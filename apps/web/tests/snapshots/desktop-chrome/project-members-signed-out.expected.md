@@ -1,0 +1,6 @@
+- dialog "Workspace settings":
+  - heading "Workspace settings" [level=2]
+  - button "Close":
+    - img
+  - text: Workspace upgrade Platform Account required Project Members uses the same Platform Account as Mobile pairing.
+  - button "Sign in to Platform"

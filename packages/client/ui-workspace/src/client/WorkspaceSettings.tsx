@@ -11,12 +11,13 @@
  * different remote is labeled 异源, and a new clone is always selectable.
  * Closing the wizard decides nothing: the invitation stays pending.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Modal, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ProjectMembershipAccessSnapshot } from '@deepseek-ai/dsh-project-membership-client'
 import type { WorkspaceBrowserProps } from './contract/slots.ts'
 import type {
-  ProjectMembershipAccessSnapshot, ProjectMembershipGateway, WorkspaceIssuedInvitation, WorkspaceMemberRow,
+  ProjectMembershipGateway, WorkspaceIssuedInvitation, WorkspaceMemberRow,
   WorkspacePendingInvitation, WorkspaceProjectView,
 } from './contract/slots.ts'
 import css from './WorkspaceSettings.module.css'
@@ -34,30 +35,26 @@ export interface WizardWorkspace {
  * The workspace settings modal. Unmounted when closed; the bound project and
  * its roster live in local state so a reopened modal re-reads fresh facts.
  */
-export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, onClose, t }: {
+export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, access, openSignIn, onClose, t }: {
   /** Exact local Workspace whose Cloud Project relationship is being managed. */
   workspaceId: WorkspaceId
   /** Title of the workspace being configured (heading context only). */
   workspaceTitle: string
   gateway: ProjectMembershipGateway
+  /** Framework-projected current-installation authorization state. */
+  access?: ProjectMembershipAccessSnapshot
+  /** Navigate to the product surface that owns Platform Account sign-in. */
+  openSignIn?: () => void
   onClose: () => void
   t: SettingsTranslate
 }) {
-  const accessSource = gateway.access
-  const subscribeAccess = accessSource === undefined
-    ? noopSubscribe
-    : (listener: () => void) => accessSource.subscribe(listener)
-  const readAccess: () => ProjectMembershipAccessSnapshot = accessSource === undefined
-    ? signedInAccess
-    : () => accessSource.getSnapshot()
-  const openSignIn = accessSource === undefined ? undefined : () => { accessSource.openSignIn() }
-  const access = useSyncExternalStore(
-    subscribeAccess,
-    readAccess,
-    readAccess,
-  )
-  const authorized = access.status === 'signed-in'
-  const [project, setProject] = useState<WorkspaceProjectView | null | undefined>(undefined)
+  const actualAccess = access ?? signedInAccessSnapshot
+  const authorized = actualAccess.status === 'signed-in'
+  const [projectResult, setProjectResult] = useState<{
+    access: ProjectMembershipAccessSnapshot
+    value: WorkspaceProjectView | null
+  } | undefined>(undefined)
+  const project = projectResult?.access === actualAccess ? projectResult.value : undefined
   const [name, setName] = useState('')
   const [remote, setRemote] = useState<string | null | undefined>(undefined)
   const [creating, setCreating] = useState(false)
@@ -73,16 +70,16 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
       gateway.localRemoteFor(workspaceId),
     ]).then(([existing, localRemote]) => {
       if (!alive) return
-      setProject(existing ?? null)
+      setProjectResult({ access: actualAccess, value: existing ?? null })
       setRemote(localRemote ?? null)
     }).catch((reason: unknown) => {
       if (!alive) return
-      setProject(null)
+      setProjectResult({ access: actualAccess, value: null })
       setRemote(null)
       setCreateError(reason instanceof Error ? reason.message : String(reason))
     })
     return () => { alive = false }
-  }, [authorized, gateway, workspaceId])
+  }, [actualAccess, authorized, gateway, workspaceId])
   const submitCreate = () => {
     /* v8 ignore next -- the create button uses the same createBlocked predicate. */
     if (createBlocked) return
@@ -90,7 +87,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
     setCreateError(null)
     gateway.createProject({ name: trimmedName, localWorkspaceId: workspaceId }).then((created) => {
       setCreating(false)
-      setProject(created)
+      setProjectResult({ access: actualAccess, value: created })
     }).catch((reason: unknown) => {
       setCreating(false)
       setCreateError(reason instanceof Error ? reason.message : String(reason))
@@ -102,7 +99,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
         <div className={css.sectionTitle}>{t('upgrade.title')}</div>
         {!authorized
           ? <ProjectMembershipAccessGate
-            access={access}
+            access={actualAccess}
             openSignIn={openSignIn}
             t={t}
           />
@@ -149,9 +146,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
   )
 }
 
-const noopSubscribe = (): (() => void) => () => {}
 const signedInAccessSnapshot = { status: 'signed-in' as const }
-const signedInAccess = () => signedInAccessSnapshot
 
 function ProjectMembershipAccessGate({ access, openSignIn, t }: {
   access: ProjectMembershipAccessSnapshot

@@ -131,7 +131,9 @@ describe('ui-desktop apply', () => {
     expect(desktop.onPairingSnapshot).toHaveBeenCalledOnce()
     expect(b.ctx.get('projectMembershipClient')).toBe(desktop.projectMembership)
     const membershipAccess = b.ctx.get('projectMembershipAccess')
-    expect(membershipAccess?.getSnapshot()).toEqual({ status: 'unavailable' })
+    const unavailableAccess = membershipAccess?.getSnapshot()
+    expect(unavailableAccess).toEqual({ status: 'unavailable' })
+    expect(membershipAccess?.getSnapshot()).toBe(unavailableAccess)
     const accessListener = vi.fn()
     const disposeAccessListener = membershipAccess?.subscribe(accessListener)
     for (const [snapshot, expected] of [
@@ -147,7 +149,9 @@ describe('ui-desktop apply', () => {
       } }, { status: 'signing-out' }],
     ] as const) {
       accountListener?.(snapshot)
-      expect(membershipAccess?.getSnapshot()).toEqual(expected)
+      const projected = membershipAccess?.getSnapshot()
+      expect(projected).toEqual(expected)
+      expect(membershipAccess?.getSnapshot()).toBe(projected)
     }
     expect(accessListener).toHaveBeenCalledTimes(6)
     disposeAccessListener?.()

@@ -149,7 +149,9 @@ describe('ui-workspace apply', () => {
     await b.ctx.plugin({ inject: [...inject], apply }).await()
 
     const browser = (b.slots.entries('sidebar.workspaces')[0]!.inject as () => WorkspaceBrowserInjected)()
-    expect(browser.projectMembership?.access).toBe(membershipAccess)
+    expect(browser.hooks.projectMembershipAccess).toBe(membershipAccess)
+    browser.openProjectMembershipSignIn?.()
+    expect(membershipAccess.openSignIn).toHaveBeenCalledOnce()
     // Both arms delegate to the runtime's shared New Session action.
     browser.startSession('ws' as never)
     expect(b.startSession).toHaveBeenCalledWith('ws')

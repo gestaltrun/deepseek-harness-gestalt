@@ -31,12 +31,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
   SessionId, SessionSearchResultItem, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ProjectMembershipAccess } from '@deepseek-ai/dsh-project-membership-client'
+import type { ProjectMembershipAccessSnapshot } from '@deepseek-ai/dsh-project-membership-client'
 import type { createWorkspaceViewStore } from '../stores.ts'
-
-export type {
-  ProjectMembershipAccess, ProjectMembershipAccessSnapshot,
-} from '@deepseek-ai/dsh-project-membership-client'
 
 /** Client-face projection of one bound cloud project. */
 export interface WorkspaceProjectView {
@@ -84,8 +80,6 @@ export interface WorkspacePendingInvitation {
  * without it render no upgrade affordance.
  */
 export interface ProjectMembershipGateway {
-  /** Shared Platform Account access; absent in compositions that own authorization elsewhere. */
-  access?: ProjectMembershipAccess
   createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
   /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
   projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
@@ -175,6 +169,8 @@ export type WorkspaceBrowserInjected = {
   hooks: DirectoryPickingInjected['hooks'] & {
     /** Current generation's Host description, bound by the slot renderer. */
     hostDescription: HostDescriptionSource
+    /** Shared current-installation Account state for Project Membership authorization. */
+    projectMembershipAccess: HostObservable<ProjectMembershipAccessSnapshot>
   }
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and
@@ -223,6 +219,8 @@ export type WorkspaceBrowserInjected = {
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
   /** Authenticated Project Membership gateway supplied by a product composition. */
   projectMembership?: ProjectMembershipGateway | undefined
+  /** Open the product surface that owns shared Platform Account sign-in. */
+  openProjectMembershipSignIn?: (() => void) | undefined
 }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */

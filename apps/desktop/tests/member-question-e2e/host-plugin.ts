@@ -5,6 +5,7 @@ import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import CompanionMemberQuestionSender, { MemberQuestionSenderError } from '@deepseek-ai/dsh-member-question-sender'
+import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   decodeProtocolBase64Url,
   parseCompanionSessionId,
@@ -29,8 +30,8 @@ interface ControlAsk {
 export function apply(ctx: Context): void {
   const endpoint = new KeylessMemberQuestionEndpoint({
     origin: required('DSH_MEMBER_QUESTION_KEYLESS_ORIGIN'),
-    accountId: required('DSH_MEMBER_QUESTION_ACCOUNT_ID'),
-    installationId: required('DSH_MEMBER_QUESTION_INSTALLATION_ID'),
+    accountId: parsePlatformAccountId(required('DSH_MEMBER_QUESTION_ACCOUNT_ID')),
+    installationId: parseInstallationId(required('DSH_MEMBER_QUESTION_INSTALLATION_ID')),
     key: decodeProtocolBase64Url(
       required('DSH_MEMBER_QUESTION_KEY'),
       32,
@@ -40,7 +41,6 @@ export function apply(ctx: Context): void {
     pollMs: positiveInteger('DSH_MEMBER_QUESTION_POLL_MS', 25),
   })
   const receiver = ctx.memberQuestionReceiver
-  const unregisterAuthority = receiver.registerTerminalAuthority(endpoint.terminalAuthority)
   const sender = new CompanionMemberQuestionSender(ctx, {
     delivery: endpoint.delivery,
     presenceLookup: endpoint.presenceLookup,
@@ -52,29 +52,61 @@ export function apply(ctx: Context): void {
     void handleControl(request, response, endpoint, sender, asks)
   })
   ctx.effect(async () => {
-    await endpoint.start({ receiver, sender })
-    await new Promise<void>((resolve, reject) => {
-      control.once('error', reject)
-      control.listen(0, '127.0.0.1', () => {
-        control.off('error', reject)
-        resolve()
-      })
-    })
-    const address = control.address()
-    if (address === null || typeof address === 'string') throw new Error('member-question control exposed no TCP address')
-    await writeFile(controlFile, JSON.stringify({
-      origin: `http://127.0.0.1:${String(address.port)}`,
-    }) + '\n', { mode: 0o600 })
-    return async () => {
-      control.closeAllConnections()
+    const unregisterAuthority = receiver.registerTerminalAuthority(endpoint.terminalAuthority)
+    try {
+      await endpoint.start({ receiver, sender })
       await new Promise<void>((resolve, reject) => {
-        control.close((error) => { if (error === undefined) resolve(); else reject(error) })
+        control.once('error', reject)
+        control.listen(0, '127.0.0.1', () => {
+          control.off('error', reject)
+          resolve()
+        })
       })
-      unregisterAuthority()
-      await endpoint.stop()
-      await rm(controlFile, { force: true })
+      const address = control.address()
+      if (address === null || typeof address === 'string') {
+        throw new Error('member-question control exposed no TCP address')
+      }
+      await writeFile(controlFile, JSON.stringify({
+        origin: `http://127.0.0.1:${String(address.port)}`,
+      }) + '\n', { mode: 0o600 })
+    } catch (error) {
+      try {
+        await disposeHost(control, unregisterAuthority, endpoint, controlFile)
+      } catch (disposeError) {
+        throw new AggregateError([error, disposeError], 'member-question keyless host setup failed')
+      }
+      throw error
     }
+    return () => disposeHost(control, unregisterAuthority, endpoint, controlFile)
   }, 'member-question-keyless-host: encrypted endpoint lifecycle')
+}
+
+async function disposeHost(
+  control: ReturnType<typeof createServer>,
+  unregisterAuthority: () => void,
+  endpoint: KeylessMemberQuestionEndpoint,
+  controlFile: string,
+): Promise<void> {
+  const results = await Promise.allSettled([
+    closeControl(control),
+    Promise.resolve().then(unregisterAuthority),
+    endpoint.stop(),
+    rm(controlFile, { force: true }),
+  ])
+  const failures: unknown[] = []
+  for (const result of results) {
+    if (result.status === 'rejected') failures.push(result.reason as unknown)
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) throw new AggregateError(failures, 'member-question keyless host shutdown failed')
+}
+
+async function closeControl(control: ReturnType<typeof createServer>): Promise<void> {
+  if (!control.listening) return
+  control.closeAllConnections()
+  await new Promise<void>((resolve, reject) => {
+    control.close((error) => { if (error === undefined) resolve(); else reject(error) })
+  })
 }
 
 async function handleControl(
@@ -92,7 +124,7 @@ async function handleControl(
     const body = await readBody(request)
     if (request.url === '/identity') {
       const accountId = requiredField(body, 'accountId')
-      await endpoint.rebindAccount(accountId)
+      await endpoint.rebindAccount(parsePlatformAccountId(accountId))
       respond(response, 200, { accountId })
       return
     }

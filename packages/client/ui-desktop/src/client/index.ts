@@ -41,26 +41,52 @@ const NS = 'desktop'
 /** Required services: slots plus desktop copy. */
 export const inject = ['slots', 'locale']
 
+/* v8 ignore next -- TypeScript closes the Desktop Account status union. */
+function assertNever(value: never): never { throw new TypeError(`unknown Desktop Account status: ${String(value)}`) }
+
+function membershipAccessStatus(
+  status: DesktopAccountSnapshot['status'],
+): ProjectMembershipAccessSnapshot['status'] {
+  switch (status) {
+    case 'unavailable': return 'unavailable'
+    case 'authorizing':
+    case 'polling': return 'signing-in'
+    case 'signed-in': return 'signed-in'
+    case 'signing-out': return 'signing-out'
+    case 'idle':
+    case 'failed': return 'signed-out'
+    default: return assertNever(status)
+  }
+}
+
 function membershipAccessSnapshot(snapshot: DesktopAccountSnapshot): ProjectMembershipAccessSnapshot {
-  const status = snapshot.status === 'unavailable'
-    ? 'unavailable'
-    : snapshot.status === 'authorizing' || snapshot.status === 'polling'
-      ? 'signing-in'
-      : snapshot.status === 'signed-in'
-        ? 'signed-in'
-        : snapshot.status === 'signing-out'
-          ? 'signing-out'
-          : 'signed-out'
-  return { status, ...(snapshot.error === undefined ? {} : { error: snapshot.error }) }
+  return {
+    status: membershipAccessStatus(snapshot.status),
+    ...(snapshot.error === undefined ? {} : { error: snapshot.error }),
+  }
 }
 
 function projectMembershipAccess(
   account: ReturnType<typeof createDesktopAccountSource>,
   desktop: DesktopBridge,
 ): ProjectMembershipAccess {
+  let sourceSnapshot = account.getSnapshot()
+  let projectedSnapshot = membershipAccessSnapshot(sourceSnapshot)
+  const refresh = () => {
+    const next = account.getSnapshot()
+    if (next === sourceSnapshot) return
+    sourceSnapshot = next
+    projectedSnapshot = membershipAccessSnapshot(next)
+  }
   return {
-    getSnapshot: () => membershipAccessSnapshot(account.getSnapshot()),
-    subscribe: listener => account.subscribe(listener),
+    getSnapshot: () => {
+      refresh()
+      return projectedSnapshot
+    },
+    subscribe: listener => account.subscribe(() => {
+      refresh()
+      listener()
+    }),
     openSignIn: () => {
       void desktop.chromeOverlayShow({
         kind: 'settings', requestId: crypto.randomUUID(), sectionId: 'mobile-pairing',

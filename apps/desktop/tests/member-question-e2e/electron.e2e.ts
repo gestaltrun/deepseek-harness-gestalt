@@ -78,7 +78,7 @@ describe('Project Members three-installation Electron journey', () => {
     )
   })
 
-  it('runs the real two-account Project Member question and answer flow', async () => {
+  it('runs the assembled two-account Project Member question and answer race', async () => {
     for (const name of installations) {
       const item = requiredEvidence(name)
       const created = await rpc<{ workspace: { workspaceId: string } }>(
@@ -138,20 +138,33 @@ describe('Project Members three-installation Electron journey', () => {
     await focusTransferredDocument('b1', 'preview.html', 'A1 authoritative guarded preview')
 
     const b1 = getInstance('b1')
-    const approve = await b1.$('//button[.//*[normalize-space(.)="approve"]]')
-    await approve.waitForClickable({ timeout: 10_000 })
-    await approve.click()
-    await clickExactButton(b1, 'Submit')
-
     const b2 = getInstance('b2')
-    await waitForBodyText(b2, 'Answered on B1 Electron')
+    const approve = await b1.$('//button[.//*[normalize-space(.)="approve"]]')
+    const revise = await b2.$('//button[.//*[normalize-space(.)="revise"]]')
+    await approve.waitForClickable({ timeout: 10_000 })
+    await revise.waitForClickable({ timeout: 10_000 })
+    await Promise.all([approve.click(), revise.click()])
+    const submitB1 = await b1.$('//button[normalize-space(.)="Submit"]')
+    const submitB2 = await b2.$('//button[normalize-space(.)="Submit"]')
+    await Promise.all([
+      submitB1.waitForClickable({ timeout: 10_000 }),
+      submitB2.waitForClickable({ timeout: 10_000 }),
+    ])
+    await Promise.all([submitB1.click(), submitB2.click()])
+
+    const winner = await waitForAnswerRace(b1, b2)
+    const loser = winner === 'b1' ? 'b2' : 'b1'
     const a1 = getInstance('a1')
     await waitForBodyText(a1, 'Project member accepted the guarded rollout.')
 
     await Promise.all([
       a1.saveScreenshot(join(required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), 'a1', 'answer-returned.png')),
-      b1.saveScreenshot(join(required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), 'b1', 'answered-here.png')),
-      b2.saveScreenshot(join(required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), 'b2', 'answered-elsewhere.png')),
+      getInstance(winner).saveScreenshot(join(
+        required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), winner, 'answered-here.png',
+      )),
+      getInstance(loser).saveScreenshot(join(
+        required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), loser, 'answered-elsewhere.png',
+      )),
     ])
     await assertA1SessionLog()
     await assertNoReceiverModelOutput('b1')
@@ -415,6 +428,24 @@ async function openReceivingQuestion(
   await row.waitForExist({ timeout: 30_000 })
   await row.click()
   await waitForBodyText(instance, question)
+}
+
+async function waitForAnswerRace(
+  b1: WebdriverIO.Browser,
+  b2: WebdriverIO.Browser,
+): Promise<'b1' | 'b2'> {
+  let winner: 'b1' | 'b2' | undefined
+  await b1.waitUntil(async () => {
+    const [b1Text, b2Text] = await Promise.all([
+      (await b1.$('body')).getText(),
+      (await b2.$('body')).getText(),
+    ])
+    if (b1Text.includes('Answered on B2 Electron')) winner = 'b2'
+    if (b2Text.includes('Answered on B1 Electron')) winner = 'b1'
+    return winner !== undefined
+  }, { timeout: 30_000, timeoutMsg: 'B1 and B2 did not converge on one answer winner' })
+  if (winner === undefined) throw new Error('answer race winner is unavailable')
+  return winner
 }
 
 async function focusTransferredDocument(

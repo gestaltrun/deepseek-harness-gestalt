@@ -11,6 +11,8 @@ import {
   negotiateCompanionProtocol,
   type CompanionMemberQuestionSettledResult,
   type MemberQuestionId,
+  parseMemberQuestionId,
+  parseMemberQuestionProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
   MemberQuestionDocumentAssembler,
@@ -26,7 +28,11 @@ import type {
   MemberQuestionSenderService,
   MemberQuestionTerminalClaim,
 } from '@deepseek-ai/dsh-member-question-sender'
-import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import {
+  parsePlatformAccountId,
+  type InstallationId,
+  type PlatformAccountId,
+} from '@deepseek-ai/dsh-platform-account'
 import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
 
 const PROTOCOL = negotiateCompanionProtocol(
@@ -37,8 +43,8 @@ const PROTOCOL = negotiateCompanionProtocol(
 
 export interface KeylessMemberQuestionEndpointOptions {
   readonly origin: string
-  readonly accountId: string
-  readonly installationId: string
+  readonly accountId: PlatformAccountId
+  readonly installationId: InstallationId
   readonly key: Uint8Array
   readonly heartbeatMs?: number
   readonly pollMs?: number
@@ -47,17 +53,17 @@ export interface KeylessMemberQuestionEndpointOptions {
 interface BrokerQuestionEvent {
   readonly seq: number
   readonly kind: 'question'
-  readonly questionId: string
-  readonly projectId: string
-  readonly fromAccountId: string
-  readonly toAccountId: string
+  readonly questionId: MemberQuestionId
+  readonly projectId: ProjectId
+  readonly fromAccountId: PlatformAccountId
+  readonly toAccountId: PlatformAccountId
   readonly ciphertexts: readonly string[]
 }
 
 interface BrokerTerminalEvent {
   readonly seq: number
   readonly kind: 'terminal'
-  readonly questionId: string
+  readonly questionId: MemberQuestionId
   readonly ciphertext: string
 }
 
@@ -69,7 +75,7 @@ export class KeylessMemberQuestionEndpoint {
   readonly terminalAuthority: MemberQuestionTerminalAuthority
   readonly presenceLookup: MemberPresenceLookup
   private readonly key: Uint8Array
-  private accountId: string
+  private accountId: PlatformAccountId
   private readonly abort = new AbortController()
   private cursor = 0
   private loop: Promise<void> | undefined
@@ -129,15 +135,22 @@ export class KeylessMemberQuestionEndpoint {
 
   /** Stop this exact Installation and remove its live presence lease. */
   async stop(): Promise<void> {
-    if (this.online) await this.setOnline(false)
+    const failures: unknown[] = []
+    const wasOnline = this.online
+    this.online = false
+    if (this.heartbeat !== undefined) clearInterval(this.heartbeat)
+    this.heartbeat = undefined
+    await collectFailure(this.heartbeatTask, failures)
+    if (wasOnline) await collectFailure(this.removePresence(), failures)
     this.abort.abort()
-    await this.loop
+    await collectFailure(this.loop, failures)
     this.key.fill(0)
+    if (failures.length === 1) throw failures[0]
+    if (failures.length > 1) throw new AggregateError(failures, 'keyless member-question endpoint shutdown failed')
   }
 
   /** Replace the provisional route identity with the signed-in Platform Account. */
-  async rebindAccount(accountId: string): Promise<void> {
-    if (accountId.length === 0) throw new TypeError('keyless member-question account id must be non-empty')
+  async rebindAccount(accountId: PlatformAccountId): Promise<void> {
     if (accountId === this.accountId) return
     await this.removePresence()
     this.accountId = accountId
@@ -288,13 +301,13 @@ export class KeylessMemberQuestionEndpoint {
         throw new Error('keyless delivery ended before every reference document completed')
       }
       await this.receiver.ingest({
-        authority: { accountId: this.accountId as PlatformAccountId },
+        authority: { accountId: this.accountId },
         operation: first.operation,
         documents,
       })
       return
     }
-    const terminal = decodeTerminal(this.key, event.questionId as MemberQuestionId, event.ciphertext)
+    const terminal = decodeTerminal(this.key, event.questionId, event.ciphertext)
     await this.sender?.applyTerminal(terminal)
     const receiver = this.receiver
     if (receiver === undefined) return
@@ -317,13 +330,26 @@ function parseEvent(value: unknown): BrokerEvent {
     && typeof record.toAccountId === 'string'
     && Array.isArray(record.ciphertexts)
     && record.ciphertexts.every(item => typeof item === 'string')) {
-    return record as unknown as BrokerQuestionEvent
+    return {
+      seq: record.seq,
+      kind: 'question',
+      questionId: parseMemberQuestionId(record.questionId),
+      projectId: parseMemberQuestionProjectId(record.projectId),
+      fromAccountId: parsePlatformAccountId(record.fromAccountId),
+      toAccountId: parsePlatformAccountId(record.toAccountId),
+      ciphertexts: record.ciphertexts,
+    }
   }
   if (record.kind === 'terminal'
     && typeof record.seq === 'number'
     && typeof record.questionId === 'string'
     && typeof record.ciphertext === 'string') {
-    return record as unknown as BrokerTerminalEvent
+    return {
+      seq: record.seq,
+      kind: 'terminal',
+      questionId: parseMemberQuestionId(record.questionId),
+      ciphertext: record.ciphertext,
+    }
   }
   throw new Error('keyless broker event is invalid')
 }
@@ -360,11 +386,11 @@ function open(key: Uint8Array, encoded: string, aad: string): Uint8Array {
   return Buffer.concat([decipher.update(ciphertext), decipher.final()])
 }
 
-function questionAad(questionId: MemberQuestionId | string, index: number): string {
+function questionAad(questionId: MemberQuestionId, index: number): string {
   return `member-question:${questionId}:${String(index)}`
 }
 
-function terminalAad(questionId: MemberQuestionId | string): string {
+function terminalAad(questionId: MemberQuestionId): string {
   return `member-question-terminal:${questionId}`
 }
 
@@ -376,4 +402,12 @@ async function delay(ms: number, signal: AbortSignal): Promise<void> {
       resolve()
     }, { once: true })
   })
+}
+
+async function collectFailure(task: Promise<void> | undefined, failures: unknown[]): Promise<void> {
+  try {
+    await task
+  } catch (error) {
+    failures.push(error)
+  }
 }

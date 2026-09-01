@@ -7,8 +7,9 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import type { ProjectMembershipAccessSnapshot } from '@deepseek-ai/dsh-project-membership-client'
 import type {
-  ProjectMembershipAccessSnapshot, ProjectMembershipGateway, WorkspaceBrowserProps,
+  ProjectMembershipGateway, WorkspaceBrowserProps, WorkspaceProjectView,
 } from '../src/client/contract/slots.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
@@ -83,20 +84,24 @@ function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
 
 function accessHarness(initial: ProjectMembershipAccessSnapshot) {
   let snapshot = initial
-  const listeners = new Set<() => void>()
   const openSignIn = vi.fn()
   return {
-    access: {
-      getSnapshot: () => snapshot,
-      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
-      openSignIn,
-    },
+    getSnapshot: () => snapshot,
     openSignIn,
     publish(value: ProjectMembershipAccessSnapshot) {
       snapshot = value
-      for (const listener of listeners) listener()
     },
   }
+}
+
+function accountSettingsModal(
+  membership: ProjectMembershipGateway,
+  account: ReturnType<typeof accessHarness>,
+) {
+  return <WorkspaceSettingsModal
+    workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership}
+    access={account.getSnapshot()} openSignIn={account.openSignIn} onClose={() => {}} t={t}
+  />
 }
 
 function mount(membership: ProjectMembershipGateway | undefined, overrides: Partial<WorkspaceBrowserProps> = {}) {
@@ -122,6 +127,7 @@ function mount(membership: ProjectMembershipGateway | undefined, overrides: Part
     createWorkspace: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useHostDescription: selector => selector(undefined),
+    useProjectMembershipAccess: hook({ status: 'signed-in' }),
     renderSlot: ((_name: string, owner: { open: boolean }) => (owner.open ? <div data-testid="directory-flow" /> : null)) as never,
     t,
     projectMembership: membership,
@@ -189,10 +195,8 @@ describe('workspace settings and invite wizard (M4)', () => {
 
   it('gates Cloud Project lookup on the shared Platform Account and resumes after sign-in', async () => {
     const account = accessHarness({ status: 'signed-out' })
-    const membership = gateway({ access: account.access })
-    render(<WorkspaceSettingsModal
-      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
-    />)
+    const membership = gateway()
+    const view = render(accountSettingsModal(membership, account))
 
     expect(screen.getByText('Project Members 使用与手机配对相同的 Platform 账号。')).toBeTruthy()
     expect(screen.queryByLabelText('云项目名称')).toBeNull()
@@ -200,11 +204,13 @@ describe('workspace settings and invite wizard (M4)', () => {
     fireEvent.click(screen.getByRole('button', { name: '登录 Platform' }))
     expect(account.openSignIn).toHaveBeenCalledOnce()
 
-    act(() => { account.publish({ status: 'signing-in' }) })
+    account.publish({ status: 'signing-in' })
+    view.rerender(accountSettingsModal(membership, account))
     expect(screen.getByText('请在浏览器中完成登录。')).toBeTruthy()
     expect(membership.projectForWorkspace).not.toHaveBeenCalled()
 
-    act(() => { account.publish({ status: 'signed-in' }) })
+    account.publish({ status: 'signed-in' })
+    view.rerender(accountSettingsModal(membership, account))
     await flush()
     expect(membership.projectForWorkspace).toHaveBeenCalledWith(wid('proj'))
     expect(screen.getByLabelText('云项目名称')).toBeTruthy()
@@ -228,15 +234,41 @@ describe('workspace settings and invite wizard (M4)', () => {
     },
   ])('renders the shared Platform Account gate for $access.status', ({ access, button, description }) => {
     const account = accessHarness(access)
-    const membership = gateway({ access: account.access })
+    const membership = gateway()
     render(<WorkspaceSettingsModal
-      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership}
+      access={account.getSnapshot()} openSignIn={account.openSignIn} onClose={vi.fn()} t={t}
     />)
 
     expect(screen.getByText(description)).toBeTruthy()
     expect(screen.queryByRole('button', { name: '登录 Platform' }) !== null).toBe(button)
     expect(membership.projectForWorkspace).not.toHaveBeenCalled()
     if (access.error !== undefined) expect(screen.getByRole('alert').textContent).toBe(access.error)
+  })
+
+  it('clears the previous Account project before resolving the next signed-in Account', async () => {
+    const nextProject = deferred<WorkspaceProjectView | undefined>()
+    const account = accessHarness({ status: 'signed-in' })
+    const projectForWorkspace = vi.fn<ProjectMembershipGateway['projectForWorkspace']>()
+      .mockResolvedValueOnce(projectView)
+      .mockReturnValueOnce(nextProject.promise)
+    const membership = gateway({ projectForWorkspace })
+    const view = render(accountSettingsModal(membership, account))
+
+    await flush()
+    expect(screen.getByText('已绑定云项目：Assembled')).toBeTruthy()
+
+    account.publish({ status: 'signed-out' })
+    view.rerender(accountSettingsModal(membership, account))
+    expect(screen.getByText('需要 Platform 账号')).toBeTruthy()
+    account.publish({ status: 'signed-in' })
+    view.rerender(accountSettingsModal(membership, account))
+    expect(screen.getByText('正在查找已绑定的云项目…')).toBeTruthy()
+    expect(screen.queryByText('已绑定云项目：Assembled')).toBeNull()
+
+    nextProject.resolve(undefined)
+    await flush()
+    expect(screen.getByLabelText('云项目名称')).toBeTruthy()
   })
 
   it('routes the upgrade create action through the membership gateway and shows the roster', async () => {

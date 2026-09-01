@@ -22,16 +22,29 @@ const OVERLAY = fileURLToPath(new URL('../../desktop/cordis.patch.yml', import.m
 const FIXTURE = fileURLToPath(new URL('./snapshots/lifecycle-chrome/session.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/desktop-chrome', import.meta.url))
 const INACTIVE_EXPECTED = fileURLToPath(new URL('./snapshots/desktop-chrome/inactive.expected.md', import.meta.url))
+const PROJECT_MEMBERS_SIGNED_OUT_EXPECTED = fileURLToPath(
+  new URL('./snapshots/desktop-chrome/project-members-signed-out.expected.md', import.meta.url),
+)
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with the single word LIGHTHOUSE and stop.'
 
-async function openDesktopPage(browser: Browser, baseUrl: string, platform: 'darwin' | 'win32'): Promise<Page> {
+async function openDesktopPage(
+  browser: Browser,
+  baseUrl: string,
+  platform: 'darwin' | 'win32',
+  accountStatus: 'unavailable' | 'idle' = 'unavailable',
+): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, locale: 'en-US' })
   // Dynamic import keeps this host-plane spec from loading packages/client/*/src.
   const { installDesktopBridgeFixture } = await import(pathToFileURL(DESKTOP_BRIDGE_FIXTURE).href) as {
-    installDesktopBridgeFixture: (platform: 'darwin' | 'win32') => void
+    installDesktopBridgeFixture: (
+      input: 'darwin' | 'win32' | {
+        platform: 'darwin' | 'win32'
+        accountStatus: 'unavailable' | 'idle'
+      },
+    ) => void
   }
-  await page.addInitScript(installDesktopBridgeFixture, platform)
+  await page.addInitScript(installDesktopBridgeFixture, { platform, accountStatus })
   await page.goto(baseUrl, { waitUntil: 'load' })
   await page.waitForSelector(`[data-desktop-chrome="${platform === 'darwin' ? 'mac' : 'win'}"]`, {
     timeout: 30_000,
@@ -62,6 +75,7 @@ describe('web e2e: Desktop Session Surface overlay', () => {
   let browser: Browser
   let macPage: Page
   let winPage: Page
+  let signedOutPage: Page
 
   beforeAll(async () => {
     const fixture = await readFile(FIXTURE, 'utf8')
@@ -70,6 +84,7 @@ describe('web e2e: Desktop Session Surface overlay', () => {
     browser = await chromium.launch()
     macPage = await openDesktopPage(browser, scaffold.baseUrl, 'darwin')
     await connectFreshWorkspace(macPage, scaffold.workspaceCwd)
+    signedOutPage = await openDesktopPage(browser, scaffold.baseUrl, 'darwin', 'idle')
     const settled = scaffold.whenTurnSettled()
     const input = macPage.locator('textarea').first()
     await input.fill(PROMPT)
@@ -130,7 +145,27 @@ describe('web e2e: Desktop Session Surface overlay', () => {
     })
   })
 
+  it('offers the shared Platform Account sign-in from Workspace settings', async () => {
+    const workspace = signedOutPage.getByRole('treeitem').filter({ hasText: 'workspace' }).first()
+    await workspace.waitFor({ timeout: 10_000 })
+    await workspace.hover()
+    await signedOutPage.getByRole('button', { name: 'Workspace actions for workspace' }).click()
+    await signedOutPage.getByRole('menuitem', { name: 'Workspace settings' }).click()
+    const dialog = signedOutPage.getByRole('dialog', { name: 'Workspace settings' })
+    await dialog.waitFor({ timeout: 10_000 })
+    await dialog.getByRole('button', { name: 'Sign in to Platform' }).waitFor({ timeout: 10_000 })
+    expect(await dialog.getByRole('button', { name: 'Create cloud project' }).count()).toBe(0)
+    await compareOrRefreshGolden(PROJECT_MEMBERS_SIGNED_OUT_EXPECTED, await captureStableAria(
+      signedOutPage,
+      '[role="dialog"][aria-label="Workspace settings"]',
+      scaffold.workspaceCwd,
+    ), MODE)
+  })
+
   it('keeps its snapshot inventory closed', async () => {
-    await assertFixtureInventory(SNAPSHOT_DIR, ['inactive.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, [
+      'inactive.expected.md',
+      'project-members-signed-out.expected.md',
+    ])
   })
 })

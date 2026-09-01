@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import FileMemberQuestionReceiver from '@deepseek-ai/dsh-member-question-receiver'
 import CompanionMemberQuestionSender from '@deepseek-ai/dsh-member-question-sender'
+import { parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import { parseCompanionSessionId, parseMemberQuestionProjectId } from '@deepseek-ai/dsh-remote-protocol'
 import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
@@ -12,19 +13,21 @@ import { startLocalKeylessPlatform, type KeylessPlatformSession } from './local-
 
 describe('assembled keyless Project Members acceptance', () => {
   it('walks real Account, membership, presence, encrypted ask, and offline failure listeners', { timeout: 30_000 }, async () => {
-    const platform = await startLocalKeylessPlatform([
-      { providerSubject: 101, login: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
-      { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
-      { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
-    ], { heartbeatMs: 25, ttlMs: 100 })
-    const broker = await startKeylessMemberQuestionBroker()
     const roots: string[] = []
     const contexts = [new Context(), new Context(), new Context()]
     const [aCtx, b1Ctx, b2Ctx] = contexts as [Context, Context, Context]
     const key = new Uint8Array(32).fill(19)
     let endpoints: KeylessMemberQuestionEndpoint[] = []
     let startedEndpoints: KeylessMemberQuestionEndpoint[] = []
+    let platform: Awaited<ReturnType<typeof startLocalKeylessPlatform>> | undefined
+    let broker: Awaited<ReturnType<typeof startKeylessMemberQuestionBroker>> | undefined
     try {
+      platform = await startLocalKeylessPlatform([
+        { providerSubject: 101, login: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
+        { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
+        { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
+      ], { heartbeatMs: 25, ttlMs: 100 })
+      broker = await startKeylessMemberQuestionBroker()
       const a1 = await platform.signIn('installation-a1')
       const b1 = await platform.signIn('installation-b1')
       const b2 = await platform.signIn('installation-b2')
@@ -32,15 +35,15 @@ describe('assembled keyless Project Members acceptance', () => {
       expect(a1.accountId).not.toBe(b1.accountId)
       endpoints = [
         new KeylessMemberQuestionEndpoint({
-          origin: broker.origin, accountId: String(a1.accountId), installationId: 'installation-a1', key,
+          origin: broker.origin, accountId: a1.accountId, installationId: parseInstallationId('installation-a1'), key,
           heartbeatMs: 25, pollMs: 5,
         }),
         new KeylessMemberQuestionEndpoint({
-          origin: broker.origin, accountId: String(b1.accountId), installationId: 'installation-b1', key,
+          origin: broker.origin, accountId: b1.accountId, installationId: parseInstallationId('installation-b1'), key,
           heartbeatMs: 25, pollMs: 5,
         }),
         new KeylessMemberQuestionEndpoint({
-          origin: broker.origin, accountId: String(b2.accountId), installationId: 'installation-b2', key,
+          origin: broker.origin, accountId: b2.accountId, installationId: parseInstallationId('installation-b2'), key,
           heartbeatMs: 25, pollMs: 5,
         }),
       ]
@@ -93,10 +96,11 @@ describe('assembled keyless Project Members acceptance', () => {
         [String(b1.accountId), 'online'],
       ])
 
+      const membershipPlatform = platform
       await aCtx.plugin(CompanionMemberQuestionSender, {
         delivery: a.delivery,
         presenceLookup: async ({ projectId, peerAccountId }) => {
-          const roster = await platform.get(`/v1/projects/${projectId}/members`, a1)
+          const roster = await membershipPlatform.get(`/v1/projects/${projectId}/members`, a1)
           if (!roster.ok) throw new Error(`roster failed with HTTP ${String(roster.status)}`)
           const view = await roster.json() as { members: Array<{ accountId: string; presence: 'online' | 'offline' }> }
           return view.members.find(member => member.accountId === peerAccountId)?.presence ?? 'offline'
@@ -112,7 +116,11 @@ describe('assembled keyless Project Members acceptance', () => {
         toProjectMember: String(b1.accountId),
         projectId: parseMemberQuestionProjectId(project.id),
         background: 'Review the linked project materials before choosing the rollout.',
-        questions: [{ id: 'rollout', question: 'Approve guarded rollout?', options: [{ label: 'approve' }] }],
+        questions: [{
+          id: 'rollout',
+          question: 'Approve guarded rollout?',
+          options: [{ label: 'approve' }, { label: 'revise' }],
+        }],
         references: [{ path: 'decision.md', reason: 'Current decision' }],
         documents: [{ path: 'decision.md', bytes: new TextEncoder().encode('# Guarded rollout\n') }],
         origin: {
@@ -123,19 +131,46 @@ describe('assembled keyless Project Members acceptance', () => {
       })
       await expect.poll(async () => (await receiverB1.snapshot()).pending.length).toBe(1)
       await expect.poll(async () => (await receiverB2.snapshot()).pending.length).toBe(1)
-      const question = (await receiverB1.snapshot()).pending[0]
-      await receiverB1.settle(question!.questionId, {
-        kind: 'answered',
-        answers: [{ id: 'rollout', selected: ['approve'] }],
-        settledByInstallationId: 'installation-b1' as never,
-        settledByDeviceName: 'Grace B1',
-        settledAt: Date.now(),
+      const questionB1 = (await receiverB1.snapshot()).pending[0]
+      const questionB2 = (await receiverB2.snapshot()).pending[0]
+      const settledAt = Date.now()
+      const [canonicalB1, canonicalB2] = await Promise.all([
+        receiverB1.settle(questionB1!.questionId, {
+          kind: 'answered',
+          answers: [{ id: 'rollout', selected: ['approve'] }],
+          settledByInstallationId: 'installation-b1' as never,
+          settledByDeviceName: 'Grace B1',
+          settledAt,
+        }),
+        receiverB2.settle(questionB2!.questionId, {
+          kind: 'answered',
+          answers: [{ id: 'rollout', selected: ['revise'] }],
+          settledByInstallationId: 'installation-b2' as never,
+          settledByDeviceName: 'Grace B2',
+          settledAt,
+        }),
+      ])
+      expect(canonicalB1).toEqual(canonicalB2)
+      expect(canonicalB1.outcome).toBe('answered')
+      if (canonicalB1.outcome !== 'answered') throw new Error('answer competition produced a system terminal')
+      expect(['installation-b1', 'installation-b2']).toContain(canonicalB1.settledByInstallationId)
+      const winningSelection = canonicalB1.settledByInstallationId === 'installation-b1'
+        ? 'approve'
+        : 'revise'
+      expect(canonicalB1).toMatchObject({
+        outcome: 'answered',
+        answers: [{ id: 'rollout', selected: [winningSelection] }],
       })
-      await expect(send).resolves.toMatchObject({ outcome: 'answered' })
-      await expect.poll(async () => (await receiverB2.snapshot()).terminal.length).toBe(1)
-      expect((await receiverB2.snapshot()).terminal[0]?.terminal).toMatchObject({
-        settledByInstallationId: 'installation-b1', settledByDeviceName: 'Grace B1',
+      await expect(send).resolves.toMatchObject({
+        outcome: 'answered',
+        answers: [{ id: 'rollout', selected: [winningSelection] }],
       })
+      await Promise.all([
+        expect.poll(async () => (await receiverB1.snapshot()).terminal.length).toBe(1),
+        expect.poll(async () => (await receiverB2.snapshot()).terminal.length).toBe(1),
+      ])
+      expect((await receiverB1.snapshot()).terminal[0]?.terminal).toEqual(canonicalB1)
+      expect((await receiverB2.snapshot()).terminal[0]?.terminal).toEqual(canonicalB1)
 
       const terminalPayload = (originSessionId: string, background: string) => ({
         toProjectMember: String(b1.accountId),
@@ -233,11 +268,21 @@ describe('assembled keyless Project Members acceptance', () => {
         for (const marker of forbiddenPlaintext) expect(retained).not.toContain(marker)
       }
     } finally {
-      for (const endpoint of startedEndpoints.reverse()) await endpoint.stop()
-      for (const context of contexts.reverse()) await context.fiber.dispose()
-      for (const root of roots) await rm(root, { recursive: true, force: true })
-      await broker.close()
-      await platform.close()
+      const cleanup = [
+        ...await Promise.allSettled(startedEndpoints.toReversed().map(endpoint => endpoint.stop())),
+        ...await Promise.allSettled(contexts.toReversed().map(context => context.fiber.dispose())),
+        ...await Promise.allSettled([
+          ...roots.map(root => rm(root, { recursive: true, force: true })),
+          ...(broker === undefined ? [] : [broker.close()]),
+          ...(platform === undefined ? [] : [platform.close()]),
+        ]),
+      ]
+      const failures: unknown[] = []
+      for (const result of cleanup) {
+        if (result.status === 'rejected') failures.push(result.reason as unknown)
+      }
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, 'assembled Project Members cleanup failed')
     }
   })
 })

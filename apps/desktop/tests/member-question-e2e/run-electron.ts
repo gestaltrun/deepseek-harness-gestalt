@@ -12,6 +12,7 @@ import { networkInterfaces, platform, release, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
+import { build } from 'esbuild'
 import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { startLocalKeylessPlatform } from './local-platform.ts'
 import { encodeProtocolBase64Url } from '@deepseek-ai/dsh-remote-protocol'
@@ -31,91 +32,100 @@ if (process.platform === 'linux' && process.env.DISPLAY === undefined) {
   throw new Error('Project Members Electron acceptance requires a visible DISPLAY on Linux')
 }
 
-const runtimeRoot = await mkdtemp(join(tmpdir(), 'dsh-project-members-electron-'))
-const operatedConfig = join(runtimeRoot, 'operated-platform.json')
-const certificate = await createCertificate(runtimeRoot, localIpv4())
-const proxyPort = await reservePort()
-const publicOrigin = `https://${certificate.host}:${String(proxyPort)}`
-const platformService = await startLocalKeylessPlatform([
-  { providerSubject: 101, login: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
-  { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
-  { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
-  { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
-], { heartbeatMs: 1_000, ttlMs: 5_000 }, {
-  publicOrigin,
-  automaticAuthorization: true,
-})
-const platformProxy = await startHttpsProxy(
-  certificate.host,
-  proxyPort,
-  certificate.key,
-  certificate.cert,
-  platformService.origin,
-)
-const broker = await startKeylessMemberQuestionBroker({ presenceTtlMs: 10_000 })
-const model = await startKeylessModelProvider()
-const endpointKey = encodeProtocolBase64Url(randomBytes(32))
-const installations = await Promise.all((['a1', 'b1', 'b2'] as const).map(async (name) => {
-  const root = join(runtimeRoot, name)
-  const dshHome = join(root, 'dsh-home')
-  const userData = join(root, 'user-data')
-  const workspace = join(root, 'workspace')
-  const smokeFile = join(artifactRoot, name, 'desktop.log')
-  const profile = join(root, 'profile.json')
-  await Promise.all([
-    mkdir(dshHome, { recursive: true, mode: 0o700 }),
-    mkdir(userData, { recursive: true, mode: 0o700 }),
-    mkdir(workspace, { recursive: true, mode: 0o700 }),
-    mkdir(join(artifactRoot, name), { recursive: true }),
-  ])
-  await writeFile(smokeFile, '')
-  await initializeWorkspace(workspace, name)
-  await writeHarnessHome(dshHome, name)
-  const accountId = name === 'a1' ? 'account-a' : 'account-b'
-  await writeFile(profile, JSON.stringify({
-    DSH_HOME: dshHome,
-    DSH_DESKTOP_SMOKE_FILE: smokeFile,
-    DSH_MEMBER_QUESTION_KEYLESS_ORIGIN: broker.origin,
-    DSH_MEMBER_QUESTION_ACCOUNT_ID: accountId,
-    DSH_MEMBER_QUESTION_INSTALLATION_ID: `installation-${name}`,
-    DSH_MEMBER_QUESTION_KEY: endpointKey,
-    DSH_MEMBER_QUESTION_HEARTBEAT_MS: '500',
-    DSH_MEMBER_QUESTION_POLL_MS: '25',
-    DSH_MEMBER_QUESTION_TTL_MS: '30000',
-    DSH_PROJECT_MEMBERS_PROJECT_ID: 'project-electron',
-    DSH_PROJECT_MEMBERS_PROJECT_NAME: 'Atlas',
-    DSH_PROJECT_MEMBERS_REMOTE_ACCOUNT_ID: 'account-b',
-    DSH_PROJECT_MEMBERS_ASKER_NAME: 'Ada',
-    DSH_PROJECT_MEMBERS_ASKER_ROLE: 'owner',
-  }, undefined, 2) + '\n', { mode: 0o600 })
-  return { name, root, dshHome, userData, workspace, smokeFile, profile, accountId }
-}))
-
-await writeFile(operatedConfig, JSON.stringify({
-  environment: 'production',
-  origin: publicOrigin,
-  callbackUrl: `${publicOrigin}/v1/account/oauth/github/callback`,
-  githubClientId: 'project-members-electron',
-  credentialReference: 'credentials://project-members-electron',
-  databaseIdentity: 'project-members-electron',
-  identityNamespace: 'project-members-electron',
-  companionAttachmentHostTimeoutMs: 120_000,
-  remoteRelay: {
-    url: `wss://${certificate.host}:${String(proxyPort)}/v1/remote-access/relay`,
-    attachTimeoutMs: 10_000,
-    negotiationTimeoutMs: 10_000,
-    heartbeatIntervalMs: 30_000,
-    reconnectDelayMs: 1_000,
-    inboundMaxBytes: 1_048_576,
-    inboundMaxMessages: 16,
-  },
-}, undefined, 2) + '\n', { mode: 0o600 })
-
+let runtimeRoot: string | undefined
+const resourceDisposers: Array<() => Promise<void>> = []
 let exitCode = 1
 try {
+  const runtimeDirectory = await mkdtemp(join(tmpdir(), 'dsh-project-members-electron-'))
+  runtimeRoot = runtimeDirectory
+  const operatedConfig = join(runtimeDirectory, 'operated-platform.json')
+  const hostPlugin = join(runtimeDirectory, 'member-question-e2e-host.mjs')
+  const certificate = await createCertificate(runtimeDirectory, localIpv4())
+  const proxyPort = await reservePort()
+  const publicOrigin = `https://${certificate.host}:${String(proxyPort)}`
+  const platformService = await startLocalKeylessPlatform([
+    { providerSubject: 101, login: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
+    { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
+    { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
+    { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
+  ], { heartbeatMs: 1_000, ttlMs: 5_000 }, {
+    publicOrigin,
+    automaticAuthorization: true,
+  })
+  resourceDisposers.push(() => platformService.close())
+  const platformProxy = await startHttpsProxy(
+    certificate.host,
+    proxyPort,
+    certificate.key,
+    certificate.cert,
+    platformService.origin,
+  )
+  resourceDisposers.push(() => platformProxy.close())
+  const broker = await startKeylessMemberQuestionBroker({ presenceTtlMs: 10_000 })
+  resourceDisposers.push(() => broker.close())
+  const model = await startKeylessModelProvider()
+  resourceDisposers.push(() => model.close())
+  const endpointKey = encodeProtocolBase64Url(randomBytes(32))
+  const installations = await Promise.all((['a1', 'b1', 'b2'] as const).map(async (name) => {
+    const root = join(runtimeDirectory, name)
+    const dshHome = join(root, 'dsh-home')
+    const userData = join(root, 'user-data')
+    const workspace = join(root, 'workspace')
+    const smokeFile = join(artifactRoot, name, 'desktop.log')
+    const profile = join(root, 'profile.json')
+    await Promise.all([
+      mkdir(dshHome, { recursive: true, mode: 0o700 }),
+      mkdir(userData, { recursive: true, mode: 0o700 }),
+      mkdir(workspace, { recursive: true, mode: 0o700 }),
+      mkdir(join(artifactRoot, name), { recursive: true }),
+    ])
+    await writeFile(smokeFile, '')
+    await initializeWorkspace(workspace, name)
+    await writeHarnessHome(dshHome, name, hostPlugin)
+    const accountId = name === 'a1' ? 'account-a' : 'account-b'
+    await writeFile(profile, JSON.stringify({
+      DSH_HOME: dshHome,
+      DSH_DESKTOP_SMOKE_FILE: smokeFile,
+      DSH_MEMBER_QUESTION_KEYLESS_ORIGIN: broker.origin,
+      DSH_MEMBER_QUESTION_ACCOUNT_ID: accountId,
+      DSH_MEMBER_QUESTION_INSTALLATION_ID: `installation-${name}`,
+      DSH_MEMBER_QUESTION_KEY: endpointKey,
+      DSH_MEMBER_QUESTION_HEARTBEAT_MS: '500',
+      DSH_MEMBER_QUESTION_POLL_MS: '25',
+      DSH_MEMBER_QUESTION_TTL_MS: '30000',
+      DSH_PROJECT_MEMBERS_PROJECT_ID: 'project-electron',
+      DSH_PROJECT_MEMBERS_PROJECT_NAME: 'Atlas',
+      DSH_PROJECT_MEMBERS_REMOTE_ACCOUNT_ID: 'account-b',
+      DSH_PROJECT_MEMBERS_ASKER_NAME: 'Ada',
+      DSH_PROJECT_MEMBERS_ASKER_ROLE: 'owner',
+    }, undefined, 2) + '\n', { mode: 0o600 })
+    return { name, root, dshHome, userData, workspace, smokeFile, profile, accountId }
+  }))
+
+  await writeFile(operatedConfig, JSON.stringify({
+    environment: 'production',
+    origin: publicOrigin,
+    callbackUrl: `${publicOrigin}/v1/account/oauth/github/callback`,
+    githubClientId: 'project-members-electron',
+    credentialReference: 'credentials://project-members-electron',
+    databaseIdentity: 'project-members-electron',
+    identityNamespace: 'project-members-electron',
+    companionAttachmentHostTimeoutMs: 120_000,
+    remoteRelay: {
+      url: `wss://${certificate.host}:${String(proxyPort)}/v1/remote-access/relay`,
+      attachTimeoutMs: 10_000,
+      negotiationTimeoutMs: 10_000,
+      heartbeatIntervalMs: 30_000,
+      reconnectDelayMs: 1_000,
+      inboundMaxBytes: 1_048_576,
+      inboundMaxMessages: 16,
+    },
+  }, undefined, 2) + '\n', { mode: 0o600 })
+
   const buildSkipped = process.env.DSH_PROJECT_MEMBERS_ELECTRON_SKIP_BUILD === '1'
   if (buildSkipped) await buildDesktopMain(operatedConfig)
   else await buildCurrentSource(operatedConfig)
+  await buildMemberQuestionHost(hostPlugin)
   await writeFile(join(artifactRoot, 'build-source.json'), JSON.stringify({
     head,
     builtAt: new Date().toISOString(),
@@ -188,14 +198,19 @@ try {
     plaintextRetention: { brokerAudit: 'absent', platformState: 'absent' },
   }, undefined, 2) + '\n')
 } finally {
-  await Promise.allSettled([
-    model.close(),
-    broker.close(),
-    platformProxy.close(),
-    platformService.close(),
-  ])
-  await rm(runtimeRoot, { recursive: true, force: true })
+  const cleanup = await Promise.allSettled(resourceDisposers.toReversed().map(dispose => (
+    Promise.resolve().then(dispose)
+  )))
+  if (runtimeRoot !== undefined) {
+    cleanup.push(...await Promise.allSettled([rm(runtimeRoot, { recursive: true, force: true })]))
+  }
   process.stdout.write(`Project Members Electron artifacts: ${artifactRoot}\n`)
+  const failures: unknown[] = []
+  for (const result of cleanup) {
+    if (result.status === 'rejected') failures.push(result.reason as unknown)
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) throw new AggregateError(failures, 'Project Members Electron cleanup failed')
 }
 process.exitCode = exitCode
 
@@ -204,8 +219,12 @@ function assertPlaintextAbsent(name: string, retained: string, forbidden: readon
   if (leaked !== undefined) throw new Error(`${name} retained forbidden business plaintext ${JSON.stringify(leaked)}`)
 }
 
-async function writeHarnessHome(dshHome: string, name: 'a1' | 'b1' | 'b2'): Promise<void> {
-  const pluginUrl = pathToFileURL(join(here, 'host-plugin.ts')).href
+async function writeHarnessHome(
+  dshHome: string,
+  name: 'a1' | 'b1' | 'b2',
+  hostPlugin: string,
+): Promise<void> {
+  const pluginUrl = pathToFileURL(hostPlugin).href
   await writeFile(join(dshHome, 'cordis.patch.yml'), [
     '- insert:',
     '    - id: member-question-keyless-host',
@@ -239,6 +258,20 @@ async function writeHarnessHome(dshHome: string, name: 'a1' | 'b1' | 'b2'): Prom
     '  welcomeNoticeVersion: "2026-08-13.1"',
     '',
   ].join('\n'), { mode: 0o600 })
+}
+
+async function buildMemberQuestionHost(outfile: string): Promise<void> {
+  await build({
+    absWorkingDir: repoRoot,
+    entryPoints: [join(here, 'host-plugin.ts')],
+    outfile,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    packages: 'external',
+    logLevel: 'info',
+  })
 }
 
 async function initializeWorkspace(workspace: string, name: 'a1' | 'b1' | 'b2'): Promise<void> {

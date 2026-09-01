@@ -2,38 +2,50 @@
 
 import { createHash } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import {
+  parseInstallationId,
+  parsePlatformAccountId,
+  type InstallationId,
+  type PlatformAccountId,
+} from '@deepseek-ai/dsh-platform-account'
+import {
+  parseMemberQuestionId,
+  parseMemberQuestionProjectId,
+  type MemberQuestionId,
+} from '@deepseek-ai/dsh-remote-protocol'
+import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
 
 interface BrokerLease {
-  readonly accountId: string
-  readonly installationId: string
+  readonly accountId: PlatformAccountId
+  readonly installationId: InstallationId
   expiresAt: number
 }
 
 interface BrokerQuestionEvent {
   readonly seq: number
   readonly kind: 'question'
-  readonly questionId: string
-  readonly projectId: string
-  readonly fromAccountId: string
-  readonly toAccountId: string
-  readonly targets: readonly string[]
+  readonly questionId: MemberQuestionId
+  readonly projectId: ProjectId
+  readonly fromAccountId: PlatformAccountId
+  readonly toAccountId: PlatformAccountId
+  readonly targets: readonly InstallationId[]
   readonly ciphertexts: readonly string[]
 }
 
 interface BrokerTerminalEvent {
   readonly seq: number
   readonly kind: 'terminal'
-  readonly questionId: string
-  readonly targets: readonly string[]
+  readonly questionId: MemberQuestionId
+  readonly targets: readonly InstallationId[]
   readonly ciphertext: string
 }
 
 type BrokerEvent = BrokerQuestionEvent | BrokerTerminalEvent
 
 interface BrokerQuestionRoute {
-  readonly fromAccountId: string
-  readonly toAccountId: string
-  readonly targetInstallations: readonly string[]
+  readonly fromAccountId: PlatformAccountId
+  readonly toAccountId: PlatformAccountId
+  readonly targetInstallations: readonly InstallationId[]
 }
 
 interface BrokerTerminal {
@@ -44,8 +56,8 @@ interface BrokerTerminal {
 /** Content-free broker observation retained as acceptance evidence. */
 interface KeylessBrokerAuditEntry {
   readonly operation: 'presence' | 'deliver' | 'terminal'
-  readonly accountIds: readonly string[]
-  readonly questionId?: string
+  readonly accountIds: readonly PlatformAccountId[]
+  readonly questionId?: MemberQuestionId
   readonly ciphertextBytes?: number
   readonly ciphertextDigest?: string
 }
@@ -68,14 +80,14 @@ export async function startKeylessMemberQuestionBroker(
 ): Promise<KeylessMemberQuestionBroker> {
   const now = options.now ?? Date.now
   const presenceTtlMs = options.presenceTtlMs ?? 2_000
-  const leases = new Map<string, BrokerLease>()
+  const leases = new Map<InstallationId, BrokerLease>()
   const events: BrokerEvent[] = []
-  const routes = new Map<string, BrokerQuestionRoute>()
-  const terminals = new Map<string, BrokerTerminal>()
+  const routes = new Map<MemberQuestionId, BrokerQuestionRoute>()
+  const terminals = new Map<MemberQuestionId, BrokerTerminal>()
   const audit: KeylessBrokerAuditEntry[] = []
   let seq = 0
 
-  const activeInstallations = (accountId: string): string[] => {
+  const activeInstallations = (accountId: PlatformAccountId): InstallationId[] => {
     const observedAt = now()
     for (const [installationId, lease] of leases) {
       if (lease.expiresAt <= observedAt) leases.delete(installationId)
@@ -100,30 +112,30 @@ export async function startKeylessMemberQuestionBroker(
     const url = new URL(request.url ?? '/', 'http://loopback')
     if (request.method === 'POST' && url.pathname === '/v1/member-questions/presence') {
       const body = await readJson(request)
-      const accountId = nonEmpty(body.accountId, 'accountId')
-      const installationId = nonEmpty(body.installationId, 'installationId')
+      const accountId = parsePlatformAccountId(body.accountId)
+      const installationId = parseInstallationId(body.installationId)
       leases.set(installationId, { accountId, installationId, expiresAt: now() + presenceTtlMs })
       json(response, 200, { online: true, expiresAt: now() + presenceTtlMs })
       return
     }
     if (request.method === 'DELETE' && url.pathname === '/v1/member-questions/presence') {
       const body = await readJson(request)
-      const installationId = nonEmpty(body.installationId, 'installationId')
+      const installationId = parseInstallationId(body.installationId)
       leases.delete(installationId)
       json(response, 200, { online: false })
       return
     }
     if (request.method === 'GET' && url.pathname === '/v1/member-questions/presence') {
-      const accountId = nonEmpty(url.searchParams.get('accountId'), 'accountId')
+      const accountId = parsePlatformAccountId(url.searchParams.get('accountId'))
       json(response, 200, { online: activeInstallations(accountId).length > 0 })
       return
     }
     if (request.method === 'POST' && url.pathname === '/v1/member-questions/deliver') {
       const body = await readJson(request)
-      const questionId = nonEmpty(body.questionId, 'questionId')
-      const projectId = nonEmpty(body.projectId, 'projectId')
-      const fromAccountId = nonEmpty(body.fromAccountId, 'fromAccountId')
-      const toAccountId = nonEmpty(body.toAccountId, 'toAccountId')
+      const questionId = parseMemberQuestionId(body.questionId)
+      const projectId = parseMemberQuestionProjectId(body.projectId)
+      const fromAccountId = parsePlatformAccountId(body.fromAccountId)
+      const toAccountId = parsePlatformAccountId(body.toAccountId)
       const ciphertexts = stringArray(body.ciphertexts, 'ciphertexts')
       const targets = activeInstallations(toAccountId)
       if (targets.length === 0) {
@@ -152,7 +164,7 @@ export async function startKeylessMemberQuestionBroker(
     }
     if (request.method === 'POST' && url.pathname === '/v1/member-questions/terminal') {
       const body = await readJson(request)
-      const questionId = nonEmpty(body.questionId, 'questionId')
+      const questionId = parseMemberQuestionId(body.questionId)
       const ciphertext = nonEmpty(body.ciphertext, 'ciphertext')
       const route = routes.get(questionId)
       if (route === undefined) throw new Error(`question ${questionId} has no delivery route`)
@@ -173,7 +185,7 @@ export async function startKeylessMemberQuestionBroker(
       return
     }
     if (request.method === 'GET' && url.pathname === '/v1/member-questions/terminal') {
-      const questionId = nonEmpty(url.searchParams.get('questionId'), 'questionId')
+      const questionId = parseMemberQuestionId(url.searchParams.get('questionId'))
       const retained = terminals.get(questionId)
       json(response, 200, retained === undefined ? { state: 'pending' } : {
         state: 'terminal', ciphertext: retained.ciphertext,
@@ -181,8 +193,8 @@ export async function startKeylessMemberQuestionBroker(
       return
     }
     if (request.method === 'GET' && url.pathname === '/v1/member-questions/events') {
-      const accountId = nonEmpty(url.searchParams.get('accountId'), 'accountId')
-      const installationId = nonEmpty(url.searchParams.get('installationId'), 'installationId')
+      const accountId = parsePlatformAccountId(url.searchParams.get('accountId'))
+      const installationId = parseInstallationId(url.searchParams.get('installationId'))
       const after = Number(url.searchParams.get('after') ?? '0')
       if (!Number.isSafeInteger(after) || after < 0) throw new Error('after must be a safe integer >= 0')
       const live = activeInstallations(accountId)

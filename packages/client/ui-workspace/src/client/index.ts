@@ -13,7 +13,7 @@ import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ClientContext, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   FunctionTag, InvitationId, MembershipId, ProjectId, ProjectMembershipClient,
-  PlatformAccountId, ProjectMembershipAccess,
+  PlatformAccountId, ProjectMembershipAccessSnapshot,
 } from '@deepseek-ai/dsh-project-membership-client'
 import { normalizeGitRemoteUrl } from '@deepseek-ai/dsh-project-membership/remote-url'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
@@ -26,9 +26,6 @@ import { WorkspaceBrowser } from './WorkspaceBrowser.tsx'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
 import { en, zh, type WorkspaceKey } from './locales.ts'
 
-export type {
-  ProjectMembershipAccess, ProjectMembershipAccessSnapshot,
-} from '@deepseek-ai/dsh-project-membership-client'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
   WorkspaceBrowserInjected, WorkspaceBrowserProps, WorkspacePickerInjected, WorkspacePickerProps,
@@ -45,6 +42,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin. */
 const NS = 'workspace'
 
+const preauthorizedMembershipSnapshot = Object.freeze({ status: 'signed-in' as const })
+const preauthorizedMembershipAccess: HostObservable<ProjectMembershipAccessSnapshot> = Object.freeze({
+  getSnapshot: () => preauthorizedMembershipSnapshot,
+  subscribe: () => () => {},
+})
+
 /**
  * Required services (cordis fiber inject). The target slots are declared by
  * the ui-sidebar / ui-conversation applies, whose activation order relative
@@ -59,7 +62,6 @@ function projectMembershipGateway(
   client: ProjectMembershipClient,
   workspaces: ClientContext['workspaces'],
   connection: ConnectionHandle,
-  access: ProjectMembershipAccess | undefined,
 ): ProjectMembershipGateway {
   const bindWorkspace = async (input: {
     receivingAccountId: PlatformAccountId
@@ -83,7 +85,6 @@ function projectMembershipGateway(
     return binding.result.value.workspaceId
   }
   return {
-    ...(access === undefined ? {} : { access }),
     createProject: async (input) => {
       const { localWorkspaceId, name } = input
       const remoteUrl = await workspaces.gitRemote(localWorkspaceId)
@@ -273,10 +274,17 @@ export function apply(ctx: ClientContext): void {
         ? {}
         : {
           projectMembership: projectMembershipGateway(
-            membership, ctx.workspaces, connection, membershipAccess,
+            membership, ctx.workspaces, connection,
           ),
         }),
-      hooks: { directoryFlow: browserFlowSource, hostDescription },
+      ...(membershipAccess === undefined
+        ? {}
+        : { openProjectMembershipSignIn: () => { membershipAccess.openSignIn() } }),
+      hooks: {
+        directoryFlow: browserFlowSource,
+        hostDescription,
+        projectMembershipAccess: membershipAccess ?? preauthorizedMembershipAccess,
+      },
     }
   }
   const pickerInjected = (): WorkspacePickerInjected => ({

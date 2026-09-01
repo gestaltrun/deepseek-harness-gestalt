@@ -764,6 +764,7 @@ function SearchResults({
  */
 export function WorkspaceBrowser({
   projectMembership,
+  openProjectMembershipSignIn,
   wide,
   expandSidebar,
   useSessions,
@@ -784,10 +785,12 @@ export function WorkspaceBrowser({
   searchResultLimit,
   useDirectoryFlow,
   useHostDescription,
+  useProjectMembershipAccess,
   renderSlot,
   t,
 }: WorkspaceBrowserProps) {
   const home = useHostDescription(description => description?.home)
+  const projectMembershipAccess = useProjectMembershipAccess(snapshot => snapshot)
   const workspaces = useWorkspaces(state => state.items)
   const wizardWorkspaces = useMemo(() => workspaces.map((workspace): WizardWorkspace => ({
     workspaceId: workspace.workspaceId,
@@ -1263,6 +1266,10 @@ export function WorkspaceBrowser({
           workspaceId={settingsTarget.workspaceId}
           workspaceTitle={settingsTarget.title}
           gateway={projectMembership}
+          access={projectMembershipAccess}
+          {...openProjectMembershipSignIn === undefined ? {} : {
+            openSignIn: openProjectMembershipSignIn,
+          }}
           onClose={() => { setSettingsTarget(null) }}
           t={t}
         />

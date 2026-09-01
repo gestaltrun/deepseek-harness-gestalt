@@ -1,10 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import FileMemberQuestionReceiver from '@deepseek-ai/dsh-member-question-receiver'
 import CompanionMemberQuestionSender from '@deepseek-ai/dsh-member-question-sender'
+import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   parseCompanionSessionId,
   parseMemberQuestionProjectId,
@@ -16,6 +18,7 @@ import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
 const contexts: Context[] = []
 const endpoints: KeylessMemberQuestionEndpoint[] = []
 const roots: string[] = []
+const servers: Server[] = []
 let broker: KeylessMemberQuestionBroker | undefined
 
 afterEach(async () => {
@@ -23,6 +26,10 @@ afterEach(async () => {
   for (const context of contexts.splice(0).reverse()) await context.fiber.dispose()
   await broker?.close()
   broker = undefined
+  await Promise.all(servers.splice(0).map(server => new Promise<void>((resolve, reject) => {
+    server.closeAllConnections()
+    server.close((error) => { if (error === undefined) resolve(); else reject(error) })
+  })))
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
 
@@ -203,6 +210,52 @@ describe('keyless member-question encrypted listener', () => {
     })
     await expect(second).resolves.toMatchObject({ outcome: 'declined' })
   })
+
+  it('quiesces polling when presence removal fails during shutdown', async () => {
+    let eventPolls = 0
+    let presenceRemovals = 0
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'application/json')
+      if (request.method === 'POST') {
+        response.end('{"online":true}')
+        return
+      }
+      if (request.method === 'DELETE') {
+        presenceRemovals += 1
+        response.writeHead(503)
+        response.end('{"error":"unavailable"}')
+        return
+      }
+      eventPolls += 1
+      response.end('{"events":[],"cursor":0}')
+    })
+    servers.push(server)
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('test listener exposed no TCP address')
+    const client = new KeylessMemberQuestionEndpoint({
+      origin: `http://127.0.0.1:${String(address.port)}`,
+      accountId: parsePlatformAccountId('account-a'),
+      installationId: parseInstallationId('installation-a1'),
+      key: new Uint8Array(32).fill(17),
+      heartbeatMs: 10,
+      pollMs: 5,
+    })
+    endpoints.push(client)
+    await client.start()
+    await expect.poll(() => eventPolls).toBeGreaterThan(0)
+
+    await expect(client.stop()).rejects.toThrow('keyless presence removal failed with HTTP 503')
+    expect(presenceRemovals).toBe(1)
+    const stoppedPolls = eventPolls
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(eventPolls).toBe(stoppedPolls)
+    await expect(client.stop()).resolves.toBeUndefined()
+    endpoints.pop()
+  })
 })
 
 function questionPayload(originSessionId: string, background: string) {
@@ -224,8 +277,8 @@ function endpoint(accountId: string, installationId: string, key: Uint8Array): K
   if (broker === undefined) throw new Error('broker is not running')
   const created = new KeylessMemberQuestionEndpoint({
     origin: broker.origin,
-    accountId,
-    installationId,
+    accountId: parsePlatformAccountId(accountId),
+    installationId: parseInstallationId(installationId),
     key,
     heartbeatMs: 200,
     pollMs: 5,

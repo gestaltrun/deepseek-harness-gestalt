@@ -557,8 +557,11 @@ export async function fillTopAccountDialogProviderCredential(labels: readonly st
   await fillTopAccountDialogInput(labels, apiKey)
 }
 
-/** Sync the account created through the embedded form and return one complete live model. */
-export async function syncRealProviderAccount(hostOrigin: string, accountName: string): Promise<string> {
+/** Sync the account created through the embedded form and return its exact live model catalog. */
+export async function syncRealProviderAccount(
+  hostOrigin: string,
+  accountName: string,
+): Promise<{ targetModel: string; supportedModels: string[] }> {
   const groups = await adminJson<{ items?: Array<{ id: number; platform: string }> }>(
     hostOrigin,
     '/groups?page=1&page_size=100',
@@ -613,9 +616,14 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
   }
   const liveModels = new Set((catalog.models ?? []).filter((model): model is string =>
     typeof model === 'string' && model.length > 0))
+  const supportedModels = [...liveModels]
+    .filter(modelId => Object.hasOwn(configuredModels, modelId))
+    .sort()
+  if (supportedModels.length === 0) {
+    throw new Error('Sub2API account sync returned no model persisted by the embedded account form')
+  }
   const targetModel = Object.entries(catalog.metadata ?? {}).find(([modelId, metadata]) =>
-    liveModels.has(modelId)
-      && Object.hasOwn(configuredModels, modelId)
+    supportedModels.includes(modelId)
       && (metadata.reasoning === false
         || (metadata.reasoning === true
           && Array.isArray(metadata.supported_reasoning_levels)
@@ -629,7 +637,7 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
   if (targetModel === undefined) {
     throw new Error('Sub2API account sync returned no configured model with complete capability metadata')
   }
-  return targetModel
+  return { targetModel, supportedModels }
 }
 
 /** Read every model id from the current Sub2API provider settings profile. */

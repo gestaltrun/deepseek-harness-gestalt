@@ -93,7 +93,7 @@ describe('Sub2API Desktop installation', () => {
       timeout: 60_000,
       timeoutMsg: 'Embedded account form did not save the real provider account',
     })
-    const targetModel = await syncRealProviderAccount(hostOrigin, accountName)
+    const { targetModel, supportedModels } = await syncRealProviderAccount(hostOrigin, accountName)
 
     await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
     await browser.waitUntil(async () => /已保存路由|Saved Routes/u.test((await overlayAccountConsoleSnapshot()).text), {
@@ -131,7 +131,7 @@ describe('Sub2API Desktop installation', () => {
         `Release-backed Sub2API gateway capability profile: ${JSON.stringify(await gatewayModelProfile(targetModel))}`,
       )
     }
-    expect(await gatewayModelIds()).toEqual([targetModel])
+    expect(await gatewayModelIds()).toEqual(supportedModels)
 
     await openSettings()
     expect(new URL(await overlayUrl()).origin).toBe(new URL(hostSurface.url).origin)
@@ -163,7 +163,7 @@ describe('Sub2API Desktop installation', () => {
       timeoutMsg: 'Sub2API provider did not receive live model capability metadata',
     })
     const providerModel = await providerModelProfile(targetModel)
-    expect(await providerModelIds()).toEqual([targetModel])
+    expect(await providerModelIds()).toEqual(supportedModels)
     expect(providerModel?.contextWindow).toBeGreaterThan(0)
     expect(providerModel?.maxTokens).toBeGreaterThan(0)
     expect(providerModel?.input).toContain('text')

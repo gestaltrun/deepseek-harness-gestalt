@@ -47,6 +47,11 @@ export function redactWebHostDiagnostic(output: string, environment: NodeJS.Proc
     .replaceAll(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1[REDACTED]@')
 }
 
+/** Return a bounded credential-free child diagnostic. */
+export function webHostDiagnosticTail(output: string, environment: NodeJS.ProcessEnv): string {
+  return redactWebHostDiagnostic(output.trim(), environment).slice(-800)
+}
+
 /**
  * Spawn `dsh web` and resolve when it prints the loopback URL.
  * @param command - node, args, cwd.
@@ -95,7 +100,7 @@ export function spawnWebHost(
     }
     command.signal?.addEventListener('abort', onAbort, { once: true })
     const timer = setTimeout(() => {
-      const tail = redactWebHostDiagnostic(buffer.trim().slice(-800), environment)
+      const tail = webHostDiagnosticTail(buffer, environment)
       terminateBeforeReady(new Error(
         `dsh web did not print a loopback URL within ${String(timeoutMs)}ms`
         + (tail.length === 0 ? '' : `\n${tail}`),
@@ -122,7 +127,7 @@ export function spawnWebHost(
       if (settled) return
       settled = true
       clearTimeout(timer)
-      const tail = redactWebHostDiagnostic(buffer.trim().slice(-800), environment)
+      const tail = webHostDiagnosticTail(buffer, environment)
       reject(new Error(
         'dsh web exited before announcing a URL (code ' + String(code) + ', signal ' + String(signal) + ')'
         + (tail.length === 0 ? '' : '\n' + tail),

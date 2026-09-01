@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import { redactWebHostDiagnostic, spawnWebHost, type RunningWebHost } from '../src/spawn-web-host.ts'
+import {
+  redactWebHostDiagnostic, spawnWebHost, type RunningWebHost, webHostDiagnosticTail,
+} from '../src/spawn-web-host.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const children: RunningWebHost[] = []
@@ -27,6 +29,16 @@ describe('spawnWebHost', () => {
     expect(diagnostic).not.toContain('dynamic-token')
     expect(diagnostic).not.toContain('user:password')
     expect(diagnostic).toContain('[REDACTED]')
+  })
+
+  it('redacts before truncating across a credential boundary', () => {
+    const secret = 'credential-prefix-and-visible-suffix'
+    const output = `SERVICE_API_KEY=${secret}${'x'.repeat(790)}`
+
+    const diagnostic = webHostDiagnosticTail(output, { SERVICE_API_KEY: secret })
+
+    expect(diagnostic).not.toContain('visible-suffix')
+    expect(diagnostic.length).toBeLessThanOrEqual(800)
   })
 
   it('resolves the loopback URL from mixed stdout', async () => {

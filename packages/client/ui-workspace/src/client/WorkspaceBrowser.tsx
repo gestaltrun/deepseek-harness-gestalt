@@ -1278,7 +1278,9 @@ export function WorkspaceBrowser({
           t={t}
         />
       )}
-      {wizardInvitation !== null && projectMembership !== undefined && (
+      {projectMembershipAccess.status === 'signed-in'
+        && wizardInvitation !== null
+        && projectMembership !== undefined && (
         <InviteWizardModal
           invitation={wizardInvitation}
           workspaces={wizardWorkspaces}

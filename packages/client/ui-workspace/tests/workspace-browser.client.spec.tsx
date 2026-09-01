@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
   SessionId, SessionListState, SessionSummary, WorkspaceId, WorkspaceListState, WorkspaceView,
@@ -78,7 +79,7 @@ function dragData(): Pick<DataTransfer, 'effectAllowed' | 'dropEffect' | 'setDat
   return { effectAllowed: 'uninitialized', dropEffect: 'none', setData: vi.fn() }
 }
 
-function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
+function fixture(overrides: Partial<WorkspaceBrowserProps> = {}) {
   const store = createWorkspaceViewStore().create()
   const props: WorkspaceBrowserProps = {
     wide: true,
@@ -106,6 +107,11 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     t,
     ...overrides,
   }
+  return { props, store }
+}
+
+function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
+  const { props, store } = fixture(overrides)
   const view = render(<WorkspaceBrowser {...props} />)
   return { view, props, store }
 }
@@ -120,26 +126,61 @@ describe('WorkspaceBrowser', () => {
   it('polls pending invitations only while the shared Platform Account is signed in', async () => {
     vi.useFakeTimers()
     try {
-      const pendingInvitations = vi.fn<ProjectMembershipGateway['pendingInvitations']>().mockResolvedValue([])
+      let resolveOldPoll: ((rows: Awaited<ReturnType<ProjectMembershipGateway['pendingInvitations']>>) => void) | undefined
+      const oldPoll = new Promise<Awaited<ReturnType<ProjectMembershipGateway['pendingInvitations']>>>((resolve) => {
+        resolveOldPoll = resolve
+      })
+      const invitation = {
+        invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: 'https://github.com/example/assembled.git',
+      }
+      const pendingInvitations = vi.fn<ProjectMembershipGateway['pendingInvitations']>()
+        .mockResolvedValueOnce([invitation])
+        .mockReturnValueOnce(oldPoll)
       const projectMembership = projectMembershipGateway(pendingInvitations)
-      const b = mount({
+      const { props } = fixture({
         projectMembership,
         useProjectMembershipAccess: hook({ status: 'signed-out' as const }),
       })
+      const commits: Array<{ status: 'signed-in' | 'signed-out'; invitationVisible: boolean }> = []
+      const CommitProbe = ({ status }: { status: 'signed-in' | 'signed-out' }) => {
+        useLayoutEffect(() => {
+          commits.push({
+            status,
+            invitationVisible: screen.queryByText('项目邀请') !== null,
+          })
+        }, [status])
+        return null
+      }
+      const browser = (status: 'signed-in' | 'signed-out') => <>
+        <WorkspaceBrowser {...props} useProjectMembershipAccess={hook({ status })} />
+        <CommitProbe status={status} />
+      </>
+      const view = render(browser('signed-out'))
 
       await act(async () => { await Promise.resolve() })
       expect(pendingInvitations).not.toHaveBeenCalled()
 
-      rerender(b, { useProjectMembershipAccess: hook({ status: 'signed-in' as const }) })
+      view.rerender(browser('signed-in'))
       await act(async () => { await Promise.resolve() })
-      expect(pendingInvitations).toHaveBeenCalledOnce()
+      expect(pendingInvitations).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('项目邀请')).toBeTruthy()
 
-      rerender(b, { useProjectMembershipAccess: hook({ status: 'signed-out' as const }) })
+      view.rerender(browser('signed-out'))
+      expect(commits.at(-1)).toEqual({ status: 'signed-out', invitationVisible: false })
+      expect(screen.queryByText('项目邀请')).toBeNull()
+
+      await act(async () => {
+        resolveOldPoll?.([invitation])
+        await oldPoll
+      })
+      expect(screen.queryByText('项目邀请')).toBeNull()
+
       await act(async () => {
         vi.advanceTimersByTime(15_000)
         await Promise.resolve()
       })
-      expect(pendingInvitations).toHaveBeenCalledOnce()
+      expect(pendingInvitations).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }

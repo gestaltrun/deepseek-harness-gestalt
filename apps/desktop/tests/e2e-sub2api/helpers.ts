@@ -549,7 +549,6 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
       group_ids?: number[]
       groups?: Array<{ id?: number }>
       rate_multiplier?: number
-      upstream_billing_probe_enabled?: boolean
       credentials?: Record<string, unknown>
       extra?: Record<string, unknown>
     }>
@@ -564,13 +563,14 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
     .filter((id): id is number => Number.isInteger(id)) ?? []
   if (!groupIds.includes(composite.id)) throw new Error('Embedded account form did not bind the Composite group default')
   if (account.rate_multiplier !== 1) throw new Error('Embedded account form did not retain the default billing multiplier')
-  if (account.upstream_billing_probe_enabled !== true) {
+  const extra = record(account.extra)
+  if (extra?.['upstream_billing_probe_enabled'] !== true) {
     throw new Error('Embedded account form did not retain the default upstream billing probe setting')
   }
   if (record(account.credentials)?.['pool_mode'] === true) {
     throw new Error('Embedded account form enabled hidden pool mode')
   }
-  if (Object.keys(record(account.extra) ?? {}).some(key => key.startsWith('quota_'))) {
+  if (Object.keys(extra ?? {}).some(key => key.startsWith('quota_'))) {
     throw new Error('Embedded account form persisted a hidden quota override')
   }
   const catalog = await adminJson<{

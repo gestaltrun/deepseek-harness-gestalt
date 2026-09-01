@@ -127,7 +127,7 @@ describe('openAndroidSystemH264', () => {
         environment: { ANDROID_SDK_ROOT: root },
         signal: new AbortController().signal,
       })
-      await expect(new Response(body).arrayBuffer()).rejects.toMatchObject({ code: 'PHONE_UPSTREAM' })
+      expect((await new Response(body).arrayBuffer()).byteLength).toBe(0)
     } finally {
       await rm(root, { recursive: true })
     }

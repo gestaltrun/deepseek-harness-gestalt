@@ -209,7 +209,10 @@ try {
   } catch (error) { teardownErrors.push(error) }
   let sharedMemorySegmentsRemoved = false
   try {
-    cleanupNewDarwinPostgresSharedMemory(sharedMemoryBaseline)
+    cleanupNewDarwinPostgresSharedMemory(
+      sharedMemoryBaseline,
+      new Set(cleanupProcesses.map(process => process.pid)),
+    )
     sharedMemorySegmentsRemoved = true
   } catch (error) { teardownErrors.push(error) }
   await captureArtifact(join(dshHome, 'sub2api', 'run'), join(artifactDir, 'run'), exitCode === 0, teardownErrors)
@@ -395,7 +398,7 @@ function darwinSharedMemorySnapshot() {
   return new Set(parseDarwinSharedMemory(result.stdout).map(segment => segment.id))
 }
 
-function cleanupNewDarwinPostgresSharedMemory(baselineIds) {
+function cleanupNewDarwinPostgresSharedMemory(baselineIds, ownedPids) {
   if (process.platform !== 'darwin') return
   const snapshot = spawnSync('ipcs', ['-ma'], { encoding: 'utf8' })
   if (snapshot.status !== 0) throw new Error(`ipcs -ma failed during cleanup: ${snapshot.stderr.trim()}`)
@@ -405,6 +408,7 @@ function cleanupNewDarwinPostgresSharedMemory(baselineIds) {
     baselineIds,
     parseDarwinSharedMemory(snapshot.stdout),
     user.stdout.trim(),
+    ownedPids,
   )
   for (const id of ids) {
     const removed = spawnSync('ipcrm', ['-m', id], { encoding: 'utf8' })

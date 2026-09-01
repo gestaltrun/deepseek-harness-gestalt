@@ -35,6 +35,7 @@ async function disableAndReEnable(cycle: number): Promise<void> {
     timeout: 60_000,
     timeoutMsg: `Native Sub2API account workspace did not return after re-enable cycle ${String(cycle)}`,
   })
+  await recordOwnedProcesses()
 }
 
 describe('Sub2API Desktop installation', () => {
@@ -64,6 +65,7 @@ describe('Sub2API Desktop installation', () => {
       timeout: 60_000,
       timeoutMsg: 'Settings did not render the native Sub2API account workspace by default',
     })
+    await recordOwnedProcesses()
 
     await disableAndReEnable(1)
     await disableAndReEnable(2)

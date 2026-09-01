@@ -13,15 +13,18 @@ m 3407875 0x3f9e492b --rw------- user staff user staff 0 4096 95278 95278
 describe('macOS System V shared-memory cleanup', () => {
   it('parses attachment, owner, and size facts', () => {
     expect(parseDarwinSharedMemory(IPCS_OUTPUT)).toEqual([
-      { id: '65536', owner: 'user', attachments: 6, size: 56 },
-      { id: '27983873', owner: 'user', attachments: 0, size: 56 },
-      { id: '3670018', owner: 'other', attachments: 0, size: 56 },
-      { id: '3407875', owner: 'user', attachments: 0, size: 4096 },
+      { id: '65536', owner: 'user', attachments: 6, size: 56, creatorPid: 1000, lastPid: 1000 },
+      { id: '27983873', owner: 'user', attachments: 0, size: 56, creatorPid: 28734, lastPid: 28734 },
+      { id: '3670018', owner: 'other', attachments: 0, size: 56, creatorPid: 63074, lastPid: 63074 },
+      { id: '3407875', owner: 'user', attachments: 0, size: 4096, creatorPid: 95278, lastPid: 95278 },
     ])
   })
 
   it('selects only new detached PostgreSQL marker segments owned by the run user', () => {
     const segments = parseDarwinSharedMemory(IPCS_OUTPUT)
-    expect(newDetachedPostgresSegmentIds(new Set(['65536']), segments, 'user')).toEqual(['27983873'])
+    expect(newDetachedPostgresSegmentIds(new Set(['65536']), segments, 'user', new Set([28734])))
+      .toEqual(['27983873'])
+    expect(newDetachedPostgresSegmentIds(new Set(['65536']), segments, 'user', new Set([99999])))
+      .toEqual([])
   })
 })

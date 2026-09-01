@@ -19,6 +19,16 @@ describe('Android SDK process launch', () => {
     })
   })
 
+  it('uses cmd.exe when Windows exposes no command processor', () => {
+    const previous = process.env.ComSpec
+    delete process.env.ComSpec
+    try {
+      expect(androidSpawnSpec('C:\\sdkmanager.bat', ['--licenses'], 'win32')).toMatchObject({ command: 'cmd.exe' })
+    } finally {
+      if (previous !== undefined) process.env.ComSpec = previous
+    }
+  })
+
   it('keeps native executables as direct children', () => {
     expect(androidSpawnSpec('/sdk/emulator/emulator', ['-accel-check'], 'linux')).toEqual({
       command: '/sdk/emulator/emulator',

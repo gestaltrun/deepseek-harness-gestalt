@@ -88,8 +88,8 @@ function writeAgentState(agentState) {
 }
 
 function replyAgent(payload) {
+  process.exitCode = 0
   process.stdout.write(`${JSON.stringify(payload)}\n`)
-  process.exit(0)
 }
 
 // CLI mode: `fakemobilecli agent status|install --device <id> ...` runs as a
@@ -110,20 +110,24 @@ if (args[0] === 'agent') {
   const delayMs = subcommand === 'install' ? (agentKnobs.installDelayMs ?? 0) : (agentKnobs.statusDelayMs ?? 0)
   setTimeout(() => {
     if (typeof failText === 'string') {
+      process.exitCode = subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1)
       process.stderr.write(`${failText}\n`)
-      process.exit(subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1))
+      return
     }
     if (subcommand === 'status') {
       agentState.statusCount += 1
       writeAgentState(agentState)
       if (typeof agentKnobs.statusAnswer === 'string') {
+        process.exitCode = 0
         process.stdout.write(`${agentKnobs.statusAnswer}\n`)
-        process.exit(0)
+        return
       }
       if (agentState.installed) {
         replyAgent({ status: 'ok', data: { message: 'Agent version 0.0.0-test is installed on device', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+        return
       }
       replyAgent({ status: 'fail', data: { message: 'Agent is not installed on the device' } })
+      return
     }
     if (subcommand === 'install') {
       agentState.installCount += 1
@@ -131,19 +135,22 @@ if (args[0] === 'agent') {
       writeAgentState(agentState)
       const deviceEntry = state.devices.find(candidate => candidate.id === device)
       if (deviceEntry?.platform === 'ios' && deviceEntry.type === 'real' && !args.includes('--provisioning-profile')) {
+        process.exitCode = 1
         process.stderr.write('--provisioning-profile is required for real iOS devices\n')
-        process.exit(1)
+        return
       }
       agentState.installed = true
       writeAgentState(agentState)
       if (typeof agentKnobs.installAnswer === 'string') {
+        process.exitCode = 0
         process.stdout.write(`${agentKnobs.installAnswer}\n`)
-        process.exit(0)
+        return
       }
       replyAgent({ status: 'ok', data: { message: 'Agent installed successfully', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+      return
     }
+    process.exitCode = 1
     process.stderr.write(`unknown agent subcommand: ${String(subcommand)}\n`)
-    process.exit(1)
   }, delayMs)
 }
 

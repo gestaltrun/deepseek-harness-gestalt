@@ -74,6 +74,7 @@ describe('web e2e: phone H264 fallback', () => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         deviceId: 'android-real', ioPath: '/phone/ws/io',
+        agentManaged: false,
         h264: { url: '/phone/stream/android-real/h264?token=x', expiresAt: Date.now() + 60_000 },
         mjpeg: { url: '/phone/stream/android-real/mjpeg?token=x', expiresAt: Date.now() + 60_000 },
       }),

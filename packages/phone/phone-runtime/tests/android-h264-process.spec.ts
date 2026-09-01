@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import { PassThrough } from 'node:stream'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -110,6 +110,24 @@ describe('openAndroidSystemH264', () => {
         signal: new AbortController().signal,
       })
       await expect(new Response(body).text()).resolves.toBe('native-h264')
+    } finally {
+      await rm(root, { recursive: true })
+    }
+  })
+
+  it.runIf(process.platform === 'win32')('launches the owned Windows process tree with the selected SDK adb', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-adb-h264-win-'))
+    const platformTools = join(root, 'platform-tools')
+    const adb = join(platformTools, 'adb.exe')
+    await mkdir(platformTools)
+    await symlink(process.env.ComSpec ?? 'C:\\Windows\\System32\\cmd.exe', adb, 'file')
+    try {
+      const body = openAndroidSystemH264({
+        deviceId: 'device-owned-tree',
+        environment: { ANDROID_SDK_ROOT: root },
+        signal: new AbortController().signal,
+      })
+      await expect(new Response(body).arrayBuffer()).rejects.toMatchObject({ code: 'PHONE_UPSTREAM' })
     } finally {
       await rm(root, { recursive: true })
     }

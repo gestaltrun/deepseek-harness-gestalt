@@ -95,6 +95,7 @@ export class MobilecliProcessTree {
     this.exitSettlement = Promise.withResolvers<ServerExit>()
     this.platform = internals.platform ?? process.platform
     this.probeGroup = internals.probeGroup ?? ((pid) => { process.kill(-pid, 0) })
+    /* v8 ignore next -- Windows cannot execute POSIX process-group signals; macOS/Linux native integration covers this default. */
     this.signalGroup = internals.signalGroup ?? ((pid, signal) => { process.kill(-pid, signal) })
     this.taskkill = internals.taskkill ?? ((pid) => {
       const result = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {

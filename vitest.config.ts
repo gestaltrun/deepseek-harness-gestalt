@@ -80,6 +80,10 @@ const windowsRunnerCoverageExclusions = process.platform === 'win32'
       // coverage keeps the per-file 100% bar.
       'packages/workflow/workflow-worker-thread/src/index.ts',
       'packages/workflow/workflow-worker-thread/src/host.ts',
+      // The iOS command adapter owns Xcode/simctl POSIX process groups and is
+      // runnable only on macOS. Its full lifecycle remains covered in the
+      // macOS/Linux coverage lane; Windows still type-checks the package.
+      'packages/phone/phone-environment-ios/src/process.ts',
     ]
   : []
 

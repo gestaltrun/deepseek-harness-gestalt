@@ -885,6 +885,9 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
       ...resolveModelCompat(provider, entry, request.compat, base, api),
     }
     if (entry.defaultReasoningLevel !== undefined) {
+      if (!model.reasoning) {
+        invalid(provider, `model "${entry.id}" defaultReasoningLevel "${entry.defaultReasoningLevel}" requires a reasoning model`)
+      }
       if (!getSupportedThinkingLevels(model).some(level => level === entry.defaultReasoningLevel)) {
         invalid(provider, `model "${entry.id}" defaultReasoningLevel "${entry.defaultReasoningLevel}" is not`
           + ' present in its reasoningEfforts')

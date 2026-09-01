@@ -338,7 +338,7 @@ export class PiAiAdapter extends LlmAdapter {
     const model = this.modelOf(snapshot, options.provider, options.model)
     const reasoning = resolveReasoningLevel(
       model,
-      options.reasoningEffort ?? profile.reasoning,
+      options.reasoningEffort ?? profile.modelReasoningDefaults.get(options.model) ?? profile.reasoning,
     )
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 

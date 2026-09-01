@@ -661,6 +661,31 @@ describe('provider profile lifecycle', () => {
     })
   })
 
+  it('dispatches the declared per-model reasoning default without an explicit request override', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const adapter = adapterOf({
+      'acme-gateway': {
+        apiKeyEnv: 'PI_TEST_KEY',
+        api: 'openai-completions',
+        baseURL: `${server.url}/v1`,
+        reasoning: 'low',
+        models: [{
+          id: 'acme-medium',
+          reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
+          defaultReasoningLevel: 'medium',
+        }],
+      },
+    })
+
+    for await (const _chunk of adapter.stream({
+      provider: 'acme-gateway',
+      model: 'acme-medium',
+      messages: [],
+    })) { /* drain */ }
+
+    expect(server.requests[0]).toMatchObject({ reasoning_effort: 'medium' })
+  })
+
   it('sends the declared wire spelling and refuses undeclared levels before network I/O', async () => {
     vi.stubEnv('PI_TEST_KEY', 'test-key')
     const server = await mockServer([{ events: textEvents }])

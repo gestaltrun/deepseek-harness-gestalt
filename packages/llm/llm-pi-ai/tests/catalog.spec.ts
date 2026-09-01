@@ -642,6 +642,14 @@ describe('per-model reasoning efforts', () => {
     }]))).toThrow(/defaultReasoningLevel "medium" is not present/u)
   })
 
+  it('refuses a per-model default on a non-reasoning model', () => {
+    expect(() => modelOf(declared([{
+      id: 'm',
+      reasoningEfforts: false,
+      defaultReasoningLevel: 'off',
+    }]))).toThrow(/defaultReasoningLevel "off" requires a reasoning model/u)
+  })
+
   it('narrows a catalog model’s levels in place', () => {
     const [catalogModel] = getBuiltinModels('deepseek')
     if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')

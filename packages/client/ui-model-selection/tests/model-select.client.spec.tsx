@@ -163,8 +163,9 @@ describe('ModelSelect reasoning effort', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择模型' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
 
-    expect(screen.getByRole('menuitemradio', { name: 'GLM-5.2' }).getAttribute('data-model-id'))
-      .toBe('glm-5.2')
+    const option = screen.getByRole('menuitemradio', { name: 'GLM-5.2' })
+    expect(option.getAttribute('data-provider-id')).toBe('sub2api')
+    expect(option.getAttribute('data-model-id')).toBe('glm-5.2')
   })
 
   it('keeps long model names inside the vertical menu scroller', () => {

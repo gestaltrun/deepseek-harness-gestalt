@@ -610,17 +610,22 @@ export async function syncRealProviderAccount(
       max_output_tokens?: number
     }>
   }>(hostOrigin, `/accounts/${String(account.id)}/models/sync-upstream`, { method: 'POST' })
-  const configuredModels = record(record(account.credentials)?.['model_mapping'])
-  if (configuredModels === undefined || Object.keys(configuredModels).length === 0) {
-    throw new Error('Embedded account form did not persist the upstream-supported model mapping')
-  }
-  const liveModels = new Set((catalog.models ?? []).filter((model): model is string =>
-    typeof model === 'string' && model.length > 0))
-  const supportedModels = [...liveModels]
-    .filter(modelId => Object.hasOwn(configuredModels, modelId))
-    .sort()
+  const supportedModels = [...new Set((catalog.models ?? []).filter((model): model is string =>
+    typeof model === 'string' && model.length > 0))].sort()
   if (supportedModels.length === 0) {
-    throw new Error('Sub2API account sync returned no model persisted by the embedded account form')
+    throw new Error('Sub2API account sync returned no supported model')
+  }
+  const refreshedAccounts = await adminJson<{
+    items?: Array<{ id?: number; extra?: Record<string, unknown> }>
+  }>(hostOrigin, '/accounts?page=1&page_size=100')
+  const refreshedAccount = refreshedAccounts.items?.find(candidate => candidate.id === account.id)
+  const snapshot = record(record(refreshedAccount?.extra)?.['upstream_model_metadata'])
+  const persistedModels = Array.isArray(snapshot?.['model_ids'])
+    ? [...new Set(snapshot['model_ids'].filter((model): model is string =>
+      typeof model === 'string' && model.length > 0))].sort()
+    : []
+  if (JSON.stringify(persistedModels) !== JSON.stringify(supportedModels)) {
+    throw new Error(`Sub2API persisted model ids ${JSON.stringify(persistedModels)} instead of synchronized ids ${JSON.stringify(supportedModels)}`)
   }
   const targetModel = Object.entries(catalog.metadata ?? {}).find(([modelId, metadata]) =>
     supportedModels.includes(modelId)
@@ -819,18 +824,24 @@ export async function selectModelAndSend(
   const modelPane = browser.$('div[role="menu"] button[role="menuitem"]')
   await modelPane.waitForClickable({ timeout: 30_000 })
   await modelPane.click()
-  const choices = await browser.$$('button[data-model-id]')
+  const choices = await browser.$$('button[data-provider-id][data-model-id]')
   let choice: WebdriverIO.Element | undefined
   for (const candidate of choices) {
-    if (await candidate.getAttribute('data-model-id') === model) {
+    if (await candidate.getAttribute('data-provider-id') === 'sub2api'
+      && await candidate.getAttribute('data-model-id') === model) {
       choice = candidate
       break
     }
   }
   if (choice === undefined) {
-    const advertised: Array<string | null> = []
-    for (const candidate of choices) advertised.push(await candidate.getAttribute('data-model-id'))
-    throw new Error(`Desktop model menu omitted ${model}; advertised ${JSON.stringify(advertised)}`)
+    const advertised: Array<{ provider: string | null; model: string | null }> = []
+    for (const candidate of choices) {
+      advertised.push({
+        provider: await candidate.getAttribute('data-provider-id'),
+        model: await candidate.getAttribute('data-model-id'),
+      })
+    }
+    throw new Error(`Desktop model menu omitted sub2api/${model}; advertised ${JSON.stringify(advertised)}`)
   }
   const choiceLabel = await choice.getAttribute('title')
   await choice.scrollIntoView({ block: 'nearest', inline: 'nearest' })

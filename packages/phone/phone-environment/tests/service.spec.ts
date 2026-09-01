@@ -1209,7 +1209,7 @@ describe('PhoneEnvironment', () => {
     await service.setEnabled(true)
     await service.prepare()
     expect(activateExecutable).toHaveBeenCalledWith(
-      expect.stringContaining('/versions/'), expect.any(AbortSignal), undefined,
+      expect.stringMatching(/[\\/]versions[\\/]/u), expect.any(AbortSignal), undefined,
     )
     expect(service.snapshot()).toMatchObject({ enabled: true, runtime: { kind: 'ready', source: 'managed' } })
   })

@@ -8,6 +8,8 @@
     "gh",
     "icacls",
     "initdb",
+    "ipcrm",
+    "ipcs",
     "jar",
     "javac",
     "keytool",

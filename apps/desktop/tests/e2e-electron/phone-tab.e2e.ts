@@ -147,7 +147,7 @@ describe('Desktop phone tab live chain', () => {
     await composer.setValue('Use device_act to press Home on the active iOS Simulator.')
     await composer.click()
     await browser.keys(['Enter'])
-    const allow = browser.$('button=允许一次')
+    const allow = browser.$('//button[normalize-space()="允许一次" or normalize-space()="Allow once"]')
     await allow.waitForDisplayed({ timeout: 30_000 })
     await saveWindowEvidence('phone-agent-device-act-approval-window')
     await allow.click()

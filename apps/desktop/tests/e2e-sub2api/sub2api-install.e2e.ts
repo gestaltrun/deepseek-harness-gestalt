@@ -8,7 +8,7 @@ import {
   openProviderEditor,
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
   overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
-  recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
+  providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
 } from './helpers.ts'
 
 async function disableAndReEnable(cycle: number): Promise<void> {
@@ -87,6 +87,24 @@ describe('Sub2API Desktop installation', () => {
       interval: 500,
       timeoutMsg: 'Models Settings did not receive the live Sub2API account catalog',
     })
+    await browser.waitUntil(async () => {
+      const model = await providerModelProfile('claude-sonnet-4-5-20250929')
+      return model?.contextWindow !== undefined
+        && model.maxTokens !== undefined
+        && model.input !== undefined
+        && model.reasoningEfforts !== undefined
+    }, {
+      timeout: 30_000,
+      interval: 500,
+      timeoutMsg: 'Sub2API provider did not receive live model capability metadata',
+    })
+    const providerModel = await providerModelProfile('claude-sonnet-4-5-20250929')
+    expect(providerModel?.contextWindow).toBeGreaterThan(0)
+    expect(providerModel?.maxTokens).toBeGreaterThan(0)
+    expect(providerModel?.input).toContain('text')
+    if (providerModel?.reasoningEfforts !== false) {
+      expect(Object.keys(providerModel?.reasoningEfforts ?? {})).toContain(providerModel?.defaultReasoningLevel)
+    }
 
     await clickOverlayButton(['账号池', 'Account pool'])
     const consoleWindow = await overlayAccountConsoleSnapshot()

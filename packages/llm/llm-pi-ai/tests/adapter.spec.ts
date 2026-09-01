@@ -627,6 +627,40 @@ describe('provider profile lifecycle', () => {
     })
   })
 
+  it('uses each declared model reasoning default independently', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(LlmPiAi, {
+      providers: {
+        'acme-gateway': {
+          apiKeyEnv: 'PI_TEST_KEY',
+          api: 'openai-completions',
+          baseURL: 'https://acme.test/v1',
+          reasoning: 'low',
+          models: [
+            {
+              id: 'acme-medium',
+              reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
+              defaultReasoningLevel: 'medium',
+            },
+            {
+              id: 'acme-high',
+              reasoningEfforts: { off: null, low: 'low', high: 'high' },
+              defaultReasoningLevel: 'high',
+            },
+          ],
+        },
+      },
+    })
+
+    await expect(ctx.llm.resolveModelInfo('acme-gateway', 'acme-medium')).resolves.toMatchObject({
+      reasoning: { defaultEffort: ReasoningEffortId('medium') },
+    })
+    await expect(ctx.llm.resolveModelInfo('acme-gateway', 'acme-high')).resolves.toMatchObject({
+      reasoning: { defaultEffort: ReasoningEffortId('high') },
+    })
+  })
+
   it('sends the declared wire spelling and refuses undeclared levels before network I/O', async () => {
     vi.stubEnv('PI_TEST_KEY', 'test-key')
     const server = await mockServer([{ events: textEvents }])

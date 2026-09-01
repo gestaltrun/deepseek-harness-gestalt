@@ -46,6 +46,15 @@ export interface AccountWorkspaceUiSnapshot {
   readonly headers: readonly string[]
 }
 
+export interface ProviderModelProfileSnapshot {
+  readonly id: string
+  readonly contextWindow: number | undefined
+  readonly maxTokens: number | undefined
+  readonly input: readonly string[] | undefined
+  readonly reasoningEfforts: Record<string, string | null> | false | undefined
+  readonly defaultReasoningLevel: string | undefined
+}
+
 function requiredEnv(name: string): string {
   const value = process.env[name]
   if (value === undefined || value.length === 0) throw new Error(`${name} is required`)
@@ -527,7 +536,7 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
   )
   const composite = groups.items?.find(group => group.platform === 'composite')
   if (composite === undefined) throw new Error('Sub2API E2E found no composite group')
-  await adminJson(hostOrigin, '/accounts', {
+  const account = await adminJson<{ id?: number }>(hostOrigin, '/accounts', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -547,6 +556,8 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
       upstream_billing_probe_enabled: false,
     }),
   })
+  if (!Number.isInteger(account.id)) throw new Error('Sub2API account creation omitted its numeric id')
+  await adminJson(hostOrigin, `/accounts/${String(account.id)}/models/sync-upstream`, { method: 'POST' })
   const routes = await adminJson<Array<{ id: number; public_model: string }>>(
     hostOrigin,
     `/groups/${String(composite.id)}/composite-routes`,
@@ -568,6 +579,32 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
       notes: 'ephemeral Electron E2E route',
     }),
   })
+}
+
+/** Read one live Sub2API model entry from the settings document the sidecar writes. */
+export async function providerModelProfile(modelId: string): Promise<ProviderModelProfileSnapshot | undefined> {
+  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
+  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
+  const profile = record(providers?.['sub2api'])
+  const models = profile?.['models']
+  if (!Array.isArray(models)) return undefined
+  const model = models.map(record).find(candidate => candidate?.['id'] === modelId)
+  if (model === undefined) return undefined
+  const reasoningEfforts = model['reasoningEfforts']
+  return {
+    id: modelId,
+    contextWindow: typeof model['contextWindow'] === 'number' ? model['contextWindow'] : undefined,
+    maxTokens: typeof model['maxTokens'] === 'number' ? model['maxTokens'] : undefined,
+    input: Array.isArray(model['input'])
+      ? model['input'].filter((value): value is string => typeof value === 'string')
+      : undefined,
+    reasoningEfforts: reasoningEfforts === false
+      ? false
+      : record(reasoningEfforts) as Record<string, string | null> | undefined,
+    defaultReasoningLevel: typeof model['defaultReasoningLevel'] === 'string'
+      ? model['defaultReasoningLevel']
+      : undefined,
+  }
 }
 
 /** Connect an empty temporary workspace so the first Session composer unlocks. */

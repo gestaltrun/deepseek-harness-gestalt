@@ -483,6 +483,18 @@ describe('PhoneConnectionController io', () => {
     expect(gateway.lastSocket!.sent).toHaveLength(0)
   })
 
+  it('drops io after both capture formats move a surfaced connection into retry', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', 360, 720)
+    controller.noteCaptureFailure('h264')
+    controller.noteSurface('mjpeg', 360, 720)
+    controller.noteCaptureFailure('mjpeg')
+    expect(controller.snapshot().kind).toBe('reconnecting')
+    expect(controller.button('HOME')).toBe(false)
+    expect(gateway.lastSocket!.sent).toEqual([])
+  })
+
   it('moves to the offline error arm when the device stops answering io', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()

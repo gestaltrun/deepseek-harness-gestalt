@@ -26,6 +26,7 @@ const devicesSource = join(desktopRoot, 'tests', 'fixtures', 'phone-e2e-devices.
 const managedEnvironmentFixture = join(e2eDir, 'managed-phone-environment.mjs')
 const wdioConfig = join(e2eDir, 'wdio.conf.ts')
 const wdioBin = join(desktopRoot, 'node_modules', '@wdio', 'cli', 'bin', 'wdio.js')
+const iosSimulatorId = '8294A429-4C99-411F-A46D-0AD9499B7FDD'
 
 if (process.platform === 'win32') {
   throw new Error('Desktop phone Electron e2e uses POSIX fakemobilecli launchers; Windows asset selection is covered separately')
@@ -88,15 +89,39 @@ async function buildCurrentSource() {
 
 async function startKeylessProvider() {
   const server = createServer((request, response) => {
-    request.resume()
+    let raw = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => { raw += chunk })
     request.on('end', () => {
+      let body
+      try {
+        body = JSON.parse(raw)
+      } catch {
+        response.writeHead(400, { 'content-type': 'application/json' })
+        response.end('{"error":"invalid fixture request"}')
+        return
+      }
+      const hasToolResult = Array.isArray(body?.messages)
+        && body.messages.some(message => message?.role === 'tool')
       response.writeHead(200, { 'content-type': 'text/event-stream' })
-      response.end([
-        'data: {"choices":[{"delta":{"content":"desktop electron e2e response"}}]}',
-        'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
-        'data: [DONE]',
-        '',
-      ].join('\n\n'))
+      const chunks = hasToolResult
+        ? [
+            { choices: [{ index: 0, delta: { content: 'desktop electron e2e response' }, finish_reason: null }] },
+            { choices: [{ index: 0, delta: { content: '' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+          ]
+        : [
+            { choices: [{ index: 0, delta: { tool_calls: [{
+              index: 0,
+              id: 'phone-e2e-device-act',
+              type: 'function',
+              function: {
+                name: 'device_act',
+                arguments: JSON.stringify({ deviceId: iosSimulatorId, action: { kind: 'button', name: 'home' } }),
+              },
+            }] }, finish_reason: null }] },
+            { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+          ]
+      response.end([...chunks.map(chunk => `data: ${JSON.stringify(chunk)}`), 'data: [DONE]', ''].join('\n\n'))
     })
   })
   await new Promise((resolve, reject) => {
@@ -515,12 +540,13 @@ try {
   const android = managed.code === 0
     ? await runSpec('phone-android', 'phone-android-environment.e2e.ts', provider, undefined, fake.ownerToken, managedFixture)
     : { code: 1, errors: ['phone-android skipped because phone-managed failed'], cleanup: [], portCollision: false }
+  if (android.code === 0 && process.platform === 'darwin') await fake.configure([iosSimulatorId])
   const ios = android.code === 0 && process.platform === 'darwin'
     ? await runSpec('phone-ios', 'phone-ios-environment.e2e.ts', provider, undefined, fake.ownerToken, managedFixture)
     : process.platform === 'darwin'
       ? { code: 1, errors: ['phone-ios skipped because phone-android failed'], cleanup: [], portCollision: false }
       : { code: 0, errors: [], cleanup: [], portCollision: false, skipped: 'iOS Simulator requires macOS' }
-  if (android.code === 0) await fake.configure(['emulator-5554'])
+  if (android.code === 0) await fake.configure(['emulator-5554', iosSimulatorId])
   const live = android.code === 0 && ios.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
     : { code: 1, errors: ['phone-live skipped because an environment prerequisite failed'], cleanup: [], portCollision: false }

@@ -249,7 +249,7 @@ describe('Sub2API Desktop installation', () => {
     await connectTemporaryWorkspace()
     const expected = 'DSH445_MODEL_OK_7F3A'
     await selectModelAndSend(
-      'Claude Sonnet 4.5',
+      ACCOUNT_PROVIDER_MODEL,
       `Reply with exactly ${expected} and no other text.`,
       expected,
       hostSurface.url,

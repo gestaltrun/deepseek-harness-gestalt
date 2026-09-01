@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { planAndroidEnvironment } from '../src/planner.ts'
+import { androidSystemImagePackage, planAndroidEnvironment } from '../src/planner.ts'
 
 describe('Android environment planner', () => {
+  it('rejects an unsupported CPU before constructing a system-image package', () => {
+    expect(androidSystemImagePackage('ia32')).toBeUndefined()
+    const result = planAndroidEnvironment('darwin', 'ia32', '/phone')
+    expect(result).toEqual({
+      kind: 'unsupported',
+      reason: 'darwin ia32 does not have a supported Android Emulator toolchain.',
+    })
+  })
+
   it.each([
     ['darwin', 'arm64', 'arm64-v8a'],
     ['darwin', 'x64', 'x86_64'],
@@ -32,10 +41,10 @@ describe('Android environment planner', () => {
     ['linux', 'arm64'],
     ['freebsd', 'x64'],
   ])('reports unsupported Host tuple %s/%s', (platform, architecture) => {
-    expect(planAndroidEnvironment(platform, architecture, '/phone')).toEqual({
-      kind: 'unsupported',
-      reason: expect.stringContaining('does not have a supported Android Emulator toolchain'),
-    })
+    const result = planAndroidEnvironment(platform, architecture, '/phone')
+    expect(result.kind).toBe('unsupported')
+    if (result.kind !== 'unsupported') throw new Error('unsupported Host tuple produced an Android plan')
+    expect(result.reason).toContain('does not have a supported Android Emulator toolchain')
   })
 
   it('reuses a compatible SDK while retaining a private AVD home', () => {

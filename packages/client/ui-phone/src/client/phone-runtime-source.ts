@@ -35,6 +35,14 @@ export type PhoneIosView =
   | { readonly kind: 'ready'; readonly plan: IosPreparationPlanView; readonly deviceId: string; readonly running: boolean }
   | { readonly kind: 'failed'; readonly plan?: IosPreparationPlanView; readonly code: string; readonly message: string; readonly retryable: boolean }
 
+interface AndroidComponentView {
+  readonly commandLineTools: boolean
+  readonly platformTools: boolean
+  readonly emulator: boolean
+  readonly systemImage: boolean
+  readonly avd: boolean
+}
+
 /** Immutable Android SDK plan displayed before the user accepts Google's terms. */
 export interface AndroidPreparationPlanView {
   readonly sdkRoot: string
@@ -47,13 +55,7 @@ export interface AndroidPreparationPlanView {
   readonly packageIds: readonly string[]
   readonly minimumFreeBytes: number
   readonly licenseUrl: string
-  readonly components: {
-    readonly commandLineTools: boolean
-    readonly platformTools: boolean
-    readonly emulator: boolean
-    readonly systemImage: boolean
-    readonly avd: boolean
-  }
+  readonly components: AndroidComponentView
 }
 
 /** Android platform state projected from the Host full snapshot. */
@@ -179,14 +181,14 @@ export function createHttpPhoneRuntimeSource(
     const operation = request(path, method)
     active = operation
     void operation.then(
-      () => { if (active === operation) active = undefined },
-      () => { if (active === operation) active = undefined },
+      () => { active = undefined },
+      () => { active = undefined },
     )
     return operation
   }
   const pollOperation = (operation: Promise<void>): Promise<void> => {
     active = operation
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout>
     const poll = (): void => {
       if (active !== operation) return
       void request(PATH, 'GET').catch(() => {})
@@ -195,12 +197,12 @@ export function createHttpPhoneRuntimeSource(
     timer = setTimeout(poll, 0)
     void operation.then(
       () => {
-        if (active === operation) active = undefined
-        if (timer !== undefined) clearTimeout(timer)
+        active = undefined
+        clearTimeout(timer)
       },
       () => {
-        if (active === operation) active = undefined
-        if (timer !== undefined) clearTimeout(timer)
+        active = undefined
+        clearTimeout(timer)
       },
     )
     return operation

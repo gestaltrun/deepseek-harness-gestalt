@@ -13,6 +13,7 @@ import { isTrustedApiRequest } from '@deepseek-ai/dsh-request-trust'
 import {
   installManagedMobilecli, PhoneEnvironmentError, probeMobilecliVersion, readManagedMobilecli,
 } from './installer.ts'
+import type { MobilecliVersionProbe } from './installer.ts'
 import { MOBILECLI_MANAGED_VERSION, selectMobilecliReleaseAsset } from './manifest.ts'
 import { initialPhoneEnvironmentSnapshot, selectPhoneRuntimeCandidate } from './planner.ts'
 import type {
@@ -147,8 +148,8 @@ export class PhoneEnvironment extends Service {
       try { await this.iosTask } catch (error) { if (!isCancellation(error)) failures.push(error) }
       try { await this.ios?.deactivate() } catch (error) { failures.push(error) }
       await this.prepareTask?.catch(() => {})
-      await this.refreshTask?.catch(() => {})
-      await this.enableTail.catch(() => {})
+      await this.refreshTask
+      await this.enableTail
       await ctx.phoneDevices.deactivate().catch(() => {})
       if (failures.length > 0) throw new AggregateError(failures, 'phone environment teardown failed')
     }, 'phone environment teardown')
@@ -156,7 +157,7 @@ export class PhoneEnvironment extends Service {
 
   /** Detect persisted, explicit, and system runtime candidates without failing Host composition. */
   protected [Service.init](): Promise<void> {
-    return this.refresh().then(() => {}, () => {})
+    return this.refresh().then(() => {})
   }
 
   /**
@@ -272,16 +273,12 @@ export class PhoneEnvironment extends Service {
       ? AbortSignal.any([this.lifetime.signal, controller.signal])
       : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
     const operation = this.transactionTail.then(() => this.detectRuntime(operationSignal))
-    this.transactionTail = operation.catch(() => {})
+    this.transactionTail = operation
     this.refreshTask = operation
     void operation.then(
       () => {
-        if (this.refreshTask === operation) this.refreshTask = undefined
-        if (this.refreshController === controller) this.refreshController = undefined
-      },
-      () => {
-        if (this.refreshTask === operation) this.refreshTask = undefined
-        if (this.refreshController === controller) this.refreshController = undefined
+        this.refreshTask = undefined
+        this.refreshController = undefined
       },
     )
     return operation
@@ -317,6 +314,7 @@ export class PhoneEnvironment extends Service {
     const operation = this.transactionTail.then(async () => {
       try {
         const installed = await installManagedMobilecli(this.root, asset, controller.signal, {
+          probeVersion: this.probeRuntimeVersion,
           onPhase: (phase) => {
             this.publishRuntime(phase === 'verifying'
               ? { kind: 'verifying', targetVersion: MOBILECLI_MANAGED_VERSION }
@@ -345,14 +343,14 @@ export class PhoneEnvironment extends Service {
           : environmentFailure(error))
         throw error
       } finally {
-        if (this.prepareController === controller) this.prepareController = undefined
+        this.prepareController = undefined
       }
     })
     this.transactionTail = operation.catch(() => {})
     this.prepareTask = operation
     void operation.then(
-      () => { if (this.prepareTask === operation) this.prepareTask = undefined },
-      () => { if (this.prepareTask === operation) this.prepareTask = undefined },
+      () => { this.prepareTask = undefined },
+      () => { this.prepareTask = undefined },
     )
     return operation
   }
@@ -459,8 +457,8 @@ export class PhoneEnvironment extends Service {
     try {
       await task
     } finally {
-      if (this.androidTask === task) this.androidTask = undefined
-      if (this.androidController === controller) this.androidController = undefined
+      this.androidTask = undefined
+      this.androidController = undefined
     }
   }
 
@@ -473,7 +471,7 @@ export class PhoneEnvironment extends Service {
     try { await this.androidTask } catch (error) { if (!isCancellation(error)) failure = error }
     try { await this.android?.deactivate() } catch (error) { failure ??= error }
     if (this.android !== undefined) this.publishAndroid(this.android.snapshot())
-    if (failure !== undefined) throw failure
+    if (failure !== undefined) throw environmentError(failure)
   }
 
   private async prepareIos(): Promise<void> {
@@ -726,9 +724,7 @@ export class PhoneEnvironment extends Service {
    * @param signal - operation cancellation.
    * @returns the candidate semantic version.
    */
-  protected probeRuntimeVersion(executablePath: string, signal: AbortSignal): Promise<string> {
-    return probeMobilecliVersion(executablePath, signal)
-  }
+  protected readonly probeRuntimeVersion: MobilecliVersionProbe = probeMobilecliVersion
 
   /**
    * Resolve the optional system mobilecli candidate without changing candidate precedence.
@@ -788,7 +784,7 @@ export class PhoneEnvironment extends Service {
     return this.current
   }
 
-  private async activateCandidate(candidate: PhoneRuntimeCandidate, version: string, signal?: AbortSignal): Promise<void> {
+  private async activateCandidate(candidate: PhoneRuntimeCandidate, version: string, signal: AbortSignal): Promise<void> {
     this.publishRuntime({
       kind: 'activating', targetVersion: MOBILECLI_MANAGED_VERSION, source: candidate.source,
     })
@@ -797,9 +793,7 @@ export class PhoneEnvironment extends Service {
       'PHONE_ENVIRONMENT_ABORTED', 'the previous mobilecli activation was replaced',
     ))
     this.activationController = controller
-    const activationSignal = signal === undefined
-      ? AbortSignal.any([this.lifetime.signal, controller.signal])
-      : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
+    const activationSignal = AbortSignal.any([this.lifetime.signal, controller.signal, signal])
     try {
       await this.ctx.phoneDevices.activateExecutable(
         candidate.executablePath,
@@ -808,7 +802,7 @@ export class PhoneEnvironment extends Service {
       )
       this.publishReady(candidate.source, version)
     } catch (error) {
-      this.publishRuntime(environmentFailure(error))
+      if (this.activationController === controller) this.publishRuntime(environmentFailure(error))
       throw error
     } finally {
       if (this.activationController === controller) this.activationController = undefined
@@ -904,10 +898,10 @@ export class PhoneEnvironment extends Service {
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
+  const chunks: Uint8Array[] = []
   let bytes = 0
   for await (const raw of req) {
-    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+    const chunk = Buffer.from(raw)
     bytes += chunk.byteLength
     if (bytes > 4_096) throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_REQUEST', 'request body exceeds 4096 bytes')
     chunks.push(chunk)
@@ -966,11 +960,7 @@ function sameSnapshot(previous: PhoneEnvironmentSnapshot, next: PhoneEnvironment
 }
 
 function pathnameOf(req: IncomingMessage): string {
-  try {
-    return new URL(req.url ?? '/', 'http://localhost').pathname
-  } catch {
-    return '/'
-  }
+  return new URL(req.url as string, 'http://localhost').pathname
 }
 
 export default PhoneEnvironment

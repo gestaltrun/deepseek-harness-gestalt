@@ -16,6 +16,8 @@ Managed preparation accepts only the six fixed mobile-next/mobilecli 1.0.5 GitHu
 
 The browser reads a full snapshot and invokes prepare, cancel, or refresh through Host routes protected by the shared same-origin trust fence. Android and iOS platform rows are separate extensible states. A non-macOS iOS row reports unsupported and has no executable action.
 
+An activation may publish its result only while its controller remains current. A superseded generation rejects its own caller but cannot overwrite the newer generation snapshot.
+
 mobilecli is licensed under FSL-1.1 with an Apache-2.0 future license. Direct runtime download from the upstream release is not bundling or redistribution by this repository, but it is not legal clearance. Desktop release remains blocked until counsel or the upstream licensor confirms that the intended product use is permitted.
 
 ## Alternatives considered

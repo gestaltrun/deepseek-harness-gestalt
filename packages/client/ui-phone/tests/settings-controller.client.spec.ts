@@ -180,6 +180,78 @@ describe('PhoneSettingsCardController', () => {
     expect(runtimeListeners.size).toBe(0)
   })
 
+  it('republishes runtime snapshots and contains rejected runtime operations', async () => {
+    const runtimeListeners = new Set<() => void>()
+    let runtimeSnapshot: ReturnType<PhoneRuntimeSource['getSnapshot']> = {
+      revision: 0,
+      enabled: false,
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+    }
+    const refresh = vi.fn(async () => { throw new Error('refresh failed') })
+    const prepare = vi.fn(async () => { throw new Error('prepare failed') })
+    const cancel = vi.fn(async () => { throw new Error('cancel failed') })
+    const prepareAndroid = vi.fn(async () => { throw new Error('Android prepare failed') })
+    const cancelAndroid = vi.fn(async () => { throw new Error('Android cancel failed') })
+    const refreshAndroid = vi.fn(async () => { throw new Error('Android refresh failed') })
+    const startAndroid = vi.fn(async () => { throw new Error('Android start failed') })
+    const prepareIos = vi.fn(async () => { throw new Error('iOS prepare failed') })
+    const cancelIos = vi.fn(async () => { throw new Error('iOS cancel failed') })
+    const refreshIos = vi.fn(async () => { throw new Error('iOS refresh failed') })
+    const startIos = vi.fn(async () => { throw new Error('iOS start failed') })
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => runtimeSnapshot,
+      refresh,
+      prepare,
+      cancel,
+      prepareAndroid,
+      cancelAndroid,
+      refreshAndroid,
+      startAndroid,
+      prepareIos,
+      cancelIos,
+      refreshIos,
+      startIos,
+      ensureDetected: vi.fn(),
+      subscribe: (listener) => {
+        runtimeListeners.add(listener)
+        return () => { runtimeListeners.delete(listener) }
+      },
+    }
+    const controller = new PhoneSettingsCardController(
+      readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
+    )
+    const face = controller.inject()
+    runtimeSnapshot = {
+      revision: 1,
+      enabled: false,
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'unsupported', reason: 'macOS required' } },
+    }
+    for (const listener of runtimeListeners) listener()
+    expect(face.hooks.phoneSettingsCard.getSnapshot()).toMatchObject({
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { ios: { kind: 'unsupported', reason: 'macOS required' } },
+    })
+
+    face.prepareRuntime()
+    face.cancelRuntime()
+    face.refreshRuntime()
+    face.prepareAndroid()
+    face.cancelAndroid()
+    face.refreshAndroid()
+    face.startAndroid()
+    await flush()
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(prepareAndroid).toHaveBeenCalledOnce()
+    expect(cancelAndroid).toHaveBeenCalledOnce()
+    expect(refreshAndroid).toHaveBeenCalledOnce()
+    expect(startAndroid).toHaveBeenCalledOnce()
+    controller.dispose()
+  })
+
   it('projects the durable enable flag onto the off / probe-failed views', () => {
     const host = readyScope(false)
     const controller = new PhoneSettingsCardController(host.scope)

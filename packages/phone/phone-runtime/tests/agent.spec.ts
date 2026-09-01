@@ -182,7 +182,7 @@ describe('phone runtime on-device agent operations', () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
     const context = await mountWith(fake, { provisioningProfilePath: fake.profilePath })
-    await fake.setAgent({ installText: 'not json at all', installExitCode: 0 })
+    await fake.setAgent({ installAnswer: 'not json at all' })
     const protocol = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL))
     expect(protocol.code).toBe('PHONE_PROTOCOL')
   })

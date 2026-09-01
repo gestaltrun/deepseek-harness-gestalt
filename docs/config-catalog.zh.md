@@ -1695,7 +1695,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-environment/src/index.ts:70`](../packages/phone/phone-environment/src/index.ts)
+来源：[`packages/phone/phone-environment/src/index.ts:71`](../packages/phone/phone-environment/src/index.ts)
 
 <a id="deepseek-aidsh-phone-environment-android"></a>
 

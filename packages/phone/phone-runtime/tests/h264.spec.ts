@@ -7,6 +7,119 @@ const SPS = REAL_ACCESS_UNIT.slice(0, 14)
 const PPS = REAL_ACCESS_UNIT.slice(14, 22)
 const AUD = [0, 0, 1, 0x09, 0xf0]
 
+class Bits {
+  private readonly values: number[] = []
+
+  bit(value: number): this { this.values.push(value & 1); return this }
+  bits(value: number, width: number): this {
+    for (let shift = width - 1; shift >= 0; shift -= 1) this.bit(value >> shift)
+    return this
+  }
+  ue(value: number): this {
+    const code = value + 1
+    const width = Math.floor(Math.log2(code))
+    for (let index = 0; index < width; index += 1) this.bit(0)
+    return this.bits(code, width + 1)
+  }
+  se(value: number): this { return this.ue(value <= 0 ? -value * 2 : value * 2 - 1) }
+  bytes(trailing = true): number[] {
+    if (trailing) this.bit(1)
+    while (this.values.length % 8 !== 0) this.bit(0)
+    const bytes: number[] = []
+    for (let offset = 0; offset < this.values.length; offset += 8) {
+      let byte = 0
+      for (let index = 0; index < 8; index += 1) byte = byte * 2 + (this.values[offset + index] as number)
+      bytes.push(byte)
+    }
+    return bytes
+  }
+}
+
+interface SpsOptions {
+  profile?: number
+  chroma?: number
+  scaling?: number
+  frameBits?: number
+  pocType?: number
+  pocBits?: number
+  width?: number
+  height?: number
+  frameOnly?: number
+  crop?: readonly [number, number, number, number]
+}
+
+function sps(options: SpsOptions = {}): number[] {
+  const profile = options.profile ?? 66
+  const bits = new Bits().bits(profile, 8).bits(0, 8).bits(31, 8).ue(0)
+  if (profile === 100) {
+    bits.ue(options.chroma ?? 1).ue(0).ue(0).bit(0).bit(options.scaling ?? 0)
+  }
+  bits.ue((options.frameBits ?? 4) - 4)
+  const pocType = options.pocType ?? 0
+  bits.ue(pocType)
+  if (pocType === 0) bits.ue((options.pocBits ?? 4) - 4)
+  bits.ue(0).bit(0).ue((options.width ?? 1) - 1).ue((options.height ?? 1) - 1)
+  bits.bit(options.frameOnly ?? 1).bit(1)
+  const crop = options.crop
+  bits.bit(crop === undefined ? 0 : 1)
+  if (crop !== undefined) for (const value of crop) bits.ue(value)
+  return [0x67, ...bits.bytes()]
+}
+
+interface PpsOptions {
+  id?: number
+  spsId?: number
+  bottom?: number
+  sliceGroups?: number
+  redundant?: number
+  deblocking?: number
+  picInit?: number
+}
+
+function pps(options: PpsOptions = {}): number[] {
+  const bits = new Bits()
+    .ue(options.id ?? 0).ue(options.spsId ?? 0).bit(0).bit(options.bottom ?? 0)
+    .ue(options.sliceGroups ?? 0).ue(0).ue(0).bit(0).bits(0, 2)
+    .se(options.picInit ?? 0).se(0).se(0).bit(options.deblocking ?? 0).bit(0).bit(options.redundant ?? 0)
+  return [0x68, ...bits.bytes()]
+}
+
+interface IdrOptions {
+  header?: number
+  first?: number
+  sliceType?: number
+  ppsId?: number
+  frameBits?: number
+  pocBits?: number
+  bottom?: boolean
+  redundant?: boolean
+  deblocking?: boolean
+  disableDeblocking?: number
+  trailing?: boolean
+}
+
+function idr(options: IdrOptions = {}): number[] {
+  const bits = new Bits()
+    .ue(options.first ?? 0).ue(options.sliceType ?? 2).ue(options.ppsId ?? 0)
+    .bits(0, options.frameBits ?? 4).ue(0)
+  if (options.pocBits !== undefined) {
+    bits.bits(0, options.pocBits)
+    if (options.bottom === true) bits.se(0)
+  }
+  if (options.redundant === true) bits.ue(0)
+  bits.bit(0).bit(0).se(0)
+  if (options.deblocking === true) {
+    const disable = options.disableDeblocking ?? 1
+    bits.ue(disable)
+    if (disable !== 1) bits.se(0).se(0)
+  }
+  return [options.header ?? 0x65, ...bits.bytes(options.trailing ?? true)]
+}
+
+function annex(...nals: readonly number[][]): number[] {
+  return nals.flatMap(nal => [0, 0, 0, 1, ...nal])
+}
+
 function streamOf(...chunks: readonly number[][]): ReadableStream<Uint8Array> {
   return new ReadableStream({
     start(controller) {
@@ -17,6 +130,30 @@ function streamOf(...chunks: readonly number[][]): ReadableStream<Uint8Array> {
 }
 
 describe('verifyAnnexBH264KeyAccessUnit', () => {
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('rejects invalid maxBytes %s', async (maxBytes) => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf([]), { signal: new AbortController().signal, maxBytes },
+    )).rejects.toThrow(TypeError)
+  })
+
+  it('rejects an already-aborted owner and contains reader cancellation failure', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('already stopped'))
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      new ReadableStream<Uint8Array>({ cancel() { throw new Error('cancel failed') } }),
+      { signal: controller.signal, maxBytes: 1024 },
+    )).rejects.toThrow('already stopped')
+  })
+
+  it('accepts a final IDR at EOF and contains reader cancellation failure', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from(REAL_ACCESS_UNIT)); controller.close() },
+      cancel() { throw new Error('already closed') },
+    })
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      body, { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).resolves.toBeUndefined()
+  })
   it('accepts a chunk-split SPS, PPS, and IDR from the decodable gradient fixture', async () => {
     const bytes = [0, ...REAL_ACCESS_UNIT, ...AUD]
     await expect(verifyAnnexBH264KeyAccessUnit(
@@ -36,6 +173,79 @@ describe('verifyAnnexBH264KeyAccessUnit', () => {
       streamOf(bytes),
       { signal: new AbortController().signal, maxBytes: 1024 },
     )).rejects.toThrow(/H264 stream/)
+  })
+
+  it.each([
+    ['a non-zero preamble', [9, ...annex(sps(), pps(), idr()), ...AUD]],
+    ['an empty NAL', [...annex([]), ...annex(sps(), pps(), idr()), ...AUD]],
+    ['a forbidden-zero-bit header', [...annex([0xe7, 1]), ...annex(sps(), pps(), idr()), ...AUD]],
+  ])('rejects %s', async (_label, bytes) => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf(bytes), { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).rejects.toThrow(/H264 stream/u)
+  })
+
+  it.each([
+    ['unsupported chroma', sps({ profile: 100, chroma: 3 }), pps(), idr()],
+    ['scaling matrices', sps({ profile: 100, scaling: 1 }), pps(), idr()],
+    ['picture order type 1', sps({ pocType: 1 }), pps(), idr()],
+    ['invalid picture order type', sps({ pocType: 3 }), pps(), idr()],
+    ['interlaced picture', sps({ frameOnly: 0 }), pps(), idr()],
+    ['invalid horizontal crop', sps({ crop: [8, 0, 0, 0] }), pps(), idr()],
+    ['invalid vertical crop', sps({ crop: [0, 0, 8, 0] }), pps(), idr()],
+    ['oversized frame number', sps({ frameBits: 21 }), pps(), idr({ frameBits: 21 })],
+    ['oversized picture order', sps({ pocBits: 21 }), pps(), idr({ pocBits: 21 })],
+    ['oversized width', sps({ width: 16_385 }), pps(), idr()],
+    ['unknown SPS', sps(), pps({ spsId: 1 }), idr()],
+    ['slice groups', sps(), pps({ sliceGroups: 1 }), idr()],
+    ['no reference priority', sps(), pps(), idr({ header: 0x05 })],
+    ['unknown PPS', sps(), pps(), idr({ ppsId: 1 })],
+    ['macroblock outside picture', sps(), pps(), idr({ first: 1 })],
+    ['non-primary slice type', sps(), pps(), idr({ sliceType: 0 })],
+  ])('rejects %s syntax', async (_label, sequence, picture, slice) => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf([...annex(sequence, picture, slice), ...AUD]),
+      { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).rejects.toThrow(/H264/u)
+  })
+
+  it.each([
+    ['high profile without scaling matrices', sps({ profile: 100 }), pps(), idr({ pocBits: 4 })],
+    ['picture order and bottom-field delta', sps(), pps({ bottom: 1 }), idr({ pocBits: 4, bottom: true })],
+    ['redundant picture count', sps(), pps({ redundant: 1 }), idr({ pocBits: 4, redundant: true })],
+    ['disabled deblocking', sps(), pps({ deblocking: 1 }), idr({ pocBits: 4, deblocking: true })],
+    ['deblocking offsets', sps(), pps({ deblocking: 1 }), idr({ pocBits: 4, deblocking: true, disableDeblocking: 0 })],
+    ['positive signed syntax', sps(), pps({ picInit: 1 }), idr({ pocBits: 4 })],
+  ])('accepts %s syntax', async (_label, sequence, picture, slice) => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf([...annex(sequence, picture, slice), ...AUD]),
+      { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).resolves.toBeUndefined()
+  })
+
+  it('rejects a truncated IDR after parsing its slice header', async () => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf([...annex(
+        sps(),
+        pps({ bottom: 1, redundant: 1, deblocking: 1 }),
+        idr({
+          sliceType: 4, pocBits: 4, bottom: true, redundant: true,
+          deblocking: true, disableDeblocking: 1, trailing: false,
+        }),
+      ), ...AUD]),
+      { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).rejects.toThrow(/truncated IDR slice payload/u)
+  })
+
+  it('rejects invalid and truncated exponential-Golomb syntax', async () => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf([...annex([0x67, 0, 0, 0, 0, 0, 0, 0]), ...AUD]),
+      { signal: new AbortController().signal, maxBytes: 1024 },
+    )).rejects.toThrow(/truncated SPS/u)
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      streamOf([...annex([0x67, 0, 0, 0, 0, 0, 0, 0, 0]), ...AUD]),
+      { signal: new AbortController().signal, maxBytes: 1024 },
+    )).rejects.toThrow(/invalid SPS|truncated SPS/u)
   })
 
   it('rejects a partial stream at its byte ceiling', async () => {

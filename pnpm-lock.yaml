@@ -482,9 +482,6 @@ importers:
       '@deepseek-ai/dsh-phone-environment':
         specifier: workspace:^
         version: link:../../packages/phone/phone-environment
-      '@deepseek-ai/dsh-phone-environment-android':
-        specifier: workspace:^
-        version: link:../../packages/phone/phone-environment-android
       '@deepseek-ai/dsh-phone-runtime':
         specifier: workspace:^
         version: link:../../packages/phone/phone-runtime

@@ -6,10 +6,15 @@ import {
 } from './helpers.ts'
 
 async function get(path: string): Promise<{ status: number; body: unknown }> {
-  return await browser.execute(async (pathname: string) => {
+  const value: unknown = await browser.execute(async (pathname: string) => {
     const response = await fetch(new URL(pathname, location.origin))
-    return { status: response.status, body: await response.json() }
+    return { status: response.status, body: JSON.parse(await response.text()) as unknown }
   }, path)
+  if (typeof value !== 'object' || value === null || !('status' in value)
+    || typeof value.status !== 'number' || !('body' in value)) {
+    throw new Error('iOS environment fixture returned an invalid HTTP result')
+  }
+  return { status: value.status, body: value.body }
 }
 
 describe('Desktop iOS environment preparation', () => {

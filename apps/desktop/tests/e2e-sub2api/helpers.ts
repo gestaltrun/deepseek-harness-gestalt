@@ -629,6 +629,48 @@ export async function providerModelProfile(modelId: string): Promise<ProviderMod
   }
 }
 
+/** Read one model directly from the release-backed Sub2API gateway. */
+export async function gatewayModelProfile(modelId: string): Promise<ProviderModelProfileSnapshot | undefined> {
+  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
+  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
+  const profile = record(providers?.['sub2api'])
+  const baseURL = profile?.['baseURL']
+  const apiKeyEnv = profile?.['apiKeyEnv']
+  if (typeof baseURL !== 'string' || typeof apiKeyEnv !== 'string') return undefined
+  const credentials = record(load(await readFile(join(requiredEnv('DSH_HOME'), '.credentials.yaml'), 'utf8')))
+  const apiKey = record(credentials?.['refs'])?.[apiKeyEnv]
+  if (typeof apiKey !== 'string' || apiKey.length === 0) return undefined
+  const response = await fetch(`${baseURL}/models`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  })
+  if (!response.ok) return undefined
+  const payload = record(await response.json())
+  const data = payload?.['data']
+  if (!Array.isArray(data)) return undefined
+  const model = data.map(record).find(candidate => candidate?.['id'] === modelId)
+  if (model === undefined) return undefined
+  const reasoningLevels = Array.isArray(model['supported_reasoning_levels'])
+    ? model['supported_reasoning_levels'].filter((value): value is string => typeof value === 'string')
+    : undefined
+  const defaultReasoningLevel = typeof model['default_reasoning_level'] === 'string'
+    ? model['default_reasoning_level']
+    : undefined
+  return {
+    id: modelId,
+    contextWindow: typeof model['context_window'] === 'number' ? model['context_window'] : undefined,
+    maxTokens: typeof model['max_output_tokens'] === 'number' ? model['max_output_tokens'] : undefined,
+    input: Array.isArray(model['input_modalities'])
+      ? model['input_modalities'].filter((value): value is string => typeof value === 'string')
+      : undefined,
+    reasoningEfforts: model['reasoning'] === false
+      ? false
+      : reasoningLevels === undefined
+        ? undefined
+        : Object.fromEntries(reasoningLevels.map(level => [level, level === 'none' ? null : level])),
+    defaultReasoningLevel,
+  }
+}
+
 /** Connect an empty temporary workspace so the first Session composer unlocks. */
 export async function connectTemporaryWorkspace(): Promise<void> {
   const workspace = join(requiredEnv('DSH_SUB2API_E2E_RUN_ROOT'), 'workspace')

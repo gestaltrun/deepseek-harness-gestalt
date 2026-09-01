@@ -4,7 +4,7 @@ import {
   ACCOUNT_PROVIDER_MODEL, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
   clickAccountConsoleRowAction, clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
   configureRealModelRoute, connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput,
-  mainWindowSnapshot,
+  gatewayModelProfile, mainWindowSnapshot,
   openProviderEditor,
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
   overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
@@ -68,6 +68,24 @@ describe('Sub2API Desktop installation', () => {
     await disableAndReEnable(2)
     const hostSurface = await mainWindowSnapshot()
     await configureRealModelRoute(new URL(hostSurface.url).origin)
+
+    try {
+      await browser.waitUntil(async () => {
+        const model = await gatewayModelProfile(ACCOUNT_PROVIDER_MODEL)
+        return model?.contextWindow !== undefined
+          && model.maxTokens !== undefined
+          && model.input !== undefined
+          && model.reasoningEfforts !== undefined
+      }, {
+        timeout: 30_000,
+        interval: 500,
+        timeoutMsg: 'Release-backed Sub2API gateway did not project routed model capability metadata',
+      })
+    } catch {
+      throw new Error(
+        `Release-backed Sub2API gateway capability profile: ${JSON.stringify(await gatewayModelProfile(ACCOUNT_PROVIDER_MODEL))}`,
+      )
+    }
 
     await openSettings()
     expect(new URL(await overlayUrl()).origin).toBe(new URL(hostSurface.url).origin)

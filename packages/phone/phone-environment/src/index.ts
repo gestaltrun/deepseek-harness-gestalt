@@ -13,6 +13,7 @@ import { isTrustedApiRequest } from '@deepseek-ai/dsh-request-trust'
 import {
   installManagedMobilecli, PhoneEnvironmentError, probeMobilecliVersion, readManagedMobilecli,
 } from './installer.ts'
+import type { MobilecliVersionProbe } from './installer.ts'
 import { MOBILECLI_MANAGED_VERSION, selectMobilecliReleaseAsset } from './manifest.ts'
 import { initialPhoneEnvironmentSnapshot, selectPhoneRuntimeCandidate } from './planner.ts'
 import type {
@@ -266,6 +267,7 @@ export class PhoneEnvironment extends Service {
     const operation = this.transactionTail.then(async () => {
       try {
         const installed = await installManagedMobilecli(this.root, asset, controller.signal, {
+          probeVersion: this.probeRuntimeVersion,
           onPhase: (phase) => {
             this.publishRuntime(phase === 'verifying'
               ? { kind: 'verifying', targetVersion: MOBILECLI_MANAGED_VERSION }
@@ -477,9 +479,7 @@ export class PhoneEnvironment extends Service {
    * @param signal - operation cancellation.
    * @returns the candidate semantic version.
    */
-  protected probeRuntimeVersion(executablePath: string, signal: AbortSignal): Promise<string> {
-    return probeMobilecliVersion(executablePath, signal)
-  }
+  protected readonly probeRuntimeVersion: MobilecliVersionProbe = probeMobilecliVersion
 
   private async detectRuntime(signal: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     try {

@@ -16,7 +16,7 @@ import type { AndroidEnvironmentProvider, AndroidPreparationPlan, PhoneAndroidSt
 import type { MobilecliReleaseAsset } from '../src/types.ts'
 
 class TestPhoneEnvironment extends PhoneEnvironment {
-  protected override async probeRuntimeVersion(executablePath: string): Promise<string> {
+  protected override readonly probeRuntimeVersion = async (executablePath: string): Promise<string> => {
     try {
       await access(executablePath)
       return '1.0.5'
@@ -35,8 +35,13 @@ class ControlledPhoneEnvironment extends PhoneEnvironment {
     return controlledAsset as MobilecliReleaseAsset
   }
 
-  protected override async probeRuntimeVersion(executablePath: string, signal: AbortSignal): Promise<string> {
-    if (controlledProbe !== undefined) return await controlledProbe(executablePath, signal)
+  protected override readonly probeRuntimeVersion = async (
+    executablePath: string, signal?: AbortSignal,
+  ): Promise<string> => {
+    if (controlledProbe !== undefined) {
+      if (signal === undefined) throw new Error('controlled version probe requires an operation signal')
+      return await controlledProbe(executablePath, signal)
+    }
     await access(executablePath)
     return '1.0.5'
   }
@@ -1082,11 +1087,16 @@ describe('PhoneEnvironment', () => {
     expect((await fetch(`${origin}${PHONE_ENVIRONMENT_PATH}/unknown`, { method: 'POST' })).status).toBe(404)
   })
 
-  it.runIf(process.platform !== 'win32')('uses the production version probe for a trimmed explicit override', async () => {
+  it('passes a trimmed explicit override through the version probe', async () => {
     const path = await executable()
+    const probe = vi.fn(async () => '1.0.5')
+    controlledProbe = probe
     const context = new Context()
     contexts.push(context)
-    const { service } = await mountEnvironment(context, {}, { executablePath: `  ${path}  ` }, PhoneEnvironment)
+    const { service } = await mountEnvironment(
+      context, {}, { executablePath: `  ${path}  ` }, ControlledPhoneEnvironment,
+    )
+    expect(probe).toHaveBeenCalledWith(path, expect.any(AbortSignal))
     expect(service.snapshot().runtime).toEqual({ kind: 'ready', source: 'override', version: '1.0.5' })
   })
 
@@ -1171,7 +1181,7 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot()).toMatchObject({ enabled: true, runtime: { kind: 'missing' } })
   })
 
-  it.runIf(process.platform !== 'win32')('publishes every managed preparation phase while disabled', async () => {
+  it('publishes every managed preparation phase while disabled', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-prepare-'))
     roots.push(root)
     controlledAsset = await localAsset()
@@ -1187,7 +1197,7 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot().runtime).toEqual({ kind: 'ready', source: 'managed', version: '1.0.5' })
   })
 
-  it.runIf(process.platform !== 'win32')('activates a prepared managed runtime without restarting the enabled Service', async () => {
+  it('activates a prepared managed runtime without restarting the enabled Service', async () => {
     isolateSystemMobilecliSearch()
     const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-active-prepare-'))
     roots.push(root)
@@ -1204,7 +1214,7 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot()).toMatchObject({ enabled: true, runtime: { kind: 'ready', source: 'managed' } })
   })
 
-  it.runIf(process.platform !== 'win32')('publishes verification failure and cancellation terminal states', async () => {
+  it('publishes verification failure and cancellation terminal states', async () => {
     const failedRoot = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-failed-prepare-'))
     roots.push(failedRoot)
     controlledAsset = await localAsset({ digest: '0'.repeat(64) })
@@ -1229,7 +1239,7 @@ describe('PhoneEnvironment', () => {
     expect(cancelled.service.snapshot().runtime).toMatchObject({ kind: 'missing' })
   })
 
-  it.runIf(process.platform !== 'win32')('waits for cancelled preparation before disabling the fleet', async () => {
+  it('waits for cancelled preparation before disabling the fleet', async () => {
     isolateSystemMobilecliSearch()
     const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-disable-prepare-'))
     roots.push(root)
@@ -1350,7 +1360,7 @@ describe('PhoneEnvironment', () => {
     })
   })
 
-  it.runIf(process.platform !== 'win32')('maps concurrent preparation to HTTP conflict and drains it on teardown', async () => {
+  it('maps concurrent preparation to HTTP conflict and drains it on teardown', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-http-busy-'))
     roots.push(root)
     controlledAsset = await localAsset({ hold: true })

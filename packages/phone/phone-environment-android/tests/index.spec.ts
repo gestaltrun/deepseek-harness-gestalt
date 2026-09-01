@@ -50,7 +50,7 @@ describe('Android environment Provider plugin', () => {
     await fiber.await()
     const manager = managerState.instances[0]
     expect(manager).toBeDefined()
-    expect(manager?.options.phoneRoot.endsWith(expectedRoot)).toBe(true)
+    expect(manager?.options.phoneRoot.replaceAll('\\', '/').endsWith(expectedRoot)).toBe(true)
     expect(registered).toEqual([manager])
     const failure = new Error('manager failed')
     manager?.options.reportError(failure)

@@ -38,6 +38,10 @@ const PLAN: AndroidPreparationPlan = {
   components: { commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true },
 }
 
+function planFor(root: string): AndroidPreparationPlan {
+  return { ...PLAN, sdkRoot: join(root, 'sdk'), avdHome: join(root, 'avd') }
+}
+
 function runner(run: AndroidCommandRunner['run'] = async () => result()): AndroidCommandRunner {
   return {
     run,
@@ -102,10 +106,10 @@ function internals(value: AndroidEnvironmentManager): ManagerInternals {
   return value as unknown as ManagerInternals
 }
 
-async function compatibleRoot(root: string): Promise<string> {
+async function compatibleRoot(root: string, platform: NodeJS.Platform = process.platform): Promise<string> {
   const sdk = join(root, 'sdk')
   for (const name of ['sdkmanager', 'avdmanager']) {
-    const path = join(sdk, 'cmdline-tools', 'latest', 'bin', name)
+    const path = join(sdk, 'cmdline-tools', 'latest', 'bin', platform === 'win32' ? `${name}.bat` : name)
     await mkdir(join(path, '..'), { recursive: true })
     await writeFile(path, 'fixture')
   }
@@ -303,7 +307,7 @@ describe('Android environment defensive outcomes', () => {
       runner: runner(async () => result({ exitCode: 7, stderr: `prefix${'x'.repeat(1_200)}` })),
     })
     const owned = internals(value)
-    owned.plan = PLAN
+    owned.plan = planFor(root)
     owned.asset = assetFor(new Uint8Array())
     await expect(value.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_LICENSES' })
     const state = value.snapshot()
@@ -315,7 +319,7 @@ describe('Android environment defensive outcomes', () => {
 
   it('rejects an AVD whose generated config does not name the pinned ABI', async () => {
     const root = await tempRoot()
-    const partial = { ...PLAN, avdHome: join(root, 'avd'), components: { ...PLAN.components, avd: false } }
+    const partial = { ...planFor(root), components: { ...PLAN.components, avd: false } }
     const value = manager(root, {
       runner: runner(async (_command, args) => {
         if (args.includes('create')) {
@@ -341,14 +345,14 @@ describe('Android environment defensive outcomes', () => {
       }),
     })
     const owned = internals(value)
-    owned.plan = PLAN
+    owned.plan = planFor(root)
     owned.asset = assetFor(new Uint8Array())
     await expect(value.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_UNSUPPORTED' })
   })
 
   it('aggregates an ordinary AVD creation failure with its cleanup failure', async () => {
     const root = await tempRoot()
-    const partial = { ...PLAN, avdHome: join(root, 'avd'), components: { ...PLAN.components, avd: false } }
+    const partial = { ...planFor(root), components: { ...PLAN.components, avd: false } }
     let removals = 0
     const value = manager(root, {
       runner: runner(async (_command, args) => args.includes('create') ? result({ exitCode: 1 }) : result()),
@@ -543,8 +547,10 @@ describe('Android environment defensive outcomes', () => {
 
   it.each(['cmdline-tools/latest/bin', 'tools/bin'])('discovers an existing SDK from PATH ending in %s', async (suffix) => {
     const root = await tempRoot()
-    const sdk = await compatibleRoot(root)
+    const sdk = await compatibleRoot(root, process.platform)
     const value = manager(root, {
+      platform: process.platform,
+      architecture: process.arch === 'arm64' ? 'arm64' : 'x64',
       environment: { PATH: join(sdk, ...suffix.split('/')) },
       runner: runner(async (_command, args) => args.includes('--version')
         ? result({ stdout: '20.0\n' })

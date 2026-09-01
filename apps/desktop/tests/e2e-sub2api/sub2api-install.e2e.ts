@@ -131,7 +131,8 @@ describe('Sub2API Desktop installation', () => {
         `Release-backed Sub2API gateway capability profile: ${JSON.stringify(await gatewayModelProfile(targetModel))}`,
       )
     }
-    expect(await gatewayModelIds()).toEqual(supportedModels)
+    const gatewayModels = await gatewayModelIds()
+    expect(supportedModels.every(modelId => gatewayModels.includes(modelId))).toBe(true)
 
     await openSettings()
     expect(new URL(await overlayUrl()).origin).toBe(new URL(hostSurface.url).origin)

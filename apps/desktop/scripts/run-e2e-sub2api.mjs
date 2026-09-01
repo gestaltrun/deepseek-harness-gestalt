@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { load } from 'js-yaml'
 import { assertArtifactSecretsAbsent, credentialValues } from './artifact-secret-safety.mjs'
 import { withPrivateTempDirectory } from './private-temp-directory.mjs'
+import { newDetachedPostgresSegmentIds, parseDarwinSharedMemory } from './sysv-shared-memory.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = join(here, '..')
@@ -25,6 +26,7 @@ const sidecarHead = process.env.DSH_SUB2API_E2E_SIDECAR_SHA
 const credentialsSource = process.env.DSH_SUB2API_E2E_CREDENTIALS_SOURCE
 const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-')
 const artifactDir = join(repoRoot, '.artifacts', 'e2e-sub2api', stamp)
+const sharedMemoryBaseline = darwinSharedMemorySnapshot()
 
 if (sourceManifest === undefined || !isAbsolute(sourceManifest)) {
   throw new Error('Sub2API Electron e2e requires absolute DSH_SUB2API_E2E_SOURCES')
@@ -205,6 +207,11 @@ try {
     await verifyRunRootProcessesStopped(runRoot)
     environmentProcessesStopped = true
   } catch (error) { teardownErrors.push(error) }
+  let sharedMemorySegmentsRemoved = false
+  try {
+    cleanupNewDarwinPostgresSharedMemory(sharedMemoryBaseline)
+    sharedMemorySegmentsRemoved = true
+  } catch (error) { teardownErrors.push(error) }
   await captureArtifact(join(dshHome, 'sub2api', 'run'), join(artifactDir, 'run'), exitCode === 0, teardownErrors)
   await captureArtifact(join(dshHome, 'sub2api', 'data', 'logs'), join(artifactDir, 'data', 'logs'), false, teardownErrors)
   await captureArtifact(
@@ -247,6 +254,7 @@ try {
     productProcessesStoppedNaturally: naturalSurvivors.length === 0,
     forcedCleanupApplied: naturalSurvivors.length > 0,
     environmentProcessesStopped,
+    sharedMemorySegmentsRemoved,
     artifactsSecretFree,
     runtimeRootRemoved,
     cdpPortClosed,
@@ -378,4 +386,31 @@ async function assertPortClosed(port) {
     socket.once('connect', () => { socket.destroy(); reject(new Error(`CDP port ${String(port)} is still open`)) })
     socket.once('error', () => { resolve() })
   })
+}
+
+function darwinSharedMemorySnapshot() {
+  if (process.platform !== 'darwin') return new Set()
+  const result = spawnSync('ipcs', ['-ma'], { encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`ipcs -ma failed: ${result.stderr.trim()}`)
+  return new Set(parseDarwinSharedMemory(result.stdout).map(segment => segment.id))
+}
+
+function cleanupNewDarwinPostgresSharedMemory(baselineIds) {
+  if (process.platform !== 'darwin') return
+  const snapshot = spawnSync('ipcs', ['-ma'], { encoding: 'utf8' })
+  if (snapshot.status !== 0) throw new Error(`ipcs -ma failed during cleanup: ${snapshot.stderr.trim()}`)
+  const user = spawnSync('id', ['-un'], { encoding: 'utf8' })
+  if (user.status !== 0 || user.stdout.trim() === '') throw new Error('could not resolve the E2E operating-system user')
+  const ids = newDetachedPostgresSegmentIds(
+    baselineIds,
+    parseDarwinSharedMemory(snapshot.stdout),
+    user.stdout.trim(),
+  )
+  for (const id of ids) {
+    const removed = spawnSync('ipcrm', ['-m', id], { encoding: 'utf8' })
+    if (removed.status !== 0) throw new Error(`ipcrm failed for E2E shared-memory segment ${id}: ${removed.stderr.trim()}`)
+  }
+  const remaining = darwinSharedMemorySnapshot()
+  const survivors = ids.filter(id => remaining.has(id))
+  if (survivors.length > 0) throw new Error(`E2E shared-memory segment cleanup failed: ${survivors.join(', ')}`)
 }

@@ -7,11 +7,11 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import {
   parseAccountProofJti,
-  parseInstallationId,
   selectPlatformEnvironment,
   validatePlatformEnvironmentPair,
   type AccountProof,
   type AccountService,
+  type InstallationId,
   type PlatformAccountId,
   type SelectedPlatformEnvironment,
 } from '@deepseek-ai/dsh-platform-account'
@@ -52,7 +52,7 @@ export interface KeylessPlatformUser {
 export interface KeylessPlatformSession {
   readonly accountId: PlatformAccountId
   readonly githubLogin: string
-  readonly installationId: string
+  readonly installationId: InstallationId
   readonly accessToken: string
   readonly proof: (issuedAt?: number) => AccountProof
 }
@@ -60,7 +60,7 @@ export interface KeylessPlatformSession {
 export interface LocalKeylessPlatform {
   readonly origin: string
   readonly environment: SelectedPlatformEnvironment
-  signIn(installationId: string): Promise<KeylessPlatformSession>
+  signIn(installationId: InstallationId): Promise<KeylessPlatformSession>
   post(path: string, body: unknown, session: KeylessPlatformSession): Promise<Response>
   get(path: string, session: KeylessPlatformSession): Promise<Response>
   heartbeat(session: KeylessPlatformSession): Promise<Response>
@@ -161,10 +161,10 @@ export async function startLocalKeylessPlatform(
   }
 }
 
-async function signIn(service: AccountService, installationId: string): Promise<KeylessPlatformSession> {
+async function signIn(service: AccountService, installationId: InstallationId): Promise<KeylessPlatformSession> {
   const key = installationKey()
   const attempt = await service.beginLogin({
-    installationId: parseInstallationId(installationId),
+    installationId,
     installationKind: 'desktop',
     presentation: { name: `Keyless ${installationId}`, platform: 'linux' },
     publicKey: key.publicKey,

@@ -90,7 +90,7 @@ describe('Project Members three-installation Electron journey', () => {
     }
 
     const accounts = {
-      a1: await signIn('a1', 'ada'),
+      a1: await signInFromWorkspaceSettings('a1', 'ada'),
       b1: await signIn('b1', 'grace'),
       b2: await signIn('b2', 'grace'),
     }
@@ -279,6 +279,40 @@ async function signIn(name: InstallationName, login: string): Promise<string> {
   await (await instance.$('button[aria-haspopup="dialog"]')).click()
   await switchToOverlaySurface(instance)
   await clickExactButton(instance, 'Mobile pairing')
+  return await finishPlatformSignIn(name, login)
+}
+
+async function signInFromWorkspaceSettings(name: InstallationName, login: string): Promise<string> {
+  const instance = getInstance(name)
+  await openWorkspaceSettings(instance)
+  const dialog = await instance.$('[role="dialog"][aria-label="Workspace settings"]')
+  await waitForBodyText(instance, 'Platform Account required')
+  await waitForBodyText(instance, 'Project Members uses the same Platform Account as Mobile pairing.')
+  await instance.saveScreenshot(join(
+    required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), name, 'project-members-sign-in-gate.png',
+  ))
+  await clickExactButton(instance, 'Sign in to Platform')
+  await switchToOverlaySurface(instance)
+  await waitForBodyText(instance, 'Mobile pairing')
+  const accountId = await finishPlatformSignIn(name, login)
+  await dialog.waitForExist({ timeout: 10_000 })
+  await instance.waitUntil(async () => !await (await dialog.$('//button[normalize-space(.)="Sign in to Platform"]')).isExisting(), {
+    timeout: 10_000,
+    timeoutMsg: 'Workspace settings did not resume after Platform Account sign-in',
+  })
+  await (await dialog.$('input[aria-label="Cloud project name"]')).waitForExist({
+    timeout: 10_000,
+    timeoutMsg: 'Workspace settings did not finish Project recovery after Platform Account sign-in',
+  })
+  await instance.saveScreenshot(join(
+    required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), name, 'project-members-signed-in-resumed.png',
+  ))
+  await (await dialog.$('button[aria-label="Close"]')).click()
+  return accountId
+}
+
+async function finishPlatformSignIn(name: InstallationName, login: string): Promise<string> {
+  const instance = getInstance(name)
   const consent = await instance.$('input[type="checkbox"]')
   if (!await consent.isSelected()) await consent.click()
   await clickExactButton(instance, 'Continue to GitHub')

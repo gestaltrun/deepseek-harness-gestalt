@@ -48,6 +48,7 @@ export interface KeylessMemberQuestionEndpointOptions {
   readonly key: Uint8Array
   readonly heartbeatMs?: number
   readonly pollMs?: number
+  readonly shutdownMs?: number
 }
 
 interface BrokerQuestionEvent {
@@ -140,9 +141,11 @@ export class KeylessMemberQuestionEndpoint {
     this.online = false
     if (this.heartbeat !== undefined) clearInterval(this.heartbeat)
     this.heartbeat = undefined
-    await collectFailure(this.heartbeatTask, failures)
-    if (wasOnline) await collectFailure(this.removePresence(), failures)
     this.abort.abort()
+    await collectAbortFailure(this.heartbeatTask, this.abort.signal, failures)
+    if (wasOnline) {
+      await collectFailure(this.removePresence(AbortSignal.timeout(this.options.shutdownMs ?? 2_000)), failures)
+    }
     await collectFailure(this.loop, failures)
     this.key.fill(0)
     if (failures.length === 1) throw failures[0]
@@ -178,11 +181,12 @@ export class KeylessMemberQuestionEndpoint {
     }, this.options.heartbeatMs ?? 500)
   }
 
-  private async removePresence(): Promise<void> {
+  private async removePresence(signal?: AbortSignal): Promise<void> {
     const response = await fetch(`${this.options.origin}/v1/member-questions/presence`, {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ installationId: this.options.installationId }),
+      ...(signal === undefined ? {} : { signal }),
     })
     if (!response.ok) throw new Error(`keyless presence removal failed with HTTP ${String(response.status)}`)
   }
@@ -408,6 +412,19 @@ async function collectFailure(task: Promise<void> | undefined, failures: unknown
   try {
     await task
   } catch (error) {
+    failures.push(error)
+  }
+}
+
+async function collectAbortFailure(
+  task: Promise<void>,
+  signal: AbortSignal,
+  failures: unknown[],
+): Promise<void> {
+  try {
+    await task
+  } catch (error) {
+    if (signal.aborted && error instanceof Error && error.name === 'AbortError') return
     failures.push(error)
   }
 }

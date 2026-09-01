@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import FileMemberQuestionReceiver from '@deepseek-ai/dsh-member-question-receiver'
 import CompanionMemberQuestionSender from '@deepseek-ai/dsh-member-question-sender'
 import { parseInstallationId } from '@deepseek-ai/dsh-platform-account'
+import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { parseCompanionSessionId, parseMemberQuestionProjectId } from '@deepseek-ai/dsh-remote-protocol'
 import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
@@ -28,9 +29,9 @@ describe('assembled keyless Project Members acceptance', () => {
         { providerSubject: 202, login: 'grace', avatarUrl: 'https://avatars.example/grace.png' },
       ], { heartbeatMs: 25, ttlMs: 100 })
       broker = await startKeylessMemberQuestionBroker()
-      const a1 = await platform.signIn('installation-a1')
-      const b1 = await platform.signIn('installation-b1')
-      const b2 = await platform.signIn('installation-b2')
+      const a1 = await platform.signIn(parseInstallationId('installation-a1'))
+      const b1 = await platform.signIn(parseInstallationId('installation-b1'))
+      const b2 = await platform.signIn(parseInstallationId('installation-b2'))
       expect(b1.accountId).toBe(b2.accountId)
       expect(a1.accountId).not.toBe(b1.accountId)
       endpoints = [
@@ -71,8 +72,9 @@ describe('assembled keyless Project Members acceptance', () => {
       const a = endpoints[0]!
       const receiverB1 = await receiver(b1Ctx, endpoints[1]!, roots)
       const receiverB2 = await receiver(b2Ctx, endpoints[2]!, roots)
-      await receiverB1.bind(b1.accountId, project.id as never, 'workspace-b1' as never)
-      await receiverB2.bind(b2.accountId, project.id as never, 'workspace-b2' as never)
+      const projectId = parseMemberQuestionProjectId(project.id)
+      await receiverB1.bind(b1.accountId, projectId, WorkspaceId('workspace-b1'))
+      await receiverB2.bind(b2.accountId, projectId, WorkspaceId('workspace-b2'))
       const accepted = await platform.post(
         `/v1/projects/invitations/${invitation.id}/decision`,
         {
@@ -108,9 +110,11 @@ describe('assembled keyless Project Members acceptance', () => {
         ttlMs: 5_000,
       })
       await a.start({ sender: aCtx.memberQuestionSender })
+      startedEndpoints.push(a)
       await endpoints[1]!.start({ receiver: receiverB1 })
+      startedEndpoints.push(endpoints[1]!)
       await endpoints[2]!.start({ receiver: receiverB2 })
-      startedEndpoints = [...endpoints]
+      startedEndpoints.push(endpoints[2]!)
 
       const send = aCtx.memberQuestionSender.send({
         toProjectMember: String(b1.accountId),
@@ -138,14 +142,14 @@ describe('assembled keyless Project Members acceptance', () => {
         receiverB1.settle(questionB1!.questionId, {
           kind: 'answered',
           answers: [{ id: 'rollout', selected: ['approve'] }],
-          settledByInstallationId: 'installation-b1' as never,
+          settledByInstallationId: parseInstallationId('installation-b1'),
           settledByDeviceName: 'Grace B1',
           settledAt,
         }),
         receiverB2.settle(questionB2!.questionId, {
           kind: 'answered',
           answers: [{ id: 'rollout', selected: ['revise'] }],
-          settledByInstallationId: 'installation-b2' as never,
+          settledByInstallationId: parseInstallationId('installation-b2'),
           settledByDeviceName: 'Grace B2',
           settledAt,
         }),
@@ -232,7 +236,7 @@ describe('assembled keyless Project Members acceptance', () => {
       expect(replacementQuestion).toBeDefined()
       await receiverB1.settle(replacementQuestion!.questionId, {
         kind: 'declined',
-        settledByInstallationId: 'installation-b1' as never,
+        settledByInstallationId: parseInstallationId('installation-b1'),
         settledByDeviceName: 'Grace B1',
         settledAt: Date.now(),
       })

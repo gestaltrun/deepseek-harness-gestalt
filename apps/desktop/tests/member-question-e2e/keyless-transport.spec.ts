@@ -105,7 +105,7 @@ describe('keyless member-question encrypted listener', () => {
     await b1Receiver.settle(b1Pending!.questionId, {
       kind: 'answered',
       answers: [{ id: 'route', selected: ['guarded'] }],
-      settledByInstallationId: 'installation-b1' as never,
+      settledByInstallationId: parseInstallationId('installation-b1'),
       settledByDeviceName: 'Receiver B1',
       settledAt: 1_788_089_400_000,
     })
@@ -204,7 +204,7 @@ describe('keyless member-question encrypted listener', () => {
     expect(secondQuestion).toBeDefined()
     await bReceiver.settle(secondQuestion!.questionId, {
       kind: 'declined',
-      settledByInstallationId: 'installation-b1' as never,
+      settledByInstallationId: parseInstallationId('installation-b1'),
       settledByDeviceName: 'Receiver B1',
       settledAt: Date.now(),
     })
@@ -250,6 +250,48 @@ describe('keyless member-question encrypted listener', () => {
 
     await expect(client.stop()).rejects.toThrow('keyless presence removal failed with HTTP 503')
     expect(presenceRemovals).toBe(1)
+    const stoppedPolls = eventPolls
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(eventPolls).toBe(stoppedPolls)
+    await expect(client.stop()).resolves.toBeUndefined()
+    endpoints.pop()
+  })
+
+  it('bounds a stalled presence removal before joining the polling loop', async () => {
+    let eventPolls = 0
+    const server = createServer((request, response) => {
+      if (request.method === 'DELETE') return
+      response.setHeader('content-type', 'application/json')
+      if (request.method === 'POST') {
+        response.end('{"online":true}')
+        return
+      }
+      eventPolls += 1
+      response.end('{"events":[],"cursor":0}')
+    })
+    servers.push(server)
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('test listener exposed no TCP address')
+    const client = new KeylessMemberQuestionEndpoint({
+      origin: `http://127.0.0.1:${String(address.port)}`,
+      accountId: parsePlatformAccountId('account-a'),
+      installationId: parseInstallationId('installation-a1'),
+      key: new Uint8Array(32).fill(23),
+      heartbeatMs: 10,
+      pollMs: 5,
+      shutdownMs: 20,
+    })
+    endpoints.push(client)
+    await client.start()
+    await expect.poll(() => eventPolls).toBeGreaterThan(0)
+
+    const startedAt = Date.now()
+    await expect(client.stop()).rejects.toThrow()
+    expect(Date.now() - startedAt).toBeLessThan(500)
     const stoppedPolls = eventPolls
     await new Promise(resolve => setTimeout(resolve, 25))
     expect(eventPolls).toBe(stoppedPolls)

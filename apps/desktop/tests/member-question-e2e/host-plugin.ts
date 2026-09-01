@@ -39,6 +39,7 @@ export function apply(ctx: Context): void {
     ),
     heartbeatMs: positiveInteger('DSH_MEMBER_QUESTION_HEARTBEAT_MS', 500),
     pollMs: positiveInteger('DSH_MEMBER_QUESTION_POLL_MS', 25),
+    shutdownMs: positiveInteger('DSH_MEMBER_QUESTION_SHUTDOWN_MS', 2_000),
   })
   const receiver = ctx.memberQuestionReceiver
   const sender = new CompanionMemberQuestionSender(ctx, {

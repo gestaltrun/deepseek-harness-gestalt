@@ -1,18 +1,26 @@
 #!/usr/bin/env node
 /** Build the current source and run the visible A1/B1/B2 Electron acceptance. */
 
-import { execFile, spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import {
   access, mkdir, mkdtemp, readFile, rm, writeFile,
 } from 'node:fs/promises'
-import { createServer as createHttpServer, request as httpRequest } from 'node:http'
-import { createServer as createHttpsServer } from 'node:https'
-import { networkInterfaces, platform, release, tmpdir } from 'node:os'
+import { platform, release, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { build } from 'esbuild'
+import { startKeylessModelProvider } from './electron-keyless-model.ts'
+import {
+  assertProcessesExited,
+  cleanEnvironment,
+  createCertificate,
+  localIpv4,
+  reservePort,
+  runLogged,
+  startHttpsProxy,
+} from './electron-runner-infrastructure.ts'
 import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { startLocalKeylessPlatform } from './local-platform.ts'
 import { encodeProtocolBase64Url } from '@deepseek-ai/dsh-remote-protocol'
@@ -92,6 +100,7 @@ try {
       DSH_MEMBER_QUESTION_KEY: endpointKey,
       DSH_MEMBER_QUESTION_HEARTBEAT_MS: '500',
       DSH_MEMBER_QUESTION_POLL_MS: '25',
+      DSH_MEMBER_QUESTION_SHUTDOWN_MS: '2000',
       DSH_MEMBER_QUESTION_TTL_MS: '30000',
       DSH_PROJECT_MEMBERS_PROJECT_ID: 'project-electron',
       DSH_PROJECT_MEMBERS_PROJECT_NAME: 'Atlas',
@@ -320,206 +329,4 @@ async function buildDesktopMain(configPath: string): Promise<void> {
     logFile: join(artifactRoot, 'build-main.log'),
   })
   if (code !== 0) throw new Error(`Desktop main build exited ${String(code)}`)
-}
-
-async function startKeylessModelProvider(): Promise<{ origin: string; close(): Promise<void> }> {
-  let remoteAccountId = 'account-b'
-  const server = createHttpServer((request, response) => {
-    const chunks: Uint8Array[] = []
-    request.on('data', (chunk) => { chunks.push(Buffer.from(chunk)) })
-    request.on('end', () => {
-      const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as {
-        accountId?: string
-        messages?: Array<{ role?: string }>
-        tools?: Array<{ function?: { name?: string } }>
-      }
-      if (request.url === '/control/member') {
-        if (typeof body.accountId !== 'string' || body.accountId.length === 0) {
-          response.writeHead(400, { 'content-type': 'application/json' })
-          response.end('{"error":"accountId is required"}')
-          return
-        }
-        remoteAccountId = body.accountId
-        response.writeHead(200, { 'content-type': 'application/json' })
-        response.end(JSON.stringify({ accountId: remoteAccountId }))
-        return
-      }
-      const toolResult = body.messages?.some(message => message.role === 'tool') === true
-      const hasAsk = body.tools?.some(tool => tool.function?.name === 'ask_user_question') === true
-      response.writeHead(200, { 'content-type': 'text/event-stream' })
-      if (hasAsk && !toolResult) {
-        const args = JSON.stringify({
-          questions: [{
-            id: 'rollout',
-            question: 'Approve the guarded rollout?',
-            options: [{ label: 'approve' }, { label: 'revise' }],
-          }],
-          to_project_member: remoteAccountId,
-          background: 'Review the Markdown, HTML, and plain-text materials before choosing the rollout.',
-          references: [
-            { path: 'decision.md', reason: 'Current decision' },
-            { path: 'preview.html', reason: 'Restricted preview' },
-            { path: 'notes.txt', reason: 'Plain notes' },
-          ],
-        })
-        response.end([
-          `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{
-            index: 0,
-            id: 'call-project-member',
-            type: 'function',
-            function: { name: 'ask_user_question', arguments: args },
-          }] } }] })}`,
-          'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
-          'data: [DONE]',
-          '',
-        ].join('\n\n'))
-        return
-      }
-      response.end([
-        'data: {"choices":[{"delta":{"content":"Project member accepted the guarded rollout."}}]}',
-        'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
-        'data: [DONE]',
-        '',
-      ].join('\n\n'))
-    })
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
-  })
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('keyless model exposed no TCP address')
-  return {
-    origin: `http://127.0.0.1:${String(address.port)}`,
-    close: async () => {
-      server.closeAllConnections()
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => { if (error === undefined) resolve(); else reject(error) })
-      })
-    },
-  }
-}
-
-async function createCertificate(root: string, host: string): Promise<{ host: string; key: string; cert: string }> {
-  const key = join(root, 'platform-key.pem')
-  const cert = join(root, 'platform-cert.pem')
-  const config = join(root, 'openssl.cnf')
-  await writeFile(config, [
-    '[req]',
-    'distinguished_name = dn',
-    'x509_extensions = v3_req',
-    'prompt = no',
-    '[dn]',
-    'CN = Project Members Electron',
-    '[v3_req]',
-    `subjectAltName = IP:${host}`,
-    'basicConstraints = critical,CA:TRUE',
-    'keyUsage = critical,digitalSignature,keyEncipherment,keyCertSign',
-    '',
-  ].join('\n'))
-  await execute('openssl', [
-    'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
-    '-config', config, '-keyout', key, '-out', cert,
-  ])
-  return { host, key, cert }
-}
-
-async function startHttpsProxy(host: string, port: number, keyPath: string, certPath: string, targetOrigin: string) {
-  const [key, cert] = await Promise.all([readFile(keyPath), readFile(certPath)])
-  const target = new URL(targetOrigin)
-  const server = createHttpsServer({ key, cert }, (request, response) => {
-    const upstream = httpRequest({
-      hostname: target.hostname,
-      port: target.port,
-      path: request.url,
-      method: request.method,
-      headers: { ...request.headers, host: target.host },
-    }, (upstreamResponse) => {
-      response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers)
-      upstreamResponse.pipe(response)
-    })
-    upstream.on('error', (error) => { response.destroy(error) })
-    request.pipe(upstream)
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, host, () => { server.off('error', reject); resolve() })
-  })
-  return {
-    close: async () => {
-      server.closeAllConnections()
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => { if (error === undefined) resolve(); else reject(error) })
-      })
-    },
-  }
-}
-
-async function reservePort(): Promise<number> {
-  const server = createHttpServer()
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '0.0.0.0', () => { server.off('error', reject); resolve() })
-  })
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('port reservation exposed no address')
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => { if (error === undefined) resolve(); else reject(error) })
-  })
-  return address.port
-}
-
-function localIpv4(): string {
-  for (const addresses of Object.values(networkInterfaces())) {
-    for (const address of addresses ?? []) {
-      if (address.family === 'IPv4' && !address.internal) return address.address
-    }
-  }
-  throw new Error('Electron acceptance requires a non-loopback local IPv4 address')
-}
-
-async function runLogged(
-  command: string,
-  args: readonly string[],
-  options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly logFile: string },
-): Promise<number> {
-  await mkdir(dirname(options.logFile), { recursive: true })
-  return await new Promise<number>((resolve, reject) => {
-    const child = spawn(command, [...args], {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    const chunks: Buffer[] = []
-    const retain = (chunk: Buffer): void => {
-      chunks.push(chunk)
-      process.stdout.write(chunk)
-    }
-    child.stdout.on('data', retain)
-    child.stderr.on('data', retain)
-    child.once('error', reject)
-    child.once('close', (code) => {
-      void writeFile(options.logFile, Buffer.concat(chunks)).then(() => { resolve(code ?? 1) }, reject)
-    })
-  })
-}
-
-function cleanEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(source).filter(([name]) => !/KEY|SECRET|TOKEN|PASSWORD/i.test(name)))
-}
-
-async function assertProcessesExited(pids: readonly number[]): Promise<void> {
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && pids.some(processExists)) await new Promise(resolve => setTimeout(resolve, 100))
-  const remaining = pids.filter(processExists)
-  if (remaining.length > 0) throw new Error(`Electron acceptance left owned processes running: ${remaining.join(', ')}`)
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
 }

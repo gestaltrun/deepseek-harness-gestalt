@@ -153,25 +153,16 @@ function ProjectMembershipAccessGate({ access, openSignIn, t }: {
   openSignIn: (() => void) | undefined
   t: SettingsTranslate
 }) {
-  const pending = access.status === 'signing-in'
-  const unavailable = access.status === 'unavailable'
+  const presentation = projectMembershipAccessGate(access.status, t)
   return (
     <div>
       <div className={css.subTitle}>{t('upgrade.accountRequired')}</div>
-      <div className={css.sectionDesc}>
-        {pending
-          ? t('upgrade.signingIn')
-          : access.status === 'signing-out'
-            ? t('upgrade.signingOut')
-            : unavailable
-              ? t('upgrade.accountUnavailable')
-              : t('upgrade.accountDescription')}
-      </div>
+      <div className={css.sectionDesc}>{presentation.description}</div>
       {access.error !== undefined && <div className={css.actionError} role="alert">{access.error}</div>}
-      {!unavailable && (
+      {presentation.showSignIn && (
         <Button
           variant="primary"
-          disabled={pending || access.status === 'signing-out' || openSignIn === undefined}
+          disabled={presentation.signInDisabled || openSignIn === undefined}
           onClick={openSignIn}
         >
           {t('upgrade.signIn')}
@@ -179,6 +170,30 @@ function ProjectMembershipAccessGate({ access, openSignIn, t }: {
       )}
     </div>
   )
+}
+
+function projectMembershipAccessGate(
+  status: ProjectMembershipAccessSnapshot['status'],
+  t: SettingsTranslate,
+): { description: string; showSignIn: boolean; signInDisabled: boolean } {
+  switch (status) {
+    case 'unavailable':
+      return { description: t('upgrade.accountUnavailable'), showSignIn: false, signInDisabled: true }
+    case 'signed-out':
+      return { description: t('upgrade.accountDescription'), showSignIn: true, signInDisabled: false }
+    case 'signing-in':
+      return { description: t('upgrade.signingIn'), showSignIn: true, signInDisabled: true }
+    case 'signing-out':
+      return { description: t('upgrade.signingOut'), showSignIn: true, signInDisabled: true }
+    case 'signed-in':
+      throw new TypeError('signed-in Project Membership access cannot render the authorization gate')
+    default:
+      return assertNever(status)
+  }
+}
+
+function assertNever(value: never): never {
+  throw new TypeError(`unknown Project Membership access status: ${String(value)}`)
 }
 
 /** Roster + invitation administration for one bound cloud project. */

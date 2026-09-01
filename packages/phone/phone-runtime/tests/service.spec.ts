@@ -667,7 +667,7 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('fails when the child exits after the baseline listing response but before readiness commits', async () => {
-    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 1 })
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
     fakes.push(fake)
     await fake.claim()
     const context = new Context()

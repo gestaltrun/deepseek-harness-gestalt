@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-28-sub2api-offer-card-installer.md
-2026-08-28-sub2api-offer-card-installer.md: b5966e789d6ef645d9890de0266e691e1d792bbc
-2026-08-28-sub2api-offer-card-installer.zh.md: 2efcf38b1ec959bed2d23c71a2b87d8d73aa916c
+2026-08-28-sub2api-offer-card-installer.md: afbcb8b28572ad840c1db5ff1db9708f2af2c734
+2026-08-28-sub2api-offer-card-installer.zh.md: 60bcec76185e0996b6f107d0e3f0a3703d9c2a50

@@ -824,7 +824,7 @@ export async function selectModelAndSend(
   const modelPane = browser.$('div[role="menu"] button[role="menuitem"]')
   await modelPane.waitForClickable({ timeout: 30_000 })
   await modelPane.click()
-  const choices = browser.$$('button[data-provider-id][data-model-id]')
+  const choices = await browser.$$('button[data-provider-id][data-model-id]').getElements()
   let choice: WebdriverIO.Element | undefined
   for (const candidate of choices) {
     if (await candidate.getAttribute('data-provider-id') === 'sub2api'

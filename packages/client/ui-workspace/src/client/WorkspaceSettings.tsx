@@ -185,13 +185,16 @@ function projectMembershipAccessGate(
       return { description: t('upgrade.signingIn'), showSignIn: true, signInDisabled: true }
     case 'signing-out':
       return { description: t('upgrade.signingOut'), showSignIn: true, signInDisabled: true }
+    /* v8 ignore next -- the caller renders this gate only while access is not signed in. */
     case 'signed-in':
       throw new TypeError('signed-in Project Membership access cannot render the authorization gate')
+    /* v8 ignore next -- TypeScript closes the Project Membership access status union. */
     default:
       return assertNever(status)
   }
 }
 
+/* v8 ignore next -- TypeScript closes the Project Membership access status union. */
 function assertNever(value: never): never {
   throw new TypeError(`unknown Project Membership access status: ${String(value)}`)
 }

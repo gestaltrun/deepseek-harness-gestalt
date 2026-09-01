@@ -55,6 +55,7 @@ function membershipAccessStatus(
     case 'signing-out': return 'signing-out'
     case 'idle':
     case 'failed': return 'signed-out'
+    /* v8 ignore next -- TypeScript closes the Desktop Account status union. */
     default: return assertNever(status)
   }
 }

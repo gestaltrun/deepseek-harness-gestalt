@@ -1032,6 +1032,24 @@ describe('phone runtime service lifecycle', () => {
     expect(unavailable.message).toMatch(/exited unexpectedly|socket is gone/)
   })
 
+  it('marks the current ready generation lost when its child exit callback settles', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      child: MobilecliServerProcess | undefined
+      onChildExit(child: MobilecliServerProcess, exit: { readonly code: number | null }): void
+    }
+    const child = captured.child
+    if (child === undefined) throw new Error('ready phone runtime has no current child')
+
+    captured.onChildExit(child, { code: 73 })
+
+    const unavailable = await errorOf(() => context.phoneDevices.listDevices())
+    expect(unavailable).toMatchObject({ code: 'PHONE_UNAVAILABLE' })
+    expect(unavailable.message).toContain('exited unexpectedly (code 73)')
+  })
+
   it('does not publish readiness when the first device listing violates the protocol', async () => {
     const fake = await stageFake({ devices: [{ id: 'malformed' }] as never })
     fakes.push(fake)

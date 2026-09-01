@@ -867,7 +867,11 @@ export function WorkspaceBrowser({
   const [wizardInvitation, setWizardInvitation] = useState<WorkspacePendingInvitation | null>(null)
   const wizardCoolUntil = useRef(0)
   useEffect(() => {
-    if (projectMembership === undefined) return
+    if (projectMembership === undefined || projectMembershipAccess.status !== 'signed-in') {
+      setWizardInvitation(null)
+      wizardCoolUntil.current = 0
+      return
+    }
     let disposed = false
     const poll = () => {
       if (disposed) return
@@ -885,7 +889,7 @@ export function WorkspaceBrowser({
       disposed = true
       window.clearInterval(timer)
     }
-  }, [projectMembership, wizardInvitation])
+  }, [projectMembership, projectMembershipAccess.status, wizardInvitation])
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.

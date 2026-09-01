@@ -7,7 +7,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import type { ProjectMembershipGateway, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
@@ -44,6 +44,26 @@ const workspaceState = (items: readonly WorkspaceView[], archivedSessionIds: rea
 })
 function hook<T>(snapshot: T) {
   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
+}
+
+function projectMembershipGateway(
+  pendingInvitations: ProjectMembershipGateway['pendingInvitations'],
+): ProjectMembershipGateway {
+  return {
+    createProject: vi.fn(),
+    projectForWorkspace: vi.fn(),
+    roster: vi.fn(),
+    invite: vi.fn(),
+    issuedInvitations: vi.fn(),
+    retractInvitation: vi.fn(),
+    decideInvitation: vi.fn(),
+    changeRole: vi.fn(),
+    setMemberTags: vi.fn(),
+    removeMember: vi.fn(),
+    pendingInvitations,
+    localRemoteFor: vi.fn(),
+    cloneWorkspace: vi.fn(),
+  }
 }
 
 /** jsdom lacks DragEvent — the fireEvent fallback drops clientY, so pin it on the built event. */
@@ -97,6 +117,34 @@ function rerender(b: ReturnType<typeof mount>, overrides: Partial<WorkspaceBrows
 }
 
 describe('WorkspaceBrowser', () => {
+  it('polls pending invitations only while the shared Platform Account is signed in', async () => {
+    vi.useFakeTimers()
+    try {
+      const pendingInvitations = vi.fn<ProjectMembershipGateway['pendingInvitations']>().mockResolvedValue([])
+      const projectMembership = projectMembershipGateway(pendingInvitations)
+      const b = mount({
+        projectMembership,
+        useProjectMembershipAccess: hook({ status: 'signed-out' as const }),
+      })
+
+      await act(async () => { await Promise.resolve() })
+      expect(pendingInvitations).not.toHaveBeenCalled()
+
+      rerender(b, { useProjectMembershipAccess: hook({ status: 'signed-in' as const }) })
+      await act(async () => { await Promise.resolve() })
+      expect(pendingInvitations).toHaveBeenCalledOnce()
+
+      rerender(b, { useProjectMembershipAccess: hook({ status: 'signed-out' as const }) })
+      await act(async () => {
+        vi.advanceTimersByTime(15_000)
+        await Promise.resolve()
+      })
+      expect(pendingInvitations).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('workspace hover card shows a POSIX home descendant as ~', () => {
     vi.useFakeTimers()
     try {

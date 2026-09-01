@@ -10,8 +10,6 @@ import { isExpectedSessionSurface } from './session-surface.ts'
 
 const ADMIN_PREFIX = '/plugins/dsh-sub2api/admin'
 const REAL_PROVIDER_CREDENTIAL_REF = 'ZAI_CODING_CN_API_KEY'
-const SUB2API_PUBLIC_MODEL = 'claude-sonnet-4-5-20250929'
-export const ACCOUNT_PROVIDER_MODEL = SUB2API_PUBLIC_MODEL
 const execFileAsync = promisify(execFile)
 
 interface Sub2ApiSnapshot {
@@ -133,11 +131,15 @@ export async function recordReleaseChecksums(): Promise<void> {
     }
     return { tag: decodeURIComponent(match[1]), name: decodeURIComponent(match[2]) }
   })
-  const tag = assets[0]?.tag
-  if (tag === undefined || assets.some(asset => asset.tag !== tag)) {
-    throw new Error('Sub2API source URLs do not belong to one Release tag')
+  const bundleTag = assets[0]?.tag
+  const runtimeTag = assets[2]?.tag
+  if (bundleTag === undefined || assets[1]?.tag !== bundleTag) {
+    throw new Error('Sub2API bundle and its checksum do not belong to one Release tag')
   }
-  const version = /^v(.+)$/u.exec(tag)?.[1]
+  if (runtimeTag === undefined || assets[3]?.tag !== runtimeTag) {
+    throw new Error('Sub2API runtime pack and its checksum do not belong to one Release tag')
+  }
+  const version = /^v(.+)$/u.exec(bundleTag)?.[1]
   if (version === undefined
     || assets[0]?.name !== `dsh-sub2api-sidecar-${version}.tgz`
     || assets[1]?.name !== 'bundle-sha256sums.txt'
@@ -156,7 +158,7 @@ export async function recordReleaseChecksums(): Promise<void> {
     }
     const headers = { 'user-agent': 'deepseek-harness-electron-e2e' }
     const refResponse = await electron.net.fetch(
-      `https://api.github.com/repos/gestaltrun/dsh-sub2api-sidecar/git/ref/tags/${encodeURIComponent(input.tag)}`,
+      `https://api.github.com/repos/gestaltrun/dsh-sub2api-sidecar/git/ref/tags/${encodeURIComponent(input.bundleTag)}`,
       { headers },
     )
     if (!refResponse.ok) throw new Error(`release tag lookup failed: HTTP ${String(refResponse.status)}`)
@@ -171,10 +173,10 @@ export async function recordReleaseChecksums(): Promise<void> {
     } else if (ref.object?.type !== 'commit') {
       throw new Error('release ref does not resolve to a commit')
     }
-    return { documents: values, commit, tag: input.tag }
+    return { documents: values, commit, bundleTag: input.bundleTag }
   }, {
     checksumUrls: [sources.bundleSha256SumsUrl, sources.runtimePackSha256SumsUrl],
-    tag,
+    bundleTag,
   })
   const expectedSidecar = requiredEnv('DSH_SUB2API_E2E_SIDECAR_SHA')
   if (result.commit !== expectedSidecar) throw new Error('sidecar Release tag does not match DSH_SUB2API_E2E_SIDECAR_SHA')
@@ -183,7 +185,8 @@ export async function recordReleaseChecksums(): Promise<void> {
   await writeFile(join(artifactDir, 'runtime-pack-sha256sums.txt'), result.documents[1] ?? '')
   await writeFile(join(artifactDir, 'sidecar-release.json'), JSON.stringify({
     repository: 'gestaltrun/dsh-sub2api-sidecar',
-    tag: result.tag,
+    bundleTag: result.bundleTag,
+    runtimeTag,
     commit: result.commit,
     assets: assets.map(asset => asset.name),
   }, undefined, 2) + '\n')
@@ -605,8 +608,14 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
     }>
   }>(hostOrigin, `/accounts/${String(account.id)}/models/sync-upstream`, { method: 'POST' })
   const configuredModels = record(record(account.credentials)?.['model_mapping'])
+  if (configuredModels === undefined || Object.keys(configuredModels).length === 0) {
+    throw new Error('Embedded account form did not persist the upstream-supported model mapping')
+  }
+  const liveModels = new Set((catalog.models ?? []).filter((model): model is string =>
+    typeof model === 'string' && model.length > 0))
   const targetModel = Object.entries(catalog.metadata ?? {}).find(([modelId, metadata]) =>
-    (configuredModels === undefined || Object.hasOwn(configuredModels, modelId))
+    liveModels.has(modelId)
+      && Object.hasOwn(configuredModels, modelId)
       && (metadata.reasoning === false
         || (metadata.reasoning === true
           && Array.isArray(metadata.supported_reasoning_levels)
@@ -621,6 +630,18 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
     throw new Error('Sub2API account sync returned no configured model with complete capability metadata')
   }
   return targetModel
+}
+
+/** Read every model id from the current Sub2API provider settings profile. */
+export async function providerModelIds(): Promise<string[]> {
+  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
+  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
+  const models = record(providers?.['sub2api'])?.['models']
+  if (!Array.isArray(models)) return []
+  return models.map(record)
+    .map(model => model?.['id'])
+    .filter((id): id is string => typeof id === 'string')
+    .sort()
 }
 
 /** Verify the Composite route saved by the embedded native dialog. */
@@ -642,7 +663,7 @@ export async function verifyCompositeModelRoute(hostOrigin: string, targetModel:
     hostOrigin,
     `/groups/${String(composite.id)}/composite-routes`,
   )
-  const route = routes.find(entry => entry.public_model === SUB2API_PUBLIC_MODEL)
+  const route = routes.find(entry => entry.public_model === targetModel)
   if (route === undefined) throw new Error('Embedded Composite form did not persist the published model route')
   if (route.target_platform !== 'zhipu'
     || route.upstream_model !== targetModel
@@ -718,6 +739,27 @@ export async function gatewayModelProfile(modelId: string): Promise<ProviderMode
         : Object.fromEntries(reasoningLevels.map(level => [level, level === 'none' ? null : level])),
     defaultReasoningLevel,
   }
+}
+
+/** Read every model id advertised by the release-backed Sub2API gateway. */
+export async function gatewayModelIds(): Promise<string[]> {
+  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
+  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
+  const profile = record(providers?.['sub2api'])
+  const baseURL = profile?.['baseURL']
+  const apiKeyEnv = profile?.['apiKeyEnv']
+  if (typeof baseURL !== 'string' || typeof apiKeyEnv !== 'string') return []
+  const credentials = record(load(await readFile(join(requiredEnv('DSH_HOME'), '.credentials.yaml'), 'utf8')))
+  const apiKey = record(credentials?.['refs'])?.[apiKeyEnv]
+  if (typeof apiKey !== 'string' || apiKey.length === 0) return []
+  const response = await fetch(`${baseURL}/models`, { headers: { authorization: `Bearer ${apiKey}` } })
+  if (!response.ok) return []
+  const data = record(await response.json())?.['data']
+  if (!Array.isArray(data)) return []
+  return data.map(record)
+    .map(model => model?.['id'])
+    .filter((id): id is string => typeof id === 'string')
+    .sort()
 }
 
 /** Connect an empty temporary workspace so the first Session composer unlocks. */

@@ -1,14 +1,14 @@
 /** Release-backed Electron flow: Settings offer, installer, Web Host restart, embedded console. */
 import { browser, expect } from '@wdio/globals'
 import {
-  ACCOUNT_PROVIDER_MODEL, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
+  clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
   clickAccountConsoleRowAction, clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
   connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput, fillTopAccountDialogProviderCredential,
-  gatewayModelProfile, mainWindowSnapshot,
+  gatewayModelIds, gatewayModelProfile, mainWindowSnapshot,
   openProviderEditor,
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
   overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
-  providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, syncRealProviderAccount,
+  providerModelIds, providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, syncRealProviderAccount,
   topAccountDialogButtonEnabled, verifyCompositeModelRoute, waitForSessionSurface,
 } from './helpers.ts'
 
@@ -100,14 +100,14 @@ describe('Sub2API Desktop installation', () => {
       timeout: 15_000,
       timeoutMsg: 'Composite route dialog did not open inside the account workspace',
     })
-    await fillTopAccountDialogInput(['公开模型', 'Public Model'], ACCOUNT_PROVIDER_MODEL)
+    await fillTopAccountDialogInput(['公开模型', 'Public Model'], targetModel)
     await clickAccountConsoleFieldSelector(['端点', 'Endpoint'])
     await clickAccountConsoleOption(['Chat Completions'])
     await clickAccountConsoleFieldSelector(['目标平台', 'Target Platform'])
     await clickAccountConsoleOption(['Zhipu GLM'])
     await fillTopAccountDialogInput(['上游模型', 'Upstream Model'], targetModel)
     await clickTopAccountDialogButton(['创建', 'Create'])
-    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(ACCOUNT_PROVIDER_MODEL), {
+    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(targetModel), {
       timeout: 15_000,
       timeoutMsg: 'Embedded Composite form did not save the real model route',
     })
@@ -116,7 +116,7 @@ describe('Sub2API Desktop installation', () => {
 
     try {
       await browser.waitUntil(async () => {
-        const model = await gatewayModelProfile(ACCOUNT_PROVIDER_MODEL)
+        const model = await gatewayModelProfile(targetModel)
         return model?.contextWindow !== undefined
           && model.maxTokens !== undefined
           && model.input !== undefined
@@ -128,9 +128,10 @@ describe('Sub2API Desktop installation', () => {
       })
     } catch {
       throw new Error(
-        `Release-backed Sub2API gateway capability profile: ${JSON.stringify(await gatewayModelProfile(ACCOUNT_PROVIDER_MODEL))}`,
+        `Release-backed Sub2API gateway capability profile: ${JSON.stringify(await gatewayModelProfile(targetModel))}`,
       )
     }
+    expect(await gatewayModelIds()).toEqual([targetModel])
 
     await openSettings()
     expect(new URL(await overlayUrl()).origin).toBe(new URL(hostSurface.url).origin)
@@ -145,13 +146,13 @@ describe('Sub2API Desktop installation', () => {
     expect(modelsText).not.toMatch(/加载提供方目录失败|Loading the provider directory failed/u)
     await openProviderEditor(['Sub2API (sub2api)', 'Sub2API'])
     await expandProviderSettings(['自定义设置', 'Customized settings'])
-    await browser.waitUntil(async () => (await overlayProviderInputValues()).includes(ACCOUNT_PROVIDER_MODEL), {
+    await browser.waitUntil(async () => (await overlayProviderInputValues()).includes(targetModel), {
       timeout: 30_000,
       interval: 500,
       timeoutMsg: 'Models Settings did not receive the live Sub2API account catalog',
     })
     await browser.waitUntil(async () => {
-      const model = await providerModelProfile('claude-sonnet-4-5-20250929')
+      const model = await providerModelProfile(targetModel)
       return model?.contextWindow !== undefined
         && model.maxTokens !== undefined
         && model.input !== undefined
@@ -161,7 +162,8 @@ describe('Sub2API Desktop installation', () => {
       interval: 500,
       timeoutMsg: 'Sub2API provider did not receive live model capability metadata',
     })
-    const providerModel = await providerModelProfile('claude-sonnet-4-5-20250929')
+    const providerModel = await providerModelProfile(targetModel)
+    expect(await providerModelIds()).toEqual([targetModel])
     expect(providerModel?.contextWindow).toBeGreaterThan(0)
     expect(providerModel?.maxTokens).toBeGreaterThan(0)
     expect(providerModel?.input).toContain('text')
@@ -292,7 +294,7 @@ describe('Sub2API Desktop installation', () => {
     await connectTemporaryWorkspace()
     const expected = 'DSH445_MODEL_OK_7F3A'
     await selectModelAndSend(
-      ACCOUNT_PROVIDER_MODEL,
+      targetModel,
       `Reply with exactly ${expected} and no other text.`,
       expected,
       hostSurface.url,

@@ -60,7 +60,10 @@ export function initialPhoneEnvironmentSnapshot(
       android: Object.freeze({ kind: 'deferred' }),
       ios: platform === 'darwin'
         ? Object.freeze({ kind: 'deferred' })
-        : Object.freeze({ kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' }),
+        : Object.freeze({
+          kind: 'unsupported',
+          reason: 'iOS Simulator and physical iPhone control require macOS with a complete Xcode installation.',
+        }),
     }),
   })
 }

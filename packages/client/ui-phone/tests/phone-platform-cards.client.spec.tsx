@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PhonePlatformCards } from '../src/client/PhonePlatformCards.tsx'
 import type {
@@ -65,7 +65,7 @@ describe('PhonePlatformCards', () => {
       kind: 'unsupported', reason: 'macOS required',
     })
     render(<PhonePlatformCards {...card} />)
-    expect(screen.getByText('iOS 模拟器需要 macOS')).toBeTruthy()
+    expect(screen.getByText('iOS 设备控制需要 macOS + Xcode')).toBeTruthy()
     expect(screen.getAllByText('需要下载')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '一键准备 Android' }))
     const confirm = screen.getByRole('button', { name: '接受并准备' })
@@ -79,6 +79,20 @@ describe('PhonePlatformCards', () => {
     fireEvent.click(screen.getByRole('button', { name: '一键准备 Android' }))
     fireEvent.click(screen.getByRole('button', { name: '返回' }))
     expect(screen.queryByText('最低可用空间')).toBeNull()
+  })
+
+  it('renders dedicated unsupported iOS content without preparation claims', () => {
+    const message = 'iOS Simulator 和 iPhone 真机控制均需要安装完整 Xcode 的 macOS。Windows 与 Linux 不支持这些功能。'
+    render(<PhonePlatformCards {...props(
+      { kind: 'deferred' }, { kind: 'unsupported', reason: 'unsupported host' }, message,
+    )} />)
+    const card = document.querySelector<HTMLElement>('[data-phone-platform-ios="unsupported"]')
+    if (card === null) throw new Error('unsupported iOS card did not render')
+    expect(within(card).getByText('iOS 设备控制需要 macOS + Xcode')).toBeTruthy()
+    expect(within(card).getByText(message)).toBeTruthy()
+    expect(within(card).queryByText('iOS Simulator Runtime')).toBeNull()
+    expect(within(card).queryByText('DSH Gestalt iPhone')).toBeNull()
+    expect(within(card).queryByRole('button')).toBeNull()
   })
 
   it('renders component detection, zero-download disclosure, and both ready operations', () => {
@@ -210,6 +224,16 @@ describe('PhonePlatformCards', () => {
     rendered.rerender(<PhonePlatformCards {...retryable} />)
     fireEvent.click(screen.getByRole('button', { name: '一键准备 iOS' }))
     expect(retryable.onPrepareIos).toHaveBeenCalledOnce()
+  })
+
+  it('offers cancellation only for Host-owned iOS preparation checking', () => {
+    const active = props({ kind: 'deferred' }, { kind: 'checking', operation: 'prepare' })
+    const rendered = render(<PhonePlatformCards {...active} />)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(active.onCancelIos).toHaveBeenCalledOnce()
+
+    rendered.rerender(<PhonePlatformCards {...props({ kind: 'deferred' }, { kind: 'checking' })} />)
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull()
   })
 
   it('uses the Provider reason when the deployment has no platform-specific copy', () => {

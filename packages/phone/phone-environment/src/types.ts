@@ -158,7 +158,7 @@ export interface IosPreparationPlan {
 export type PhoneIosState =
   | { readonly kind: 'deferred' }
   | { readonly kind: 'unsupported'; readonly reason: string }
-  | { readonly kind: 'checking' }
+  | { readonly kind: 'checking'; readonly operation?: 'prepare' }
   | { readonly kind: 'xcode-missing'; readonly message: string }
   | { readonly kind: 'license-required'; readonly developerDir: string; readonly message: string }
   | {

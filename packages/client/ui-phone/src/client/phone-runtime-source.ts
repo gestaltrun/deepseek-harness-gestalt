@@ -26,7 +26,7 @@ export interface IosPreparationPlanView {
 /** iOS platform state projected from the Host full snapshot. */
 export type PhoneIosView =
   | PhonePlatformView
-  | { readonly kind: 'checking' }
+  | { readonly kind: 'checking'; readonly operation?: 'prepare' }
   | { readonly kind: 'xcode-missing'; readonly message: string }
   | { readonly kind: 'license-required'; readonly developerDir: string; readonly message: string }
   | { readonly kind: 'manual-required'; readonly code: 'first-launch' | 'xcode-update'; readonly message: string; readonly developerDir?: string }
@@ -296,7 +296,15 @@ function parsePlatform(value: Record<string, unknown>): PhonePlatformView {
 function parseIos(value: unknown): PhoneIosView {
   if (!record(value) || !string(value.kind)) throw new Error('phone environment snapshot carried an invalid iOS state')
   if (value.kind === 'deferred' || value.kind === 'unsupported') return parsePlatform(value)
-  if (value.kind === 'checking') return Object.freeze({ kind: 'checking' })
+  if (value.kind === 'checking') {
+    if (value.operation !== undefined && value.operation !== 'prepare') {
+      throw new Error('phone environment snapshot carried an invalid iOS state')
+    }
+    return Object.freeze({
+      kind: 'checking',
+      ...(value.operation === undefined ? {} : { operation: value.operation }),
+    })
+  }
   if (value.kind === 'xcode-missing' && string(value.message)) return Object.freeze({ kind: value.kind, message: value.message })
   if (value.kind === 'license-required' && string(value.developerDir) && string(value.message)) {
     return Object.freeze({ kind: value.kind, developerDir: value.developerDir, message: value.message })

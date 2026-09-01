@@ -312,6 +312,53 @@ function runningIosProvider(options: { readonly initialRunning?: boolean; readon
 }
 
 describe('PhoneEnvironment', () => {
+  it('marks active iOS preparation without marking passive refresh checking', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service, origin } = await mountEnvironment(context)
+    let state: PhoneIosState = { kind: 'no-simulator', plan: IOS_PLAN }
+    const listeners = new Set<(value: PhoneIosState) => void>()
+    let refreshes = 0
+    const waitForCancellation = async (signal: AbortSignal): Promise<PhoneIosState> => {
+      state = { kind: 'checking' }
+      for (const listener of listeners) listener(state)
+      return await new Promise<PhoneIosState>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error('iOS operation cancelled'))
+        }, { once: true })
+      })
+    }
+    const provider: IosEnvironmentProvider = {
+      snapshot: () => state,
+      refresh: async (signal = new AbortController().signal) => {
+        refreshes += 1
+        return refreshes === 1 ? state : await waitForCancellation(signal)
+      },
+      prepare: async (signal = new AbortController().signal) => await waitForCancellation(signal),
+      start: async () => state,
+      cancel: () => {},
+      deactivate: async () => {},
+      onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    }
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+
+    const preparation = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_PREPARE_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toEqual({ kind: 'checking', operation: 'prepare' })
+    })
+    expect((await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })).status).toBe(200)
+    expect((await preparation).status).toBe(502)
+    expect(service.snapshot().platforms.ios).toEqual({ kind: 'checking' })
+
+    const refresh = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_REFRESH_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toEqual({ kind: 'checking' })
+    })
+    expect((await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })).status).toBe(200)
+    expect((await refresh).status).toBe(502)
+  })
+
   it('publishes iOS readiness only after mobilecli lists the Simulator and yields a JPEG picture', async () => {
     const path = await executable()
     const context = new Context()

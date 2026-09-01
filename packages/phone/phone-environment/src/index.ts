@@ -110,6 +110,7 @@ export class PhoneEnvironment extends Service {
   private unsubscribeIos: (() => void) | undefined
   private iosController: AbortController | undefined
   private iosTask: Promise<void> | undefined
+  private iosOperation: 'prepare' | undefined
   private transactionTail: Promise<unknown> = Promise.resolve()
   private enableTail: Promise<void> = Promise.resolve()
   private readonly lifetime = new AbortController()
@@ -482,7 +483,7 @@ export class PhoneEnvironment extends Service {
         ? prepared
         : await provider.start(signal)
       await this.activateIosRuntime(running, signal)
-    })
+    }, undefined, 'prepare')
   }
 
   private async startIos(): Promise<void> {
@@ -571,6 +572,7 @@ export class PhoneEnvironment extends Service {
   private async runIosOperation(
     operation: (provider: IosEnvironmentProvider, signal: AbortSignal) => Promise<void>,
     ownerSignal?: AbortSignal,
+    snapshotOperation?: 'prepare',
   ): Promise<void> {
     if (this.iosTask !== undefined) {
       throw new PhoneEnvironmentError('PHONE_IOS_BUSY', 'an iOS environment operation is already running')
@@ -578,6 +580,7 @@ export class PhoneEnvironment extends Service {
     const provider = this.requireIos()
     const controller = new AbortController()
     this.iosController = controller
+    this.iosOperation = snapshotOperation
     const signal = ownerSignal === undefined
       ? AbortSignal.any([this.lifetime.signal, controller.signal])
       : AbortSignal.any([this.lifetime.signal, controller.signal, ownerSignal])
@@ -588,6 +591,10 @@ export class PhoneEnvironment extends Service {
     } finally {
       if (this.iosTask === task) this.iosTask = undefined
       if (this.iosController === controller) this.iosController = undefined
+      if (snapshotOperation !== undefined && this.iosOperation === snapshotOperation) {
+        this.iosOperation = undefined
+        if (this.current.platforms.ios.kind === 'checking') this.publishIos(provider.snapshot())
+      }
     }
   }
 
@@ -825,9 +832,12 @@ export class PhoneEnvironment extends Service {
   }
 
   private publishIos(ios: PhoneIosState): void {
+    const projected = ios.kind === 'checking'
+      ? this.iosOperation === 'prepare' ? { kind: 'checking', operation: 'prepare' } as const : { kind: 'checking' } as const
+      : ios
     this.publish({
       ...this.current,
-      platforms: Object.freeze({ ...this.current.platforms, ios: Object.freeze(ios) }),
+      platforms: Object.freeze({ ...this.current.platforms, ios: Object.freeze(projected) }),
     })
   }
 

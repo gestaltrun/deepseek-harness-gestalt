@@ -329,6 +329,7 @@ describe('Host phone runtime source', () => {
     { kind: 'deferred' },
     { kind: 'unsupported', reason: 'macOS required' },
     { kind: 'checking' },
+    { kind: 'checking', operation: 'prepare' },
     { kind: 'xcode-missing', message: 'install Xcode' },
     { kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 'accept license' },
     { kind: 'manual-required', code: 'first-launch', message: 'finish launch' },
@@ -358,6 +359,7 @@ describe('Host phone runtime source', () => {
 
   it.each([
     [{}, 'invalid iOS state'],
+    [{ kind: 'checking', operation: 'refresh' }, 'invalid iOS state'],
     [{ kind: 'xcode-missing', message: 1 }, 'invalid iOS plan'],
     [{ kind: 'license-required', developerDir: 1, message: 'accept' }, 'invalid iOS plan'],
     [{ kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 1 }, 'invalid iOS plan'],

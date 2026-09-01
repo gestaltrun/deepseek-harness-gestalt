@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Host 在 `ctx.phoneEnvironment` 上持有手机工具链状态。该服务为「手机设备」设置客户端发布一份不可变全量快照，并在启用开关或活动 mobilecli 代变化时保持自身身份。共享运行时状态是 missing / downloading / verifying / activating / ready / failed 闭合联合。Android 与 iOS 准备使用各自可扩展状态；非 macOS Host 将 iOS 报告为不支持，不提供无法执行的操作。
+Host 在 `ctx.phoneEnvironment` 上持有手机工具链状态。该服务为「手机设备」设置客户端发布一份不可变全量快照，并在启用开关或活动 mobilecli 代变化时保持自身身份。共享运行时状态是 missing / downloading / verifying / activating / ready / failed 闭合联合。Android 与 iOS 准备使用各自可扩展状态。Host 持有的一键 iOS 准备会在 `checking` 状态中标记 `operation: 'prepare'`；被动检测不携带该标记。非 macOS Host 会报告 iOS Simulator 与 iPhone 真机控制需要安装完整 Xcode 的 macOS，不提供无法执行的操作。
 
 托管运行时固定到 mobile-next/mobilecli 官方 GitHub Release 的六个 1.0.5 归档，覆盖 macOS、Windows 与 Linux 的 arm64 和 amd64。包清单记录每个固定 URL、字节长度、SHA-256 摘要与归档内可执行文件名。准备只跟随官方 GitHub asset redirect，把数据流式写入 owner-only staging 目录，校验长度与 SHA-256，只接受 zip 根目录中的单个可执行文件，探测 `mobilecli --version`，最后原子替换 `current.json`。失败或取消会删除 staging，并保留此前 current generation 可用。运行时选择顺序为显式运维 override、托管 current、系统发现。它绝不写入全局 npm 安装或 `PATH`。
 

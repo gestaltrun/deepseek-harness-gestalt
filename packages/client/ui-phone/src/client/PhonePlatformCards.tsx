@@ -79,15 +79,19 @@ export function PhonePlatformCards(props: PhonePlatformCardsProps): ReactNode {
           <span className={css.logo} aria-hidden="true">●</span>
           <div><h3>iOS</h3><p>模拟器与 USB 真机</p></div>
         </header>
-        <IosComponents state={props.ios} />
-        <IosStatus state={props.ios} unsupportedMessage={props.iosUnsupportedMessage} />
-        <IosActions
-          state={props.ios}
-          onPrepare={props.onPrepareIos}
-          onCancel={props.onCancelIos}
-          onRefresh={props.onRefreshIos}
-          onStart={props.onStartIos}
-        />
+        {props.ios.kind === 'unsupported'
+          ? <IosUnsupported message={props.iosUnsupportedMessage || props.ios.reason} />
+          : <>
+            <IosComponents state={props.ios} />
+            <IosStatus state={props.ios} />
+            <IosActions
+              state={props.ios}
+              onPrepare={props.onPrepareIos}
+              onCancel={props.onCancelIos}
+              onRefresh={props.onRefreshIos}
+              onStart={props.onStartIos}
+            />
+          </>}
       </article>
     </div>
   )
@@ -109,11 +113,16 @@ function IosComponents({ state }: { readonly state: PhoneIosView }): ReactNode {
   )
 }
 
-function IosStatus(props: { readonly state: PhoneIosView; readonly unsupportedMessage: string }): ReactNode {
+function IosUnsupported({ message }: { readonly message: string }): ReactNode {
+  return <div className={css.unavailable}><strong>iOS 设备控制需要 macOS + Xcode</strong><p>{message}</p></div>
+}
+
+type SupportedIosView = Exclude<PhoneIosView, { readonly kind: 'unsupported' }>
+
+function IosStatus(props: { readonly state: SupportedIosView }): ReactNode {
   const state = props.state
   switch (state.kind) {
     case 'deferred': return <p className={css.status}>等待 iOS 环境 Provider…</p>
-    case 'unsupported': return <div className={css.unavailable}><strong>iOS 模拟器需要 macOS</strong><p>{props.unsupportedMessage || state.reason}</p></div>
     case 'checking': return <p className={css.status}>正在检测 Xcode、Apple 授权、iOS Runtime 与模拟器…</p>
     case 'xcode-missing': return <p className={css.problem}>{state.message}</p>
     case 'license-required': return <p className={css.problem}>请在 Xcode 中接受 Apple 许可；Gestalt 不会代替你接受。{state.message}</p>
@@ -127,13 +136,16 @@ function IosStatus(props: { readonly state: PhoneIosView; readonly unsupportedMe
 }
 
 function IosActions(props: {
-  readonly state: PhoneIosView
+  readonly state: SupportedIosView
   readonly onPrepare: () => void
   readonly onCancel: () => void
   readonly onRefresh: () => void
   readonly onStart: () => void
 }): ReactNode {
-  if (props.state.kind === 'preparing') return <Button variant="outline" onClick={props.onCancel}>取消</Button>
+  if (props.state.kind === 'preparing'
+    || props.state.kind === 'checking' && props.state.operation === 'prepare') {
+    return <Button variant="outline" onClick={props.onCancel}>取消</Button>
+  }
   if (props.state.kind === 'ready') {
     return <SimulatorReadyActions running={props.state.running} onStart={props.onStart} onRefresh={props.onRefresh} />
   }

@@ -17,14 +17,8 @@
 - article:
   - heading "iOS" [level=3]
   - paragraph: 模拟器与 USB 真机
-  - strong: 完整 Xcode
-  - text: 需要手动安装或更新
-  - strong: iOS Simulator Runtime
-  - text: 可在这里一键下载
-  - strong: DSH Gestalt iPhone
-  - text: 默认 iPhone 模拟器
-  - strong: iOS 模拟器需要 macOS
-  - paragraph: iOS 模拟器需要在安装 Xcode 的 macOS 上使用。
+  - strong: iOS 设备控制需要 macOS + Xcode
+  - paragraph: iOS Simulator 和 iPhone 真机控制均需要安装完整 Xcode 的 macOS。Windows 与 Linux 不支持这些功能。
 - article:
   - heading "手机设备" [level=3]
   - paragraph: 把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。

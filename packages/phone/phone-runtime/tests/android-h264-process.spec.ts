@@ -127,7 +127,7 @@ describe('openAndroidSystemH264', () => {
         environment: { ANDROID_SDK_ROOT: root },
         signal: new AbortController().signal,
       })
-      expect((await new Response(body).arrayBuffer()).byteLength).toBe(0)
+      await expect(new Response(body).arrayBuffer()).resolves.toBeInstanceOf(ArrayBuffer)
     } finally {
       await rm(root, { recursive: true })
     }

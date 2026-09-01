@@ -21,6 +21,7 @@ import { MobilecliServerProcess, TERM_ESCAPE_MS } from '../src/server-process.ts
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.clearAllMocks()
 })
 
@@ -73,6 +74,35 @@ describe('MobilecliServerProcess stop policy', () => {
     await expect(runtimeProcess.exit).resolves.toEqual({ code: null, signal: 'SIGKILL' })
     expect(runtimeProcess.alive).toBe(false)
   }, TERM_ESCAPE_MS + 5_000)
+
+  it('uses the default POSIX process-group signal edge', async () => {
+    const events = new EventEmitter()
+    const stderr = new PassThrough()
+    let closed = false
+    const child = Object.assign(events, { pid: 12_346, stderr, kill: vi.fn() }) as unknown as ChildProcess
+    spawnMock.mockReturnValue(child)
+    const processKill = vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+      queueMicrotask(() => {
+        closed = true
+        events.emit('close', null, signal)
+      })
+      return true
+    })
+    const runtimeProcess = new MobilecliServerProcess(
+      { executablePath: '/mobilecli', port: 12_000 },
+      {
+        platform: 'darwin',
+        probeGroup: () => {
+          if (closed) throw Object.assign(new Error('gone'), { code: 'ESRCH' })
+        },
+      },
+    )
+
+    await runtimeProcess.stop()
+
+    expect(processKill).toHaveBeenCalledWith(-12_346, 'SIGTERM')
+    await expect(runtimeProcess.exit).resolves.toEqual({ code: null, signal: 'SIGTERM' })
+  })
 
   it('uses one immediate bounded Windows forced tree termination', async () => {
     const events = new EventEmitter()

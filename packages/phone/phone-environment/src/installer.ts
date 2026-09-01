@@ -35,11 +35,11 @@ export interface MobilecliDownloadProgress {
   readonly totalBytes: number
 }
 
-/** Installer dependencies; tests replace only the nondeterministic HTTP boundary. */
+/** Installer dependencies selected by the Host service. */
 export interface MobilecliInstallerOptions {
   readonly fetch?: typeof fetch
-  /** Test replacement for the platform executable probe. */
-  readonly probeVersion?: typeof probeMobilecliVersion
+  /** Version probe selected by the Host service. */
+  readonly probeVersion: MobilecliVersionProbe
   readonly onProgress?: (progress: MobilecliDownloadProgress) => void
   readonly onPhase?: (phase: 'downloading' | 'verifying') => void
 }
@@ -62,7 +62,7 @@ export async function installManagedMobilecli(
   root: string,
   asset: MobilecliReleaseAsset,
   signal: AbortSignal,
-  options: MobilecliInstallerOptions = {},
+  options: MobilecliInstallerOptions,
 ): Promise<ManagedMobilecliInstall> {
   await ensurePrivateRoot(root)
   const staging = await mkdtemp(join(root, '.staging-'))
@@ -96,8 +96,7 @@ export async function installManagedMobilecli(
       await handle.close()
     }
     await chmod(stagedExecutable, 0o700)
-    const probeVersion = options.probeVersion ?? probeMobilecliVersion
-    const version = await probeVersion(stagedExecutable, signal)
+    const version = await options.probeVersion(stagedExecutable, signal)
     if (version !== MOBILECLI_MANAGED_VERSION) {
       throw new PhoneEnvironmentError(
         'PHONE_ENVIRONMENT_VERSION',
@@ -111,7 +110,7 @@ export async function installManagedMobilecli(
       await rename(stagedVersion, finalVersion)
     } catch (error) {
       if (!await isExistingDirectory(finalVersion)) throw error
-      const existingVersion = await probeVersion(join(finalVersion, asset.executable), signal)
+      const existingVersion = await options.probeVersion(join(finalVersion, asset.executable), signal)
       if (existingVersion !== version) {
         throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'existing managed mobilecli failed the pinned version probe')
       }
@@ -207,29 +206,51 @@ async function downloadAsset(
   }
 }
 
+/** Promise-form subprocess adapter used by the version-probe factory. */
+export type MobilecliVersionExec = (
+  executablePath: string,
+  args: string[],
+  options: {
+    encoding: 'utf8'
+    env: Record<string, string>
+    timeout: number
+    windowsHide: true
+    signal?: AbortSignal
+  },
+) => Promise<{ stdout: string; stderr: string }>
+
+/** Version-probe operation selected by the Host service. */
+export type MobilecliVersionProbe = (executablePath: string, signal?: AbortSignal) => Promise<string>
+
 /**
- * Probe the executable's own version output.
- * @param executablePath - verified archive output or discovered host executable.
- * @param signal - cancellation signal.
- * @returns parsed semantic version.
+ * Bind semantic version parsing and failure normalization to one subprocess adapter.
+ * @param command - Promise-form executable runner.
+ * @returns a bounded mobilecli version probe.
  */
-export async function probeMobilecliVersion(executablePath: string, signal?: AbortSignal): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync(executablePath, ['--version'], {
-      encoding: 'utf8',
-      env: scrubbedParentEnv(),
-      timeout: VERSION_PROBE_TIMEOUT_MS,
-      windowsHide: true,
-      ...(signal === undefined ? {} : { signal }),
-    })
-    const match = /^mobilecli version (\d+\.\d+\.\d+)\s*$/u.exec(stdout)
-    if (match?.[1] === undefined) throw new Error(`unexpected output ${JSON.stringify(stdout.trim())}`)
-    return match[1]
-  } catch (error) {
-    if (signal?.aborted === true) throw cancellationError(error)
-    throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'mobilecli version probe failed', { cause: error })
+export function createMobilecliVersionProbe(command: MobilecliVersionExec): MobilecliVersionProbe {
+  return async (executablePath, signal) => {
+    try {
+      const { stdout } = await command(executablePath, ['--version'], {
+        encoding: 'utf8',
+        env: scrubbedParentEnv(),
+        timeout: VERSION_PROBE_TIMEOUT_MS,
+        windowsHide: true,
+        ...(signal === undefined ? {} : { signal }),
+      })
+      const match = /^mobilecli version (\d+\.\d+\.\d+)\s*$/u.exec(stdout)
+      if (match?.[1] === undefined) throw new Error(`unexpected output ${JSON.stringify(stdout.trim())}`)
+      return match[1]
+    } catch (error) {
+      if (signal?.aborted === true) throw cancellationError(error)
+      throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'mobilecli version probe failed', { cause: error })
+    }
   }
 }
+
+/** Probe one executable through the production child-process adapter. */
+export const probeMobilecliVersion = createMobilecliVersionProbe(
+  execFileAsync,
+)
 
 /**
  * Read the atomically published managed current pointer for this host.

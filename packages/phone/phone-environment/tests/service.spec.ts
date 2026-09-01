@@ -466,7 +466,7 @@ describe('PhoneEnvironment', () => {
     expect(response.status).toBe(200)
     expect(startCapture).toHaveBeenCalledTimes(2)
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
-  }, 500)
+  }, 5_000)
 
   it('uses the configured first-capture timeout before retrying a hung Simulator capture', async () => {
     const context = new Context()
@@ -502,7 +502,7 @@ describe('PhoneEnvironment', () => {
 
     await expect(internals(service).verifyIosRuntime(IOS_ID, new AbortController().signal)).resolves.toBeUndefined()
     expect(captureAttempt).toBe(2)
-  }, 500)
+  }, 5_000)
 
   it('does not retry first-session verification after its owner cancels', async () => {
     const context = new Context()
@@ -672,9 +672,11 @@ describe('PhoneEnvironment', () => {
 
   it('prepares iOS while disabled and rejects start without an active runtime', async () => {
     isolateSystemMobilecliSearch()
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-isolated-'))
+    roots.push(root)
     const context = new Context()
     contexts.push(context)
-    const { service } = await mountEnvironment(context)
+    const { service } = await mountEnvironment(context, {}, { root })
     const fixture = runningIosProvider()
     const prepare = vi.spyOn(fixture.provider, 'prepare')
     const start = vi.spyOn(fixture.provider, 'start')

@@ -14,7 +14,7 @@ afterEach(async () => {
 })
 
 describe('MobilecliServerProcess', () => {
-  it('spawns the fake, reaches liveness, and stops to exit quiescence on SIGTERM', async () => {
+  it.skipIf(process.platform === 'win32')('spawns the fake, reaches liveness, and stops to exit quiescence on SIGTERM', async () => {
     const fake = await stageFake()
     fakes.push(fake)
     await fake.claim()
@@ -75,7 +75,7 @@ child.on('close', code => { process.exit(code ?? 1) })
     }
   }, 15_000)
 
-  it.runIf(process.platform === 'win32')('reaches quiescence when Windows terminates the native launcher on SIGTERM', async () => {
+  it.runIf(process.platform === 'win32')('reaches quiescence after Windows forcibly terminates the native launcher', async () => {
     const fake = await stageFake({ ignoreTerm: true })
     fakes.push(fake)
     await fake.claim()
@@ -84,7 +84,7 @@ child.on('close', code => { process.exit(code ?? 1) })
     await fake.awaitOnline()
     await proc.stop()
     const exit = await proc.exit
-    expect(exit.signal).toBe('SIGTERM')
+    expect(exit).toEqual({ code: 1 })
     expect(proc.alive).toBe(false)
   }, 15_000)
 

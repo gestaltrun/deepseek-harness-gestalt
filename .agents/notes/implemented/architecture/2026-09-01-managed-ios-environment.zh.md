@@ -16,7 +16,7 @@ Status: implemented
 
 Xcode 安装或更新、Apple 许可接受、首次启动授权、Apple ID、系统权限、真机解锁与信任、开发者模式、签名身份和预置描述文件都保持人工处理。产品文案把手机侧组件称为「设备控制代理」，不承诺某一种上游内部实现。
 
-只有当前 mobilecli generation 将精确模拟器列为在线，并且公共 format-specific 画面验证器识别出 MJPEG/JPEG 帧后，稳定服务才发布运行 ready。Provider 注册、启用 reconcile 或手动刷新发现运行中的模拟器时，也由同一个事务持有；取消只会让该事实保持 pending，不能直接提升 Provider 快照。mobilecli 不为 iOS 模拟器提供 H264，因此共享的真实流 fallback 会显示实际 MJPEG 格式，不制造 H264 结果。浏览器与模型可见消费方因此共享一个已提交的就绪事实。iOS 环境依赖 Android 就绪基础和真实流 fallback，不重复实现其中任何机制。
+只有当前 mobilecli generation 将精确模拟器列为在线，并且公共 format-specific 画面验证器识别出 MJPEG/JPEG 帧后，稳定服务才发布运行 ready。Provider 注册、启用 reconcile 或手动刷新发现运行中的模拟器时，也由同一个事务持有；取消只会让该事实保持 pending，不能直接提升 Provider 快照。候选发现与一键 mobilecli 准备会在激活后 reconcile 同一个 pending 事实，也覆盖先观察到已启动模拟器、后安装 mobilecli 的顺序。mobilecli 不为 iOS 模拟器提供 H264，因此共享的真实流 fallback 会显示实际 MJPEG 格式，不制造 H264 结果。浏览器与模型可见消费方因此共享一个已提交的就绪事实。iOS 环境依赖 Android 就绪基础和真实流 fallback，不重复实现其中任何机制。
 
 ## Alternatives considered
 

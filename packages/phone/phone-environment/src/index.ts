@@ -200,16 +200,7 @@ export class PhoneEnvironment extends Service {
     }
     if (this.candidate === undefined || this.candidateVersion === undefined) await this.refresh(signal)
     else await this.activateCandidate(this.candidate, this.candidateVersion, signal)
-    await this.iosTask?.catch((error: unknown) => {
-      if (!isCancellation(error)) throw error
-    })
-    const ios = this.ios?.snapshot()
-    if (ios?.kind === 'ready' && ios.running
-      && (this.current.platforms.ios.kind !== 'ready' || !this.current.platforms.ios.running)) {
-      await this.runIosOperation(async (_provider, operationSignal) => {
-        await this.activateIosRuntime(ios, operationSignal)
-      }, signal)
-    }
+    await this.reconcilePendingIosRuntime(signal)
   }
 
   /**
@@ -339,6 +330,14 @@ export class PhoneEnvironment extends Service {
         this.candidateVersion = installed.version
         if (this.current.enabled) await this.activateCandidate(this.candidate, installed.version, controller.signal)
         else this.publishReady('managed', installed.version)
+        if (this.current.enabled) {
+          try {
+            await this.reconcilePendingIosRuntime(controller.signal)
+          } catch (error) {
+            if (isCancellation(error)) throw error
+            this.ctx.logger.error(error)
+          }
+        }
         return this.current
       } catch (error) {
         this.publishRuntime(controller.signal.aborted
@@ -509,6 +508,23 @@ export class PhoneEnvironment extends Service {
         await this.activateIosRuntime(state, signal)
       }
     })
+  }
+
+  private async reconcilePendingIosRuntime(ownerSignal?: AbortSignal): Promise<void> {
+    if (this.ios === undefined) return
+    const active = this.iosTask
+    if (active !== undefined) {
+      try { await active } catch (error) { if (!isCancellation(error)) throw error }
+    }
+    const state = this.ios?.snapshot()
+    if (state?.kind !== 'ready' || !state.running
+      || !this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) return
+    if (this.current.platforms.ios.kind === 'ready' && this.current.platforms.ios.running
+      && this.current.platforms.ios.deviceId === state.deviceId) return
+    ownerSignal?.throwIfAborted()
+    await this.runIosOperation(async (_provider, signal) => {
+      await this.activateIosRuntime(state, signal)
+    }, ownerSignal)
   }
 
   private requireIos(): IosEnvironmentProvider {
@@ -701,15 +717,22 @@ export class PhoneEnvironment extends Service {
     return probeMobilecliVersion(executablePath, signal)
   }
 
+  /**
+   * Resolve the optional system mobilecli candidate without changing candidate precedence.
+   * @returns the executable path, or undefined when system discovery finds none.
+   */
+  protected resolveSystemRuntime(): string | undefined {
+    try {
+      return resolveMobilecliExecutable({ env: process.env })
+    } catch {
+      return undefined
+    }
+  }
+
   private async detectRuntime(signal: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     try {
       const managed = await readManagedMobilecli(this.root, process.platform, process.arch, signal)
-      let system: string | undefined
-      try {
-        system = resolveMobilecliExecutable({ env: process.env })
-      } catch {
-        // Absence is the ordinary missing state; fixed guidance belongs in the UI.
-      }
+      const system = this.resolveSystemRuntime()
       const candidate = selectPhoneRuntimeCandidate({
         ...(this.executableOverride === undefined ? {} : { override: this.executableOverride }),
         ...(managed === undefined ? {} : { managed: managed.executablePath }),
@@ -733,7 +756,15 @@ export class PhoneEnvironment extends Service {
       }
       this.candidate = candidate
       this.candidateVersion = version
-      if (this.current.enabled) await this.activateCandidate(candidate, version, signal)
+      if (this.current.enabled) {
+        await this.activateCandidate(candidate, version, signal)
+        try {
+          await this.reconcilePendingIosRuntime(signal)
+        } catch (error) {
+          if (isCancellation(error)) throw error
+          this.ctx.logger.error(error)
+        }
+      }
       else this.publishReady(candidate.source, version)
     } catch (error) {
       this.candidate = undefined

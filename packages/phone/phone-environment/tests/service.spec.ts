@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
+import { zipSync } from 'fflate'
 import { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import { buildGradientJpeg } from '../../phone-runtime/tests/fixtures/u3-visible-frames.ts'
 import PhoneEnvironment, {
@@ -15,9 +17,21 @@ import PhoneEnvironment, {
 import type {
   AndroidEnvironmentProvider, AndroidPreparationPlan, IosEnvironmentProvider,
   IosPreparationPlan, PhoneAndroidState, PhoneIosState,
+  MobilecliReleaseAsset,
 } from '../src/index.ts'
 
+let managedAssetOverride: MobilecliReleaseAsset | undefined
+let systemRuntimeDisabled = false
+
 class TestPhoneEnvironment extends PhoneEnvironment {
+  protected override selectManagedAsset(platform: string, architecture: string): MobilecliReleaseAsset {
+    return managedAssetOverride ?? super.selectManagedAsset(platform, architecture)
+  }
+
+  protected override resolveSystemRuntime(): string | undefined {
+    return systemRuntimeDisabled ? undefined : super.resolveSystemRuntime()
+  }
+
   protected override async probeRuntimeVersion(executablePath: string): Promise<string> {
     try {
       await access(executablePath)
@@ -69,6 +83,9 @@ async function rawGet(url: string, host: string): Promise<{ status: number; body
 }
 
 afterEach(async () => {
+  managedAssetOverride = undefined
+  systemRuntimeDisabled = false
+  vi.unstubAllGlobals()
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
@@ -305,6 +322,57 @@ describe('PhoneEnvironment', () => {
     expect(cancelled.status).toBe(200)
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
     expect(service.snapshot().platforms.ios).not.toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it.skipIf(process.platform === 'win32')('reconciles pending booted iOS after one-click mobilecli preparation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-managed-order-'))
+    roots.push(root)
+    const executableBytes = new TextEncoder().encode('#!/bin/sh\necho "mobilecli version 1.0.5"\n')
+    const archive = zipSync({ mobilecli: executableBytes })
+    managedAssetOverride = {
+      platform: process.platform === 'darwin' ? 'darwin' : 'linux',
+      architecture: process.arch === 'arm64' ? 'arm64' : 'x64',
+      name: 'mobilecli-1.0.5-fixture.zip',
+      url: 'https://github.com/mobile-next/mobilecli/releases/download/1.0.5/mobilecli-fixture.zip',
+      bytes: archive.byteLength,
+      sha256: createHash('sha256').update(archive).digest('hex'),
+      executable: 'mobilecli',
+    }
+    systemRuntimeDisabled = true
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(archive, {
+      status: 200, headers: { 'content-length': String(archive.byteLength) },
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(7)) } }),
+    }))
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { root })
+    await service.setEnabled(true)
+    expect(service.snapshot().runtime).toMatchObject({ kind: 'missing' })
+    const { provider } = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    })
+    expect(startCapture).not.toHaveBeenCalled()
+
+    await service.prepare()
+
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(service.snapshot().runtime).toMatchObject({ kind: 'ready', source: 'managed' })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+    expect(startCapture).toHaveBeenCalledWith({
+      deviceId: IOS_ID, format: 'mjpeg', signal: expect.any(AbortSignal),
+    })
   })
 
   it('requires Android license consent and reactivates mobilecli with the Provider environment', async () => {

@@ -172,6 +172,8 @@ describe('PhoneConnectionController lifecycle', () => {
     let socketAttempts = 0
     const gateway: PhoneStreamGateway = {
       mintSession: () => pending,
+      agentStatus: async () => ({ deviceId: 'emulator-5554', installed: true }),
+      installAgent: async () => ({ deviceId: 'emulator-5554', installed: true }),
       connectIo: () => {
         socketAttempts += 1
         throw new Error('a stale mint must not open io')
@@ -207,6 +209,32 @@ describe('PhoneConnectionController lifecycle', () => {
         error: new PhoneStreamHttpError(403, 'forbidden', 'forbidden'),
         failure: { kind: 'refused' },
       },
+      {
+        name: 'iOS real-device agent is missing',
+        error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent is missing'),
+        failure: { kind: 'agent-missing', agentRecovery: 'install' },
+      },
+      {
+        name: 'iPhone is locked',
+        error: new PhoneStreamHttpError(
+          502, 'PHONE_REAL_DEVICE_ISSUE', 'unlock the device', 'device-locked',
+        ),
+        failure: { kind: 'device-locked' },
+      },
+      {
+        name: 'Host has no provisioning profile',
+        error: new PhoneStreamHttpError(
+          409, 'PHONE_AGENT_PROFILE_REQUIRED', 'configure a provisioning profile',
+        ),
+        failure: { kind: 'agent-profile-required' },
+      },
+      {
+        name: 'free profile expired',
+        error: new PhoneStreamHttpError(
+          502, 'PHONE_REAL_DEVICE_ISSUE', 'profile expired', 'profile-expired',
+        ),
+        failure: { kind: 'profile-expired', agentRecovery: 'reinstall' },
+      },
     ]
     for (const testCase of cases) {
       const gateway = new FakeGateway()
@@ -217,6 +245,159 @@ describe('PhoneConnectionController lifecycle', () => {
       await flush()
       expect(controller.snapshot()).toEqual({ kind: 'error', failure: testCase.failure })
       expect(scheduler.scheduledCount).toBe(0)
+    }
+  })
+
+  it('installs a missing iOS real-device agent and reconnects into GUI control', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent is missing') })
+    gateway.queueMint({ session: {
+      ...SESSION_A,
+      deviceId: 'UDID-9',
+      agentManaged: true,
+    } })
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+    controller.connect()
+    await flush()
+    expect(controller.snapshot()).toEqual({
+      kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' },
+    })
+
+    controller.recoverAgent(false)
+    expect(controller.snapshot()).toEqual({ kind: 'repairing-agent', force: false })
+    await flush()
+    gateway.lastSocket!.accept()
+    controller.noteSurface('h264', 390, 844)
+    expect(controller.button('HOME')).toBe(true)
+    expect(gateway.agentInstallCalls).toEqual([{ deviceId: 'UDID-9', force: false }])
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'button', params: { deviceId: 'UDID-9', button: 'HOME' },
+    })
+  })
+
+  it('keeps agent recovery within an error generation and preserves a failed install result', async () => {
+    const gateway = new FakeGateway()
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9' })
+    controller.recoverAgent(false)
+    expect(gateway.agentInstallCalls).toEqual([])
+
+    gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
+    gateway.queueAgentInstall({ installed: false })
+    controller.connect()
+    await flush()
+    controller.recoverAgent(false)
+    await flush()
+    expect(controller.snapshot()).toEqual({
+      kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' },
+    })
+
+    gateway.queueAgentInstall({
+      error: new PhoneStreamHttpError(409, 'PHONE_AGENT_PROFILE_REQUIRED', 'configure profile'),
+    })
+    controller.recoverAgent(false)
+    await flush()
+    expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'agent-profile-required' } })
+  })
+
+  it('drops stale agent install success and failure after disconnect', async () => {
+    for (const outcome of ['success', 'failure'] as const) {
+      const gateway = new FakeGateway()
+      gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
+      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9' })
+      controller.connect()
+      await flush()
+      const pending = Promise.withResolvers<{ readonly deviceId: string; readonly installed: boolean }>()
+      vi.spyOn(gateway, 'installAgent').mockReturnValue(pending.promise)
+      controller.recoverAgent(false)
+      controller.disconnect()
+      if (outcome === 'success') pending.resolve({ deviceId: 'UDID-9', installed: true })
+      else pending.reject(new Error('late install failure'))
+      await flush()
+      expect(controller.snapshot()).toEqual({ kind: 'idle' })
+    }
+  })
+
+  it('re-checks the agent after a managed real-device picture exhausts retries', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const managed = { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true }
+    for (let attempt = 0; attempt < 4; attempt += 1) gateway.queueMint({ session: managed })
+    gateway.queueAgentStatus({
+      error: new PhoneStreamHttpError(
+        502, 'PHONE_REAL_DEVICE_ISSUE', 'device tunnel failed', 'tunnel-failed',
+      ),
+    })
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      gateway.lastSocket!.drop()
+      scheduler.runNext()
+      await flush()
+      gateway.lastSocket!.accept()
+    }
+    gateway.lastSocket!.drop()
+    expect(controller.snapshot()).toEqual({ kind: 'checking-agent' })
+    await flush()
+    expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'tunnel-failed' } })
+    expect(gateway.agentStatusDevices).toEqual(['UDID-9'])
+  })
+
+  it('offers install or reinstall after a managed picture failure based on agent status', async () => {
+    for (const installed of [false, true]) {
+      const gateway = new FakeGateway()
+      const scheduler = new ManualScheduler()
+      const managed = { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true }
+      for (let attempt = 0; attempt < 4; attempt += 1) gateway.queueMint({ session: managed })
+      gateway.queueAgentStatus({ installed })
+      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+      controller.connect()
+      await flush()
+      gateway.lastSocket!.accept()
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        gateway.lastSocket!.drop()
+        scheduler.runNext()
+        await flush()
+        gateway.lastSocket!.accept()
+      }
+      gateway.lastSocket!.drop()
+      await flush()
+      expect(controller.snapshot()).toEqual({
+        kind: 'error',
+        failure: installed
+          ? { kind: 'interrupted', agentRecovery: 'reinstall' }
+          : { kind: 'agent-missing', agentRecovery: 'install' },
+      })
+    }
+  })
+
+  it('drops stale agent status success and failure after disconnect', async () => {
+    for (const outcome of ['success', 'failure'] as const) {
+      const gateway = new FakeGateway()
+      const scheduler = new ManualScheduler()
+      const managed = { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true }
+      for (let attempt = 0; attempt < 4; attempt += 1) gateway.queueMint({ session: managed })
+      const pending = Promise.withResolvers<{ readonly deviceId: string; readonly installed: boolean }>()
+      vi.spyOn(gateway, 'agentStatus').mockReturnValue(pending.promise)
+      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+      controller.connect()
+      await flush()
+      gateway.lastSocket!.accept()
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        gateway.lastSocket!.drop()
+        scheduler.runNext()
+        await flush()
+        gateway.lastSocket!.accept()
+      }
+      gateway.lastSocket!.drop()
+      expect(controller.snapshot()).toEqual({ kind: 'checking-agent' })
+      controller.disconnect()
+      if (outcome === 'success') pending.resolve({ deviceId: 'UDID-9', installed: true })
+      else pending.reject(new Error('late status failure'))
+      await flush()
+      expect(controller.snapshot()).toEqual({ kind: 'idle' })
     }
   })
 

@@ -17,6 +17,7 @@
       config:
         deferStart: true
         serverPort: !!js "Number(process.env.DSH_PHONE_SERVER_PORT || 12000)"
+        provisioningProfilePath: !!js process.env.DSH_PHONE_PROVISIONING_PROFILE
 
     - id: phone-environment
       name: '@deepseek-ai/dsh-phone-environment'

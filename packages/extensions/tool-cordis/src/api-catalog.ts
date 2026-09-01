@@ -1366,7 +1366,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Keep the on-device agent installed for one listed device. Without `force` the upstream `agent status` command runs first and an already-installed agent answers without any install spawn, so repeated calls are idempotent; `force` reinstalls and re-signs through the configured provisioning profile, which real iOS installs require upstream.',
         parameters: [{ name: 'id', description: 'Branded id of the device to install on.' }, { name: 'options', description: 'Force reinstall switch and optional cancellation.' }],
         returns: 'the resulting installation state; `reinstalled` is true only when this call spawned an install.',
-        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured real-device arm, and otherwise per the class-documented failure modes.'],
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_AGENT_PROFILE_REQUIRED` when a real-iOS install lacks `provisioningProfilePath`, `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured real-device arm, and otherwise per the class-documented failure modes.'],
       },
       {
         signature: 'onChanged(sub: (change: PhoneDeviceChange) => void): () => void',
@@ -1436,9 +1436,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Same-origin phone stream Consumer. It injects `phoneDevices` and `webServer`, registers the IO upgrade and signed capture routes, and publishes `ctx.phoneStream` so later GUI consumers can mint URLs without talking to `:12000`.',
     methods: [
       {
-        signature: 'sessionFor(id: DeviceId): PhoneStreamSession',
+        signature: 'sessionFor(id: DeviceId, agentManaged: boolean = false): PhoneStreamSession',
         description: 'Mint signed same-origin MJPEG and H264 URLs for one known device.',
-        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }],
+        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }, { name: 'agentManaged', description: 'Whether the session addresses an iOS real device whose agent is managed through this Consumer.' }],
         returns: 'the IO upgrade path plus both capture URLs and their expiry.',
       },
     ],
@@ -4916,7 +4916,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneStreamSession',
-    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
+    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly agentManaged: boolean;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
   },
   {
     name: 'PhoneStreamUrl',

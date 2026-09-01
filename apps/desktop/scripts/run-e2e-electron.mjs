@@ -27,6 +27,7 @@ const managedEnvironmentFixture = join(e2eDir, 'managed-phone-environment.mjs')
 const wdioConfig = join(e2eDir, 'wdio.conf.ts')
 const wdioBin = join(desktopRoot, 'node_modules', '@wdio', 'cli', 'bin', 'wdio.js')
 const iosSimulatorId = '8294A429-4C99-411F-A46D-0AD9499B7FDD'
+const iosRealDeviceId = '00008120-REAL-E2E'
 
 if (process.platform === 'win32') {
   throw new Error('Desktop phone Electron e2e uses POSIX fakemobilecli launchers; Windows asset selection is covered separately')
@@ -43,7 +44,7 @@ function scrubEnvironment(source) {
     if (name.startsWith('DSH_PLATFORM_') || name.startsWith('DSH_REMOTE_RELAY_')) return false
     return ![
       'DSH_DESKTOP_SMOKE', 'DSH_DESKTOP_SMOKE_FILE', 'DSH_HOME', 'DSH_PHONE_MOBILECLI',
-      'DSH_PHONE_REAL_UDID', 'DSH_PHONE_SERVER_PORT', 'DSH_ELECTRON_E2E_ARTIFACT_DIR',
+      'DSH_PHONE_REAL_UDID', 'DSH_PHONE_PROVISIONING_PROFILE', 'DSH_PHONE_SERVER_PORT', 'DSH_ELECTRON_E2E_ARTIFACT_DIR',
       'DSH_ELECTRON_E2E_CDP_PORT', 'DSH_ELECTRON_E2E_FAKE_PORT', 'DSH_ELECTRON_E2E_USER_DATA',
       'DSH_ELECTRON_E2E_FAKE_OWNER', 'DSH_ELECTRON_E2E_WORKSPACE',
       'DSH_PHONE_MANAGED_FIXTURE_BYTES', 'DSH_PHONE_MANAGED_FIXTURE_SHA256',
@@ -154,6 +155,7 @@ async function stageFake() {
     await copyFile(framesSource, join(fixtures, 'u3-visible-frames.ts'))
     const devices = JSON.parse(await readFile(devicesSource, 'utf8'))
     const configPath = join(fixtures, 'fakemobilecli.config.json')
+    const agentStatePath = join(fixtures, 'fakemobilecli.agent-state.json')
     const configure = async (h264FailureDeviceIds = []) => {
       await writeFile(configPath, JSON.stringify({
         devices,
@@ -165,7 +167,12 @@ async function stageFake() {
       }))
     }
     await configure()
-    return { root, executable, ownerToken, configure }
+    const resetAgent = async () => {
+      await writeFile(agentStatePath, JSON.stringify({
+        installed: false, installCount: 0, statusCount: 0, lastInstallArgv: null,
+      }))
+    }
+    return { root, executable, ownerToken, configure, resetAgent }
   } catch (error) {
     await rm(root, { recursive: true, force: true })
     throw error
@@ -223,7 +230,7 @@ async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken, managedF
       await rm(artifactDir, { recursive: true, force: true })
       return await runSpecAttempt({
         name, spec, provider, mobilecli, fakeOwnerToken, managedFixture,
-        androidFixture: name === 'phone-android', iosFixture: name === 'phone-ios',
+        androidFixture: name === 'phone-android',
         artifactDir, fakePort, cdpPort, attempt,
       })
     })
@@ -233,7 +240,7 @@ async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken, managedF
 }
 
 async function runSpecAttempt({
-  name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, androidFixture, iosFixture,
+  name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, androidFixture,
   artifactDir, fakePort, cdpPort, attempt,
 }) {
   const runtimeRoot = await mkdtemp(join(tmpdir(), `dsh-desktop-e2e-${name}-`))
@@ -243,6 +250,7 @@ async function runSpecAttempt({
   const managedHome = join(runtimeRoot, 'managed-home')
   const managedBin = join(runtimeRoot, 'managed-bin')
   const smokeFile = join(artifactDir, 'main-smoke.log')
+  const provisioningProfile = join(runtimeRoot, 'fixture.mobileprovision')
   let code = 1
   const errors = []
   try {
@@ -251,7 +259,7 @@ async function runSpecAttempt({
     await mkdir(userData, { recursive: true, mode: 0o700 })
     await mkdir(workspace, { recursive: true, mode: 0o700 })
     const android = androidFixture ? await stageAndroidSdkFixture(runtimeRoot, dshHome) : undefined
-    const ios = iosFixture ? await stageIosFixture(runtimeRoot) : undefined
+    const ios = process.platform === 'darwin' ? await stageIosFixture(runtimeRoot) : undefined
     if (managedFixture !== undefined) {
       await mkdir(managedHome, { recursive: true, mode: 0o700 })
       await mkdir(managedBin, { recursive: true, mode: 0o700 })
@@ -260,6 +268,7 @@ async function runSpecAttempt({
       else await symlink(process.execPath, node)
     }
     await writeFile(smokeFile, '')
+    await writeFile(provisioningProfile, 'Electron e2e fixture provisioning profile')
     await writeFile(join(dshHome, 'settings.yaml'), [
       'ui-phone:',
       '  enabled: true',
@@ -277,10 +286,14 @@ async function runSpecAttempt({
     }
     const env = {
       ...cleanEnvironment,
+      ...(ios === undefined ? {} : {
+        PATH: managedFixture === undefined
+          ? [ios.bin, cleanEnvironment.PATH].filter(Boolean).join(':')
+          : [ios.bin, managedBin, '/usr/bin', '/bin'].join(':'),
+      }),
       ...(managedFixture === undefined ? {} : {
         // The managed lane admits one test-owned Node entry plus the OS roots
         // Electron itself needs, while excluding user package-manager roots.
-        PATH: [...(ios === undefined ? [] : [ios.bin]), managedBin, '/usr/bin', '/bin'].join(':'),
         HOME: managedHome,
         USERPROFILE: managedHome,
       }),
@@ -293,6 +306,7 @@ async function runSpecAttempt({
       DSH_DESKTOP_SMOKE_FILE: smokeFile,
       ...(mobilecli === undefined ? {} : { DSH_PHONE_MOBILECLI: mobilecli }),
       DSH_PHONE_SERVER_PORT: String(fakePort),
+      DSH_PHONE_PROVISIONING_PROFILE: provisioningProfile,
       DSH_ELECTRON_E2E_ARTIFACT_DIR: artifactDir,
       DSH_ELECTRON_E2E_CDP_PORT: String(cdpPort),
       DSH_ELECTRON_E2E_FAKE_PORT: String(fakePort),
@@ -546,7 +560,10 @@ try {
     : process.platform === 'darwin'
       ? { code: 1, errors: ['phone-ios skipped because phone-android failed'], cleanup: [], portCollision: false }
       : { code: 0, errors: [], cleanup: [], portCollision: false, skipped: 'iOS Simulator requires macOS' }
-  if (android.code === 0) await fake.configure(['emulator-5554', iosSimulatorId])
+  if (android.code === 0) {
+    await fake.resetAgent()
+    await fake.configure(['emulator-5554', iosSimulatorId, iosRealDeviceId])
+  }
   const live = android.code === 0 && ios.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
     : { code: 1, errors: ['phone-live skipped because an environment prerequisite failed'], cleanup: [], portCollision: false }

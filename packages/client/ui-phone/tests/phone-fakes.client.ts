@@ -15,6 +15,7 @@ import { vi } from 'vitest'
 export const SESSION_A: PhoneStreamSessionView = {
   deviceId: 'emulator-5554',
   ioPath: '/phone/ws/io',
+  agentManaged: false,
   mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1000 },
   h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1000 },
 }
@@ -175,11 +176,25 @@ export class FakeGateway implements PhoneStreamGateway {
   readonly sockets: FakeSocket[] = []
   readonly mintedDevices: string[] = []
   readonly dialedPaths: string[] = []
+  readonly agentStatusDevices: string[] = []
+  readonly agentInstallCalls: Array<{ readonly deviceId: string; readonly force: boolean }> = []
   private readonly mintScript: Array<{ readonly session?: PhoneStreamSessionView; readonly error?: unknown }> = []
+  private readonly agentStatusScript: Array<{ readonly installed?: boolean; readonly error?: unknown }> = []
+  private readonly agentInstallScript: Array<{ readonly installed?: boolean; readonly error?: unknown }> = []
 
   /** Queue one mint outcome; unqueued mints succeed with SESSION_A. */
   queueMint(outcome: { readonly session?: PhoneStreamSessionView; readonly error?: unknown }): void {
     this.mintScript.push(outcome)
+  }
+
+  /** Queue one real-device status outcome; unqueued checks report installed. */
+  queueAgentStatus(outcome: { readonly installed?: boolean; readonly error?: unknown }): void {
+    this.agentStatusScript.push(outcome)
+  }
+
+  /** Queue one real-device install outcome; unqueued installs succeed. */
+  queueAgentInstall(outcome: { readonly installed?: boolean; readonly error?: unknown }): void {
+    this.agentInstallScript.push(outcome)
   }
 
   async mintSession(deviceId: string): Promise<PhoneStreamSessionView> {
@@ -187,6 +202,20 @@ export class FakeGateway implements PhoneStreamGateway {
     const next = this.mintScript.shift()
     if (next !== undefined && next.error !== undefined) throw next.error
     return next?.session ?? SESSION_A
+  }
+
+  async agentStatus(deviceId: string): Promise<{ readonly deviceId: string; readonly installed: boolean }> {
+    this.agentStatusDevices.push(deviceId)
+    const next = this.agentStatusScript.shift()
+    if (next?.error !== undefined) throw next.error
+    return { deviceId, installed: next?.installed ?? true }
+  }
+
+  async installAgent(deviceId: string, force: boolean): Promise<{ readonly deviceId: string; readonly installed: boolean }> {
+    this.agentInstallCalls.push({ deviceId, force })
+    const next = this.agentInstallScript.shift()
+    if (next?.error !== undefined) throw next.error
+    return { deviceId, installed: next?.installed ?? true }
   }
 
   connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket {

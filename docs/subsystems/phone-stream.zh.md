@@ -21,6 +21,8 @@ interface PhoneStreamSession {
   readonly deviceId: DeviceId
   /** Exact-path WebSocket upgrade that forwards `device.io.*` JSON-RPC. */
   readonly ioPath: string
+  /** Whether this session addresses an iOS real device whose on-device agent is product-managed. */
+  readonly agentManaged: boolean
   /** Signed MJPEG capture URL. */
   readonly mjpeg: PhoneStreamUrl
   /** Signed H264 (`avc`) capture URL. */
@@ -46,9 +48,10 @@ Same-origin phone stream Consumer. It injects `phoneDevices` and `webServer`, re
 /**
  * Mint signed same-origin MJPEG and H264 URLs for one known device.
  * @param id - Branded device id present in the latest published listing.
+ * @param agentManaged - Whether the session addresses an iOS real device whose agent is managed through this Consumer.
  * @returns the IO upgrade path plus both capture URLs and their expiry.
  */
-sessionFor(id: DeviceId): PhoneStreamSession
+sessionFor(id: DeviceId, agentManaged: boolean = false): PhoneStreamSession
 ```
 
 Types: [DeviceId](phone-runtime.zh.md)

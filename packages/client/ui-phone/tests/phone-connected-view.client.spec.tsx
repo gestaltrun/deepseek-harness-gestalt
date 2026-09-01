@@ -13,7 +13,7 @@ import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
 import {
-  FakeGateway, FakeListingSource, flush, installFakeH264Playback, listingOf, ManualScheduler,
+  FakeGateway, FakeListingSource, flush, installFakeH264Playback, listingOf, ManualScheduler, SESSION_A,
 } from './phone-fakes.client.ts'
 
 let h264Runtime: ReturnType<typeof installFakeH264Playback>
@@ -451,6 +451,125 @@ describe('PhoneConnectedView toolbar', () => {
 })
 
 describe('PhoneConnectedView error and recovery arms', () => {
+  it('installs a missing real-iPhone agent and reaches live GUI control', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
+    gateway.queueMint({ session: {
+      ...SESSION_A,
+      deviceId: 'UDID-9',
+      agentManaged: true,
+    } })
+    render(
+      <PhoneConnectedView
+        serial="UDID-9"
+        name="Yishu iPhone"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([], [
+          { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
+      />,
+    )
+    await step(() => {})
+    expect(screen.getByText('设备控制代理未安装')).toBeTruthy()
+    const install = screen.getByRole('button', { name: '安装设备控制代理' })
+    const detect = screen.getByRole('button', { name: '重新检测' })
+    expect(install.className).toContain('minibtnPrimary')
+    expect(detect.className).toContain('minibtnSecondary')
+    fireEvent.click(install)
+    expect(screen.getByText('正在安装设备控制代理…')).toBeTruthy()
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    expect(screen.getByRole('img', { name: 'Yishu iPhone 实时画面' })).toBeTruthy()
+    expect(gateway.agentInstallCalls).toEqual([{ deviceId: 'UDID-9', force: false }])
+  })
+
+  it('renders every structured real-iPhone prerequisite without claiming automatic signing or trust', async () => {
+    const cases = [
+      ['device-locked', '请解锁 iPhone', 'iPhone 已锁定'],
+      ['agent-profile-required', '打开配置文件', '未配置真机签名描述文件'],
+      ['cert-untrusted', 'Developer Mode', '设备控制代理未受信任'],
+      ['profile-expired', '重新安装设备控制代理', '签名描述文件已过期'],
+      ['tunnel-failed', '重新连接', '真机连接通道未建立'],
+      ['device-unplugged', '重新连接', 'iPhone 已断开连接'],
+    ] as const
+    for (const [issue, action, title] of cases) {
+      const gateway = new FakeGateway()
+      gateway.queueMint({
+        error: issue === 'agent-profile-required'
+          ? new PhoneStreamHttpError(409, 'PHONE_AGENT_PROFILE_REQUIRED', issue)
+          : new PhoneStreamHttpError(502, 'PHONE_REAL_DEVICE_ISSUE', issue, issue),
+      })
+      const mounted = render(
+        <PhoneConnectedView
+          serial="UDID-9"
+          name="Yishu iPhone"
+          visible={true}
+          source={new FakeListingSource().seed(listingOf([], [
+            { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+          ]))}
+          onOpenDevice={() => {}}
+          createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
+        />,
+      )
+      await step(() => {})
+      expect(screen.getByText(title)).toBeTruthy()
+      expect(screen.getAllByText(new RegExp(action)).length).toBeGreaterThan(0)
+      mounted.unmount()
+    }
+  })
+
+  it('shows the agent-check and force-reinstall progress states', async () => {
+    const checkingGateway = new FakeGateway()
+    checkingGateway.queueMint({ session: { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true } })
+    vi.spyOn(checkingGateway, 'agentStatus').mockReturnValue(new Promise(() => {}))
+    const checking = render(
+      <PhoneConnectedView
+        serial="UDID-9"
+        name="Yishu iPhone"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([], [
+          { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway: checkingGateway, deviceId: serial, retryLimit: 0,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { checkingGateway.lastSocket!.accept() })
+    await act(async () => { h264Runtime.failLastDecoder(); await flush() })
+    await act(async () => {
+      fireEvent.error(screen.getByRole('img', { name: 'Yishu iPhone 实时画面' }))
+      await flush()
+    })
+    expect(screen.getByText('正在检测设备控制代理…')).toBeTruthy()
+    checking.unmount()
+
+    const reinstallGateway = new FakeGateway()
+    reinstallGateway.queueMint({ error: new PhoneStreamHttpError(
+      502, 'PHONE_REAL_DEVICE_ISSUE', 'profile expired', 'profile-expired',
+    ) })
+    vi.spyOn(reinstallGateway, 'installAgent').mockReturnValue(new Promise(() => {}))
+    render(
+      <PhoneConnectedView
+        serial="UDID-9"
+        name="Yishu iPhone"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([], [
+          { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: reinstallGateway, deviceId: serial })}
+      />,
+    )
+    await step(() => {})
+    fireEvent.click(screen.getByRole('button', { name: '重新安装设备控制代理' }))
+    expect(screen.getByText('正在重新安装设备控制代理…')).toBeTruthy()
+  })
+
   it('shows the refused and unavailable next-action copy', async () => {
     renderView(true, new PhoneStreamHttpError(403, 'forbidden', 'forbidden'))
     await step(() => {})

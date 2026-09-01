@@ -10,6 +10,7 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { deviceId, type DeviceId } from '@deepseek-ai/dsh-phone-runtime'
 import { buildGradientJpeg } from '../../phone-runtime/tests/fixtures/u3-visible-frames.ts'
 import PhoneEnvironment, {
+  Config,
   PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH, PHONE_ENVIRONMENT_ANDROID_START_PATH,
   PHONE_ENVIRONMENT_IOS_CANCEL_PATH, PHONE_ENVIRONMENT_IOS_PREPARE_PATH, PHONE_ENVIRONMENT_IOS_REFRESH_PATH,
   PHONE_ENVIRONMENT_IOS_START_PATH, PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
@@ -138,7 +139,7 @@ function isolateSystemMobilecliSearch(): void {
 async function mountEnvironment(
   context: Context,
   phoneDevices: object = {},
-  config: { root?: string; executablePath?: string } = {},
+  config: Config = {},
   Plugin: typeof PhoneEnvironment = TestPhoneEnvironment,
 ) {
   const fleet = {
@@ -146,6 +147,8 @@ async function mountEnvironment(
     onReadinessChanged: () => () => {},
     activateExecutable: async () => {},
     deactivate: async () => {},
+    agentStatus: async () => ({ installed: true }),
+    installAgent: async () => ({ installed: true, reinstalled: false }),
     ...phoneDevices,
   }
   context.provide('phoneDevices', fleet as never)
@@ -218,6 +221,7 @@ interface ServiceInternals {
     signal?: AbortSignal,
   ): Promise<void>
   cancelIos(): Promise<void>
+  verifyNewIosAgentPicture(id: DeviceId, signal: AbortSignal): Promise<void>
   verifyIosRuntime(id: DeviceId, signal: AbortSignal): Promise<void>
   requireCurrentIosRuntime(id: DeviceId): void
 }
@@ -312,6 +316,25 @@ function runningIosProvider(options: { readonly initialRunning?: boolean; readon
 }
 
 describe('PhoneEnvironment', () => {
+  it('resolves and validates the named iOS readiness durations', () => {
+    expect(Config({})).toMatchObject({
+      iosRuntimeVerifyTimeoutMs: 25_000,
+      iosAgentSettleDelayMs: 2_000,
+      iosAgentCaptureRetryDelayMs: 1_000,
+      iosAgentFirstCaptureTimeoutMs: 5_000,
+    })
+
+    for (const field of [
+      'iosRuntimeVerifyTimeoutMs',
+      'iosAgentSettleDelayMs',
+      'iosAgentCaptureRetryDelayMs',
+      'iosAgentFirstCaptureTimeoutMs',
+    ] as const) {
+      expect(() => Config({ [field]: 0 })).toThrow()
+      expect(() => Config({ [field]: 1.5 })).toThrow()
+    }
+  })
+
   it('marks active iOS preparation without marking passive refresh checking', async () => {
     const context = new Context()
     contexts.push(context)
@@ -368,26 +391,142 @@ describe('PhoneEnvironment', () => {
       contentType: 'multipart/x-mixed-replace; boundary=frame',
       body: new ReadableStream<Uint8Array>({ start(controller) { picture = controller } }),
     }))
+    const installAgent = vi.fn(async (_id: DeviceId, _options: { signal: AbortSignal }) => ({
+      installed: true, reinstalled: false,
+    }))
+    const agentStatus = vi.fn(async () => ({ installed: false }))
     const { service, origin } = await mountEnvironment(context, {
       activateExecutable: async () => {},
+      agentStatus,
+      installAgent,
       listDevices: async () => ({
         android: [], ios: { simulators: [{
           id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
         }], reals: [] },
       }),
       startCapture,
-    }, { executablePath: path })
+    }, {
+      executablePath: path,
+      iosAgentSettleDelayMs: 1,
+      iosAgentCaptureRetryDelayMs: 1,
+    })
     const { provider } = runningIosProvider()
     service.registerIosEnvironment(provider)
     await service.setEnabled(true)
 
     const starting = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
-    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() })
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() }, { timeout: 3_000 })
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
     picture.enqueue(buildGradientJpeg(4))
     expect((await starting).status).toBe(200)
+    expect(agentStatus).toHaveBeenCalledWith(IOS_ID, expect.any(AbortSignal))
+    expect(installAgent.mock.calls[0]?.[0]).toBe(IOS_ID)
+    expect(installAgent.mock.calls[0]?.[1].signal).toBeInstanceOf(AbortSignal)
     expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it('uses configured settle and retry delays for an early-ended first Simulator capture', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let captureAttempt = 0
+    const startCapture = vi.fn(async () => {
+      captureAttempt += 1
+      return {
+        contentType: 'multipart/x-mixed-replace; boundary=frame',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            if (captureAttempt === 1) controller.close()
+            else controller.enqueue(buildGradientJpeg(8))
+          },
+        }),
+      }
+    })
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      agentStatus: async () => ({ installed: false }),
+      installAgent: async () => ({ installed: true, reinstalled: false }),
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture,
+    }, {
+      executablePath: path,
+      iosAgentSettleDelayMs: 1,
+      iosAgentCaptureRetryDelayMs: 1,
+    })
+    service.registerIosEnvironment(runningIosProvider().provider)
+    await service.setEnabled(true)
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
+
+    expect(response.status).toBe(200)
+    expect(startCapture).toHaveBeenCalledTimes(2)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  }, 500)
+
+  it('uses the configured first-capture timeout before retrying a hung Simulator capture', async () => {
+    const context = new Context()
+    contexts.push(context)
+    let captureAttempt = 0
+    const { service } = await mountEnvironment(context, {
+      agentStatus: async () => ({ installed: false }),
+      installAgent: async () => ({ installed: true, reinstalled: false }),
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture: async (request: { signal: AbortSignal }) => {
+        captureAttempt += 1
+        return {
+          contentType: 'multipart/x-mixed-replace; boundary=frame',
+          body: captureAttempt === 1
+            ? new ReadableStream<Uint8Array>({
+              start(controller) {
+                request.signal.addEventListener('abort', () => { controller.close() }, { once: true })
+              },
+            })
+            : new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(9)) } }),
+        }
+      },
+    }, {
+      iosRuntimeVerifyTimeoutMs: 100,
+      iosAgentSettleDelayMs: 1,
+      iosAgentFirstCaptureTimeoutMs: 7,
+      iosAgentCaptureRetryDelayMs: 1,
+    })
+
+    await expect(internals(service).verifyIosRuntime(IOS_ID, new AbortController().signal)).resolves.toBeUndefined()
+    expect(captureAttempt).toBe(2)
+  }, 500)
+
+  it('does not retry first-session verification after its owner cancels', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async (request: { signal: AbortSignal }) => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          request.signal.addEventListener('abort', () => {
+            controller.error(request.signal.reason)
+          }, { once: true })
+        },
+      }),
+    }))
+    const { service } = await mountEnvironment(context, { startCapture })
+    const controller = new AbortController()
+    const verification = internals(service).verifyNewIosAgentPicture(IOS_ID, controller.signal)
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalledOnce() })
+
+    const cancellation = new Error('owner cancelled first-session verification')
+    controller.abort(cancellation)
+
+    await expect(verification).rejects.toBe(cancellation)
+    expect(startCapture).toHaveBeenCalledOnce()
   })
 
   it('rejects iOS readiness when the Simulator stream is not a recognizable picture', async () => {
@@ -681,8 +820,7 @@ describe('PhoneEnvironment', () => {
 
     fixture.provider.deactivate = async () => {}
     const nonErrorFailure: unknown = 'non-error cancellation failure'
-    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- exercise arbitrary Provider rejection normalization
-    owned.iosTask = Promise.reject(nonErrorFailure)
+    owned.iosTask = Promise.reject(nonErrorFailure) // oxlint-disable-line typescript/prefer-promise-reject-errors
     await expect(owned.cancelIos()).rejects.toMatchObject({
       message: 'iOS environment cancellation failed with a non-Error reason',
     })
@@ -737,15 +875,14 @@ describe('PhoneEnvironment', () => {
       listDevices: async (signal: AbortSignal) => await new Promise((_resolve, reject) => {
         signal.addEventListener('abort', () => {
           const reason: unknown = signal.reason
-          // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- preserve arbitrary AbortSignal.reason
-          reject(reason)
+          reject(reason) // oxlint-disable-line typescript/prefer-promise-reject-errors
         }, { once: true })
       }),
-    })
+    }, { iosRuntimeVerifyTimeoutMs: 7 })
     const owned = internals(service)
     const timed = owned.verifyIosRuntime(IOS_ID, new AbortController().signal)
-    const timedAssertion = expect(timed).rejects.toThrow(/did not produce/u)
-    await vi.advanceTimersByTimeAsync(120_000)
+    const timedAssertion = expect(timed).rejects.toThrow(/within 7ms/u)
+    await vi.advanceTimersByTimeAsync(7)
     await timedAssertion
 
     const aborted = new AbortController()

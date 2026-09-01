@@ -146,6 +146,7 @@ describe('PhoneSettingsCardController publish re-entrancy', () => {
 describe('PhoneSettingsCardController', () => {
   it('keeps the runtime subscription across environment-source replacement and disposes it', () => {
     const runtimeListeners = new Set<() => void>()
+    const dispose = vi.fn()
     const runtime: PhoneRuntimeSource = {
       getSnapshot: () => ({
         revision: 0,
@@ -165,6 +166,7 @@ describe('PhoneSettingsCardController', () => {
       refreshIos: async () => {},
       startIos: async () => {},
       ensureDetected: () => {},
+      dispose,
       subscribe: (listener) => {
         runtimeListeners.add(listener)
         return () => { runtimeListeners.delete(listener) }
@@ -178,6 +180,7 @@ describe('PhoneSettingsCardController', () => {
     expect(runtimeListeners.size).toBe(1)
     controller.dispose()
     expect(runtimeListeners.size).toBe(0)
+    expect(dispose).toHaveBeenCalledOnce()
   })
 
   it('republishes runtime snapshots and contains rejected runtime operations', async () => {
@@ -213,6 +216,7 @@ describe('PhoneSettingsCardController', () => {
       refreshIos,
       startIos,
       ensureDetected: vi.fn(),
+      dispose: vi.fn(),
       subscribe: (listener) => {
         runtimeListeners.add(listener)
         return () => { runtimeListeners.delete(listener) }
@@ -358,7 +362,7 @@ describe('PhoneSettingsCardController', () => {
       refresh: async () => {}, prepare, cancel: async () => {},
       prepareAndroid: async () => {}, cancelAndroid: async () => {}, refreshAndroid: async () => {}, startAndroid: async () => {},
       prepareIos: async () => {}, cancelIos: async () => {}, refreshIos: async () => {}, startIos: async () => {},
-      ensureDetected: () => {}, subscribe: () => () => {},
+      ensureDetected: () => {}, subscribe: () => () => {}, dispose: vi.fn(),
     }
     const controller = new PhoneSettingsCardController(host.scope, source, { writeText }, runtime)
     const face = controller.inject()

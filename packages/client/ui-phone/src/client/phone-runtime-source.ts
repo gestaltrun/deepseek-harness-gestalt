@@ -123,6 +123,8 @@ export interface PhoneRuntimeSource {
   startIos(): Promise<void>
   ensureDetected(): void
   subscribe(listener: () => void): () => void
+  /** Abort Host requests, clear polling, and silence later publications. */
+  dispose(): void
 }
 
 /** Initial state before the first Host pull. */
@@ -155,6 +157,10 @@ export function createHttpPhoneRuntimeSource(
   let snapshot = MISSING_PHONE_ENVIRONMENT
   let detected = false
   let active: Promise<void> | undefined
+  let passiveTimer: ReturnType<typeof setTimeout> | undefined
+  let operationTimer: ReturnType<typeof setTimeout> | undefined
+  const abortController = new AbortController()
+  const isDisposed = (): boolean => abortController.signal.aborted
   const listeners = new Set<() => void>()
   const notify = (): void => {
     for (const listener of [...listeners]) {
@@ -165,9 +171,31 @@ export function createHttpPhoneRuntimeSource(
       }
     }
   }
-  const request = async (path: string, method: 'GET' | 'POST'): Promise<void> => {
-    const response = await fetch(path, { method, headers: { accept: 'application/json' } })
+  const schedulePassivePoll = (): void => {
+    if (isDisposed() || !transient(snapshot)) {
+      if (passiveTimer !== undefined) clearTimeout(passiveTimer)
+      passiveTimer = undefined
+      return
+    }
+    if (passiveTimer !== undefined) return
+    passiveTimer = setTimeout(() => {
+      passiveTimer = undefined
+      if (active !== undefined) {
+        schedulePassivePoll()
+        return
+      }
+      void run(PATH, 'GET').catch(() => { schedulePassivePoll() })
+    }, PREPARE_POLL_MS)
+  }
+  const request = async (path: string, init: RequestInit): Promise<void> => {
+    if (isDisposed()) throw new Error('phone runtime source is disposed')
+    const response = await fetch(path, {
+      ...init,
+      signal: abortController.signal,
+    })
+    if (isDisposed()) return
     const body: unknown = await response.json()
+    if (isDisposed()) return
     if (!response.ok) throw new Error(errorMessage(body, response.status))
     const next = parseSnapshot(body)
     detected = true
@@ -175,10 +203,12 @@ export function createHttpPhoneRuntimeSource(
       snapshot = next
       notify()
     }
+    schedulePassivePoll()
   }
   const run = (path: string, method: 'GET' | 'POST'): Promise<void> => {
+    if (isDisposed()) return Promise.reject(new Error('phone runtime source is disposed'))
     if (active !== undefined) return active
-    const operation = request(path, method)
+    const operation = request(path, { method, headers: { accept: 'application/json' } })
     active = operation
     void operation.then(
       () => { active = undefined },
@@ -188,47 +218,42 @@ export function createHttpPhoneRuntimeSource(
   }
   const pollOperation = (operation: Promise<void>): Promise<void> => {
     active = operation
-    let timer: ReturnType<typeof setTimeout>
     const poll = (): void => {
-      if (active !== operation) return
-      void request(PATH, 'GET').catch(() => {})
-      timer = setTimeout(poll, PREPARE_POLL_MS)
+      operationTimer = undefined
+      void request(PATH, { method: 'GET', headers: { accept: 'application/json' } }).catch(() => {}).finally(() => {
+        if (active === operation) operationTimer = setTimeout(poll, PREPARE_POLL_MS)
+      })
     }
-    timer = setTimeout(poll, 0)
-    void operation.then(
-      () => {
-        active = undefined
-        clearTimeout(timer)
-      },
-      () => {
-        active = undefined
-        clearTimeout(timer)
-      },
-    )
+    operationTimer = setTimeout(poll, 0)
+    const settled = (): void => {
+      if (active === operation) active = undefined
+      if (operationTimer !== undefined) clearTimeout(operationTimer)
+      operationTimer = undefined
+    }
+    void operation.then(settled, settled)
     return operation
   }
-  const prepare = (): Promise<void> => active ?? pollOperation(request(`${PATH}/prepare`, 'POST'))
+  const prepare = (): Promise<void> => {
+    if (isDisposed()) return Promise.reject(new Error('phone runtime source is disposed'))
+    return active ?? pollOperation(request(
+      `${PATH}/prepare`, { method: 'POST', headers: { accept: 'application/json' } },
+    ))
+  }
   const runPolled = (path: string, body?: unknown): Promise<void> => {
+    if (isDisposed()) return Promise.reject(new Error('phone runtime source is disposed'))
     if (active !== undefined) return active
     return pollOperation(requestWithBody(path, body))
   }
-  const requestWithBody = async (path: string, body?: unknown): Promise<void> => {
-    const response = await fetch(path, {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    const value: unknown = await response.json()
-    if (!response.ok) throw new Error(errorMessage(value, response.status))
-    const next = parseSnapshot(value)
-    detected = true
-    if (next.revision > snapshot.revision) { snapshot = next; notify() }
-  }
+  const requestWithBody = (path: string, body?: unknown): Promise<void> => request(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
   return {
     getSnapshot: () => snapshot,
     refresh: () => run(`${PATH}/refresh`, 'POST'),
     prepare,
-    cancel: () => request(`${PATH}/cancel`, 'POST'),
+    cancel: () => request(`${PATH}/cancel`, { method: 'POST', headers: { accept: 'application/json' } }),
     prepareAndroid: () => runPolled(`${PATH}/android/prepare`, { licenseAccepted: true }),
     cancelAndroid: () => requestWithBody(`${PATH}/android/cancel`),
     refreshAndroid: () => runPolled(`${PATH}/android/refresh`),
@@ -237,12 +262,35 @@ export function createHttpPhoneRuntimeSource(
     cancelIos: () => requestWithBody(`${PATH}/ios/cancel`),
     refreshIos: () => runPolled(`${PATH}/ios/refresh`),
     startIos: () => runPolled(`${PATH}/ios/start`),
-    ensureDetected: () => { if (!detected && active === undefined) void run(PATH, 'GET') },
+    ensureDetected: () => {
+      if (!isDisposed() && !detected && active === undefined) void run(PATH, 'GET').catch(() => {})
+    },
     subscribe: (listener) => {
+      if (isDisposed()) return () => {}
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
+    dispose: () => {
+      if (isDisposed()) return
+      listeners.clear()
+      if (passiveTimer !== undefined) clearTimeout(passiveTimer)
+      passiveTimer = undefined
+      if (operationTimer !== undefined) clearTimeout(operationTimer)
+      operationTimer = undefined
+      active = undefined
+      abortController.abort()
+    },
   }
+}
+
+function transient(snapshot: PhoneEnvironmentClientSnapshot): boolean {
+  const runtime = snapshot.runtime.kind
+  const android = snapshot.platforms.android.kind
+  const ios = snapshot.platforms.ios.kind
+  return runtime === 'downloading' || runtime === 'verifying' || runtime === 'activating'
+    || android === 'checking' || android === 'downloading' || android === 'installing'
+    || android === 'creating-avd' || android === 'checking-acceleration' || android === 'booting'
+    || ios === 'checking' || ios === 'preparing'
 }
 
 function parseSnapshot(value: unknown): PhoneEnvironmentClientSnapshot {

@@ -52,5 +52,14 @@
     "state": "online",
     "model": "iPhone 16-model",
     "provider": { "type": "local" }
+  },
+  {
+    "id": "00008120-REAL-E2E",
+    "name": "Acceptance iPhone",
+    "platform": "ios",
+    "type": "real",
+    "state": "online",
+    "model": "Acceptance-iPhone-model",
+    "provider": { "type": "local" }
   }
 ]

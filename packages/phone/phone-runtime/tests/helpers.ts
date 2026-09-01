@@ -23,6 +23,8 @@ interface FakeAgentKnobs {
   installExitCode?: number
   /** When set, a successful install prints this JSON answer verbatim. */
   installAnswer?: string
+  /** When set, status prints this JSON answer verbatim. */
+  statusAnswer?: string
   /** Makes the POSIX agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
   ignoreTerm?: boolean
 }

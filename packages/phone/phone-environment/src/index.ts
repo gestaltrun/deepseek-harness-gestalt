@@ -3,6 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { writeJson } from '@deepseek-ai/dsh-host-webserver'
@@ -62,8 +63,14 @@ export const PHONE_ENVIRONMENT_IOS_START_PATH = '/phone/environment/ios/start'
 const ANDROID_RUNTIME_VERIFY_MS = 15_000
 /** Maximum Android H264 bytes inspected before readiness fails. */
 const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
-/** Maximum wait for one recognizable JPEG picture from a booted iOS Simulator. */
-const IOS_RUNTIME_VERIFY_MS = 15_000
+/** Default maximum wait for one recognizable JPEG picture from a booted iOS Simulator. */
+const DEFAULT_IOS_RUNTIME_VERIFY_TIMEOUT_MS = 25_000
+/** Default settlement after installing the Simulator device agent. */
+const DEFAULT_IOS_AGENT_SETTLE_DELAY_MS = 2_000
+/** Default delay before retrying the first capture after device-agent installation. */
+const DEFAULT_IOS_AGENT_CAPTURE_RETRY_DELAY_MS = 1_000
+/** Default ceiling for the first capture opened after device-agent installation. */
+const DEFAULT_IOS_AGENT_FIRST_CAPTURE_TIMEOUT_MS = 5_000
 /** Maximum MJPEG bytes inspected before iOS readiness fails. */
 const IOS_MJPEG_PROBE_MAX_BYTES = 8 * 1024 * 1024
 
@@ -73,10 +80,35 @@ export interface Config {
   readonly root?: string
   /** Explicit operator executable override, ahead of managed and system discovery. */
   readonly executablePath?: string
+  /** Ceiling for online-listing, device-agent, and recognizable-picture verification. */
+  readonly iosRuntimeVerifyTimeoutMs?: number
+  /** Delay after installing the Simulator device agent before the first capture. */
+  readonly iosAgentSettleDelayMs?: number
+  /** Delay before retrying an unsuccessful first capture after device-agent installation. */
+  readonly iosAgentCaptureRetryDelayMs?: number
+  /** Ceiling for the first capture opened after device-agent installation. */
+  readonly iosAgentFirstCaptureTimeoutMs?: number
 }
 
 /** Runtime configuration schema. */
-export const Config: z<Config> = z.object({ root: z.string(), executablePath: z.string() })
+export const Config: z<Config> = z.object({
+  root: z.string(),
+  executablePath: z.string(),
+  iosRuntimeVerifyTimeoutMs: z.number().step(1).min(1).default(DEFAULT_IOS_RUNTIME_VERIFY_TIMEOUT_MS),
+  iosAgentSettleDelayMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_SETTLE_DELAY_MS),
+  iosAgentCaptureRetryDelayMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_CAPTURE_RETRY_DELAY_MS),
+  iosAgentFirstCaptureTimeoutMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_FIRST_CAPTURE_TIMEOUT_MS),
+})
+
+type ResolvedConfig = Omit<Config,
+  'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs' | 'iosAgentCaptureRetryDelayMs'
+  | 'iosAgentFirstCaptureTimeoutMs'> & Required<Pick<Config,
+  'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs' | 'iosAgentCaptureRetryDelayMs'
+  | 'iosAgentFirstCaptureTimeoutMs'>>
+
+function resolveConfig(config: Config): ResolvedConfig {
+  return Config(config) as ResolvedConfig
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -94,6 +126,10 @@ export class PhoneEnvironment extends Service {
   private readonly listeners = new Set<(snapshot: PhoneEnvironmentSnapshot) => void>()
   private readonly root: string
   private readonly executableOverride: string | undefined
+  private readonly iosRuntimeVerifyTimeoutMs: number
+  private readonly iosAgentSettleDelayMs: number
+  private readonly iosAgentCaptureRetryDelayMs: number
+  private readonly iosAgentFirstCaptureTimeoutMs: number
   private candidate: PhoneRuntimeCandidate | undefined
   private candidateVersion: string | undefined
   private prepareController: AbortController | undefined
@@ -123,8 +159,13 @@ export class PhoneEnvironment extends Service {
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'phoneEnvironment')
-    this.root = resolve(config.root ?? join(resolveDshHome(), 'phone'))
-    this.executableOverride = nonEmpty(config.executablePath)
+    const resolved = resolveConfig(config)
+    this.root = resolve(resolved.root ?? join(resolveDshHome(), 'phone'))
+    this.executableOverride = nonEmpty(resolved.executablePath)
+    this.iosRuntimeVerifyTimeoutMs = resolved.iosRuntimeVerifyTimeoutMs
+    this.iosAgentSettleDelayMs = resolved.iosAgentSettleDelayMs
+    this.iosAgentCaptureRetryDelayMs = resolved.iosAgentCaptureRetryDelayMs
+    this.iosAgentFirstCaptureTimeoutMs = resolved.iosAgentFirstCaptureTimeoutMs
     this.current = initialPhoneEnvironmentSnapshot(process.platform, process.arch, false)
     ctx.effect(() => () => { this.listeners.clear() }, 'phone environment subscriber cleanup')
     ctx.effect(() => ctx.webServer.register({
@@ -628,9 +669,9 @@ export class PhoneEnvironment extends Service {
     const timeout = setTimeout(() => {
       controller.abort(new PhoneEnvironmentError(
         'PHONE_IOS_RUNTIME_VERIFY',
-        `mobilecli did not produce an iOS Simulator MJPEG picture within ${String(IOS_RUNTIME_VERIFY_MS)}ms`,
+        `mobilecli did not produce an iOS Simulator MJPEG picture within ${String(this.iosRuntimeVerifyTimeoutMs)}ms`,
       ))
-    }, IOS_RUNTIME_VERIFY_MS)
+    }, this.iosRuntimeVerifyTimeoutMs)
     timeout.unref()
     const verificationSignal = AbortSignal.any([signal, controller.signal])
     try {
@@ -642,19 +683,15 @@ export class PhoneEnvironment extends Service {
           `mobilecli did not list the prepared iOS Simulator ${id} online`,
         )
       }
-      const capture = await this.ctx.phoneDevices.startCapture({
-        deviceId: id, format: 'mjpeg', signal: verificationSignal,
-      })
-      if (!/^(?:multipart\/x-mixed-replace|image\/jpeg)(?:;|$)/iu.test(capture.contentType)) {
-        await capture.body.cancel()
-        throw new PhoneEnvironmentError(
-          'PHONE_IOS_RUNTIME_VERIFY',
-          `mobilecli returned ${capture.contentType || 'no Content-Type'} for the iOS Simulator MJPEG probe`,
-        )
+      const agent = await this.ctx.phoneDevices.agentStatus(id, verificationSignal)
+      let installedNow = false
+      if (!agent.installed) {
+        await this.ctx.phoneDevices.installAgent(id, { signal: verificationSignal })
+        installedNow = true
+        await delay(this.iosAgentSettleDelayMs, undefined, { signal: verificationSignal, ref: false })
       }
-      await verifyMjpegJpegPicture(capture.body, {
-        signal: verificationSignal, maxBytes: IOS_MJPEG_PROBE_MAX_BYTES,
-      })
+      if (!installedNow) await this.verifyIosPicture(id, verificationSignal)
+      else await this.verifyNewIosAgentPicture(id, verificationSignal)
     } catch (error) {
       if (controller.signal.aborted && controller.signal.reason instanceof Error) throw controller.signal.reason
       if (signal.aborted) throw signal.reason
@@ -667,6 +704,41 @@ export class PhoneEnvironment extends Service {
     } finally {
       clearTimeout(timeout)
     }
+  }
+
+  private async verifyNewIosAgentPicture(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const first = new AbortController()
+    const timeout = setTimeout(() => {
+      first.abort(new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `the first mobilecli Simulator capture session did not settle within ${String(this.iosAgentFirstCaptureTimeoutMs)}ms`,
+      ))
+    }, this.iosAgentFirstCaptureTimeoutMs)
+    timeout.unref()
+    try {
+      await this.verifyIosPicture(id, AbortSignal.any([signal, first.signal]))
+      return
+    } catch (error) {
+      if (signal.aborted) throw error
+    } finally {
+      clearTimeout(timeout)
+    }
+    await delay(this.iosAgentCaptureRetryDelayMs, undefined, { signal, ref: false })
+    await this.verifyIosPicture(id, signal)
+  }
+
+  private async verifyIosPicture(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const capture = await this.ctx.phoneDevices.startCapture({
+      deviceId: id, format: 'mjpeg', signal,
+    })
+    if (!/^(?:multipart\/x-mixed-replace|image\/jpeg)(?:;|$)/iu.test(capture.contentType)) {
+      await capture.body.cancel()
+      throw new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `mobilecli returned ${capture.contentType || 'no Content-Type'} for the iOS Simulator MJPEG probe`,
+      )
+    }
+    await verifyMjpegJpegPicture(capture.body, { signal, maxBytes: IOS_MJPEG_PROBE_MAX_BYTES })
   }
 
   private async verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {

@@ -87,6 +87,7 @@ describe('Desktop phone tab live chain', () => {
     expect(names.some(name => name.includes('Pixel_6_API_35'))).toBe(true)
     expect(names.some(name => name.includes('SM-S9310'))).toBe(true)
     expect(names.some(name => name.includes('iPhone 16'))).toBe(true)
+    expect(names.some(name => name.includes('Acceptance iPhone'))).toBe(true)
     expect(names.some(name => name.includes('Offline Pixel'))).toBe(false)
     expect(names.some(name => name.includes('Unauthorized Android'))).toBe(false)
     await clickSurfaceButton('iPhone 16切换')
@@ -161,6 +162,35 @@ describe('Desktop phone tab live chain', () => {
     })
 
     await clickSurfaceButton('切换设备：iPhone 16')
+    await clickSurfaceButton('Acceptance iPhone切换')
+    await browser.$('button[aria-label="切换设备：Acceptance iPhone"]').waitForExist({ timeout: 30_000 })
+    await browser.$('p=设备控制代理未安装').waitForDisplayed({ timeout: 30_000 })
+    await saveWindowEvidence('phone-real-ios-agent-missing-window')
+    await browser.$('button=安装设备控制代理').click()
+    await browser.$('img[alt="Acceptance iPhone 实时画面"]').waitForExist({ timeout: 30_000 })
+    await waitForMjpegPicture('Acceptance iPhone')
+    const agentStatus = await browser.execute(async () => {
+      const response = await fetch('/phone/agent/status', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: '00008120-REAL-E2E' }),
+      })
+      return { status: response.status, body: await response.json() as unknown }
+    })
+    expect(agentStatus).toMatchObject({ status: 200, body: { installed: true } })
+    const beforeRealHome = (await fakeCounters()).io.length
+    await browser.$('button[aria-label="主屏幕"]').click()
+    const afterRealHome = await waitForFakeIo(counters => counters.io.length === beforeRealHome + 1)
+    expect(afterRealHome.io.at(-1)).toMatchObject({
+      method: 'device.io.button',
+      params: { deviceId: '00008120-REAL-E2E', button: 'HOME' },
+    })
+    await writeArtifact('ios-real-agent-recovery.json', {
+      agentStatus, encoding: 'MJPEG', gui: afterRealHome.io.at(-1),
+    })
+    await saveWindowEvidence('phone-real-ios-agent-live-window')
+
+    await clickSurfaceButton('切换设备：Acceptance iPhone')
     await clickSurfaceButton('Pixel_6_API_35切换')
     await browser.$('button[aria-label="切换设备：Pixel_6_API_35"]').waitForExist({ timeout: 30_000 })
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])

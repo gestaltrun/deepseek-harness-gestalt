@@ -11,7 +11,7 @@
  */
 import {
   encodePhoneIoFrame, isUnauthorizedMessage, parsePhoneIoReply, PhoneStreamHttpError,
-  type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
+  type PhoneAgentStatusView, type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
 } from './phone-stream-client.ts'
 
 /** Capture encoding currently rendered by the live view. */
@@ -29,10 +29,26 @@ export type PhoneStreamFailureKind =
   | 'refused'
   /** The stream channel is unreachable (network or upstream). */
   | 'unavailable'
+  /** The iOS real-device control agent has not been installed. */
+  | 'agent-missing'
+  /** Agent installation is blocked until the Host names a provisioning profile. */
+  | 'agent-profile-required'
+  /** The real iPhone must be unlocked before agent or picture operations continue. */
+  | 'device-locked'
+  /** Developer Mode, certificate trust, signing identity, or provisioning trust needs human action. */
+  | 'cert-untrusted'
+  /** The installed real-device agent must be re-signed with a current profile. */
+  | 'profile-expired'
+  /** The real-device transport tunnel could not be established. */
+  | 'tunnel-failed'
+  /** The real iPhone disconnected from the Host. */
+  | 'device-unplugged'
 
 /** One terminal stream failure carried by the error phase. */
 export interface PhoneStreamFailure {
   readonly kind: PhoneStreamFailureKind
+  /** Product action that can repair the on-device agent after any stated manual prerequisite. */
+  readonly agentRecovery?: 'install' | 'reinstall'
 }
 
 /** Closed phase union the connected view renders from. */
@@ -56,6 +72,8 @@ export type PhoneConnectionPhase =
     readonly streamUrl?: string
   }
   | { readonly kind: 'suspended' }
+  | { readonly kind: 'checking-agent' }
+  | { readonly kind: 'repairing-agent'; readonly force: boolean }
   | { readonly kind: 'error'; readonly failure: PhoneStreamFailure }
 
 /** Events one io socket delivers to the controller. */
@@ -82,6 +100,10 @@ export interface PhoneIoSocket {
 export interface PhoneStreamGateway {
   /** Mint one signed same-origin session for the device. */
   mintSession(deviceId: string): Promise<PhoneStreamSessionView>
+  /** Detect the iOS real-device control agent through the Host. */
+  agentStatus(deviceId: string): Promise<PhoneAgentStatusView>
+  /** Install or force-reinstall the iOS real-device control agent through the Host. */
+  installAgent(deviceId: string, force: boolean): Promise<PhoneAgentStatusView>
   /** Open the io WebSocket on the session's minted path; events fire asynchronously. */
   connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket
 }
@@ -137,12 +159,22 @@ export function devicePointOf(point: PhoneScreenPoint, surface: PhoneSurfaceSize
  */
 export function classifyPhoneStreamFailure(error: unknown): PhoneStreamFailureKind {
   if (error instanceof PhoneStreamHttpError) {
+    if (error.code === 'PHONE_AGENT_MISSING') return 'agent-missing'
+    if (error.code === 'PHONE_AGENT_PROFILE_REQUIRED') return 'agent-profile-required'
+    if (error.code === 'PHONE_REAL_DEVICE_ISSUE' && error.issue !== undefined) return error.issue
     if (error.status === 404) return 'device-offline'
     if (error.status === 403) return 'refused'
     if (isUnauthorizedMessage(error.message)) return 'unauthorized'
     return 'unavailable'
   }
   return 'unavailable'
+}
+
+function failureOf(error: unknown): PhoneStreamFailure {
+  const kind = classifyPhoneStreamFailure(error)
+  if (kind === 'agent-missing') return { kind, agentRecovery: 'install' }
+  if (kind === 'profile-expired') return { kind, agentRecovery: 'reinstall' }
+  return { kind }
 }
 
 /** Constructor dependencies; everything but the gateway stays defaultable. */
@@ -228,6 +260,31 @@ export class PhoneConnectionController {
   refresh(): void {
     this.disconnect()
     this.connect()
+  }
+
+  /**
+   * Install or force-reinstall the iOS real-device agent, then reconnect the picture session.
+   * @param force - whether to replace an already installed agent and refresh its signing.
+   */
+  recoverAgent(force: boolean): void {
+    if (this.phase.kind !== 'error') return
+    this.teardown()
+    this.setPhase({ kind: 'repairing-agent', force })
+    const epoch = this.epoch
+    void this.gateway.installAgent(this.deviceId, force).then(
+      (status) => {
+        if (this.epoch !== epoch) return
+        if (!status.installed) {
+          this.setPhase({ kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' } })
+          return
+        }
+        void this.startConnect()
+      },
+      (error: unknown) => {
+        if (this.epoch !== epoch) return
+        this.setPhase({ kind: 'error', failure: failureOf(error) })
+      },
+    )
   }
 
   /**
@@ -338,6 +395,8 @@ export class PhoneConnectionController {
     return this.phase.kind === 'connecting'
       || this.phase.kind === 'live'
       || this.phase.kind === 'reconnecting'
+      || this.phase.kind === 'checking-agent'
+      || this.phase.kind === 'repairing-agent'
   }
 
   private async startConnect(): Promise<void> {
@@ -349,7 +408,7 @@ export class PhoneConnectionController {
       session = await this.gateway.mintSession(this.deviceId)
     } catch (error) {
       if (epoch !== this.epoch) return
-      this.handleConnectFailure(classifyPhoneStreamFailure(error))
+      this.handleConnectFailure(failureOf(error))
       return
     }
     if (epoch !== this.epoch) return
@@ -388,10 +447,18 @@ export class PhoneConnectionController {
     this.socket = entry.socket
   }
 
-  private handleConnectFailure(kind: PhoneStreamFailureKind): void {
+  private handleConnectFailure(failure: PhoneStreamFailure): void {
+    const { kind } = failure
     if (kind === 'device-offline' || kind === 'unauthorized' || kind === 'refused') {
       this.teardown()
-      this.setPhase({ kind: 'error', failure: { kind } })
+      this.setPhase({ kind: 'error', failure })
+      return
+    }
+    if (kind === 'agent-missing' || kind === 'agent-profile-required'
+      || kind === 'device-locked' || kind === 'cert-untrusted'
+      || kind === 'profile-expired' || kind === 'tunnel-failed' || kind === 'device-unplugged') {
+      this.teardown()
+      this.setPhase({ kind: 'error', failure })
       return
     }
     this.lastTransient = 'unavailable'
@@ -416,7 +483,11 @@ export class PhoneConnectionController {
 
   private scheduleRetry(): void {
     if (this.retryAttempt >= this.retryLimit) {
-      this.setPhase({ kind: 'error', failure: { kind: this.lastTransient } })
+      if (this.session?.agentManaged === true) {
+        this.checkAgentAfterFailure()
+      } else {
+        this.setPhase({ kind: 'error', failure: { kind: this.lastTransient } })
+      }
       return
     }
     this.retryAttempt += 1
@@ -429,6 +500,23 @@ export class PhoneConnectionController {
       this.cancelRetry = undefined
       void this.startConnect()
     })
+  }
+
+  private checkAgentAfterFailure(): void {
+    this.setPhase({ kind: 'checking-agent' })
+    const epoch = this.epoch
+    void this.gateway.agentStatus(this.deviceId).then(
+      (status) => {
+        if (this.epoch !== epoch) return
+        this.setPhase(status.installed
+          ? { kind: 'error', failure: { kind: this.lastTransient, agentRecovery: 'reinstall' } }
+          : { kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' } })
+      },
+      (error: unknown) => {
+        if (this.epoch !== epoch) return
+        this.setPhase({ kind: 'error', failure: failureOf(error) })
+      },
+    )
   }
 
   private streamUrlOf(session: PhoneStreamSessionView, format: PhoneCaptureFormat): string {

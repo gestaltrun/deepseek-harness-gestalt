@@ -115,6 +115,10 @@ if (args[0] === 'agent') {
     if (subcommand === 'status') {
       agentState.statusCount += 1
       writeAgentState(agentState)
+      if (typeof agentKnobs.statusAnswer === 'string') {
+        process.stdout.write(`${agentKnobs.statusAnswer}\n`)
+        process.exit(0)
+      }
       if (agentState.installed) {
         replyAgent({ status: 'ok', data: { message: 'Agent version 0.0.0-test is installed on device', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
       }

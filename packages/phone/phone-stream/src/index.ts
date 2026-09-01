@@ -32,6 +32,8 @@ export const PHONE_IO_PATH = '/phone/ws/io'
 export const PHONE_STREAM_PATH = '/phone/stream'
 /** Prefix for minting signed same-origin session URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
+/** Prefix for iOS real-device agent detection and installation operations. */
+export const PHONE_AGENT_PATH = '/phone/agent'
 /** Exact-path GET listing of the grouped device fleet behind the `/api` fence. */
 export const PHONE_DEVICES_PATH = '/phone/devices'
 
@@ -96,6 +98,11 @@ export class PhoneStream extends Service {
     }), 'phone-stream: /phone/session')
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix',
+      path: PHONE_AGENT_PATH,
+      handler: (req, res) => this.handleAgent(req, res),
+    }), 'phone-stream: /phone/agent')
+    ctx.effect(() => ctx.webServer.register({
+      kind: 'prefix',
       path: PHONE_DEVICES_PATH,
       handler: (req, res) => this.handleDevices(req, res),
     }), 'phone-stream: /phone/devices')
@@ -120,13 +127,15 @@ export class PhoneStream extends Service {
   /**
    * Mint signed same-origin MJPEG and H264 URLs for one known device.
    * @param id - Branded device id present in the latest published listing.
+   * @param agentManaged - Whether the session addresses an iOS real device whose agent is managed through this Consumer.
    * @returns the IO upgrade path plus both capture URLs and their expiry.
    */
-  sessionFor(id: DeviceId): PhoneStreamSession {
+  sessionFor(id: DeviceId, agentManaged: boolean = false): PhoneStreamSession {
     const expiresAt = Date.now() + this.tokenTtlMs
     return Object.freeze({
       deviceId: id,
       ioPath: PHONE_IO_PATH,
+      agentManaged,
       mjpeg: this.signedUrl(id, 'mjpeg', expiresAt),
       h264: this.signedUrl(id, 'h264', expiresAt),
     })
@@ -167,17 +176,76 @@ export class PhoneStream extends Service {
       }
       const id = deviceId(rawId)
       const list = await this.ctx.phoneDevices.listDevices()
-      const known = [...list.android, ...list.ios.simulators, ...list.ios.reals].some(ref => ref.id === id)
-      if (!known) {
+      const knownReal = list.ios.reals.find(ref => ref.id === id)
+      const known = knownReal ?? [...list.android, ...list.ios.simulators].find(ref => ref.id === id)
+      if (known === undefined) {
         throw new PhoneDevicesError(
           'PHONE_DEVICE_NOT_FOUND',
           `cannot mint stream URLs: ${JSON.stringify(id)} is absent from the latest device listing`,
         )
       }
-      writeJson(res, 200, this.sessionFor(id))
+      if (knownReal !== undefined) {
+        const status = await this.ctx.phoneDevices.agentStatus(id)
+        if (!status.installed) {
+          writeJson(res, 409, {
+            error: {
+              code: 'PHONE_AGENT_MISSING',
+              message: 'the iOS real-device control agent is not installed',
+            },
+          })
+          return
+        }
+      }
+      writeJson(res, 200, this.sessionFor(id, knownReal !== undefined))
     } catch (error) {
       this.writeFailure(res, error)
     }
+  }
+
+  private async handleAgent(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isTrustedApiRequest(req, this.trustedHosts())) {
+      writeForbidden(res)
+      return
+    }
+    if (req.method !== 'POST') {
+      writeHttpError(res, new HttpError(405, 'method-not-allowed', 'phone agent operations are POST-only'))
+      return
+    }
+    const pathname = pathnameOf(req)
+    if (pathname !== `${PHONE_AGENT_PATH}/status` && pathname !== `${PHONE_AGENT_PATH}/install`) {
+      writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone agent path'))
+      return
+    }
+    try {
+      const body = await readJsonObject(req, JSON_BODY_LIMITS)
+      const rawId = body.deviceId
+      if (typeof rawId !== 'string' || rawId.length === 0) {
+        throw new HttpError(400, 'bad-request', 'deviceId is required')
+      }
+      const id = deviceId(rawId)
+      await this.requireIosReal(id)
+      if (pathname === `${PHONE_AGENT_PATH}/status`) {
+        writeJson(res, 200, await this.ctx.phoneDevices.agentStatus(id))
+        return
+      }
+      if (body.force !== undefined && typeof body.force !== 'boolean') {
+        throw new HttpError(400, 'bad-request', 'force must be a boolean')
+      }
+      writeJson(res, 200, await this.ctx.phoneDevices.installAgent(id, { force: body.force === true }))
+    } catch (error) {
+      this.writeFailure(res, error)
+    }
+  }
+
+  private async requireIosReal(id: DeviceId): Promise<void> {
+    const list = await this.ctx.phoneDevices.listDevices()
+    if (list.ios.reals.some(device => device.id === id)) return
+    const known = [...list.android, ...list.ios.simulators].some(device => device.id === id)
+    if (known) throw new HttpError(400, 'not-real-ios', 'phone agent operations require an iOS real device')
+    throw new PhoneDevicesError(
+      'PHONE_DEVICE_NOT_FOUND',
+      `cannot operate the device agent: ${JSON.stringify(id)} is absent from the latest device listing`,
+    )
   }
 
   /**
@@ -342,7 +410,13 @@ export class PhoneStream extends Service {
       return
     }
     if (error instanceof PhoneDevicesError) {
-      writeHttpError(res, new HttpError(502, error.code, error.message))
+      writeJson(res, error.code === 'PHONE_AGENT_PROFILE_REQUIRED' ? 409 : 502, {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.issue === undefined ? {} : { issue: error.issue }),
+        },
+      })
       return
     }
     const message = error instanceof Error ? error.message : String(error)

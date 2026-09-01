@@ -185,6 +185,190 @@ describe('Host phone runtime source', () => {
     expect(source.getSnapshot().runtime).toEqual({ kind: 'ready', version: '1.0.5', source: 'system' })
   })
 
+  it('keeps detecting while Host startup activation is in flight', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(snapshot({
+        kind: 'activating', targetVersion: '1.0.5', source: 'override',
+      }))
+      .mockResolvedValueOnce(snapshot({
+        kind: 'ready', version: '1.0.5', source: 'override',
+      }, 2))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    source.ensureDetected()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(source.getSnapshot().runtime).toEqual({
+      kind: 'activating', targetVersion: '1.0.5', source: 'override',
+    })
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(source.getSnapshot().runtime).toEqual({
+      kind: 'ready', version: '1.0.5', source: 'override',
+    })
+    expect(fetcher.mock.calls.map(([path, init]) => [path, init?.method])).toEqual([
+      ['/phone/environment', 'GET'],
+      ['/phone/environment', 'GET'],
+    ])
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces passive polling with an active refresh and clears the pending timer at readiness', async () => {
+    vi.useFakeTimers()
+    let finishRefresh!: (response: Response) => void
+    const refreshResponse = new Promise<Response>((resolve) => { finishRefresh = resolve })
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }))
+      .mockImplementationOnce(async () => await refreshResponse)
+      .mockResolvedValueOnce(snapshot({ kind: 'ready', version: '1.0.5', source: 'override' }, 3))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    source.ensureDetected()
+    await vi.advanceTimersByTimeAsync(0)
+    const refresh = source.refresh()
+    await vi.advanceTimersByTimeAsync(100)
+    finishRefresh(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }, 2))
+    await refresh
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(source.getSnapshot().runtime.kind).toBe('ready')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries passive polling after a transient Host request failure', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }))
+      .mockRejectedValueOnce(new Error('temporary Host restart'))
+      .mockResolvedValueOnce(snapshot({ kind: 'ready', version: '1.0.5', source: 'override' }, 2))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    source.ensureDetected()
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(source.getSnapshot().runtime.kind).toBe('ready')
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('clears passive polling and ignores a late response after disposal', async () => {
+    vi.useFakeTimers()
+    let finish!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { finish = resolve })
+    let signal: AbortSignal | undefined
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_path, init) => {
+      signal = init?.signal ?? undefined
+      return await pending
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+    const listener = vi.fn()
+    source.subscribe(listener)
+
+    source.ensureDetected()
+    expect(fetcher).toHaveBeenCalledOnce()
+    source.dispose()
+    expect(signal?.aborted).toBe(true)
+
+    finish(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }))
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(source.getSnapshot().revision).toBe(-1)
+    expect(listener).not.toHaveBeenCalled()
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    source.ensureDetected()
+    await expect(source.refresh()).rejects.toThrow('phone runtime source is disposed')
+    await expect(source.prepare()).rejects.toThrow('phone runtime source is disposed')
+    await expect(source.cancel()).rejects.toThrow('phone runtime source is disposed')
+    await expect(source.prepareIos()).rejects.toThrow('phone runtime source is disposed')
+    const disposedListener = vi.fn()
+    source.subscribe(disposedListener)()
+    expect(disposedListener).not.toHaveBeenCalled()
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('ignores a response body that finishes parsing after disposal', async () => {
+    let finishBody!: (body: unknown) => void
+    const body = new Promise<unknown>((resolve) => { finishBody = resolve })
+    const response = new Response('{}')
+    const parse = vi.spyOn(response, 'json').mockImplementation(async () => await body)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(response))
+    const source = createHttpPhoneRuntimeSource()
+
+    const refresh = source.refresh()
+    await vi.waitFor(() => { expect(parse).toHaveBeenCalledOnce() })
+    source.dispose()
+    finishBody({
+      revision: 1,
+      enabled: true,
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+    })
+
+    await expect(refresh).resolves.toBeUndefined()
+    expect(source.getSnapshot().revision).toBe(-1)
+  })
+
+  it('aborts polled operation requests and clears all timers with one lifecycle abort', async () => {
+    vi.useFakeTimers()
+    const responses: Array<(response: Response) => void> = []
+    const signals: AbortSignal[] = []
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_path, init) => {
+      if (init?.signal != null) signals.push(init.signal)
+      return await new Promise<Response>((resolve) => { responses.push(resolve) })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    const operation = source.prepare()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    responses[1]!(snapshot({
+      kind: 'downloading', targetVersion: '1.0.5', receivedBytes: 1, totalBytes: 2,
+    }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.getTimerCount()).toBe(2)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+
+    source.dispose()
+    source.dispose()
+    expect(signals).toHaveLength(3)
+    expect(new Set(signals).size).toBe(1)
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+
+    responses[2]!(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }, 3))
+    responses[0]!(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }, 2))
+    await expect(operation).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(source.getSnapshot()).toMatchObject({ revision: 1, runtime: { kind: 'downloading' } })
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('clears an operation timer before its first poll can start', async () => {
+    vi.useFakeTimers()
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async () => await new Promise<Response>(
+      (resolve) => { finish = resolve },
+    )))
+    const source = createHttpPhoneRuntimeSource()
+
+    const operation = source.prepare()
+    expect(vi.getTimerCount()).toBe(1)
+    source.dispose()
+    expect(vi.getTimerCount()).toBe(0)
+    finish(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }))
+    await expect(operation).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it('joins preparation to an already active Host request', async () => {
     let finish!: (response: Response) => void
     const pending = new Promise<Response>((resolve) => { finish = resolve })
@@ -215,28 +399,23 @@ describe('Host phone runtime source', () => {
   })
 
   it('continues polling after a transient refresh failure and stops stale poll callbacks', async () => {
+    vi.useFakeTimers()
     let finish!: (response: Response) => void
     const preparing = new Promise<Response>((resolve) => { finish = resolve })
-    const callbacks: Array<() => void> = []
-    vi.stubGlobal('setTimeout', vi.fn((callback: () => void) => {
-      callbacks.push(callback)
-      return callbacks.length as unknown as ReturnType<typeof setTimeout>
-    }))
-    vi.stubGlobal('clearTimeout', vi.fn())
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async (path) => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (path) => {
       if (path === '/phone/environment/prepare') return await preparing
       throw new Error('transient poll failure')
-    }))
+    })
+    vi.stubGlobal('fetch', fetcher)
     const source = createHttpPhoneRuntimeSource()
 
     const operation = source.prepare()
-    callbacks.shift()?.()
-    await Promise.resolve()
-    expect(callbacks).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fetcher).toHaveBeenCalledTimes(3)
     finish(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }, 2))
     await operation
-    callbacks.shift()?.()
-    expect(callbacks).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it.each([

@@ -16,7 +16,7 @@ import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import z from '@deepseek-ai/schemastery'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
-import { PhoneDevicesError } from './errors.ts'
+import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
@@ -480,7 +480,11 @@ export class PhoneDevices extends Service {
           ? error
           : new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli startup failed unexpectedly: ${String(error)}`, { cause: error })
       this.lost = failure
-      await child.stop()
+      try {
+        await child.stop()
+      } catch (cleanup) {
+        throw phoneFailureWithCleanup(failure, cleanup, 'mobilecli startup process-tree cleanup failed')
+      }
       throw failure
     } finally {
       window[Symbol.dispose]()
@@ -703,22 +707,29 @@ export class PhoneDevices extends Service {
    * @returns the resulting installation state; `reinstalled` is true only when
    *   this call spawned an install.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
-   *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
-   *   the command output names a structured real-device arm, and otherwise per
-   *   the class-documented failure modes.
+   *   absent from the latest published listing, `PHONE_AGENT_PROFILE_REQUIRED`
+   *   when a real-iOS install lacks `provisioningProfilePath`,
+   *   `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured
+   *   real-device arm, and otherwise per the class-documented failure modes.
    */
   async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult> {
     this.assertAccepting()
     this.requireResolved()
     await this.whenReady(options.signal)
     this.assertUsable()
-    this.requireKnown(id, 'agent install')
+    const known = this.requireKnown(id, 'agent install')
     const reinstall = options.force === true
     if (!reinstall) {
       const current = await this.agentStatus(id, options.signal)
       if (current.installed) return Object.freeze({ ...current, reinstalled: false })
     }
     const profile = this.resolved.provisioningProfilePath
+    if (known.kind === 'real' && profile === undefined) {
+      throw new PhoneDevicesError(
+        'PHONE_AGENT_PROFILE_REQUIRED',
+        'configure provisioningProfilePath before installing the iOS real-device control agent',
+      )
+    }
     const answer = await runMobilecliAgent({
       executablePath: this.executable,
       args: [
@@ -773,14 +784,16 @@ export class PhoneDevices extends Service {
     }
   }
 
-  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install'): void {
+  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install'): PhoneDeviceRef {
     this.assertAccepting()
-    if (this.findKnown(id) === undefined) {
+    const known = this.findKnown(id)
+    if (known === undefined) {
       throw new PhoneDevicesError(
         'PHONE_DEVICE_NOT_FOUND',
         `cannot ${operation}: ${JSON.stringify(id)} is absent from the latest device listing (online or offline)`,
       )
     }
+    return known
   }
 
   private findKnown(id: DeviceId): PhoneDeviceRef | undefined {
@@ -961,11 +974,12 @@ export class PhoneDevices extends Service {
     await this.startupOutcome?.catch(() => {})
     await this.queueTail
     const child = this.child
+    this.clearPublishedList()
+    if (child !== undefined) await child.stop()
+    if (child !== this.child) return
     this.child = undefined
     this.rpcClient = undefined
     this.startupOutcome = undefined
-    this.clearPublishedList()
-    if (child !== undefined) await child.stop()
   }
 
   private clearPublishedList(): void {

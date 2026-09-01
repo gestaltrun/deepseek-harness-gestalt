@@ -4,7 +4,7 @@ import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phon
 import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import type { PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
-import { MobilecliServerProcess } from '../src/server-process.ts'
+import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
 import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
@@ -803,6 +803,40 @@ describe('phone runtime service lifecycle', () => {
       .rejects.toMatchObject({ code: 'PHONE_PROTOCOL' })
   })
 
+  it('preserves the startup failure when process-tree cleanup also fails', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const captured = context.phoneDevices as unknown as {
+      pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
+    }
+    captured.pollAttempt = async () => {
+      throw new PhoneDevicesError('PHONE_TIMEOUT', 'startup listing timed out')
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(MobilecliProcessTree.prototype, 'stop')
+    if (typeof descriptor?.value !== 'function') throw new Error('server stop method is unavailable')
+    const originalStop = descriptor.value as (this: MobilecliServerProcess) => Promise<void>
+    const stop = vi.spyOn(MobilecliServerProcess.prototype, 'stop').mockImplementation(async function (this: MobilecliServerProcess) {
+      await originalStop.call(this)
+      throw new Error('startup cleanup refused')
+    })
+    try {
+      const failure = await errorOf(() => context.phoneDevices.activateExecutable(fake.executablePath))
+      expect(failure.code).toBe('PHONE_TIMEOUT')
+      expect(failure.message).toContain('startup cleanup refused')
+      expect(failure.cause).toBeInstanceOf(AggregateError)
+    } finally {
+      stop.mockRestore()
+    }
+  })
+
   it('halts after a malformed background listing', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
@@ -887,6 +921,51 @@ describe('phone runtime service lifecycle', () => {
     await context.fiber.dispose()
     expect(stop).toHaveBeenCalledOnce()
     await originalStop()
+  })
+
+  it('retains a generation after failed deactivation so teardown can retry it', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      child?: { stop(): Promise<void> }
+      deactivate(): Promise<void>
+    }
+    const child = captured.child
+    if (child === undefined) throw new Error('ready runtime did not retain its child')
+    const originalStop = child.stop.bind(child)
+    const stop = vi.fn()
+      .mockRejectedValueOnce(new Error('synthetic stop refusal'))
+      .mockImplementationOnce(originalStop)
+    child.stop = stop
+
+    await expect(captured.deactivate()).rejects.toThrow('synthetic stop refusal')
+    expect(captured.child).toBe(child)
+    await captured.deactivate()
+    expect(captured.child).toBeUndefined()
+    expect(stop).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not clear a replacement generation committed while an earlier stop settles', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      child: { stop(): Promise<void> } | undefined
+      stopRuntime(reason: PhoneDevicesError): Promise<void>
+    }
+    const child = captured.child
+    if (child === undefined) throw new Error('ready runtime did not retain its child')
+    const replacement = { stop: vi.fn(async () => {}) }
+    const originalStop = child.stop.bind(child)
+    child.stop = vi.fn(async () => {
+      await originalStop()
+      captured.child = replacement
+    })
+
+    await captured.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'synthetic replacement'))
+    expect(captured.child).toBe(replacement)
+    captured.child = undefined
   })
 
   it('drains a replacement racing service disposal without leaving a child', async () => {

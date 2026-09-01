@@ -240,9 +240,10 @@ async agentStatus(id: DeviceId, signal?: AbortSignal): Promise<PhoneAgentStatus>
  * @returns the resulting installation state; `reinstalled` is true only when
  *   this call spawned an install.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
- *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
- *   the command output names a structured real-device arm, and otherwise per
- *   the class-documented failure modes.
+ *   absent from the latest published listing, `PHONE_AGENT_PROFILE_REQUIRED`
+ *   when a real-iOS install lacks `provisioningProfilePath`,
+ *   `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured
+ *   real-device arm, and otherwise per the class-documented failure modes.
  */
 async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult>
 

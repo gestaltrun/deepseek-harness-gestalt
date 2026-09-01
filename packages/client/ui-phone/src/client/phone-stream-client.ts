@@ -9,6 +9,20 @@ import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from './phone
 
 /** Minting endpoint for signed same-origin capture URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
+/** Prefix for iOS real-device agent status and installation operations. */
+export const PHONE_AGENT_PATH = '/phone/agent'
+
+/** Structured iOS real-device failure arms projected by the Host. */
+export type PhoneRealDeviceIssueView =
+  | 'device-locked'
+  | 'cert-untrusted'
+  | 'profile-expired'
+  | 'tunnel-failed'
+  | 'device-unplugged'
+
+const REAL_DEVICE_ISSUES: readonly PhoneRealDeviceIssueView[] = [
+  'device-locked', 'cert-untrusted', 'profile-expired', 'tunnel-failed', 'device-unplugged',
+]
 
 /**
  * Whether an upstream io/capture message reports the handset debugging gate.
@@ -33,6 +47,8 @@ export interface PhoneStreamSessionView {
   readonly deviceId: string
   /** Exact-path WebSocket upgrade path for io frames. */
   readonly ioPath: string
+  /** Whether the device is a real iPhone whose control agent is product-managed. */
+  readonly agentManaged: boolean
   /** Signed MJPEG capture URL (Host still signs it; the live view does not request it). */
   readonly mjpeg: PhoneStreamUrlView
   /** Signed H264 capture URL (the live view's only requested encoding). */
@@ -45,11 +61,13 @@ export class PhoneStreamHttpError extends Error {
    * @param status - HTTP status the minting endpoint answered with.
    * @param code - wire error code (`forbidden`, `not-found`, …).
    * @param message - wire error message.
+   * @param issue - optional structured iOS real-device failure arm.
    */
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly issue?: PhoneRealDeviceIssueView,
   ) {
     super(message)
   }
@@ -129,6 +147,23 @@ function isStreamUrlView(value: unknown): value is PhoneStreamUrlView {
   return typeof record.url === 'string' && record.url.length > 0 && typeof record.expiresAt === 'number'
 }
 
+function issueOf(value: unknown): PhoneRealDeviceIssueView | undefined {
+  return REAL_DEVICE_ISSUES.includes(value as PhoneRealDeviceIssueView)
+    ? value as PhoneRealDeviceIssueView
+    : undefined
+}
+
+function errorOf(response: Response, body: unknown, fallback: string): PhoneStreamHttpError {
+  const record = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
+  const error = (typeof record.error === 'object' && record.error !== null ? record.error : {}) as Record<string, unknown>
+  return new PhoneStreamHttpError(
+    response.status,
+    typeof error.code === 'string' ? error.code : 'http',
+    typeof error.message === 'string' ? error.message : fallback,
+    issueOf(error.issue),
+  )
+}
+
 /**
  * Mint one signed same-origin session for one device.
  * @param deviceId - Android serial or iOS UDID present in the latest listing.
@@ -149,20 +184,83 @@ export async function mintPhoneSession(deviceId: string): Promise<PhoneStreamSes
   }
   const body: unknown = await response.json().catch(() => null)
   const record = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
-  const error = (typeof record.error === 'object' && record.error !== null ? record.error : {}) as Record<string, unknown>
-  if (!response.ok || !isStreamUrlView(record.mjpeg) || !isStreamUrlView(record.h264) || typeof record.ioPath !== 'string') {
-    throw new PhoneStreamHttpError(
-      response.status,
-      typeof error.code === 'string' ? error.code : 'http',
-      typeof error.message === 'string' ? error.message : `phone session mint failed with HTTP ${response.status}`,
-    )
+  if (!response.ok || !isStreamUrlView(record.mjpeg) || !isStreamUrlView(record.h264)
+    || typeof record.ioPath !== 'string' || typeof record.agentManaged !== 'boolean') {
+    throw errorOf(response, body, `phone session mint failed with HTTP ${response.status}`)
   }
   return {
     deviceId: typeof record.deviceId === 'string' ? record.deviceId : deviceId,
     ioPath: record.ioPath,
+    agentManaged: record.agentManaged,
     mjpeg: record.mjpeg,
     h264: record.h264,
   }
+}
+
+/** Browser projection of one on-device agent status or install answer. */
+export interface PhoneAgentStatusView {
+  readonly deviceId: string
+  readonly installed: boolean
+  readonly version?: string
+  readonly bundleId?: string
+  readonly profileReminder?: string
+  readonly reinstalled?: boolean
+}
+
+async function phoneAgentOperation(
+  operation: 'status' | 'install',
+  deviceId: string,
+  force?: boolean,
+): Promise<PhoneAgentStatusView> {
+  let response: Response
+  try {
+    response = await fetch(`${PHONE_AGENT_PATH}/${operation}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId, ...(force === undefined ? {} : { force }) }),
+    })
+  } catch (error) {
+    throw new PhoneStreamHttpError(0, 'network', error instanceof Error ? error.message : String(error))
+  }
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok) throw errorOf(response, body, `phone agent ${operation} failed with HTTP ${response.status}`)
+  const record = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
+  if (typeof record.deviceId !== 'string' || typeof record.installed !== 'boolean'
+    || (record.reinstalled !== undefined && typeof record.reinstalled !== 'boolean')) {
+    throw new PhoneStreamHttpError(200, 'protocol', `phone agent ${operation} answered an invalid status`)
+  }
+  const optionalString = (name: 'version' | 'bundleId' | 'profileReminder'): string | undefined =>
+    typeof record[name] === 'string' ? record[name] : undefined
+  const version = optionalString('version')
+  const bundleId = optionalString('bundleId')
+  const profileReminder = optionalString('profileReminder')
+  return {
+    deviceId: record.deviceId,
+    installed: record.installed,
+    ...(version === undefined ? {} : { version }),
+    ...(bundleId === undefined ? {} : { bundleId }),
+    ...(profileReminder === undefined ? {} : { profileReminder }),
+    ...(typeof record.reinstalled === 'boolean' ? { reinstalled: record.reinstalled } : {}),
+  }
+}
+
+/**
+ * Read the iOS real-device control-agent status from the Host.
+ * @param deviceId - iOS real-device id from the current fleet listing.
+ * @returns the current on-device agent status.
+ */
+export function readPhoneAgentStatus(deviceId: string): Promise<PhoneAgentStatusView> {
+  return phoneAgentOperation('status', deviceId)
+}
+
+/**
+ * Install or force-reinstall the iOS real-device control agent through the Host.
+ * @param deviceId - iOS real-device id from the current fleet listing.
+ * @param force - whether to replace an already installed agent and refresh its signing.
+ * @returns the post-install on-device agent status.
+ */
+export function installPhoneAgent(deviceId: string, force: boolean): Promise<PhoneAgentStatusView> {
+  return phoneAgentOperation('install', deviceId, force)
 }
 
 /** Socket target the minted session names. */
@@ -198,6 +296,8 @@ export function openPhoneIoSocket(target: PhoneIoTarget, handlers: PhoneIoHandle
 export function createHttpPhoneGateway(): PhoneStreamGateway {
   return {
     mintSession: deviceId => mintPhoneSession(deviceId),
+    agentStatus: deviceId => readPhoneAgentStatus(deviceId),
+    installAgent: (deviceId, force) => installPhoneAgent(deviceId, force),
     connectIo: (target, handlers) => openPhoneIoSocket(target, handlers),
   }
 }

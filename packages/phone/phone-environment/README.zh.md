@@ -6,7 +6,7 @@ Host 在 `ctx.phoneEnvironment` 上持有手机工具链状态。该服务为「
 
 托管运行时固定到 mobile-next/mobilecli 官方 GitHub Release 的六个 1.0.5 归档，覆盖 macOS、Windows 与 Linux 的 arm64 和 amd64。包清单记录每个固定 URL、字节长度、SHA-256 摘要与归档内可执行文件名。准备只跟随官方 GitHub asset redirect，把数据流式写入 owner-only staging 目录，校验长度与 SHA-256，只接受 zip 根目录中的单个可执行文件，探测 `mobilecli --version`，最后原子替换 `current.json`。失败或取消会删除 staging，并保留此前 current generation 可用。运行时选择顺序为显式运维 override、托管 current、系统发现。它绝不写入全局 npm 安装或 `PATH`。
 
-Host 通过共享同源信任栅栏，在 `GET /phone/environment` 提供全量快照，并在该路径下提供可信运行时/平台 POST 操作。平台提供方注册到这个稳定服务；[Android 提供方](../phone-environment-android/README.zh.md)贡献 SDK、AVD 与 Emulator 准备，[iOS 提供方](../phone-environment-ios/README.zh.md)则在 macOS 上贡献 Xcode Runtime 与模拟器准备。Desktop 每次启动都会组合 environment、提供方、`phone-runtime`、`phone-stream` 与 `tool-phone`。稳定 fleet 会等待本服务选择可执行文件；启用会就地激活，关闭则取消准备并停止所持有的平台与运行时子进程。设置页在 mobilecli 在线清单与可识别 H264 关键画面后发布 Android 平台就绪，在在线清单与可识别 MJPEG/JPEG 画面后发布 iOS 模拟器就绪。这些画面探测不控制模型工具注册；模型工具注册跟随已启用 fleet 的运行时就绪，并在调用时执行权威设备清单查询。
+Host 通过共享同源信任栅栏，在 `GET /phone/environment` 提供全量快照，并在该路径下提供可信运行时/平台 POST 操作。平台提供方注册到这个稳定服务；[Android 提供方](../phone-environment-android/README.zh.md)贡献 SDK、AVD 与 Emulator 准备，[iOS 提供方](../phone-environment-ios/README.zh.md)则在 macOS 上贡献 Xcode Runtime 与模拟器准备。Desktop 每次启动都会组合 environment、提供方、`phone-runtime`、`phone-stream` 与 `tool-phone`。稳定 fleet 会等待本服务选择可执行文件；启用会就地激活，关闭则取消准备并停止所持有的平台与运行时子进程。设置页在 mobilecli 在线清单与可识别 H264 关键画面后发布 Android 平台就绪。iOS 模拟器就绪会先要求 mobilecli 在线清单中存在该精确模拟器，再幂等安装它的设备端 agent，并要求可识别 MJPEG/JPEG 画面，使一键准备包含执行采集与输入的组件。这些画面探测不控制模型工具注册；模型工具注册跟随已启用 fleet 的运行时就绪，并在调用时执行权威设备清单查询。
 
 mobilecli 使用 FSL-1.1，并带 Apache-2.0 future license。运行时从上游 Release 直连下载不等于把副本放进 Desktop Bundle，但在法务或上游许可方确认预期产品用途获准之前，产品发布仍被阻塞。本包不 vendor 或再分发 mobilecli。
 
@@ -16,6 +16,10 @@ mobilecli 使用 FSL-1.1，并带 Apache-2.0 future license。运行时从上游
 |---|---|---|
 | `root` | `$DSH_HOME/phone` | 私有托管安装根目录，包含 staging 目录、不可变版本与 `current.json`。 |
 | `executablePath` | — | 运维方持有的可执行文件 override。其优先级始终高于托管和系统 candidate；配置期间托管准备以 `PHONE_ENVIRONMENT_OVERRIDE` 拒绝。 |
+| `iosRuntimeVerifyTimeoutMs` | `25000` | iOS 模拟器在线清单、设备控制代理准备及可识别 MJPEG/JPEG 画面的整体等待上限，单位为毫秒。 |
+| `iosAgentSettleDelayMs` | `2000` | 安装设备控制代理后、首次打开模拟器画面采集前的等待时间，单位为毫秒。 |
+| `iosAgentCaptureRetryDelayMs` | `1000` | 安装设备控制代理后的首次模拟器画面采集失败时，重试前的等待时间，单位为毫秒。 |
+| `iosAgentFirstCaptureTimeoutMs` | `5000` | 安装设备控制代理后首次模拟器画面采集的等待上限，单位为毫秒。 |
 
 并发准备以 `PHONE_ENVIRONMENT_BUSY` 拒绝，取消使用 `PHONE_ENVIRONMENT_ABORTED`。下载信任失败使用 `PHONE_ENVIRONMENT_DOWNLOAD`、`PHONE_ENVIRONMENT_LENGTH` 或 `PHONE_ENVIRONMENT_DIGEST`；归档、版本、current 指针与文件系统失败使用 `PHONE_ENVIRONMENT_ARCHIVE`、`PHONE_ENVIRONMENT_VERSION`、`PHONE_ENVIRONMENT_CURRENT` 或 `PHONE_ENVIRONMENT_DISK`。激活与运行时意外丢失使用 `PHONE_ENVIRONMENT_ACTIVATION` 和 `PHONE_ENVIRONMENT_RUNTIME_LOST`。检测或准备失败时，服务不会静默选择低优先级 candidate，也不会让旧子进程与工具继续活动。
 

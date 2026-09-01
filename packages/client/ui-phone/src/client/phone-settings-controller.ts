@@ -85,6 +85,7 @@ export class PhoneSettingsCardController {
    * @param scope - bound settings scope for the `ui-phone` namespace.
    * @param source - environment snapshot; defaults to the missing-service arm.
    * @param clipboard - optional clipboard writer used by copy buttons.
+   * @param runtime - owned Host source released with this controller.
    */
   constructor(
     private readonly scope: SettingsScope<PhoneSettings>,
@@ -115,6 +116,7 @@ export class PhoneSettingsCardController {
     this.unsubscribeScope()
     this.unsubscribeSource()
     this.unsubscribeRuntime()
+    this.runtime?.dispose()
   }
 
   /**

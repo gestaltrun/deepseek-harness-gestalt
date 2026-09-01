@@ -85,7 +85,7 @@ async function mount(
 }
 
 describe('ui-phone client apply', () => {
-  afterEach(() => { vi.unstubAllGlobals() })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   it('declares the Side card, locale, and settings-section service edges', () => {
     expect([...inject]).toEqual(['betterSidebar', 'slots', 'locale', 'settingsScope'])
@@ -308,6 +308,24 @@ describe('ui-phone client apply', () => {
     expect(sidebar.getTab('phone')).toBeDefined()
     await fiber.dispose()
     expect(sidebar.getTab('phone')).toBeUndefined()
+  })
+
+  it('aborts the settings runtime pull when the plugin fiber disposes', async () => {
+    let runtimeSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async (path, init) => {
+      if (path === '/phone/environment') {
+        runtimeSignal = init?.signal ?? undefined
+        return await new Promise<Response>(() => {})
+      }
+      return new Response(JSON.stringify({ android: [], ios: { simulators: [], reals: [] } }))
+    }))
+    const sidebar = new SidebarUnderTest()
+    const { fiber } = await mount(sidebar)
+    await vi.waitFor(() => { expect(runtimeSignal).toBeDefined() })
+
+    await fiber.dispose()
+
+    expect(runtimeSignal?.aborted).toBe(true)
   })
 
   describe('Config gate', () => {

@@ -78,10 +78,11 @@ function containsPicture(bytes: Uint8Array, minimumDimension: number): boolean {
       }
       while (bytes[offset] === 0xff) offset += 1
       const marker = bytes[offset]
-      if (marker === undefined) return false
+      if (marker === undefined) break
       offset += 1
       if (marker === 0xd9) {
-        return dimensioned && hasScanPayload
+        if (dimensioned && hasScanPayload) return true
+        break
       }
       if (marker === 0x00) {
         if (!inScan) break
@@ -96,11 +97,11 @@ function containsPicture(bytes: Uint8Array, minimumDimension: number): boolean {
       inScan = false
       const high = bytes[offset]
       const low = bytes[offset + 1]
-      if (high === undefined || low === undefined) return false
+      if (high === undefined || low === undefined) break
       const length = high * 256 + low
       if (length < 2) break
       const end = offset + length
-      if (end > bytes.byteLength) return false
+      if (end > bytes.byteLength) break
       if (isStartOfFrame(marker)) {
         const frame = frameHeader(bytes, offset, end, minimumDimension)
         if (frame === undefined) break

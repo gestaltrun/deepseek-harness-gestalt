@@ -71,6 +71,16 @@ describe('verifyMjpegJpegPicture', () => {
     })).resolves.toBeUndefined()
   })
 
+  it('resynchronizes from malformed candidates onto a later complete picture', async () => {
+    await expect(verifyMjpegJpegPicture(streamOf(
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]),
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+      buildGradientJpeg(4),
+    ), {
+      signal: new AbortController().signal, maxBytes: 1024 * 1024,
+    })).resolves.toBeUndefined()
+  })
+
   it.each([
     ['an empty body', new Uint8Array()],
     ['error bytes', new TextEncoder().encode('Error: capture unavailable')],

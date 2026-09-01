@@ -7,7 +7,7 @@ import {
 } from './helpers.ts'
 
 describe('Desktop phone tab live chain', () => {
-  it('deduplicates devices, falls back to MJPEG, keeps H264 success, and forwards exact io', async () => {
+  it('deduplicates devices, falls back to MJPEG, and forwards exact GUI and Agent io', async () => {
     const startup = await assertStartupEvidence()
     await recordOwnedProcesses(startup.hostPid, true)
     await openSession()

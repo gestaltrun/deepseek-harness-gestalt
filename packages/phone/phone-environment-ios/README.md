@@ -12,7 +12,7 @@ Preparation failures use stable `PHONE_IOS_*` codes for unsupported Hosts, missi
 
 ## Model Experience
 
-Indirectly, through `dsh-tool-phone`. A running iOS environment restarts the selected mobilecli generation, requires that generation to list the exact Simulator online, and verifies a recognizable MJPEG/JPEG picture before publishing ready. mobilecli does not offer H264 for iOS Simulator; the GUI displays the actual MJPEG format through the shared real-stream fallback. The GUI and model-facing `device_*` tools therefore address the same verified Simulator.
+Indirectly, through the fleet consumed by `dsh-tool-phone`. A running iOS environment restarts the selected mobilecli generation, requires that generation to list the exact Simulator online, and verifies a recognizable MJPEG/JPEG picture before publishing platform readiness to Settings. mobilecli does not offer H264 for iOS Simulator; the GUI displays the actual MJPEG format through the shared real-stream fallback. Model tool registration follows enabled fleet runtime readiness rather than this picture probe, and each tool invocation resolves devices from the live fleet list.
 
 #### KV Cache effect
 

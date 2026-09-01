@@ -12,7 +12,7 @@
 
 ## Model Experience
 
-通过 `dsh-tool-phone` 间接可见。iOS 环境运行后，选中的 mobilecli generation 会重新启动；只有该 generation 将精确模拟器列为在线并验证出可识别的 MJPEG/JPEG 画面后才发布 ready。mobilecli 不为 iOS 模拟器提供 H264；GUI 通过共享的真实流 fallback 显示实际 MJPEG 格式。因此 GUI 与模型可见 `device_*` 工具操作的是同一台已验证模拟器。
+通过 `dsh-tool-phone` 消费的 fleet 间接可见。iOS 环境运行后，选中的 mobilecli generation 会重新启动；只有该 generation 将精确模拟器列为在线并验证出可识别的 MJPEG/JPEG 画面后，才向设置页发布平台就绪。mobilecli 不为 iOS 模拟器提供 H264；GUI 通过共享的真实流 fallback 显示实际 MJPEG 格式。模型工具注册跟随已启用 fleet 的运行时就绪，而非这项画面探测；每次工具调用都从实时 fleet 清单解析设备。
 
 #### KV Cache effect
 

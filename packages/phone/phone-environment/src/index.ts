@@ -516,8 +516,8 @@ export class PhoneEnvironment extends Service {
     if (active !== undefined) {
       try { await active } catch (error) { if (!isCancellation(error)) throw error }
     }
-    const state = this.ios?.snapshot()
-    if (state?.kind !== 'ready' || !state.running
+    const state = this.ios.snapshot()
+    if (state.kind !== 'ready' || !state.running
       || !this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) return
     if (this.current.platforms.ios.kind === 'ready' && this.current.platforms.ios.running
       && this.current.platforms.ios.deviceId === state.deviceId) return
@@ -601,8 +601,21 @@ export class PhoneEnvironment extends Service {
     let failure: unknown
     try { await this.iosTask } catch (error) { if (!isCancellation(error)) failure = error }
     try { await this.ios?.deactivate() } catch (error) { failure ??= error }
-    if (this.ios !== undefined) this.publishIos(this.pendingIosRuntime(this.ios.snapshot()))
-    if (failure !== undefined) throw failure
+    if (this.ios !== undefined) {
+      const state = this.ios.snapshot()
+      this.publishIos(state.kind === 'ready' && state.running
+        ? {
+          kind: 'failed', plan: state.plan, code: 'PHONE_IOS_ABORTED',
+          message: 'iOS Simulator picture verification was cancelled; retry preparation or detection to verify it',
+          retryable: true,
+        }
+        : state)
+    }
+    if (failure !== undefined) {
+      throw failure instanceof Error
+        ? failure
+        : new Error('iOS environment cancellation failed with a non-Error reason', { cause: failure })
+    }
   }
 
   private async verifyIosRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {

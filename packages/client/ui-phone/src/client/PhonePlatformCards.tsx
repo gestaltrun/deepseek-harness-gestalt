@@ -136,12 +136,7 @@ function IosActions(props: {
 }): ReactNode {
   if (props.state.kind === 'preparing') return <Button variant="outline" onClick={props.onCancel}>取消</Button>
   if (props.state.kind === 'ready') {
-    return (
-      <div className={css.actions}>
-        {!props.state.running && <Button variant="primary" onClick={props.onStart}>启动默认模拟器</Button>}
-        <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
-      </div>
-    )
+    return <SimulatorReadyActions running={props.state.running} onStart={props.onStart} onRefresh={props.onRefresh} />
   }
   if (props.state.kind === 'runtime-missing' || props.state.kind === 'no-simulator'
     || props.state.kind === 'failed' && props.state.retryable) {
@@ -208,17 +203,25 @@ function AndroidActions(props: {
     || props.state.kind === 'booting'
   if (busy) return <Button variant="outline" onClick={props.onCancel}>取消</Button>
   if (props.state.kind === 'ready') {
-    return (
-      <div className={css.actions}>
-        {!props.state.running && <Button variant="primary" onClick={props.onStart}>启动默认模拟器</Button>}
-        <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
-      </div>
-    )
+    return <SimulatorReadyActions running={props.state.running} onStart={props.onStart} onRefresh={props.onRefresh} />
   }
   if (props.state.kind === 'unsupported' || props.state.kind === 'deferred' || props.state.kind === 'checking') return null
   return (
     <div className={css.actions}>
       <Button variant="primary" onClick={props.onPrepare}>一键准备 Android</Button>
+      <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
+    </div>
+  )
+}
+
+function SimulatorReadyActions(props: {
+  readonly running: boolean
+  readonly onStart: () => void
+  readonly onRefresh: () => void
+}): ReactNode {
+  return (
+    <div className={css.actions}>
+      {!props.running && <Button variant="primary" onClick={props.onStart}>启动默认模拟器</Button>}
       <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
     </div>
   )

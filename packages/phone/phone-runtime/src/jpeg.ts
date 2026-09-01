@@ -1,5 +1,7 @@
 /** Bounded Host-side recognition of one complete JPEG picture in an MJPEG body. */
 
+import { readUntilRecognizable } from './recognizable-stream.ts'
+
 /** Inputs for one bounded MJPEG/JPEG picture verification. */
 export interface MjpegPictureVerificationOptions {
   /** Caller cancellation for the live response body. */
@@ -29,31 +31,30 @@ export async function verifyMjpegJpegPicture(
   if (!Number.isSafeInteger(minimumDimension) || minimumDimension < 1) {
     throw new TypeError('MJPEG minimumDimension must be a positive safe integer')
   }
-  const reader = body.getReader()
-  let received = new Uint8Array()
-  let rejectAbort: (reason?: unknown) => void = () => {}
-  const halt = (): void => { rejectAbort(options.signal.reason) }
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject
-    if (options.signal.aborted) halt()
-    else options.signal.addEventListener('abort', halt, { once: true })
-  })
-  try {
-    for (;;) {
-      const chunk = await Promise.race([reader.read(), aborted])
-      if (chunk.done) {
-        if (containsPicture(received, minimumDimension)) return
-        throw new Error('phone MJPEG stream ended before a complete recognizable JPEG picture')
-      }
-      received = append(received, chunk.value)
-      if (received.byteLength > options.maxBytes) {
-        throw new Error(`phone MJPEG picture probe exceeded ${String(options.maxBytes)} bytes`)
-      }
-      if (containsPicture(received, minimumDimension)) return
+  await readUntilRecognizable(
+    body, options.signal, new JpegPictureProbe(options.maxBytes, minimumDimension),
+    'phone MJPEG stream ended before a complete recognizable JPEG picture',
+  )
+}
+
+class JpegPictureProbe {
+  private received = new Uint8Array()
+
+  constructor(
+    private readonly maxBytes: number,
+    private readonly minimumDimension: number,
+  ) {}
+
+  push(chunk: Uint8Array): boolean {
+    this.received = append(this.received, chunk)
+    if (this.received.byteLength > this.maxBytes) {
+      throw new Error(`phone MJPEG picture probe exceeded ${String(this.maxBytes)} bytes`)
     }
-  } finally {
-    options.signal.removeEventListener('abort', halt)
-    await reader.cancel().catch(() => {})
+    return containsPicture(this.received, this.minimumDimension)
+  }
+
+  finish(): boolean {
+    return containsPicture(this.received, this.minimumDimension)
   }
 }
 

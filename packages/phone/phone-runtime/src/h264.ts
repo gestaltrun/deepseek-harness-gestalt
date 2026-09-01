@@ -1,5 +1,7 @@
 /** Bounded Host-side syntax recognition of one Annex-B H264 key access unit. */
 
+import { readUntilRecognizable } from './recognizable-stream.ts'
+
 interface StartCode {
   readonly index: number
   readonly length: 3 | 4
@@ -29,28 +31,11 @@ export async function verifyAnnexBH264KeyAccessUnit(
   if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1) {
     throw new TypeError('H264 verification maxBytes must be a positive safe integer')
   }
-  const reader = body.getReader()
   const probe = new AnnexBKeyAccessUnitProbe(options.maxBytes)
-  let rejectAbort: (reason?: unknown) => void = () => {}
-  const halt = (): void => { rejectAbort(options.signal.reason) }
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject
-    if (options.signal.aborted) halt()
-    else options.signal.addEventListener('abort', halt, { once: true })
-  })
-  try {
-    for (;;) {
-      const chunk = await Promise.race([reader.read(), aborted])
-      if (chunk.done) {
-        if (probe.finish()) return
-        throw new Error('phone H264 stream ended before a complete SPS, PPS, and IDR key access unit')
-      }
-      if (probe.push(chunk.value)) return
-    }
-  } finally {
-    options.signal.removeEventListener('abort', halt)
-    await reader.cancel().catch(() => {})
-  }
+  await readUntilRecognizable(
+    body, options.signal, probe,
+    'phone H264 stream ended before a complete SPS, PPS, and IDR key access unit',
+  )
 }
 
 class AnnexBKeyAccessUnitProbe {

@@ -5,7 +5,7 @@
  * environment view, callbacks) and assert user-visible copy.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { PhoneSettingsCard } from '../src/client/PhoneSettingsCard.tsx'
@@ -350,6 +350,7 @@ describe('PhoneSettingsSection', () => {
 
   it('offers managed iOS Runtime preparation and reports MJPEG after verified readiness', () => {
     const prepareIos = vi.fn()
+    const refreshIos = vi.fn()
     const plan = {
       developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
       simulatorName: 'DSH Gestalt iPhone',
@@ -365,11 +366,22 @@ describe('PhoneSettingsSection', () => {
       setEnabled: vi.fn(), redetect: vi.fn(), copyCommand: vi.fn(), nextAction: vi.fn(),
       prepareRuntime: vi.fn(), cancelRuntime: vi.fn(), refreshRuntime: vi.fn(),
       prepareAndroid: vi.fn(), cancelAndroid: vi.fn(), refreshAndroid: vi.fn(), startAndroid: vi.fn(),
-      prepareIos, cancelIos: vi.fn(), refreshIos: vi.fn(), startIos: vi.fn(),
+      prepareIos, cancelIos: vi.fn(), refreshIos, startIos: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     const rendered = render(<PhoneSettingsSection {...props} />)
     fireEvent.click(screen.getByRole('button', { name: '一键准备 iOS' }))
     expect(prepareIos).toHaveBeenCalledOnce()
+
+    store.set({ ...store.getSnapshot(), platforms: { android: { kind: 'deferred' }, ios: {
+      kind: 'failed', plan, code: 'PHONE_IOS_ABORTED',
+      message: 'iOS Simulator picture verification was cancelled', retryable: true,
+    } } })
+    rendered.rerender(<PhoneSettingsSection {...props} />)
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull()
+    const iosCard = document.querySelector<HTMLElement>('[data-phone-platform-ios="failed"]')
+    if (iosCard === null) throw new Error('iOS failed card did not render')
+    fireEvent.click(within(iosCard).getByRole('button', { name: '重新检测' }))
+    expect(refreshIos).toHaveBeenCalledOnce()
 
     store.set({ ...store.getSnapshot(), platforms: { android: { kind: 'deferred' }, ios: {
       kind: 'ready', plan: { ...plan, runtime: {

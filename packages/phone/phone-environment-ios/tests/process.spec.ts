@@ -21,7 +21,7 @@ describe('iOS command runner', () => {
     }
   })
 
-  it('terminates a timed-out process group and retains both timeout and exit facts', async () => {
+  it.skipIf(process.platform === 'win32')('terminates a timed-out process group and retains both timeout and exit facts', async () => {
     const runner = createNodeIosCommandRunner()
     const result = await runner.run(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
       env: { PATH: process.env.PATH ?? '' }, timeoutMs: 25,

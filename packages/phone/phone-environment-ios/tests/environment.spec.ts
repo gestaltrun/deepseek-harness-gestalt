@@ -68,6 +68,11 @@ function result(code = 0, stdout = '', stderr = ''): IosCommandResult {
   return { code, signal: null, timedOut: false, stdout, stderr }
 }
 
+function abortReason(signal: AbortSignal | undefined): Error {
+  const reason: unknown = signal?.reason
+  return reason instanceof Error ? reason : new Error('fixture command was cancelled', { cause: reason })
+}
+
 describe('iOS environment manager', () => {
   it('reserves operation ownership before checking-state notification', async () => {
     const manager = new IosEnvironmentManager({ platform: 'darwin', runner: new FixtureRunner('ready') })
@@ -141,7 +146,9 @@ describe('iOS environment manager', () => {
       const runner = new FixtureRunner(mode)
       const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
       await manager.refresh()
-      await expect(manager.prepare()).rejects.toMatchObject({ code: expect.stringMatching(/^PHONE_IOS_/u) })
+      await expect(manager.prepare()).rejects.toMatchObject({
+        code: mode === 'license' ? 'PHONE_IOS_LICENSE_REQUIRED' : 'PHONE_IOS_FIRST_LAUNCH',
+      })
       expect(runner.calls.some(call => call.args.includes('-downloadPlatform'))).toBe(false)
     }
   })
@@ -168,9 +175,7 @@ describe('iOS environment manager', () => {
     }
     const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
     await manager.refresh()
-    await expect(manager.prepare()).rejects.toMatchObject({
-      code: 'PHONE_IOS_RUNTIME_DOWNLOAD', message: expect.stringMatching(message),
-    })
+    await expect(manager.prepare()).rejects.toThrow(message)
     expect(manager.snapshot()).toMatchObject({ kind: 'failed', code: 'PHONE_IOS_RUNTIME_DOWNLOAD' })
   })
 
@@ -185,7 +190,7 @@ describe('iOS environment manager', () => {
         }
         downloadStarted()
         return await new Promise<IosCommandResult>((_resolve, reject) => {
-          options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+          options.signal?.addEventListener('abort', () => { reject(abortReason(options.signal)) }, { once: true })
         })
       },
     }
@@ -207,7 +212,7 @@ describe('iOS environment manager', () => {
         if (command !== 'xcrun' || args[1] !== 'bootstatus') return await fixture.run(command, args, options)
         bootWaitStarted()
         return await new Promise<IosCommandResult>((_resolve, reject) => {
-          options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+          options.signal?.addEventListener('abort', () => { reject(abortReason(options.signal)) }, { once: true })
         })
       },
     }

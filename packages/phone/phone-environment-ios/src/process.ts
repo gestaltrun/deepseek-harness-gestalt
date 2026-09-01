@@ -92,7 +92,9 @@ async function settleChild(
   })
   const recordTerminationError = (error: unknown): void => {
     if (terminationError !== undefined || error === undefined) return
-    terminationError = error instanceof Error ? error : new Error(String(error))
+    terminationError = error instanceof Error
+      ? error
+      : new Error('iOS process termination failed with a non-Error reason', { cause: error })
   }
   const terminate = (exitSignal: NodeJS.Signals): void => {
     if (child.pid === undefined) return

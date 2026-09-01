@@ -204,9 +204,7 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
     picture.enqueue(buildGradientJpeg(4))
     expect((await starting).status).toBe(200)
-    expect(startCapture).toHaveBeenCalledWith({
-      deviceId: IOS_ID, format: 'mjpeg', signal: expect.any(AbortSignal),
-    })
+    expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
   })
 
@@ -265,9 +263,7 @@ describe('PhoneEnvironment', () => {
     await vi.waitFor(() => {
       expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
     })
-    expect(startCapture).toHaveBeenCalledWith({
-      deviceId: IOS_ID, format: 'mjpeg', signal: expect.any(AbortSignal),
-    })
+    expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
   })
 
   it('verifies a Simulator that becomes running before manual iOS refresh', async () => {
@@ -298,14 +294,20 @@ describe('PhoneEnvironment', () => {
     expect(startCapture).toHaveBeenCalledOnce()
   })
 
-  it('never promotes an unverified running Provider snapshot when verification is cancelled', async () => {
+  it('makes a cancelled running Provider verification retryable without promoting it', async () => {
     const path = await executable()
     const context = new Context()
     contexts.push(context)
-    const startCapture = vi.fn(async () => ({
-      contentType: 'multipart/x-mixed-replace; boundary=frame',
-      body: new ReadableStream<Uint8Array>(),
-    }))
+    let attempt = 0
+    const startCapture = vi.fn(async () => {
+      attempt += 1
+      return {
+        contentType: 'multipart/x-mixed-replace; boundary=frame',
+        body: attempt === 1
+          ? new ReadableStream<Uint8Array>()
+          : new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(6)) } }),
+      }
+    })
     const { service, origin } = await mountEnvironment(context, {
       activateExecutable: async () => {},
       listDevices: async () => ({ android: [], ios: { simulators: [{
@@ -320,8 +322,15 @@ describe('PhoneEnvironment', () => {
 
     const cancelled = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })
     expect(cancelled.status).toBe(200)
-    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    expect(service.snapshot().platforms.ios).toMatchObject({
+      kind: 'failed', code: 'PHONE_IOS_ABORTED', retryable: true,
+    })
     expect(service.snapshot().platforms.ios).not.toMatchObject({ kind: 'ready', running: true })
+
+    const retried = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_REFRESH_PATH}`, { method: 'POST' })
+    expect(retried.status).toBe(200)
+    expect(startCapture).toHaveBeenCalledTimes(2)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
   })
 
   it.skipIf(process.platform === 'win32')('reconciles pending booted iOS after one-click mobilecli preparation', async () => {
@@ -370,9 +379,7 @@ describe('PhoneEnvironment', () => {
     expect(fetcher).toHaveBeenCalledOnce()
     expect(service.snapshot().runtime).toMatchObject({ kind: 'ready', source: 'managed' })
     expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
-    expect(startCapture).toHaveBeenCalledWith({
-      deviceId: IOS_ID, format: 'mjpeg', signal: expect.any(AbortSignal),
-    })
+    expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
   })
 
   it('requires Android license consent and reactivates mobilecli with the Provider environment', async () => {

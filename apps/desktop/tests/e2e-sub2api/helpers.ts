@@ -721,6 +721,7 @@ export async function selectModelAndSend(
   await modelPane.waitForClickable({ timeout: 30_000 })
   await modelPane.click()
   const choice = browser.$(`button[title="${model}"]`)
+  await choice.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   await choice.waitForClickable({ timeout: 30_000 })
   await choice.click()
   await browser.waitUntil(async () => (await browser.$(triggerSelector).getAttribute('title'))?.includes(model) === true, {

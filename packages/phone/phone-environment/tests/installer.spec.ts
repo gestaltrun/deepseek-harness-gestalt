@@ -10,19 +10,27 @@ import {
 import type { MobilecliInstallerOptions } from '../src/installer.ts'
 import type { MobilecliReleaseAsset } from '../src/types.ts'
 
-const diskFault = vi.hoisted(() => ({ enabled: false }))
+const fsFault = vi.hoisted(() => ({ openCode: undefined as string | undefined, rename: false }))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...actual,
     open: async (...args: Parameters<typeof actual.open>) => {
-      if (diskFault.enabled && basename(String(args[0])) === 'mobilecli') {
+      if (fsFault.openCode !== undefined && basename(String(args[0])) === 'mobilecli') {
         const error = new Error('no space left on device') as NodeJS.ErrnoException
-        error.code = 'ENOSPC'
+        error.code = fsFault.openCode
         throw error
       }
       return await actual.open(...args)
+    },
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      if (fsFault.rename) {
+        const error = new Error('rename failed') as NodeJS.ErrnoException
+        error.code = 'EIO'
+        throw error
+      }
+      await actual.rename(...args)
     },
   }
 })
@@ -30,7 +38,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 const roots: string[] = []
 
 afterEach(async () => {
-  diskFault.enabled = false
+  fsFault.openCode = undefined
+  fsFault.rename = false
+  vi.unstubAllGlobals()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -97,6 +107,14 @@ describe('managed mobilecli installer', () => {
     })
     if (process.platform !== 'win32') expect((await stat(root)).mode & 0o777).toBe(0o700)
     expect((await readdir(root)).filter(name => name.startsWith('.staging-'))).toEqual([])
+  })
+
+  it('uses the ambient fetch boundary when no installer override is supplied', async () => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(responseOf(bytes)))
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, hostProbe()))
+      .resolves.toMatchObject({ version: '1.0.5' })
   })
 
   it.runIf(process.platform !== 'win32')('keeps the installation root, executable, and pointer private', async () => {
@@ -182,6 +200,77 @@ describe('managed mobilecli installer', () => {
     })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_VERSION' })
   })
 
+  it('rejects an empty executable and a redirect without a Location header', async () => {
+    const emptyRoot = await tempRoot()
+    const empty = zipSync({ mobilecli: new Uint8Array() })
+    await expect(installManagedMobilecli(emptyRoot, assetOf(empty), new AbortController().signal, {
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(empty)),
+    })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ARCHIVE' })
+
+    const redirectRoot = await tempRoot()
+    const bytes = archiveOf()
+    await expect(installManagedMobilecli(redirectRoot, assetOf(bytes), new AbortController().signal, {
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 302 })),
+    })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_DOWNLOAD' })
+  })
+
+  it.each([
+    ['HTTP failure', new Response('not found', { status: 404 })],
+    ['missing body', new Response(null, { status: 200 })],
+  ])('rejects a %s before opening the archive', async (_name, response) => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response)
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, { fetch: fetcher }))
+      .rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_DOWNLOAD' })
+  })
+
+  it('rejects a response body that exceeds the pinned byte length', async () => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    const response = new Response(new Uint8Array([...bytes, 0]), { status: 200 })
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(response),
+    })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_LENGTH' })
+  })
+
+  it('reuses a verified existing version and rejects a conflicting existing version', async () => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => responseOf(bytes))
+    const first = await installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      ...hostProbe(), fetch: fetcher,
+    })
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      ...hostProbe(), fetch: fetcher,
+    })).resolves.toEqual(first)
+
+    const probeVersion = vi.fn()
+      .mockResolvedValueOnce('1.0.5')
+      .mockResolvedValueOnce('9.9.9')
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      fetch: fetcher, probeVersion,
+    })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_VERSION' })
+  })
+
+  it('preserves a non-filesystem preparation failure', async () => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    const failure = new Error('network unavailable')
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      fetch: vi.fn<typeof fetch>().mockRejectedValue(failure),
+    })).rejects.toBe(failure)
+  })
+
+  it('preserves rename failure when no published version exists', async () => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    fsFault.rename = true
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      ...hostProbe(), fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(bytes)),
+    })).rejects.toMatchObject({ code: 'EIO' })
+  })
+
   it('cancels through the download signal and rejects unsafe current pointers', async () => {
     const root = await tempRoot()
     const bytes = archiveOf()
@@ -239,6 +328,16 @@ describe('managed mobilecli installer', () => {
     })
   })
 
+  it.runIf(process.platform !== 'win32')('rejects version probe output outside the mobilecli format', async () => {
+    const root = await tempRoot()
+    const executable = join(root, 'mobilecli')
+    await writeFile(executable, '#!/bin/sh\necho "version unknown"\n')
+    await chmod(executable, 0o700)
+    await expect(probeMobilecliVersion(executable)).rejects.toMatchObject({
+      code: 'PHONE_ENVIRONMENT_VERSION',
+    })
+  })
+
   it.runIf(process.platform !== 'win32')('normalizes cancellation during the version probe', async () => {
     const root = await tempRoot()
     const executable = join(root, 'mobilecli')
@@ -259,6 +358,42 @@ describe('managed mobilecli installer', () => {
       .rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ABORTED' })
   })
 
+  it('rejects invalid JSON and ignores pointers for another host tuple', async () => {
+    const root = await tempRoot()
+    await writeFile(join(root, 'current.json'), '{')
+    await expect(readManagedMobilecli(root, 'darwin', 'arm64'))
+      .rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_CURRENT' })
+
+    for (const pointer of [
+      null,
+      [],
+      {},
+      { version: 1, platform: 'darwin', architecture: 'arm64', executable: 'versions/current/mobilecli' },
+      { version: '1.0.5', platform: 1, architecture: 'arm64', executable: 'versions/current/mobilecli' },
+      { version: '1.0.5', platform: 'darwin', architecture: 1, executable: 'versions/current/mobilecli' },
+      { version: '1.0.5', platform: 'darwin', architecture: 'arm64', executable: 1 },
+      { version: '1.0.5', platform: 'linux', architecture: 'arm64', executable: 'versions/current/mobilecli' },
+      { version: '1.0.5', platform: 'darwin', architecture: 'x64', executable: 'versions/current/mobilecli' },
+    ]) {
+      await writeFile(join(root, 'current.json'), JSON.stringify(pointer))
+      await expect(readManagedMobilecli(root, 'darwin', 'arm64')).resolves.toBeUndefined()
+    }
+  })
+
+  it('preserves a managed-current read failure other than a missing pointer', async () => {
+    const root = await tempRoot()
+    const file = join(root, 'not-a-directory')
+    await writeFile(file, 'content')
+    await expect(readManagedMobilecli(file, 'darwin', 'arm64', new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+
+  it('treats a missing current pointer as absent with a live cancellation owner', async () => {
+    const root = await tempRoot()
+    await expect(readManagedMobilecli(root, 'darwin', 'arm64', new AbortController().signal))
+      .resolves.toBeUndefined()
+  })
+
   it('preserves the prior current pointer when the filesystem runs out of space', async () => {
     const root = await tempRoot()
     const bytes = archiveOf()
@@ -268,7 +403,7 @@ describe('managed mobilecli installer', () => {
     })
     const before = await readFile(join(root, 'current.json'), 'utf8')
 
-    diskFault.enabled = true
+    fsFault.openCode = 'ENOSPC'
     await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
       ...hostProbe(),
       fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(bytes)),
@@ -277,5 +412,14 @@ describe('managed mobilecli installer', () => {
     expect(await readManagedMobilecli(root, 'darwin', 'arm64')).toEqual({
       source: 'managed', executablePath: first.executablePath,
     })
+  })
+
+  it.each(['EDQUOT', 'EROFS', 'EACCES', 'EPERM'])('normalizes %s as a private-installation disk failure', async (code) => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    fsFault.openCode = code
+    await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(bytes)),
+    })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_DISK' })
   })
 })

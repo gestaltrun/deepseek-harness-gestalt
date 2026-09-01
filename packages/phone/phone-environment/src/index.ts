@@ -127,8 +127,8 @@ export class PhoneEnvironment extends Service {
       try { await this.androidTask } catch (error) { if (!isCancellation(error)) failures.push(error) }
       try { await this.android?.deactivate() } catch (error) { failures.push(error) }
       await this.prepareTask?.catch(() => {})
-      await this.refreshTask?.catch(() => {})
-      await this.enableTail.catch(() => {})
+      await this.refreshTask
+      await this.enableTail
       await ctx.phoneDevices.deactivate().catch(() => {})
       if (failures.length > 0) throw new AggregateError(failures, 'phone environment teardown failed')
     }, 'phone environment teardown')
@@ -136,7 +136,7 @@ export class PhoneEnvironment extends Service {
 
   /** Detect persisted, explicit, and system runtime candidates without failing Host composition. */
   protected [Service.init](): Promise<void> {
-    return this.refresh().then(() => {}, () => {})
+    return this.refresh().then(() => {})
   }
 
   /**
@@ -225,16 +225,12 @@ export class PhoneEnvironment extends Service {
       ? AbortSignal.any([this.lifetime.signal, controller.signal])
       : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
     const operation = this.transactionTail.then(() => this.detectRuntime(operationSignal))
-    this.transactionTail = operation.catch(() => {})
+    this.transactionTail = operation
     this.refreshTask = operation
     void operation.then(
       () => {
-        if (this.refreshTask === operation) this.refreshTask = undefined
-        if (this.refreshController === controller) this.refreshController = undefined
-      },
-      () => {
-        if (this.refreshTask === operation) this.refreshTask = undefined
-        if (this.refreshController === controller) this.refreshController = undefined
+        this.refreshTask = undefined
+        this.refreshController = undefined
       },
     )
     return operation
@@ -290,14 +286,14 @@ export class PhoneEnvironment extends Service {
           : environmentFailure(error))
         throw error
       } finally {
-        if (this.prepareController === controller) this.prepareController = undefined
+        this.prepareController = undefined
       }
     })
     this.transactionTail = operation.catch(() => {})
     this.prepareTask = operation
     void operation.then(
-      () => { if (this.prepareTask === operation) this.prepareTask = undefined },
-      () => { if (this.prepareTask === operation) this.prepareTask = undefined },
+      () => { this.prepareTask = undefined },
+      () => { this.prepareTask = undefined },
     )
     return operation
   }
@@ -528,7 +524,7 @@ export class PhoneEnvironment extends Service {
     return this.current
   }
 
-  private async activateCandidate(candidate: PhoneRuntimeCandidate, version: string, signal?: AbortSignal): Promise<void> {
+  private async activateCandidate(candidate: PhoneRuntimeCandidate, version: string, signal: AbortSignal): Promise<void> {
     this.publishRuntime({
       kind: 'activating', targetVersion: MOBILECLI_MANAGED_VERSION, source: candidate.source,
     })
@@ -537,9 +533,7 @@ export class PhoneEnvironment extends Service {
       'PHONE_ENVIRONMENT_ABORTED', 'the previous mobilecli activation was replaced',
     ))
     this.activationController = controller
-    const activationSignal = signal === undefined
-      ? AbortSignal.any([this.lifetime.signal, controller.signal])
-      : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
+    const activationSignal = AbortSignal.any([this.lifetime.signal, controller.signal, signal])
     try {
       await this.ctx.phoneDevices.activateExecutable(
         candidate.executablePath,
@@ -548,7 +542,7 @@ export class PhoneEnvironment extends Service {
       )
       this.publishReady(candidate.source, version)
     } catch (error) {
-      this.publishRuntime(environmentFailure(error))
+      if (this.activationController === controller) this.publishRuntime(environmentFailure(error))
       throw error
     } finally {
       if (this.activationController === controller) this.activationController = undefined
@@ -694,11 +688,7 @@ function sameSnapshot(previous: PhoneEnvironmentSnapshot, next: PhoneEnvironment
 }
 
 function pathnameOf(req: IncomingMessage): string {
-  try {
-    return new URL(req.url ?? '/', 'http://localhost').pathname
-  } catch {
-    return '/'
-  }
+  return new URL(req.url as string, 'http://localhost').pathname
 }
 
 export default PhoneEnvironment

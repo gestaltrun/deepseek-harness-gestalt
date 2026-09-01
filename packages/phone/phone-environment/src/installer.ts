@@ -168,19 +168,20 @@ async function downloadAsset(
     }
     url = redirected.href
   }
-  if (response === undefined || !response.ok || response.body === null) {
+  const finalResponse = response as Response
+  if (!finalResponse.ok || finalResponse.body === null) {
     throw new PhoneEnvironmentError(
       'PHONE_ENVIRONMENT_DOWNLOAD',
-      `mobilecli download failed with HTTP ${String(response?.status ?? 'unknown')}`,
+      `mobilecli download failed with HTTP ${String(finalResponse.status)}`,
     )
   }
-  const declared = response.headers.get('content-length')
+  const declared = finalResponse.headers.get('content-length')
   if (declared !== null && Number(declared) !== asset.bytes) {
     throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_LENGTH', 'mobilecli Content-Length did not match the pinned asset')
   }
   const handle = await open(target, 'wx', 0o600)
   const digest = createHash('sha256')
-  const reader = response.body.getReader()
+  const reader = finalResponse.body.getReader()
   let receivedBytes = 0
   try {
     for (;;) {
@@ -226,7 +227,6 @@ export async function probeMobilecliVersion(executablePath: string, signal?: Abo
     return match[1]
   } catch (error) {
     if (signal?.aborted === true) throw cancellationError(error)
-    if (error instanceof PhoneEnvironmentError) throw error
     throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'mobilecli version probe failed', { cause: error })
   }
 }

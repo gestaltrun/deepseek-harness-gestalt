@@ -32,7 +32,10 @@ describe('MobilecliServerProcess stop policy', () => {
     const child = Object.assign(events, { pid: 12_345, stderr, kill }) as unknown as ChildProcess
     spawnMock.mockReturnValue(child)
 
-    const runtimeProcess = new MobilecliServerProcess({ executablePath: '/mobilecli', port: 12_000 })
+    const runtimeProcess = new MobilecliServerProcess(
+      { executablePath: '/mobilecli', port: 12_000 },
+      { platform: 'darwin' },
+    )
     events.emit('close', 0, null)
     await expect(runtimeProcess.exit).resolves.toEqual({ code: 0 })
     await runtimeProcess.stop()
@@ -305,7 +308,10 @@ describe('MobilecliServerProcess stop policy', () => {
     const stderr = new PassThrough()
     const child = Object.assign(events, { pid: undefined, stderr, kill: vi.fn() }) as unknown as ChildProcess
     spawnMock.mockReturnValue(child)
-    const runtimeProcess = new MobilecliServerProcess({ executablePath: '/mobilecli', port: 12_000 })
+    const runtimeProcess = new MobilecliServerProcess(
+      { executablePath: '/mobilecli', port: 12_000 },
+      { platform: 'darwin' },
+    )
 
     const stopping = runtimeProcess.stop()
     const refusal = expect(stopping).rejects.toThrow('without-pid survived SIGTERM and SIGKILL')

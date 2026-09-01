@@ -44,7 +44,13 @@ describe('iOS command runner', () => {
     })) })
     expect(Buffer.byteLength(payload)).toBeGreaterThan(16_384)
     const result = await createNodeIosCommandRunner().run(
-      process.execPath, ['-e', 'process.stdout.write(process.argv[1])', payload],
+      process.execPath, ['-e', [
+        'const devicetypes = Array.from({ length: 1200 }, (_, index) => ({',
+        '  identifier: `com.apple.CoreSimulator.SimDeviceType.iPhone-${String(index)}`,',
+        '  name: `iPhone ${String(index)}`,',
+        '}))',
+        'process.stdout.write(JSON.stringify({ devicetypes }))',
+      ].join('\n')],
       { env: { PATH: process.env.PATH ?? '' }, stdoutMaxBytes: 1024 * 1024 },
     )
     expect(result).toMatchObject({ code: 0, signal: null, timedOut: false })

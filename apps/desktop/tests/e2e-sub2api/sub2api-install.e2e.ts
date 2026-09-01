@@ -2,12 +2,12 @@
 import { browser, expect } from '@wdio/globals'
 import {
   ACCOUNT_PROVIDER_MODEL, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
-  clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
-  configureRealModelRoute, connectTemporaryWorkspace, expandProviderSettings,
+  clickAccountConsoleRowAction, clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
+  configureRealModelRoute, connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput,
   mainWindowSnapshot,
   openProviderEditor,
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
-  overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
+  overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
   recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
 } from './helpers.ts'
 
@@ -165,8 +165,50 @@ describe('Sub2API Desktop installation', () => {
     const createProxyDialog = dialogStack.find(dialog =>
       /添加代理|Create Proxy/u.test(dialog.text) && dialog.ownsCenter)
     expect(createProxyDialog?.zIndex).toBe('80')
+
+    const proxyName = 'dsh-e2e-proxy'
+    await fillTopAccountDialogInput(['名称', 'Name'], proxyName)
+    await fillTopAccountDialogInput(['主机', 'Host'], '127.0.0.1')
+    await fillTopAccountDialogInput(['端口', 'Port'], '9')
+    await clickTopAccountDialogButton(['创建', 'Create'])
+    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(proxyName), {
+      timeout: 15_000,
+      timeoutMsg: 'New proxy did not appear in integrated IP management',
+    })
+
+    await clickAccountConsoleRowAction(proxyName, ['编辑', 'Edit'])
+    await browser.waitUntil(async () => {
+      const dialogs = await overlayAccountDialogStack()
+      return dialogs.some(dialog => /编辑代理|Edit Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    }, {
+      timeout: 15_000,
+      timeoutMsg: 'Edit Proxy dialog did not become the topmost integrated IP-management surface',
+    })
+    const editProxyDialog = (await overlayAccountDialogStack()).find(dialog =>
+      /编辑代理|Edit Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    expect(editProxyDialog?.zIndex).toBe('80')
     await clickTopAccountDialogButton(['取消', 'Cancel'])
+
+    await clickAccountConsoleRowAction(proxyName, ['删除', 'Delete'])
+    await browser.waitUntil(async () => {
+      const dialogs = await overlayAccountDialogStack()
+      return dialogs.some(dialog => /删除代理|Delete Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    }, {
+      timeout: 15_000,
+      timeoutMsg: 'Delete Proxy confirmation did not become the topmost integrated IP-management surface',
+    })
+    const deleteProxyDialog = (await overlayAccountDialogStack()).find(dialog =>
+      /删除代理|Delete Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    expect(deleteProxyDialog?.zIndex).toBe('80')
+    await clickTopAccountDialogButton(['取消', 'Cancel'])
+
     await clickAccountConsoleButton(['返回', 'Back'])
+    await clickAccountConsoleFieldSelector(['代理', 'Proxy'])
+    await browser.waitUntil(async () => (await overlayAccountSelectOptions()).some(option => option.includes(proxyName)), {
+      timeout: 15_000,
+      timeoutMsg: 'Account form did not refresh the proxy catalog after returning from IP management',
+    })
+    expect((await overlayAccountSelectOptions()).some(option => option.includes(proxyName))).toBe(true)
     await waitForSessionSurface(hostSurface.url)
     await connectTemporaryWorkspace()
     const expected = 'DSH445_MODEL_OK_7F3A'

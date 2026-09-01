@@ -382,6 +382,66 @@ export async function clickTopAccountDialogButton(labels: readonly string[]): Pr
   if (!clicked) throw new Error(`Top Sub2API dialog has no button matching ${labels.join(' / ')}`)
 }
 
+/** Fill one labelled input in the topmost visible native account-workspace dialog. */
+export async function fillTopAccountDialogInput(labels: readonly string[], value: string): Promise<void> {
+  await switchToDesktopOverlay()
+  const filled = await browser.execute((fieldLabels: readonly string[], nextValue: string) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const content = frame?.contentDocument
+    if (content === null || content === undefined) return false
+    const dialogs = [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .filter((dialog) => {
+        const style = getComputedStyle(dialog)
+        return dialog.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+      })
+      .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
+        - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
+    const top = dialogs.at(-1)
+    const label = [...(top?.querySelectorAll<HTMLLabelElement>('label') ?? [])]
+      .find(element => fieldLabels.some(text => element.textContent?.includes(text)))
+    const input = label?.parentElement?.querySelector<HTMLInputElement>('input')
+    if (input === null || input === undefined) return false
+    input.value = nextValue
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }, labels, value)
+  if (!filled) throw new Error(`Top Sub2API dialog has no input matching ${labels.join(' / ')}`)
+}
+
+/** Click one row action in the native proxy table by proxy identity and bilingual action label. */
+export async function clickAccountConsoleRowAction(
+  rowIdentity: string,
+  labels: readonly string[],
+): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((identity: string, actionLabels: readonly string[]) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const rows = [...(frame?.contentDocument?.querySelectorAll<HTMLTableRowElement>('tbody tr') ?? [])]
+    const row = rows.find(candidate => candidate.textContent?.includes(identity))
+    const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find(candidate => actionLabels.some(label => candidate.textContent?.includes(label)))
+    if (button === undefined) return false
+    button.click()
+    return true
+  }, rowIdentity, labels)
+  if (!clicked) {
+    throw new Error(`Sub2API proxy row ${rowIdentity} has no action matching ${labels.join(' / ')}`)
+  }
+}
+
+/** Read currently visible options from the native account form's open select. */
+export async function overlayAccountSelectOptions(): Promise<readonly string[]> {
+  await switchToDesktopOverlay()
+  return await browser.execute(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    return [...(frame?.contentDocument?.querySelectorAll<HTMLElement>('.select-option') ?? [])]
+      .filter(element => element.offsetParent !== null)
+      .map(element => element.textContent?.trim() ?? '')
+      .filter(text => text.length > 0)
+  })
+}
+
 /** Click one structural control inside the native Sub2API account workspace. */
 export async function clickAccountConsoleSelector(selector: string): Promise<void> {
   await switchToDesktopOverlay()

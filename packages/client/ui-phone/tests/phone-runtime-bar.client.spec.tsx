@@ -58,4 +58,34 @@ describe('PhoneRuntimeBar', () => {
     expect(screen.getByText('准备失败 · 摘要不匹配')).toBeTruthy()
     expect(screen.getByRole('button', { name: '准备 mobilecli' })).toBeTruthy()
   })
+
+  it('renders every cancellable verification phase and a missing asset without a byte estimate', () => {
+    const onCancel = vi.fn()
+    const { rerender } = render(<PhoneRuntimeBar
+      runtime={{ kind: 'missing', targetVersion: '1.0.5' }}
+      onPrepare={() => {}}
+      onCancel={onCancel}
+      onRefresh={() => {}}
+    />)
+    expect(screen.getByText('未准备 · v1.0.5')).toBeTruthy()
+
+    rerender(<PhoneRuntimeBar
+      runtime={{ kind: 'verifying', targetVersion: '1.0.5' }}
+      onPrepare={() => {}}
+      onCancel={onCancel}
+      onRefresh={() => {}}
+    />)
+    expect(screen.getByText('正在校验 v1.0.5 的大小、SHA-256 与归档')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    rerender(<PhoneRuntimeBar
+      runtime={{ kind: 'activating', targetVersion: '1.0.5', source: 'system' }}
+      onPrepare={() => {}}
+      onCancel={onCancel}
+      onRefresh={() => {}}
+    />)
+    expect(screen.getByText('正在激活 v1.0.5 · system')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onCancel).toHaveBeenCalledTimes(2)
+  })
 })

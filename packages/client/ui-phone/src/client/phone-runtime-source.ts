@@ -91,8 +91,8 @@ export function createHttpPhoneRuntimeSource(
     const operation = request(path, method)
     active = operation
     void operation.then(
-      () => { if (active === operation) active = undefined },
-      () => { if (active === operation) active = undefined },
+      () => { active = undefined },
+      () => { active = undefined },
     )
     return operation
   }
@@ -100,7 +100,7 @@ export function createHttpPhoneRuntimeSource(
     if (active !== undefined) return active
     const operation = request(`${PATH}/prepare`, 'POST')
     active = operation
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout>
     const poll = (): void => {
       if (active !== operation) return
       void request(PATH, 'GET').catch(() => {})
@@ -109,12 +109,12 @@ export function createHttpPhoneRuntimeSource(
     timer = setTimeout(poll, 0)
     void operation.then(
       () => {
-        if (active === operation) active = undefined
-        if (timer !== undefined) clearTimeout(timer)
+        active = undefined
+        clearTimeout(timer)
       },
       () => {
-        if (active === operation) active = undefined
-        if (timer !== undefined) clearTimeout(timer)
+        active = undefined
+        clearTimeout(timer)
       },
     )
     return operation

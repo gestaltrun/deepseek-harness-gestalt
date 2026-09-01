@@ -9,7 +9,7 @@ import {
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
   overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
   providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, syncRealProviderAccount,
-  verifyCompositeModelRoute, waitForSessionSurface,
+  topAccountDialogButtonEnabled, verifyCompositeModelRoute, waitForSessionSurface,
 } from './helpers.ts'
 
 async function disableAndReEnable(cycle: number): Promise<void> {
@@ -78,6 +78,14 @@ describe('Sub2API Desktop installation', () => {
     await clickTopAccountDialogButton(['Chat Completions'])
     await fillTopAccountDialogInput(['Base URL'], 'https://open.bigmodel.cn/api/coding/paas/v4')
     await fillTopAccountDialogProviderCredential(['API Key'])
+    await clickTopAccountDialogButton(['同步上游支持的模型', 'Sync upstream supported models'])
+    await browser.waitUntil(async () => await topAccountDialogButtonEnabled([
+      '同步上游支持的模型', 'Sync upstream supported models',
+    ]), {
+      timeout: 60_000,
+      interval: 500,
+      timeoutMsg: 'Native account form did not finish syncing the upstream-supported model list',
+    })
     await clickTopAccountDialogButton(['创建', 'Create'])
     await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(accountName), {
       timeout: 60_000,

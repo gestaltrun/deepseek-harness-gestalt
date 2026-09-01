@@ -391,6 +391,27 @@ export async function clickTopAccountDialogButton(labels: readonly string[]): Pr
   if (!clicked) throw new Error(`Top Sub2API dialog has no button matching ${labels.join(' / ')}`)
 }
 
+/** Whether the topmost native account dialog exposes one enabled button. */
+export async function topAccountDialogButtonEnabled(labels: readonly string[]): Promise<boolean> {
+  await switchToDesktopOverlay()
+  return await browser.execute((buttonLabels: readonly string[]) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const content = frame?.contentDocument
+    if (content === null || content === undefined) return false
+    const dialogs = [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .filter((dialog) => {
+        const style = getComputedStyle(dialog)
+        return dialog.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+      })
+      .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
+        - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
+    return [...(dialogs.at(-1)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].some(button =>
+      button.offsetParent !== null
+        && !button.disabled
+        && buttonLabels.some(label => button.textContent?.includes(label)))
+  }, labels)
+}
+
 /** Fill one labelled input in the topmost visible native account-workspace dialog. */
 export async function fillTopAccountDialogInput(labels: readonly string[], value: string): Promise<void> {
   await switchToDesktopOverlay()
@@ -583,10 +604,13 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
       max_output_tokens?: number
     }>
   }>(hostOrigin, `/accounts/${String(account.id)}/models/sync-upstream`, { method: 'POST' })
-  const targetModel = Object.entries(catalog.metadata ?? {}).find(([, metadata]) =>
-    metadata.reasoning === true
-      && Array.isArray(metadata.supported_reasoning_levels)
-      && metadata.supported_reasoning_levels.length > 0
+  const configuredModels = record(record(account.credentials)?.['model_mapping'])
+  const targetModel = Object.entries(catalog.metadata ?? {}).find(([modelId, metadata]) =>
+    (configuredModels === undefined || Object.hasOwn(configuredModels, modelId))
+      && (metadata.reasoning === false
+        || (metadata.reasoning === true
+          && Array.isArray(metadata.supported_reasoning_levels)
+          && metadata.supported_reasoning_levels.length > 0))
       && Array.isArray(metadata.input_modalities)
       && metadata.input_modalities.includes('text')
       && Number.isInteger(metadata.context_window)
@@ -594,7 +618,7 @@ export async function syncRealProviderAccount(hostOrigin: string, accountName: s
       && Number.isInteger(metadata.max_output_tokens)
       && (metadata.max_output_tokens ?? 0) > 0)?.[0]
   if (targetModel === undefined) {
-    throw new Error('Sub2API account sync returned no reasoning model with complete capability metadata')
+    throw new Error('Sub2API account sync returned no configured model with complete capability metadata')
   }
   return targetModel
 }

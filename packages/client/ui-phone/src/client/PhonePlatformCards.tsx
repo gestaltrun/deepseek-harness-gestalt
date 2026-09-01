@@ -21,7 +21,6 @@ export function PhonePlatformCards(props: PhonePlatformCardsProps): ReactNode {
   const plan = 'plan' in props.android ? props.android.plan : undefined
   const begin = (): void => { setConfirming(true); setAccepted(false) }
   const confirm = (): void => {
-    if (!accepted) return
     setConfirming(false)
     props.onPrepareAndroid()
   }

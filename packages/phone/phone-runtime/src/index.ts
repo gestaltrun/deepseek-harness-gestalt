@@ -279,7 +279,7 @@ export class PhoneDevices extends Service {
       } catch (error) {
         this.resolutionFailure = new PhoneDevicesError(
           'PHONE_UNRESOLVED',
-          error instanceof Error ? error.message : String(error),
+          (error as Error).message,
           { cause: error },
         )
       }

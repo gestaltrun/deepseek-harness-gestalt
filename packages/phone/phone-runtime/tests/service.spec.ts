@@ -551,6 +551,22 @@ describe('phone runtime service lifecycle', () => {
     expect(timedOut.message).toContain('device.screencapture')
   })
 
+  it('preserves a non-timeout screencapture failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      rpcClient: { stream(...args: unknown[]): Promise<unknown> }
+    }
+    vi.spyOn(captured.rpcClient, 'stream').mockRejectedValue(
+      new PhoneDevicesError('PHONE_PROTOCOL', 'capture protocol failed'),
+    )
+    const failure = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264',
+    }))
+    expect(failure.code).toBe('PHONE_PROTOCOL')
+  })
+
   it('boots and shuts simulators down through mobilecli with refreshed listings', async () => {
     const fake = await stageFake({
       devices: [wireDevice('SIM-UDID', 'ios', 'simulator', 'offline')],
@@ -794,6 +810,22 @@ describe('phone runtime service lifecycle', () => {
     await fake.setDevices([{ id: 'malformed' }])
     await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
     await expect(context.phoneDevices.listDevices()).rejects.toMatchObject({ code: 'PHONE_PROTOCOL' })
+  })
+
+  it('keeps the last listing after a retryable background poll miss', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const warnings: unknown[] = []
+    vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const captured = context.phoneDevices as unknown as {
+      roundTrip(): Promise<unknown>
+      pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
+    }
+    captured.roundTrip = async () => { throw new PhoneDevicesError('PHONE_TIMEOUT', 'temporary miss') }
+    await captured.pollAttempt()
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect(warnings).toContain('phone-runtime: device poll missed (PHONE_TIMEOUT); keeping the last listing')
   })
 
   it.each([false, true])('rejects an initial listing refused by publication (pre-lost: %s)', async (preLost) => {

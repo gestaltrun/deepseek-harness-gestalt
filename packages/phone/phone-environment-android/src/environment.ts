@@ -3,7 +3,7 @@ import {
   access, chmod, mkdir, mkdtemp, readFile, rename, rm, rmdir, statfs, writeFile,
 } from 'node:fs/promises'
 import { constants, lstatSync, mkdtempSync, renameSync, unlinkSync } from 'node:fs'
-import { dirname, join, normalize, posix, relative, resolve, sep, win32 } from 'node:path'
+import { dirname, join, normalize, posix, resolve, sep, win32 } from 'node:path'
 import { homedir } from 'node:os'
 import { unzipSync } from 'fflate'
 import type {
@@ -192,13 +192,13 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         this.publish({ kind: 'ready', plan: installed.plan, running: false })
         return this.current
       } catch (error) {
-        let cleanupFailure: Error | undefined
+        let cleanupFailure: { readonly error: Error; readonly plan: AndroidPreparationPlan } | undefined
         if (ownedAvd !== undefined) {
           try {
             await this.removeOwnedAvd(ownedAvd)
           } catch (cleanupError) {
-            cleanupFailure = asError(cleanupError)
-            this.reportError(cleanupFailure)
+            cleanupFailure = { error: asError(cleanupError), plan: ownedAvd }
+            this.reportError(cleanupFailure.error)
           }
         }
         if (operationSignal.aborted) {
@@ -206,9 +206,9 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
             'PHONE_ANDROID_ABORTED', 'Android preparation was cancelled', { cause: error },
           )
           if (cleanupFailure !== undefined) {
-            const combined = combinePreparationAndCleanup(cancellation, cleanupFailure)
+            const combined = combinePreparationAndCleanup(cancellation, cleanupFailure.error)
             this.publish({
-              kind: 'failed', ...(plan === undefined ? {} : { plan }),
+              kind: 'failed', plan: cleanupFailure.plan,
               code: combined.code, message: combined.message, retryable: true,
             })
             throw combined
@@ -220,7 +220,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         const primary = androidFailure(error)
         const failure = cleanupFailure === undefined
           ? primary
-          : combinePreparationAndCleanup(primary, cleanupFailure)
+          : combinePreparationAndCleanup(primary, cleanupFailure.error)
         this.publish({
           kind: 'failed', ...(plan === undefined ? {} : { plan }),
           code: failure.code, message: failure.message, retryable: true,
@@ -262,8 +262,8 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     try {
       return await task
     } finally {
-      if (this.operationTask === task) this.operationTask = undefined
-      if (this.operation === controller) this.operation = undefined
+      this.operationTask = undefined
+      this.operation = undefined
     }
   }
 
@@ -276,7 +276,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     throw failure
   }
 
-  private async startEmulator(signal?: AbortSignal): Promise<PhoneAndroidState> {
+  private async startEmulator(signal: AbortSignal): Promise<PhoneAndroidState> {
     const plan = this.requirePlan()
     if (!Object.values(plan.components).every(Boolean) && !await exists(this.avdConfig(plan))) {
       throw new AndroidEnvironmentError('PHONE_ANDROID_NOT_PREPARED', 'the default Android emulator is not prepared')
@@ -285,7 +285,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     const env = this.environmentFor(plan)
     this.publish({ kind: 'checking-acceleration', plan })
     const acceleration = await this.runner.run(this.emulatorPath(plan), ['-accel-check'], {
-      env, ...(signal === undefined ? {} : { signal }), timeoutMs: COMMAND_TIMEOUT_MS,
+      env, signal, timeoutMs: COMMAND_TIMEOUT_MS,
     })
     this.requireProcessFacts(acceleration, signal, 'PHONE_ANDROID_ACCELERATION', this.emulatorPath(plan))
     if (acceleration.exitCode !== 0) {
@@ -295,7 +295,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     this.publish({ kind: 'booting', plan })
     const emulator = this.runner.spawn(this.emulatorPath(plan), [
       `@${plan.avdName}`, '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot-save', '-gpu', 'auto',
-    ], { env, ...(signal === undefined ? {} : { signal }) })
+    ], { env, signal })
     this.emulatorStop = undefined
     this.emulator = emulator
     void emulator.exit.then((outcome) => {
@@ -309,9 +309,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       }
     }, () => {})
     const bootController = new AbortController()
-    const bootSignal = signal === undefined
-      ? bootController.signal
-      : AbortSignal.any([signal, bootController.signal])
+    const bootSignal = AbortSignal.any([signal, bootController.signal])
     const exitedDuringBoot = emulator.exit.then((outcome) => {
       bootController.abort(new AndroidEnvironmentError(
         'PHONE_ANDROID_EMULATOR_EXIT', processExitMessage('Android Emulator', outcome),
@@ -396,7 +394,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         this.sdkmanagerAt(root), [`--sdk_root=${root}`, '--version'], commandOptions,
       )
       if (version.callerAborted) signal?.throwIfAborted()
-      const major = Number.parseInt(version.stdout.trim().split('.')[0] ?? '', 10)
+      const major = Number.parseInt(version.stdout.trim().split('.')[0] as string, 10)
       if (version.timedOut || version.signal !== null || version.exitCode !== 0
         || !Number.isSafeInteger(major) || major < MINIMUM_SDKMANAGER_MAJOR) return false
       const devices = await this.runner.run(
@@ -480,7 +478,6 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
           throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive escapes its root')
         }
         const path = join(extracted, relativeName)
-        if (!inside(extracted, path)) throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive escapes its root')
         await mkdir(dirname(path), { recursive: true, mode: 0o700 })
         await writeFile(path, bytes, { mode: rawName.includes('/bin/') ? 0o700 : 0o600 })
       }
@@ -537,12 +534,12 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   private async waitForBoot(
     plan: AndroidPreparationPlan,
     env: Readonly<Record<string, string>>,
-    signal?: AbortSignal,
+    signal: AbortSignal,
   ): Promise<DeviceId> {
     const started = Date.now()
     while (Date.now() - started < BOOT_TIMEOUT_MS) {
-      signal?.throwIfAborted()
-      const commandOptions = { env, ...(signal === undefined ? {} : { signal }), timeoutMs: 10_000 }
+      signal.throwIfAborted()
+      const commandOptions = { env, signal, timeoutMs: 10_000 }
       const devices = await this.runner.run(this.adbPath(plan), ['devices'], commandOptions)
       this.requireProcessFacts(devices, signal, 'PHONE_ANDROID_BOOT', this.adbPath(plan))
       if (devices.exitCode !== 0) {
@@ -611,9 +608,9 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     this.emulatorStop = stop
     try {
       await stop
-      if (this.emulator === owned) this.emulator = undefined
+      this.emulator = undefined
     } finally {
-      if (this.emulatorStop === stop) this.emulatorStop = undefined
+      this.emulatorStop = undefined
     }
   }
 
@@ -806,11 +803,6 @@ async function avdMatches(path: string, abi: string): Promise<boolean> {
     const config = (await readFile(path, 'utf8')).replaceAll('\\', '/')
     return config.includes('system-images/android-35/google_apis/') && config.includes(`/${abi}/`)
   } catch { return false }
-}
-
-function inside(root: string, path: string): boolean {
-  const child = relative(root, resolve(path))
-  return child !== '..' && !child.startsWith(`..${sep}`)
 }
 
 function tail(value: string): string {

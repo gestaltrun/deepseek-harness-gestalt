@@ -398,8 +398,8 @@ export class PhoneEnvironment extends Service {
     try {
       await task
     } finally {
-      if (this.androidTask === task) this.androidTask = undefined
-      if (this.androidController === controller) this.androidController = undefined
+      this.androidTask = undefined
+      this.androidController = undefined
     }
   }
 
@@ -630,7 +630,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Uint8Array[] = []
   let bytes = 0
   for await (const raw of req) {
-    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)
+    const chunk = Buffer.from(raw)
     bytes += chunk.byteLength
     if (bytes > 4_096) throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_REQUEST', 'request body exceeds 4096 bytes')
     chunks.push(chunk)

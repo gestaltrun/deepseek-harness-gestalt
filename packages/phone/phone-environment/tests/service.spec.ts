@@ -77,6 +77,7 @@ async function rawGet(url: string, host: string): Promise<{ status: number; body
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(servers.splice(0).map(server => new Promise<void>((resolveClose) => {
     server.close(() => { resolveClose() })
@@ -156,6 +157,27 @@ function runningAndroidProvider() {
     onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   return { provider, cancel, deactivate, emit }
+}
+
+interface ServiceInternals {
+  current: ReturnType<PhoneEnvironment['snapshot']>
+  candidate: { source: 'override'; executablePath: string } | undefined
+  candidateVersion: string | undefined
+  refreshTask: Promise<ReturnType<PhoneEnvironment['snapshot']>> | undefined
+  androidTask: Promise<void> | undefined
+  android: AndroidEnvironmentProvider | undefined
+  prepareAndroid(request: { licenseAccepted: true }): Promise<void>
+  startAndroid(): Promise<void>
+  refreshAndroid(): Promise<void>
+  activateAndroidRuntime(state: PhoneAndroidState, signal: AbortSignal): Promise<void>
+  runAndroidOperation(operation: (provider: AndroidEnvironmentProvider, signal: AbortSignal) => Promise<void>): Promise<void>
+  cancelAndroid(): Promise<void>
+  verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void>
+  requireCurrentAndroidRuntime(id: DeviceId): void
+}
+
+function internals(service: PhoneEnvironment): ServiceInternals {
+  return service as unknown as ServiceInternals
 }
 
 async function localAsset(options: { hold?: boolean; digest?: string } = {}): Promise<MobilecliReleaseAsset> {
@@ -505,6 +527,254 @@ describe('PhoneEnvironment', () => {
     })
     expect(cancel).toHaveBeenCalled()
     unregister()
+  })
+
+  it('rejects duplicate Android Providers and ignores a stale registration disposer', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const first = runningAndroidProvider()
+    first.provider.refresh = async () => { throw new Error('probe failed') }
+    const unregisterFirst = service.registerAndroidEnvironment(first.provider)
+    expect(() => service.registerAndroidEnvironment(runningAndroidProvider().provider)).toThrow(/already registered/u)
+    await Promise.resolve()
+    unregisterFirst()
+    const second = runningAndroidProvider()
+    service.registerAndroidEnvironment(second.provider)
+    unregisterFirst()
+    second.emit({ kind: 'missing', plan: ANDROID_PLAN })
+    expect(service.snapshot().platforms.android).toMatchObject({ kind: 'missing' })
+  })
+
+  it('prepares while disabled without starting and rejects start without an active runtime', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const prepared = vi.fn(async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false } satisfies PhoneAndroidState))
+    const start = vi.fn(async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: true } satisfies PhoneAndroidState))
+    const fixture = runningAndroidProvider()
+    fixture.provider.prepare = prepared
+    fixture.provider.start = start
+    service.registerAndroidEnvironment(fixture.provider)
+    await internals(service).prepareAndroid({ licenseAccepted: true })
+    expect(prepared).toHaveBeenCalled()
+    expect(start).not.toHaveBeenCalled()
+    await expect(internals(service).startAndroid()).rejects.toMatchObject({ code: 'PHONE_ANDROID_RUNTIME_REQUIRED' })
+  })
+
+  it('uses an already-running prepared Emulator and refreshes its pending state', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => ({
+        android: [{
+          id: deviceId('emulator-5554'), name: 'Pixel', kind: 'emulator', platform: 'android', state: 'online', online: true,
+        }],
+        ios: { simulators: [], reals: [] },
+      }),
+      startCapture: async () => ({
+        contentType: 'video/h264',
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(H264_PICTURE) } }),
+      }),
+    }, { executablePath: path })
+    await service.setEnabled(true)
+    const fixture = runningAndroidProvider()
+    fixture.provider.prepare = async () => {
+      fixture.emit({
+        kind: 'ready', plan: ANDROID_PLAN, deviceId: deviceId('emulator-5554'), running: true,
+      })
+      return fixture.provider.snapshot()
+    }
+    const start = vi.spyOn(fixture.provider, 'start')
+    service.registerAndroidEnvironment(fixture.provider)
+    await internals(service).prepareAndroid({ licenseAccepted: true })
+    expect(start).not.toHaveBeenCalled()
+    await internals(service).refreshAndroid()
+    expect(service.snapshot().platforms.android).toMatchObject({ kind: 'booting' })
+  })
+
+  it('returns early for Android states that cannot be committed as running', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const owned = internals(service)
+    const signal = new AbortController().signal
+    await owned.activateAndroidRuntime({ kind: 'missing', plan: ANDROID_PLAN }, signal)
+    owned.candidate = { source: 'override', executablePath: '/mobilecli' }
+    owned.candidateVersion = '1.0.5'
+    await owned.activateAndroidRuntime({ kind: 'ready', plan: ANDROID_PLAN, running: false }, signal)
+    await owned.activateAndroidRuntime({ kind: 'ready', plan: ANDROID_PLAN, running: true }, signal)
+    owned.candidate = undefined
+    await owned.activateAndroidRuntime({
+      kind: 'ready', plan: ANDROID_PLAN, deviceId: deviceId('emulator-5554'), running: true,
+    }, signal)
+  })
+
+  it('rejects a concurrent Android transaction and cancel contains an owned cancellation', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const fixture = runningAndroidProvider()
+    service.registerAndroidEnvironment(fixture.provider)
+    const owned = internals(service)
+    owned.androidTask = new Promise(() => {})
+    await expect(owned.runAndroidOperation(async () => {})).rejects.toMatchObject({ code: 'PHONE_ANDROID_BUSY' })
+    owned.androidTask = Promise.reject(new PhoneEnvironmentError('PHONE_ANDROID_ABORTED', 'cancelled'))
+    await expect(owned.cancelAndroid()).resolves.toBeUndefined()
+  })
+
+  it('preserves an Android transaction failure when Provider teardown also fails', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const fixture = runningAndroidProvider()
+    fixture.provider.deactivate = async () => { throw new Error('stop failed') }
+    service.registerAndroidEnvironment(fixture.provider)
+    internals(service).androidTask = Promise.reject(
+      Object.assign(new Error('operation failed'), { code: 'ANDROID_OPERATION' }),
+    )
+    await expect(internals(service).cancelAndroid()).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ACTIVATION' })
+  })
+
+  it('rejects an Android transaction when no Provider is registered', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    await expect(internals(service).runAndroidOperation(async () => {})).rejects.toMatchObject({
+      code: 'PHONE_ANDROID_UNAVAILABLE',
+    })
+  })
+
+  it('contains cleanup failures after Android verification rejects', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      deactivate: async () => { throw new Error('fleet stop failed') },
+      listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
+    }, { executablePath: path })
+    await service.setEnabled(true)
+    const fixture = runningAndroidProvider()
+    fixture.provider.deactivate = async () => { throw new Error('provider stop failed') }
+    service.registerAndroidEnvironment(fixture.provider)
+    await expect(internals(service).activateAndroidRuntime({
+      kind: 'ready', plan: ANDROID_PLAN, deviceId: deviceId('emulator-5554'), running: true,
+    }, new AbortController().signal)).rejects.toMatchObject({ code: 'PHONE_ANDROID_RUNTIME_VERIFY' })
+  })
+
+  it('rejects a readiness commit after the Provider revokes its running device', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const fixture = runningAndroidProvider()
+    service.registerAndroidEnvironment(fixture.provider)
+    expect(() => { internals(service).requireCurrentAndroidRuntime(deviceId('emulator-5554')) }).toThrow(
+      /revoked running device/u,
+    )
+  })
+
+  it.each([
+    ['', 'no Content-Type'],
+    ['text/plain', 'text/plain'],
+  ])('rejects Android capture media type %j', async (contentType, diagnostic) => {
+    const path = await executable()
+    const cancel = vi.fn(async () => {})
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => ({
+        android: [{
+          id: deviceId('emulator-5554'), name: 'Pixel', kind: 'emulator', platform: 'android', state: 'online', online: true,
+        }],
+        ios: { simulators: [], reals: [] },
+      }),
+      startCapture: async () => ({ contentType, body: new ReadableStream<Uint8Array>({ cancel }) }),
+    }, { executablePath: path })
+    await expect(internals(service).verifyAndroidRuntime(
+      deviceId('emulator-5554'), new AbortController().signal,
+    )).rejects.toThrow(diagnostic)
+    expect(cancel).toHaveBeenCalled()
+  })
+
+  it('maps verification timeout, owner cancellation, and unexpected failures', async () => {
+    vi.useFakeTimers()
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async (signal: AbortSignal) => await new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+        }, { once: true })
+      }),
+    }, { executablePath: path })
+    const timed = internals(service).verifyAndroidRuntime(
+      deviceId('emulator-5554'), new AbortController().signal,
+    ).catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(await timed).toMatchObject({ code: 'PHONE_ANDROID_RUNTIME_VERIFY' })
+
+    const owner = new AbortController()
+    const cancelled = internals(service).verifyAndroidRuntime(deviceId('emulator-5554'), owner.signal)
+      .catch((error: unknown) => error)
+    owner.abort('owner stopped')
+    const failure = await cancelled
+    expect(failure).toBe('owner stopped')
+  })
+
+  it.each([new Error('capture failed'), 'capture string failure'])(
+    'wraps an unexpected Android verification failure %#', async (failure) => {
+      const path = await executable()
+      const context = new Context()
+      contexts.push(context)
+      const { service } = await mountEnvironment(context, {
+        listDevices: async () => { throw failure },
+      }, { executablePath: path })
+      await expect(internals(service).verifyAndroidRuntime(
+        deviceId('emulator-5554'), new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'PHONE_ANDROID_RUNTIME_VERIFY' })
+    },
+  )
+
+  it('keeps the active operation failure when teardown aggregates Provider failures', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { fiber, service } = await mountEnvironment(context)
+    const fixture = runningAndroidProvider()
+    fixture.provider.deactivate = async () => { throw new Error('provider teardown failed') }
+    service.registerAndroidEnvironment(fixture.provider)
+    internals(service).androidTask = Promise.reject(
+      Object.assign(new Error('operation failed'), { code: 'ANDROID_OPERATION' }),
+    )
+    await expect(fiber.dispose()).resolves.toBeUndefined()
+  })
+
+  it('drains rejected detection while disabling and rejects primitive Android task failures', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const owned = internals(service)
+    owned.current = { ...service.snapshot(), enabled: true }
+    owned.refreshTask = Promise.reject(new Error('detection failed'))
+    await expect(service.setEnabled(false)).resolves.toBeUndefined()
+
+    const providerTask = Promise.withResolvers<undefined>()
+    owned.androidTask = providerTask.promise
+    Reflect.apply(providerTask.reject, undefined, ['operation failed'])
+    await expect(owned.cancelAndroid()).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ACTIVATION' })
+  })
+
+  it('accepts Android refresh and rejects malformed or oversized request bodies', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service, origin } = await mountEnvironment(context)
+    service.registerAndroidEnvironment(runningAndroidProvider().provider)
+    expect((await fetch(`${origin}${PHONE_ENVIRONMENT_PATH}/android/refresh`, { method: 'POST' })).status).toBe(200)
+    for (const body of ['{', 'x'.repeat(4_097)]) {
+      const response = await fetch(`${origin}${PHONE_ENVIRONMENT_PATH}/android/prepare`, { method: 'POST', body })
+      expect(response.status).toBe(502)
+    }
   })
 
   it('drains Android capture verification before disable settles', async () => {

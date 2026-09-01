@@ -31,7 +31,7 @@ export async function verifyAnnexBH264KeyAccessUnit(
   }
   const reader = body.getReader()
   const probe = new AnnexBKeyAccessUnitProbe(options.maxBytes)
-  let rejectAbort: (reason?: unknown) => void = () => {}
+  let rejectAbort: (reason?: unknown) => void
   const halt = (): void => { rejectAbort(options.signal.reason) }
   const aborted = new Promise<never>((_resolve, reject) => {
     rejectAbort = reject

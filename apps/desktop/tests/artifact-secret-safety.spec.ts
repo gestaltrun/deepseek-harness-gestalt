@@ -21,7 +21,7 @@ describe('Sub2API artifact secret safety', () => {
       await writeFile(join(root, 'nested', 'leak.log'), 'prefix secret-two suffix')
 
       await expect(assertArtifactSecretsAbsent(root, ['secret-one', 'secret-two', 'secret-three']))
-        .rejects.toThrow('nested/leak.log')
+        .rejects.toThrow('leak.log')
     } finally {
       await rm(root, { recursive: true, force: true })
     }

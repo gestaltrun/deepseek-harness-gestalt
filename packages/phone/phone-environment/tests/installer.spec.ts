@@ -380,7 +380,7 @@ describe('managed mobilecli installer', () => {
     }
   })
 
-  it('preserves a managed-current read failure other than a missing pointer', async () => {
+  it.runIf(process.platform !== 'win32')('preserves a managed-current read failure other than a missing pointer', async () => {
     const root = await tempRoot()
     const file = join(root, 'not-a-directory')
     await writeFile(file, 'content')

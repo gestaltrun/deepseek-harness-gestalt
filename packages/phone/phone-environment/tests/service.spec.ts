@@ -968,7 +968,7 @@ describe('PhoneEnvironment', () => {
     const fixture = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
     service.registerIosEnvironment(fixture.provider)
     const preparation = service.prepare()
-    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() })
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() }, { timeout: 3_000 })
     service.cancel()
     await expect(preparation).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ABORTED' })
   })

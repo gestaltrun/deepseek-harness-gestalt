@@ -10,7 +10,7 @@ Sub2API sidecar（#346，bundle 源码在 sidecar 仓）需要一条 Desktop-onl
 
 ## Decision
 
-一切归于 Desktop Host 主进程；卡片只渲染。[`DesktopSub2ApiController`](../../../../apps/desktop/src/sub2api.ts) 运行 `missing → downloading → verifying → installed → starting → running / error` 相位机，经新增的 `sub2api:snapshot-changed` IPC 事件推送每次迁移（与 updater、pairing 快照同一姿态），六个动词全部走 preload 桥。Host 探测轮询 `GET <web-host>/plugins/dsh-sub2api/quota-snapshot`——2xx 即证明 bundle 已挂载且被监督链路健康，因为 sidecar 只在健康启动之后注册该路由；主进程发出的无 Origin 请求能通过 sidecar 的 loopback-peer + loopback-Host 准入。
+一切归于 Desktop Host 主进程；卡片只渲染。[`DesktopSub2ApiController`](../../../../apps/desktop/src/sub2api.ts) 运行 `missing → downloading → verifying → installed → starting → running / error` 相位机，经新增的 `sub2api:snapshot-changed` IPC 事件推送每次迁移（与 updater、pairing 快照同一姿态），五个生命周期动词全部走 preload 桥。Host 探测轮询 `GET <web-host>/plugins/dsh-sub2api/quota-snapshot`——2xx 即证明 bundle 已挂载且被监督链路健康，因为 sidecar 只在健康启动之后注册该路由；主进程发出的无 Origin 请求能通过 sidecar 的 loopback-peer + loopback-Host 准入。
 
 [安装器](../../../../apps/desktop/src/sub2api-install.ts)绝不调用用户 PATH 上的 pnpm 或 `dsh` CLI：Electron session-aware 的流式 `net.fetch` 把两个归档写入 OS 临时 staging 目录并承担环回健康探针，每个归档对照各自的 `SHA256SUMS` 校验（runtime pack 解压后再验其内部 sums），bundle 包落到 `$DSH_HOME/profiles/web/node_modules/<name>`，profile manifest 恰好新增一行 `dsh.profile.bundles`——遵循 [profile 发布](../../../../docs/user/develop/basic/publish.zh.md)语义：其余条目逐字节保留，写入经 `withFileLock` 加锁、`writeFileAtomic` 原子落盘。Platform Account、pairing 与附件流量继续使用独立的禁跳转、HTTPS-only、有界 system-Node helper。runtime pack 剥掉顶层目录解压到 `$DSH_HOME/sub2api/runtime`，即 sidecar supervisor 的 `binaryDir` 默认值。
 
@@ -35,4 +35,6 @@ Sub2API sidecar（#346，bundle 源码在 sidecar 仓）需要一条 Desktop-onl
 
 ## Consequences
 
-浏览器 `dsh web` 没有入口（ui-desktop 只随 Desktop overlay 挂载），没有 `window.dshDesktop` 时卡片不渲染。可见的组合证据包括 Desktop composition 的 overlay 文档 golden、[offer 卡场景](../../../../apps/web/tests/settings-chrome.e2e.ts)，以及 `pnpm test:e2e-sub2api`：macOS 或具有 display 的 Linux Electron lane 强制构建当前源码，把公开 Release 产物安装到全新且已初始化的 profile，经 Host 注入面创建临时 Z.AI 账号与 composite route，要求 Models 展示配置回退中不存在、但该账号支持的模型，并要求所选 Settings 分区在 overlay origin 替换后继续保留。它还核对批准的表格列与 Desktop-only 隐藏控件，在 Session Surface URL 不变时走通内联 IP 管理与 Composite 路由对话框，在产品输入区选择 Sub2API 模型，要求真实模型回答，核对公开 sidecar Release tag 与 checksum 输入，记录精确的 Gestalt/sidecar 身份，并在恢复干净环境前拒绝自然 teardown 后仍存活的产品自有进程。私有临时目录 owner 会在 setup 修改权限或复制只读 credentials 文件前开始工作，在每一种 setup、run 或 teardown 结果之后删除该目录并核验其不存在；credentials 只会作为 `0600` 文件存在于临时 `0700` DSH home 中。lane 会拒绝任何含其 provider key 的 artifact。`web` profile 按名钉死：Desktop Web Host 是 `dsh web`（`--profile web` 的别名），安装器只改这一个 profile。挂载 bundle 后 Web Host 启动失败仍会显示无卡片的 Host 错误页——恢复手段是等一次可用启动后卸载，或手工移除 bundles 行——可以接受，因为安装器的回滚已覆盖自身失败模式，fail-loud 的启动错误会点名插件。
+浏览器 `dsh web` 没有入口（ui-desktop 只随 Desktop overlay 挂载），没有 `window.dshDesktop` 时卡片不渲染。基于 Release 的 Electron 门禁会强制构建精确 Gestalt 源码，把一份公开且校验和匹配的 sidecar Release 安装到私有的已初始化 profile，通过原生内嵌表单创建账号与 Composite 路由，要求实时网关与 Provider 设置公开完整的账号支持模型能力，并经所选路由发送一次真实模型请求。证据记录精确 Gestalt 与 sidecar 身份；产物含凭据、产品进程未自然退出、私有 runtime 根目录未删除或 CDP 端口未关闭时，门禁都会失败。
+
+`web` profile 按名钉死：Desktop Web Host 是 `dsh web`（`--profile web` 的别名），安装器只改这一个 profile。挂载 bundle 后 Web Host 启动失败仍会显示无卡片的 Host 错误页；恢复手段是等一次可用启动后卸载，或手工移除 bundles 行。安装器回滚覆盖它所拥有的失败，fail-loud 的启动错误会点名插件。

@@ -522,41 +522,57 @@ export async function mainWindowSnapshot(): Promise<MainWindowSnapshot> {
   })
 }
 
-/** Configure one temporary Z.AI account and point the published model route at it. */
-export async function configureRealModelRoute(hostOrigin: string): Promise<void> {
+/** Fill one account credential from the isolated, read-only E2E credential file. */
+export async function fillTopAccountDialogProviderCredential(labels: readonly string[]): Promise<void> {
   const credentials = load(await readFile(join(requiredEnv('DSH_HOME'), '.credentials.yaml'), 'utf8'))
   const refs = record(credentials)?.['refs']
   const apiKey = record(refs)?.[REAL_PROVIDER_CREDENTIAL_REF]
   if (typeof apiKey !== 'string' || apiKey.length === 0) {
     throw new Error(`E2E credentials have no ${REAL_PROVIDER_CREDENTIAL_REF}`)
   }
+  await fillTopAccountDialogInput(labels, apiKey)
+}
+
+/** Sync the account created through the embedded form and return one complete live model. */
+export async function syncRealProviderAccount(hostOrigin: string, accountName: string): Promise<string> {
   const groups = await adminJson<{ items?: Array<{ id: number; platform: string }> }>(
     hostOrigin,
     '/groups?page=1&page_size=100',
   )
   const composite = groups.items?.find(group => group.platform === 'composite')
   if (composite === undefined) throw new Error('Sub2API E2E found no composite group')
-  const account = await adminJson<{ id?: number }>(hostOrigin, '/accounts', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      name: 'dsh-electron-e2e-zai',
-      platform: 'zhipu',
-      type: 'apikey',
-      credentials: {
-        base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
-        api_key: apiKey,
-        account_mode: 'coding',
-        api_protocol: 'chat_completions',
-      },
-      group_ids: [composite.id],
-      concurrency: 1,
-      priority: 100,
-      rate_multiplier: 1,
-      upstream_billing_probe_enabled: false,
-    }),
-  })
-  if (!Number.isInteger(account.id)) throw new Error('Sub2API account creation omitted its numeric id')
+  const accounts = await adminJson<{
+    items?: Array<{
+      id?: number
+      name?: string
+      platform?: string
+      group_ids?: number[]
+      groups?: Array<{ id?: number }>
+      rate_multiplier?: number
+      upstream_billing_probe_enabled?: boolean
+      credentials?: Record<string, unknown>
+      extra?: Record<string, unknown>
+    }>
+  }>(hostOrigin, '/accounts?page=1&page_size=100')
+  const account = accounts.items?.find(candidate => candidate.name === accountName)
+  if (account === undefined || !Number.isInteger(account.id)) {
+    throw new Error('Sub2API account creation omitted its numeric id')
+  }
+  if (account.platform !== 'zhipu') throw new Error('Embedded account form saved the wrong provider platform')
+  const groupIds = account.group_ids ?? account.groups
+    ?.map(group => group.id)
+    .filter((id): id is number => Number.isInteger(id)) ?? []
+  if (!groupIds.includes(composite.id)) throw new Error('Embedded account form did not bind the Composite group default')
+  if (account.rate_multiplier !== 1) throw new Error('Embedded account form did not retain the default billing multiplier')
+  if (account.upstream_billing_probe_enabled !== true) {
+    throw new Error('Embedded account form did not retain the default upstream billing probe setting')
+  }
+  if (record(account.credentials)?.['pool_mode'] === true) {
+    throw new Error('Embedded account form enabled hidden pool mode')
+  }
+  if (Object.keys(record(account.extra) ?? {}).some(key => key.startsWith('quota_'))) {
+    throw new Error('Embedded account form persisted a hidden quota override')
+  }
   const catalog = await adminJson<{
     models?: string[]
     metadata?: Record<string, {
@@ -580,27 +596,36 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
   if (targetModel === undefined) {
     throw new Error('Sub2API account sync returned no reasoning model with complete capability metadata')
   }
-  const routes = await adminJson<Array<{ id: number; public_model: string }>>(
+  return targetModel
+}
+
+/** Verify the Composite route saved by the embedded native dialog. */
+export async function verifyCompositeModelRoute(hostOrigin: string, targetModel: string): Promise<void> {
+  const groups = await adminJson<{ items?: Array<{ id: number; platform: string }> }>(
+    hostOrigin,
+    '/groups?page=1&page_size=100',
+  )
+  const composite = groups.items?.find(group => group.platform === 'composite')
+  if (composite === undefined) throw new Error('Sub2API E2E found no composite group')
+  const routes = await adminJson<Array<{
+    id: number
+    public_model: string
+    target_platform?: string
+    upstream_model?: string
+    endpoint?: string
+    enabled?: boolean
+  }>>(
     hostOrigin,
     `/groups/${String(composite.id)}/composite-routes`,
   )
   const route = routes.find(entry => entry.public_model === SUB2API_PUBLIC_MODEL)
-  const routePath = `/groups/${String(composite.id)}/composite-routes`
-    + (route === undefined ? '' : `/${String(route.id)}`)
-  await adminJson(hostOrigin, routePath, {
-    method: route === undefined ? 'POST' : 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      public_model: SUB2API_PUBLIC_MODEL,
-      match_type: 'exact',
-      target_platform: 'zhipu',
-      upstream_model: targetModel,
-      endpoint: 'chat_completions',
-      priority: 100,
-      enabled: true,
-      notes: 'ephemeral Electron E2E route',
-    }),
-  })
+  if (route === undefined) throw new Error('Embedded Composite form did not persist the published model route')
+  if (route.target_platform !== 'zhipu'
+    || route.upstream_model !== targetModel
+    || route.endpoint !== 'chat_completions'
+    || route.enabled !== true) {
+    throw new Error('Embedded Composite form persisted an incomplete route')
+  }
 }
 
 /** Read one live Sub2API model entry from the settings document the sidecar writes. */

@@ -3,12 +3,13 @@ import { browser, expect } from '@wdio/globals'
 import {
   ACCOUNT_PROVIDER_MODEL, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
   clickAccountConsoleRowAction, clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
-  configureRealModelRoute, connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput,
+  connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput, fillTopAccountDialogProviderCredential,
   gatewayModelProfile, mainWindowSnapshot,
   openProviderEditor,
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
   overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
-  providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
+  providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, syncRealProviderAccount,
+  verifyCompositeModelRoute, waitForSessionSurface,
 } from './helpers.ts'
 
 async function disableAndReEnable(cycle: number): Promise<void> {
@@ -67,7 +68,41 @@ describe('Sub2API Desktop installation', () => {
     await disableAndReEnable(1)
     await disableAndReEnable(2)
     const hostSurface = await mainWindowSnapshot()
-    await configureRealModelRoute(new URL(hostSurface.url).origin)
+    const hostOrigin = new URL(hostSurface.url).origin
+
+    const accountName = 'dsh-electron-e2e-zai'
+    await clickAccountConsoleButton(['添加账号', 'Create Account'])
+    await fillTopAccountDialogInput(['账号名称', 'Account Name'], accountName)
+    await clickTopAccountDialogButton(['Zhipu GLM'])
+    await clickTopAccountDialogButton(['Coding Plan'])
+    await clickTopAccountDialogButton(['Chat Completions'])
+    await fillTopAccountDialogInput(['Base URL'], 'https://open.bigmodel.cn/api/coding/paas/v4')
+    await fillTopAccountDialogProviderCredential(['API Key'])
+    await clickTopAccountDialogButton(['创建', 'Create'])
+    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(accountName), {
+      timeout: 60_000,
+      timeoutMsg: 'Embedded account form did not save the real provider account',
+    })
+    const targetModel = await syncRealProviderAccount(hostOrigin, accountName)
+
+    await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
+    await browser.waitUntil(async () => /已保存路由|Saved Routes/u.test((await overlayAccountConsoleSnapshot()).text), {
+      timeout: 15_000,
+      timeoutMsg: 'Composite route dialog did not open inside the account workspace',
+    })
+    await fillTopAccountDialogInput(['公开模型', 'Public Model'], ACCOUNT_PROVIDER_MODEL)
+    await clickAccountConsoleFieldSelector(['端点', 'Endpoint'])
+    await clickAccountConsoleOption(['Chat Completions'])
+    await clickAccountConsoleFieldSelector(['目标平台', 'Target Platform'])
+    await clickAccountConsoleOption(['Zhipu GLM'])
+    await fillTopAccountDialogInput(['上游模型', 'Upstream Model'], targetModel)
+    await clickTopAccountDialogButton(['创建', 'Create'])
+    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(ACCOUNT_PROVIDER_MODEL), {
+      timeout: 15_000,
+      timeoutMsg: 'Embedded Composite form did not save the real model route',
+    })
+    await verifyCompositeModelRoute(hostOrigin, targetModel)
+    await clickTopAccountDialogButton(['关闭', 'Close'])
 
     try {
       await browser.waitUntil(async () => {
@@ -155,13 +190,6 @@ describe('Sub2API Desktop installation', () => {
     expect(layout.frameHeight + 1).toBeGreaterThanOrEqual(layout.contentHeight)
     expect(layout.settingsOverflowY).toBe('auto')
     expect((layout.tableClientHeight ?? 0) + 1).toBeGreaterThanOrEqual(layout.tableScrollHeight ?? 1)
-
-    await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
-    await browser.waitUntil(async () => /已保存路由|Saved Routes/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 15_000,
-      timeoutMsg: 'Composite route dialog did not open inside the account workspace',
-    })
-    await clickAccountConsoleButton(['关闭', 'Close'])
 
     await clickAccountConsoleButton(['添加账号', 'Create Account'])
     await browser.waitUntil(async () => /代理|Proxy/u.test((await overlayAccountConsoleSnapshot()).text), {

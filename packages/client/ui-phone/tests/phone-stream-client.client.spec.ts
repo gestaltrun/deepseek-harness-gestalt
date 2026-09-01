@@ -73,6 +73,7 @@ describe('session minting', () => {
       deviceId: 'emulator-5554',
       ioPath: '/phone/ws/io',
       agentManaged: false,
+      preferredFormat: 'h264',
       mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1234 },
       h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1234 },
     }
@@ -87,10 +88,13 @@ describe('session minting', () => {
     await stubFetch(200, {
       ioPath: '/phone/ws/io',
       agentManaged: false,
+      preferredFormat: 'mjpeg',
       mjpeg: { url: '/phone/stream/fallback/mjpeg?token=a', expiresAt: 1234 },
       h264: { url: '/phone/stream/fallback/h264?token=a', expiresAt: 1234 },
     })
-    expect((await mintPhoneSession('fallback-device')).deviceId).toBe('fallback-device')
+    expect(await mintPhoneSession('fallback-device')).toMatchObject({
+      deviceId: 'fallback-device', preferredFormat: 'mjpeg',
+    })
   })
 
   it('maps error payloads and malformed bodies onto the wire error', async () => {
@@ -113,6 +117,15 @@ describe('session minting', () => {
     expect(broken.code).toBe('http')
 
     await stubFetch(200, { ioPath: 42 })
+    await expect(mintPhoneSession('x')).rejects.toBeInstanceOf(PhoneStreamHttpError)
+
+    await stubFetch(200, {
+      ioPath: '/phone/ws/io',
+      agentManaged: false,
+      preferredFormat: 'av1',
+      mjpeg: { url: '/phone/stream/x/mjpeg?token=a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/x/h264?token=a', expiresAt: 1234 },
+    })
     await expect(mintPhoneSession('x')).rejects.toBeInstanceOf(PhoneStreamHttpError)
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 500 })))
@@ -266,6 +279,7 @@ describe('io socket wiring', () => {
       deviceId: 'R3CN30',
       ioPath: MINTED_IO_PATH,
       agentManaged: false,
+      preferredFormat: 'h264',
       mjpeg: { url: '/phone/stream/R3CN30/mjpeg?token=a', expiresAt: 1234 },
       h264: { url: '/phone/stream/R3CN30/h264?token=a', expiresAt: 1234 },
     }

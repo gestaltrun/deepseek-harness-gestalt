@@ -22,3 +22,15 @@ after: format=MJPEG renderer=img
 - button "截图" [disabled]
 - button "刷新流"
 - text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+simulator: format=MJPEG renderer=img
+- button "切换设备：iOS Simulator": iOS Simulator
+- text: MJPEG
+- application "iOS Simulator 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+  - img "iOS Simulator 实时画面"
+  - text: 代理中
+- button "返回"
+- button "主屏幕"
+- button "最近任务"
+- button "截图" [disabled]
+- button "刷新流"
+- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。

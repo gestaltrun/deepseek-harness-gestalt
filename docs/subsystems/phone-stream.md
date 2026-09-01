@@ -23,6 +23,8 @@ interface PhoneStreamSession {
   readonly ioPath: string
   /** Whether this session addresses an iOS real device whose on-device agent is product-managed. */
   readonly agentManaged: boolean
+  /** Encoding the browser should open first for this device class. */
+  readonly preferredFormat: PhoneCaptureFormat
   /** Signed MJPEG capture URL. */
   readonly mjpeg: PhoneStreamUrl
   /** Signed H264 (`avc`) capture URL. */
@@ -49,12 +51,13 @@ Same-origin phone stream Consumer. It injects `phoneDevices` and `webServer`, re
  * Mint signed same-origin MJPEG and H264 URLs for one known device.
  * @param id - Branded device id present in the latest published listing.
  * @param agentManaged - Whether the session addresses an iOS real device whose agent is managed through this Consumer.
+ * @param preferredFormat - Encoding the browser should open first for this device class.
  * @returns the IO upgrade path plus both capture URLs and their expiry.
  */
-sessionFor(id: DeviceId, agentManaged: boolean = false): PhoneStreamSession
+sessionFor( id: DeviceId, agentManaged: boolean = false, preferredFormat: PhoneCaptureFormat = 'h264', ): PhoneStreamSession
 ```
 
-Types: [DeviceId](phone-runtime.md)
+Types: [DeviceId](phone-runtime.md) · [PhoneCaptureFormat](phone-runtime.md)
 
 Source: [`packages/phone/phone-stream/src/index.ts`](../../packages/phone/phone-stream/src/index.ts)
 <!-- END GENERATED cordis-surface -->

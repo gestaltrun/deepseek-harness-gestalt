@@ -49,9 +49,11 @@ export interface PhoneStreamSessionView {
   readonly ioPath: string
   /** Whether the device is a real iPhone whose control agent is product-managed. */
   readonly agentManaged: boolean
-  /** Signed MJPEG capture URL (Host still signs it; the live view does not request it). */
+  /** Encoding the Host selected as the first attempt for this device class. */
+  readonly preferredFormat: 'h264' | 'mjpeg'
+  /** Signed MJPEG capture URL. */
   readonly mjpeg: PhoneStreamUrlView
-  /** Signed H264 capture URL (the live view's only requested encoding). */
+  /** Signed H264 capture URL. */
   readonly h264: PhoneStreamUrlView
 }
 
@@ -167,7 +169,7 @@ function errorOf(response: Response, body: unknown, fallback: string): PhoneStre
 /**
  * Mint one signed same-origin session for one device.
  * @param deviceId - Android serial or iOS UDID present in the latest listing.
- * @returns the session with the io path and signed capture URLs. The live view requests `format: 'avc'` (Host `h264`).
+ * @returns the session with its preferred encoding, io path, and signed capture URLs.
  * @throws {@link PhoneStreamHttpError} when the Host refuses the mint.
  * @throws the network error when the Host is unreachable.
  */
@@ -185,13 +187,15 @@ export async function mintPhoneSession(deviceId: string): Promise<PhoneStreamSes
   const body: unknown = await response.json().catch(() => null)
   const record = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
   if (!response.ok || !isStreamUrlView(record.mjpeg) || !isStreamUrlView(record.h264)
-    || typeof record.ioPath !== 'string' || typeof record.agentManaged !== 'boolean') {
+    || typeof record.ioPath !== 'string' || typeof record.agentManaged !== 'boolean'
+    || (record.preferredFormat !== 'h264' && record.preferredFormat !== 'mjpeg')) {
     throw errorOf(response, body, `phone session mint failed with HTTP ${response.status}`)
   }
   return {
     deviceId: typeof record.deviceId === 'string' ? record.deviceId : deviceId,
     ioPath: record.ioPath,
     agentManaged: record.agentManaged,
+    preferredFormat: record.preferredFormat,
     mjpeg: record.mjpeg,
     h264: record.h264,
   }

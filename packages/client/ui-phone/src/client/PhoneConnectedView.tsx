@@ -178,13 +178,28 @@ export function PhoneConnectedView({
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
   const drag = useRef<{
+    readonly pointerId: number
+    readonly target: HTMLDivElement
     readonly origin: { u: number; v: number; clientX: number; clientY: number }
-    last: { u: number; v: number }
+    readonly trail: Array<{ u: number; v: number }>
     dragging: boolean
   } | undefined>(undefined)
 
+  const releaseDrag = useCallback((): void => {
+    const state = drag.current
+    drag.current = undefined
+    if (state?.target.hasPointerCapture(state.pointerId) === true) {
+      state.target.releasePointerCapture(state.pointerId)
+    }
+  }, [])
+
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
-  useEffect(() => () => { controller.dispose() }, [controller])
+  useEffect(() => () => {
+    releaseDrag()
+    controller.dispose()
+  }, [controller, releaseDrag])
+  const liveStreamUrl = phase.kind === 'live' ? phase.streamUrl : undefined
+  useEffect(() => () => { releaseDrag() }, [liveStreamUrl, releaseDrag, visible])
   useEffect(() => {
     // The dropdown needs the fleet even when this tab restored from layout
     // without the picker having pulled first; a failed pull keeps the
@@ -202,32 +217,45 @@ export function PhoneConnectedView({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const point = normalize(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = {
+      pointerId: event.pointerId,
+      target: event.currentTarget,
       origin: { ...point, clientX: event.clientX, clientY: event.clientY },
-      last: point,
+      trail: [],
       dragging: false,
     }
   }
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const state = drag.current
-    if (state === undefined) return
+    if (state === undefined || state.pointerId !== event.pointerId) return
+    state.trail.push(normalize(event))
     if (!state.dragging
       && Math.hypot(event.clientX - state.origin.clientX, event.clientY - state.origin.clientY)
         < DRAG_THRESHOLD_PX) {
       return
     }
     state.dragging = true
-    state.last = normalize(event)
   }
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const state = drag.current
+    if (state === undefined || state.pointerId !== event.pointerId) return
     drag.current = undefined
-    if (state === undefined) return
+    state.target.releasePointerCapture(event.pointerId)
     const point = normalize(event)
-    if (state.dragging) controller.swipe([state.origin, point])
+    const dragging = state.dragging
+      || Math.hypot(event.clientX - state.origin.clientX, event.clientY - state.origin.clientY) >= DRAG_THRESHOLD_PX
+    if (dragging) controller.swipe([state.origin, ...state.trail, point])
     else controller.tap(point.u, point.v)
+  }
+
+  const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const state = drag.current
+    if (state === undefined || state.pointerId !== event.pointerId) return
+    drag.current = undefined
+    state.target.releasePointerCapture(event.pointerId)
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -295,6 +323,7 @@ export function PhoneConnectedView({
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
           onKeyDown={onKeyDown}
         >
           {surface}

@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import {
   captureStableAria, compareOrRefreshGolden, launchWebScaffold, seedSession,
@@ -38,7 +38,11 @@ function seedLog(): string {
   ].join('\n')
 }
 
-async function capturePhoneState(page: Page, scaffold: WebScaffold, stage: 'before' | 'after'): Promise<string> {
+async function capturePhoneState(
+  page: Page,
+  scaffold: WebScaffold,
+  stage: 'before' | 'after' | 'simulator',
+): Promise<string> {
   const root = page.locator('[data-phone-connected]')
   const state = await root.evaluate((element) => {
     const chip = element.querySelector<HTMLElement>('[aria-label^="当前画面编码"]')
@@ -58,6 +62,7 @@ describe('web e2e: phone H264 fallback', () => {
   let browser: Browser
   let page: Page
   let releaseH264: () => void
+  let iosSimulatorH264Requests = 0
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({})
@@ -68,23 +73,43 @@ describe('web e2e: phone H264 fallback', () => {
     await page.routeWebSocket('**/phone/ws/io', () => undefined)
     await page.route('**/phone/devices', route => route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ android: [{ id: 'android-real', name: 'Android Real', kind: 'real', state: 'online', online: true }], ios: { simulators: [], reals: [] } }),
-    }))
-    await page.route('**/phone/session', route => route.fulfill({
-      status: 200, contentType: 'application/json',
       body: JSON.stringify({
-        deviceId: 'android-real', ioPath: '/phone/ws/io',
-        agentManaged: false,
-        h264: { url: '/phone/stream/android-real/h264?token=x', expiresAt: Date.now() + 60_000 },
-        mjpeg: { url: '/phone/stream/android-real/mjpeg?token=x', expiresAt: Date.now() + 60_000 },
+        android: [{ id: 'android-real', name: 'Android Real', kind: 'real', state: 'online', online: true }],
+        ios: {
+          simulators: [{ id: 'ios-simulator', name: 'iOS Simulator', kind: 'simulator', state: 'online', online: true }],
+          reals: [],
+        },
       }),
     }))
+    await page.route('**/phone/session', (route) => {
+      const { deviceId } = route.request().postDataJSON() as { readonly deviceId: string }
+      const simulator = deviceId === 'ios-simulator'
+      const token = simulator ? 'y' : 'x'
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({
+          deviceId, ioPath: '/phone/ws/io', agentManaged: false,
+          preferredFormat: simulator ? 'mjpeg' : 'h264',
+          h264: { url: `/phone/stream/${deviceId}/h264?token=${token}`, expiresAt: Date.now() + 60_000 },
+          mjpeg: { url: `/phone/stream/${deviceId}/mjpeg?token=${token}`, expiresAt: Date.now() + 60_000 },
+        }),
+      })
+    })
     const blocked = new Promise<void>((resolve) => { releaseH264 = resolve })
     await page.route('**/phone/stream/android-real/h264?token=x', async (route) => {
       await blocked
       await route.fulfill({ status: 200, contentType: 'video/h264', body: 'Error: Error 0x80001001' })
     })
     await page.route('**/phone/stream/android-real/mjpeg?token=x', route => route.fulfill({
+      status: 200,
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: MJPEG,
+    }))
+    await page.route('**/phone/stream/ios-simulator/h264?token=y', (route) => {
+      iosSimulatorH264Requests += 1
+      return route.abort()
+    })
+    await page.route('**/phone/stream/ios-simulator/mjpeg?token=y', route => route.fulfill({
       status: 200,
       contentType: 'multipart/x-mixed-replace; boundary=frame',
       body: MJPEG,
@@ -104,7 +129,7 @@ describe('web e2e: phone H264 fallback', () => {
     await scaffold?.close()
   })
 
-  it('shows preferred H264 then the actual MJPEG renderer from the same session', async () => {
+  it('keeps H264 first for real devices and skips known-failing AVC on iOS Simulator', async () => {
     const expand = page.getByRole('button', { name: /展开侧边栏|Expand sidebar/ })
     await expand.waitFor({ timeout: 10_000 })
     await expand.click()
@@ -123,6 +148,12 @@ describe('web e2e: phone H264 fallback', () => {
     await page.getByLabel('当前画面编码 MJPEG').waitFor({ timeout: 10_000 })
     await page.getByRole('img', { name: 'Android Real 实时画面' }).waitFor()
     const after = await capturePhoneState(page, scaffold, 'after')
-    await compareOrRefreshGolden(EXPECTED, `${before}\n${after}`, MODE)
+    await page.getByRole('button', { name: '切换设备：Android Real' }).click()
+    await page.getByRole('menuitem', { name: /iOS Simulator/ }).click()
+    await page.getByLabel('当前画面编码 MJPEG').waitFor({ timeout: 10_000 })
+    await page.getByRole('img', { name: 'iOS Simulator 实时画面' }).waitFor()
+    const simulator = await capturePhoneState(page, scaffold, 'simulator')
+    expect(iosSimulatorH264Requests).toBe(0)
+    await compareOrRefreshGolden(EXPECTED, `${before}\n${after}\n${simulator}`, MODE)
   }, 30_000)
 })

@@ -53,6 +53,7 @@ async function mount(
 
 async function mint(origin: string, id = 'emulator-5554'): Promise<{
   ioPath: string
+  preferredFormat: 'h264' | 'mjpeg'
   mjpeg: { url: string; expiresAt: number }
   h264: { url: string; expiresAt: number }
 }> {
@@ -64,6 +65,7 @@ async function mint(origin: string, id = 'emulator-5554'): Promise<{
   expect(response.status).toBe(200)
   return await response.json() as {
     ioPath: string
+    preferredFormat: 'h264' | 'mjpeg'
     mjpeg: { url: string; expiresAt: number }
     h264: { url: string; expiresAt: number }
   }
@@ -156,6 +158,19 @@ function readFrame(origin: string, path: string, host: string): Promise<{
 }
 
 describe('phone stream Host routes', () => {
+  it('prefers MJPEG only for the iOS simulator that mobilecli cannot encode as AVC', async () => {
+    const { origin, context } = await mount([
+      wireDevice('android-real', 'android', 'real', 'online'),
+      wireDevice('ios-simulator', 'ios', 'simulator', 'online'),
+      wireDevice('ios-real', 'ios', 'real', 'online'),
+    ])
+    context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: true })
+
+    expect((await mint(origin, 'android-real')).preferredFormat).toBe('h264')
+    expect((await mint(origin, 'ios-real')).preferredFormat).toBe('h264')
+    expect((await mint(origin, 'ios-simulator')).preferredFormat).toBe('mjpeg')
+  })
+
   it('detects a missing iOS real-device agent before minting a picture session', async () => {
     const { origin, context } = await mount([
       wireDevice('UDID-9', 'ios', 'real', 'online'),

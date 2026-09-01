@@ -51,6 +51,21 @@ describe('PhoneConnectionController lifecycle', () => {
     })
   })
 
+  it('starts directly on MJPEG when the Host marks AVC unsupported for the device', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ session: { ...SESSION_A, preferredFormat: 'mjpeg' } })
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toEqual({
+      kind: 'live',
+      streamUrl: SESSION_A.mjpeg.url,
+      format: 'mjpeg',
+      expiresAt: SESSION_A.mjpeg.expiresAt,
+    })
+  })
+
   it('ignores duplicate connect requests and uses the default retry scheduler', async () => {
     vi.useFakeTimers()
     const gateway = new FakeGateway()

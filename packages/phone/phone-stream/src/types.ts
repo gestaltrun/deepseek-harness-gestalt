@@ -21,6 +21,8 @@ export interface PhoneStreamSession {
   readonly ioPath: string
   /** Whether this session addresses an iOS real device whose on-device agent is product-managed. */
   readonly agentManaged: boolean
+  /** Encoding the browser should open first for this device class. */
+  readonly preferredFormat: PhoneCaptureFormat
   /** Signed MJPEG capture URL. */
   readonly mjpeg: PhoneStreamUrl
   /** Signed H264 (`avc`) capture URL. */

@@ -128,14 +128,20 @@ export class PhoneStream extends Service {
    * Mint signed same-origin MJPEG and H264 URLs for one known device.
    * @param id - Branded device id present in the latest published listing.
    * @param agentManaged - Whether the session addresses an iOS real device whose agent is managed through this Consumer.
+   * @param preferredFormat - Encoding the browser should open first for this device class.
    * @returns the IO upgrade path plus both capture URLs and their expiry.
    */
-  sessionFor(id: DeviceId, agentManaged: boolean = false): PhoneStreamSession {
+  sessionFor(
+    id: DeviceId,
+    agentManaged: boolean = false,
+    preferredFormat: PhoneCaptureFormat = 'h264',
+  ): PhoneStreamSession {
     const expiresAt = Date.now() + this.tokenTtlMs
     return Object.freeze({
       deviceId: id,
       ioPath: PHONE_IO_PATH,
       agentManaged,
+      preferredFormat,
       mjpeg: this.signedUrl(id, 'mjpeg', expiresAt),
       h264: this.signedUrl(id, 'h264', expiresAt),
     })
@@ -177,7 +183,8 @@ export class PhoneStream extends Service {
       const id = deviceId(rawId)
       const list = await this.ctx.phoneDevices.listDevices()
       const knownReal = list.ios.reals.find(ref => ref.id === id)
-      const known = knownReal ?? [...list.android, ...list.ios.simulators].find(ref => ref.id === id)
+      const knownSimulator = list.ios.simulators.find(ref => ref.id === id)
+      const known = knownReal ?? knownSimulator ?? list.android.find(ref => ref.id === id)
       if (known === undefined) {
         throw new PhoneDevicesError(
           'PHONE_DEVICE_NOT_FOUND',
@@ -196,7 +203,11 @@ export class PhoneStream extends Service {
           return
         }
       }
-      writeJson(res, 200, this.sessionFor(id, knownReal !== undefined))
+      writeJson(res, 200, this.sessionFor(
+        id,
+        knownReal !== undefined,
+        knownSimulator === undefined ? 'h264' : 'mjpeg',
+      ))
     } catch (error) {
       this.writeFailure(res, error)
     }

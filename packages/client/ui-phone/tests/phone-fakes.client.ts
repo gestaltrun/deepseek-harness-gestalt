@@ -16,6 +16,7 @@ export const SESSION_A: PhoneStreamSessionView = {
   deviceId: 'emulator-5554',
   ioPath: '/phone/ws/io',
   agentManaged: false,
+  preferredFormat: 'h264',
   mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1000 },
   h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1000 },
 }

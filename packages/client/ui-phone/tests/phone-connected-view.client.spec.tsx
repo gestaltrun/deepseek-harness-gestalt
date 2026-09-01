@@ -18,7 +18,14 @@ import {
 
 let h264Runtime: ReturnType<typeof installFakeH264Playback>
 
-beforeEach(() => { h264Runtime = installFakeH264Playback() })
+beforeEach(() => {
+  h264Runtime = installFakeH264Playback()
+  Object.defineProperties(HTMLElement.prototype, {
+    hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+    setPointerCapture: { configurable: true, value: vi.fn() },
+    releasePointerCapture: { configurable: true, value: vi.fn() },
+  })
+})
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -366,21 +373,72 @@ describe('PhoneConnectedView touch and keys', () => {
     })
   })
 
-  it('sends a pointerDown/pointerUp gesture once the drag passes the threshold', async () => {
+  it('captures the pointer and sends the complete pointerDown/move/up drag path', async () => {
     const { gateway } = await withSurface()
-    fireEvent.pointerDown(frame(), { clientX: 20, clientY: 20 })
-    fireEvent.pointerMove(frame(), { clientX: 120, clientY: 220 })
-    fireEvent.pointerUp(frame(), { clientX: 130, clientY: 230 })
+    const target = frame()
+    const setPointerCapture = vi.fn()
+    const releasePointerCapture = vi.fn()
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: setPointerCapture },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 7, clientX: 20, clientY: 20 })
+    fireEvent.pointerMove(target, { pointerId: 7, clientX: 22, clientY: 22 })
+    fireEvent.pointerMove(target, { pointerId: 7, clientX: 120, clientY: 220 })
+    fireEvent.pointerMove(target, { pointerId: 7, clientX: 125, clientY: 225 })
+    fireEvent.pointerUp(target, { pointerId: 7, clientX: 130, clientY: 230 })
+    expect(setPointerCapture).toHaveBeenCalledWith(7)
+    expect(releasePointerCapture).toHaveBeenCalledWith(7)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'gesture',
       params: {
         deviceId: 'emulator-5554',
         actions: [
           { type: 'pointerDown', x: 39, y: 42 },
+          { type: 'pointerMove', x: 43, y: 46 },
+          { type: 'pointerMove', x: 234, y: 464 },
+          { type: 'pointerMove', x: 244, y: 475 },
           { type: 'pointerUp', x: 254, y: 485 },
         ],
       },
     })
+  })
+
+  it('treats a release that crosses the threshold as a drag without an intermediate move', async () => {
+    const { gateway } = await withSurface()
+    fireEvent.pointerDown(frame(), { pointerId: 10, clientX: 20, clientY: 20 })
+    fireEvent.pointerUp(frame(), { pointerId: 10, clientX: 30, clientY: 30 })
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'gesture',
+      params: {
+        deviceId: 'emulator-5554',
+        actions: [
+          { type: 'pointerDown', x: 39, y: 42 },
+          { type: 'pointerUp', x: 59, y: 63 },
+        ],
+      },
+    })
+  })
+
+  it('releases pointer capture and drops a cancelled drag', async () => {
+    const { gateway } = await withSurface()
+    const target = frame()
+    const releasePointerCapture = vi.fn()
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 8, clientX: 20, clientY: 20 })
+    fireEvent.pointerMove(target, { pointerId: 9, clientX: 120, clientY: 220 })
+    fireEvent.pointerUp(target, { pointerId: 9, clientX: 120, clientY: 220 })
+    fireEvent.pointerCancel(target, { pointerId: 9, clientX: 120, clientY: 220 })
+    expect(releasePointerCapture).not.toHaveBeenCalled()
+    fireEvent.pointerMove(target, { pointerId: 8, clientX: 120, clientY: 220 })
+    fireEvent.pointerCancel(target, { pointerId: 8, clientX: 120, clientY: 220 })
+    expect(releasePointerCapture).toHaveBeenCalledWith(8)
+    expect(gateway.lastSocket!.sent).toEqual([])
   })
 
   it('drops stray pointer events and keeps sub-threshold travel as a tap', async () => {
@@ -391,11 +449,84 @@ describe('PhoneConnectedView touch and keys', () => {
 
     fireEvent.pointerDown(frame(), { clientX: 50, clientY: 50 })
     fireEvent.pointerMove(frame(), { clientX: 53, clientY: 54 })
-    fireEvent.pointerUp(frame(), { clientX: 60, clientY: 60 })
+    fireEvent.pointerUp(frame(), { clientX: 53, clientY: 54 })
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 117, y: 127 },
+      params: { deviceId: 'emulator-5554', x: 103, y: 114 },
     })
+  })
+
+  it('drops a captured press when the tab hides or switches to another device', async () => {
+    const firstGateway = new FakeGateway()
+    const secondGateway = new FakeGateway()
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'device-a', name: 'Device A', channel: 'usb', state: 'online', online: true },
+      { id: 'device-b', name: 'Device B', channel: 'usb', state: 'online', online: true },
+    ]))
+    const view = render(
+      <PhoneConnectedView
+        serial="device-a"
+        name="Device A"
+        visible={true}
+        source={source}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway: serial === 'device-a' ? firstGateway : secondGateway,
+          deviceId: serial,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { firstGateway.lastSocket!.accept() })
+    let target = screen.getByRole('application', { name: /Device A 画面/ })
+    const releasePointerCapture = vi.fn()
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 11, clientX: 20, clientY: 20 })
+
+    view.rerender(
+      <PhoneConnectedView
+        serial="device-a" name="Device A" visible={false} source={source} onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: firstGateway, deviceId: serial })}
+      />,
+    )
+    expect(releasePointerCapture).toHaveBeenCalledWith(11)
+    view.rerender(
+      <PhoneConnectedView
+        serial="device-a" name="Device A" visible={true} source={source} onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: firstGateway, deviceId: serial })}
+      />,
+    )
+    await flush()
+    await step(() => { firstGateway.lastSocket!.accept() })
+    target = screen.getByRole('application', { name: /Device A 画面/ })
+    fireEvent.pointerUp(target, { pointerId: 11, clientX: 120, clientY: 220 })
+    expect(firstGateway.sockets.flatMap(socket => socket.sent)).toEqual([])
+
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 12, clientX: 20, clientY: 20 })
+    view.rerender(
+      <PhoneConnectedView
+        serial="device-b" name="Device B" visible={true} source={source} onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: secondGateway, deviceId: serial })}
+      />,
+    )
+    await flush()
+    await step(() => { secondGateway.lastSocket!.accept() })
+    fireEvent.pointerUp(
+      screen.getByRole('application', { name: /Device B 画面/ }),
+      { pointerId: 12, clientX: 120, clientY: 220 },
+    )
+    expect(releasePointerCapture).toHaveBeenCalledWith(12)
+    expect(firstGateway.sockets.flatMap(socket => socket.sent)).toEqual([])
+    expect(secondGateway.sockets.flatMap(socket => socket.sent)).toEqual([])
   })
 
   it('maps a zero-size rendered frame to the safe zero coordinate', async () => {

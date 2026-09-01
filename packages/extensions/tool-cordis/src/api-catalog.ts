@@ -1436,9 +1436,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Same-origin phone stream Consumer. It injects `phoneDevices` and `webServer`, registers the IO upgrade and signed capture routes, and publishes `ctx.phoneStream` so later GUI consumers can mint URLs without talking to `:12000`.',
     methods: [
       {
-        signature: 'sessionFor(id: DeviceId, agentManaged: boolean = false): PhoneStreamSession',
+        signature: 'sessionFor( id: DeviceId, agentManaged: boolean = false, preferredFormat: PhoneCaptureFormat = \'h264\', ): PhoneStreamSession',
         description: 'Mint signed same-origin MJPEG and H264 URLs for one known device.',
-        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }, { name: 'agentManaged', description: 'Whether the session addresses an iOS real device whose agent is managed through this Consumer.' }],
+        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }, { name: 'agentManaged', description: 'Whether the session addresses an iOS real device whose agent is managed through this Consumer.' }, { name: 'preferredFormat', description: 'Encoding the browser should open first for this device class.' }],
         returns: 'the IO upgrade path plus both capture URLs and their expiry.',
       },
     ],
@@ -4916,7 +4916,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneStreamSession',
-    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly agentManaged: boolean;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
+    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly agentManaged: boolean;\n    readonly preferredFormat: PhoneCaptureFormat;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
   },
   {
     name: 'PhoneStreamUrl',

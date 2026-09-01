@@ -1,8 +1,8 @@
 /**
  * Phone live-view connection controller: the React-free state machine one
  * occupying device runs against the same-origin stream gateway. It mints
- * signed capture sessions (`format: 'avc'` on the Host mint), owns the io
- * WebSocket lifecycle, falls back from H264 to the same session's MJPEG URL,
+ * signed capture sessions, opens the Host-selected device-class encoding,
+ * owns the io WebSocket lifecycle, falls back from H264 to the same session's MJPEG URL,
  * bounds automatic reconnects after both encodings fail, and maps normalized
  * screen touches onto JSON-RPC io frames. Renderers subscribe and read phase
  * snapshots; every decision stays in this module so the machine is testable
@@ -420,11 +420,12 @@ export class PhoneConnectionController {
     entry.socket = this.gateway.connectIo(session, {
       onOpen: () => {
         if (!isCurrent()) return
+        const format = session.preferredFormat
         this.setPhase({
           kind: 'live',
-          streamUrl: this.streamUrlOf(session, 'h264'),
-          format: 'h264',
-          expiresAt: session.h264.expiresAt,
+          streamUrl: this.streamUrlOf(session, format),
+          format,
+          expiresAt: session[format].expiresAt,
         })
       },
       onClose: () => {

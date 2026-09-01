@@ -78,7 +78,11 @@ export function spawnWebHost(
     }
     command.signal?.addEventListener('abort', onAbort, { once: true })
     const timer = setTimeout(() => {
-      terminateBeforeReady(new Error(`dsh web did not print a loopback URL within ${String(timeoutMs)}ms`))
+      const tail = buffer.trim().slice(-800)
+      terminateBeforeReady(new Error(
+        `dsh web did not print a loopback URL within ${String(timeoutMs)}ms`
+        + (tail.length === 0 ? '' : `\n${tail}`),
+      ))
     }, timeoutMs)
     if (command.signal?.aborted === true) onAbort()
     const onData = (chunk: Buffer | string): void => {

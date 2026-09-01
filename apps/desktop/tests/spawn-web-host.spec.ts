@@ -76,6 +76,7 @@ describe('spawnWebHost', () => {
     const pid = await waitForPid(pidFile)
 
     expect((await outcome)?.message).toContain('within 1000ms')
+    expect((await outcome)?.message).toContain('fixture waiting without a URL')
     expect(processExists(pid)).toBe(false)
   })
 })

@@ -381,11 +381,8 @@ describe('managed mobilecli installer', () => {
   })
 
   it('preserves a managed-current read failure other than a missing pointer', async () => {
-    const root = await tempRoot()
-    const file = join(root, 'not-a-directory')
-    await writeFile(file, 'content')
-    await expect(readManagedMobilecli(file, 'darwin', 'arm64', new AbortController().signal))
-      .rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(readManagedMobilecli('\0', 'darwin', 'arm64', new AbortController().signal))
+      .rejects.toMatchObject({ code: 'ERR_INVALID_ARG_VALUE' })
   })
 
   it('treats a missing current pointer as absent with a live cancellation owner', async () => {

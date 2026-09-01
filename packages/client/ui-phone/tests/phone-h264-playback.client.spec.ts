@@ -258,6 +258,17 @@ afterEach(() => {
 })
 
 describe('playPhoneH264Stream', () => {
+  it('rejects bytes before the first Annex-B start code', async () => {
+    const error = await reportedError(streamResponse(concat(
+      Uint8Array.of(1),
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80),
+      nal(0x68, 0x80),
+    )))
+    expect(error).toEqual(expect.objectContaining({
+      message: 'phone H264 stream contains bytes without an Annex-B start code',
+    }))
+  })
+
   it('assembles Annex-B access units, paints their frames, and closes every frame', async () => {
     const sps = nal(0x67, 0x42, 0xc0, 0x1f, 0x80)
     const pps = nal(0x68, 0x80)

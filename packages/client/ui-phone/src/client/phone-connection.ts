@@ -436,8 +436,9 @@ export class PhoneConnectionController {
   }
 
   private send(request: PhoneClientIoRequest): boolean {
-    if (this.phase.kind !== 'live' || this.socket === undefined) return false
-    this.socket.send(encodePhoneIoFrame(this.nextFrameId, this.deviceId, request))
+    if (this.phase.kind !== 'live') return false
+    const socket = this.socket as PhoneIoSocket
+    socket.send(encodePhoneIoFrame(this.nextFrameId, this.deviceId, request))
     this.nextFrameId += 1
     return true
   }

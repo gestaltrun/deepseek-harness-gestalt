@@ -500,6 +500,40 @@ describe('iOS environment manager', () => {
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
   })
 
+  it.each(['cancel', 'deactivate'] as const)(
+    '%s keeps an owned Simulator snapshot aligned with cancellation cleanup',
+    async (action) => {
+      const fixture = new FixtureRunner('no-simulator')
+      let refreshStarted!: () => void
+      const started = new Promise<void>((resolve) => { refreshStarted = resolve })
+      let pauseRefresh = false
+      const runner: IosCommandRunner = {
+        run: async (command, args, options) => {
+          if (pauseRefresh && command === 'xcode-select') {
+            refreshStarted()
+            return await new Promise<IosCommandResult>((_resolve, reject) => {
+              options.signal?.addEventListener('abort', () => { reject(abortReason(options.signal)) }, { once: true })
+            })
+          }
+          return await fixture.run(command, args, options)
+        },
+      }
+      const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+      await manager.prepare()
+      await manager.start()
+      pauseRefresh = true
+      const refreshing = manager.refresh()
+      await started
+      if (action === 'cancel') manager.cancel()
+      else await manager.deactivate()
+      await expect(refreshing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })
+      expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+      expect(fixture.calls.filter(call => call.command === 'xcrun' && call.args[1] === 'shutdown')).toHaveLength(1)
+      await manager.deactivate()
+      expect(fixture.calls.filter(call => call.command === 'xcrun' && call.args[1] === 'shutdown')).toHaveLength(1)
+    },
+  )
+
   it('retains Simulator ownership until a failed shutdown can be retried', async () => {
     const fixture = new FixtureRunner('no-simulator')
     let shutdowns = 0

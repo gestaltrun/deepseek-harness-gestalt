@@ -140,7 +140,7 @@ describe('iOS command runner', () => {
     expect(result.stdout).toBe('')
   })
 
-  it('rejects a command that cannot spawn even when cancellation races its error event', async () => {
+  it.skipIf(process.platform === 'win32')('rejects a command that cannot spawn even when cancellation races its error event', async () => {
     const controller = new AbortController()
     const operation = createNodeIosCommandRunner().run('/path/that/does/not/exist/dsh-ios-command', [], {
       env: { PATH: process.env.PATH ?? '' }, signal: controller.signal,
@@ -149,7 +149,7 @@ describe('iOS command runner', () => {
     await expect(operation).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('observes an abort that lands between the initial check and listener registration', async () => {
+  it.skipIf(process.platform === 'win32')('observes an abort that lands between the initial check and listener registration', async () => {
     const controller = new AbortController()
     const aborted = vi.spyOn(controller.signal, 'aborted', 'get').mockReturnValue(true)
     const throwIfAborted = vi.spyOn(controller.signal, 'throwIfAborted').mockImplementation(() => {})
@@ -167,5 +167,16 @@ describe('iOS command runner', () => {
       { env: { PATH: process.env.PATH ?? '' } },
     )
     expect(Buffer.byteLength(result.stderr)).toBe(16_384)
+  })
+
+  it('retains a byte-bounded stderr tail without splitting UTF-8 characters', async () => {
+    const result = await createNodeIosCommandRunner().run(
+      process.execPath,
+      ['-e', 'process.stderr.write(String.fromCodePoint(0x1f642).repeat(4097) + "x")'],
+      { env: { PATH: process.env.PATH ?? '' } },
+    )
+    expect(result.stderr).toBe(`${'🙂'.repeat(4095)}x`)
+    expect(Buffer.byteLength(result.stderr)).toBeLessThanOrEqual(16_384)
+    expect(result.stderr).not.toContain('\uFFFD')
   })
 })

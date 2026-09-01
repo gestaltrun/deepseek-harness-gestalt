@@ -79,7 +79,7 @@ async function settleChild(
 ): Promise<IosCommandResult> {
   const stdoutChunks: Buffer[] = []
   let stdoutBytes = 0
-  let stderr = ''
+  let stderrTail = Buffer.alloc(0)
   let timedOut = false
   let escape: ReturnType<typeof setTimeout> | undefined
   let abandon: ReturnType<typeof setTimeout> | undefined
@@ -88,7 +88,8 @@ async function settleChild(
   const resultOf = (code: number | null, exitSignal: NodeJS.Signals | null): IosCommandResult => ({
     code, signal: exitSignal, timedOut,
     ...(terminationError === undefined ? {} : { terminationError: terminationError.message }),
-    stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'), stderr,
+    stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'),
+    stderr: decodeUtf8Tail(stderrTail),
   })
   const recordTerminationError = (error: unknown): void => {
     if (terminationError !== undefined || error === undefined) return
@@ -125,7 +126,7 @@ async function settleChild(
     stdoutChunks.push(chunk)
     stdoutBytes += chunk.byteLength
   })
-  child.stderr?.on('data', (chunk: Buffer) => { stderr = retain(stderr, chunk.toString('utf8'), STDERR_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk: Buffer) => { stderrTail = retainTail(stderrTail, chunk, STDERR_TAIL_BYTES) })
   signal?.addEventListener('abort', abort, { once: true })
   if (signal?.aborted === true) abort()
   const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
@@ -148,7 +149,16 @@ async function settleChild(
   }
 }
 
-function retain(current: string, addition: string, maxBytes: number): string {
-  const joined = `${current}${addition}`
-  return Buffer.byteLength(joined) > maxBytes ? joined.slice(-maxBytes) : joined
+function retainTail(current: Buffer, addition: Buffer, maxBytes: number): Buffer {
+  const joined = Buffer.concat([current, addition], current.byteLength + addition.byteLength)
+  return joined.byteLength > maxBytes ? joined.subarray(joined.byteLength - maxBytes) : joined
+}
+
+function decodeUtf8Tail(value: Buffer): string {
+  let start = 0
+  while (start < value.byteLength) {
+    if ((value.readUInt8(start) & 0xc0) !== 0x80) break
+    start += 1
+  }
+  return value.subarray(start).toString('utf8')
 }

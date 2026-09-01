@@ -119,9 +119,8 @@ export class IosEnvironmentManager {
     const active = this.operation
     active?.controller.abort(new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled'))
     await active?.task.catch(() => {})
-    const ownedDeviceId = this.ownedDeviceId
-    await this.stopOwnedSimulator()
-    if (ownedDeviceId !== undefined && this.current.kind === 'ready' && this.current.deviceId === ownedDeviceId) {
+    const stoppedDeviceId = await this.stopOwnedSimulator()
+    if (stoppedDeviceId !== undefined && this.current.kind === 'ready' && this.current.deviceId === stoppedDeviceId) {
       this.publish({ ...this.current, running: false })
     }
   }
@@ -143,12 +142,19 @@ export class IosEnvironmentManager {
           ? signal.reason
           : new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled', { cause: error })
         : iosFailure(error)
+      let stoppedDeviceId: DeviceId | undefined
       try {
-        await this.stopOwnedSimulator()
+        stoppedDeviceId = await this.stopOwnedSimulator()
       } catch (cleanupError) {
         failure = iosFailure(cleanupError)
       }
-      if (failure.code === 'PHONE_IOS_ABORTED') this.publish(this.lastActionable)
+      if (failure.code === 'PHONE_IOS_ABORTED') {
+        const actionable = this.lastActionable
+        this.publish(stoppedDeviceId !== undefined && actionable.kind === 'ready'
+          && actionable.deviceId === stoppedDeviceId
+          ? { ...actionable, running: false }
+          : actionable)
+      }
       else {
         const plan = planOf(this.current)
         this.publish(plan === undefined
@@ -389,9 +395,9 @@ export class IosEnvironmentManager {
     }
   }
 
-  private async stopOwnedSimulator(): Promise<void> {
+  private async stopOwnedSimulator(): Promise<DeviceId | undefined> {
     const ownedDeviceId = this.ownedDeviceId
-    if (ownedDeviceId === undefined || this.platform !== 'darwin') return
+    if (ownedDeviceId === undefined || this.platform !== 'darwin') return undefined
     const outcome = await this.runner.run('xcrun', ['simctl', 'shutdown', ownedDeviceId], {
       env: this.commandEnvironment(), timeoutMs: COMMAND_TIMEOUT_MS,
     })
@@ -400,7 +406,9 @@ export class IosEnvironmentManager {
     if (!commandSucceeded(outcome) && !alreadyShutdown) {
       throw commandFailure('PHONE_IOS_SHUTDOWN', 'simctl shutdown', outcome)
     }
-    if (this.ownedDeviceId === ownedDeviceId) this.ownedDeviceId = undefined
+    if (this.ownedDeviceId !== ownedDeviceId) return undefined
+    this.ownedDeviceId = undefined
+    return ownedDeviceId
   }
 }
 

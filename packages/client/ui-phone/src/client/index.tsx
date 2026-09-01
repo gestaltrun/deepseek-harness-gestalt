@@ -22,10 +22,10 @@ import { createListingPhoneEnvironmentSource } from './phone-environment-listing
 import { createHttpPhoneRuntimeSource } from './phone-runtime-source.ts'
 import { PhoneConnectionController } from './phone-connection.ts'
 import { createHttpPhoneGateway } from './phone-stream-client.ts'
-import { createHttpPhoneListingSource } from './phone-listing.ts'
+import { createHttpPhoneListingSource, fetchPhoneListing } from './phone-listing.ts'
 import {
   isDesktopOverlayDocument, phoneDesktopOverlayBridgeOf, phoneDeviceIdFromSelection,
-  selectPhoneDeviceFromOverlay,
+  selectPhoneDeviceFromOverlay, waitForPhoneGate,
 } from './desktop-device-open.ts'
 import {
   installPhoneTab, openPhoneDevicePanel, phoneDeviceTabMetaOf,
@@ -47,6 +47,12 @@ export const inject = ['betterSidebar', 'slots', 'locale', 'settingsScope'] as c
 
 function enabledValue(settings: PhoneSettings | undefined): boolean | undefined {
   return settings?.enabled
+}
+
+function runSettingsDeviceOpen(operation: Promise<void>): void {
+  void operation.catch((error: unknown) => {
+    console.error('[ui-phone] opening a Settings device failed:', error)
+  })
 }
 
 /**
@@ -108,22 +114,45 @@ export function apply(ctx: ClientContext, config: Config): void {
     return compositionEnabled
   }
   const sidebar = ctx.get('betterSidebar') as PhoneTabOpenFace
-  const openListedDevice = (deviceId: string): void => {
-    const devices = [...listing.snapshot().android, ...listing.snapshot().ios]
-    const device = devices.find(candidate => candidate.id === deviceId && candidate.online)
-    if (device === undefined) return
-    openPhoneDevicePanel(sidebar, tabEnabled, device.id, device.name)
+  let selectionEpoch = 0
+  let activeSelection: AbortController | undefined
+  ctx.effect(() => () => {
+    selectionEpoch += 1
+    activeSelection?.abort()
+    activeSelection = undefined
+  }, 'ui-phone: Settings device-open lifetime')
+  const openListedDevice = async (deviceId: string): Promise<void> => {
+    activeSelection?.abort()
+    const selection = new AbortController()
+    activeSelection = selection
+    const epoch = ++selectionEpoch
+    try {
+      const fresh = await fetchPhoneListing(selection.signal)
+      if (selection.signal.aborted || epoch !== selectionEpoch) return
+      const enabled = await waitForPhoneGate(scope, tabEnabled, selection.signal)
+      if (!enabled || epoch !== selectionEpoch) return
+      const devices = [...fresh.android, ...fresh.ios]
+      const device = devices.find(candidate => candidate.id === deviceId && candidate.online)
+      if (device === undefined) return
+      openPhoneDevicePanel(sidebar, () => true, device.id, device.name)
+    } catch (error) {
+      if (!selection.signal.aborted) throw error
+    } finally {
+      if (activeSelection === selection) activeSelection = undefined
+    }
   }
   const overlayBridge = phoneDesktopOverlayBridgeOf(
     (globalThis as { dshDesktop?: unknown }).dshDesktop,
   )
   const openFromSettings = isDesktopOverlayDocument() && overlayBridge !== undefined
-    ? (deviceId: string): void => { void selectPhoneDeviceFromOverlay(overlayBridge, deviceId) }
-    : openListedDevice
+    ? (deviceId: string): void => {
+      runSettingsDeviceOpen(selectPhoneDeviceFromOverlay(overlayBridge, deviceId))
+    }
+    : (deviceId: string): void => { runSettingsDeviceOpen(openListedDevice(deviceId)) }
   if (!isDesktopOverlayDocument() && overlayBridge !== undefined) {
     ctx.effect(() => overlayBridge.onChromeOverlayResult((result) => {
       const deviceId = phoneDeviceIdFromSelection(result)
-      if (deviceId !== undefined) openListedDevice(deviceId)
+      if (deviceId !== undefined) runSettingsDeviceOpen(openListedDevice(deviceId))
     }), 'ui-phone: Desktop settings device open')
   }
   const card = new PhoneSettingsCardController(

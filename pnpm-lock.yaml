@@ -3388,6 +3388,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-better-sidebar':
         specifier: workspace:^
         version: link:../ui-better-sidebar
+      '@deepseek-ai/dsh-client-ui-desktop':
+        specifier: workspace:^
+        version: link:../ui-desktop
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: workspace:^
         version: link:../ui-primitives

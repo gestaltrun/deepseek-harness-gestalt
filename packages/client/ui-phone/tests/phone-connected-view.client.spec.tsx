@@ -126,6 +126,7 @@ describe('PhoneConnectedView chrome', () => {
 
     expect(screen.queryByLabelText('当前画面编码 H264 · 30 fps')).toBeNull()
     expect(screen.getByLabelText('当前画面编码 MJPEG').textContent).toContain('MJPEG')
+    expect(screen.queryByText(/decode failed/)).toBeNull()
     const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
     expect(surface).toBeInstanceOf(HTMLImageElement)
     expect(surface.getAttribute('src')).toBe('/phone/stream/emulator-5554/mjpeg?token=a')

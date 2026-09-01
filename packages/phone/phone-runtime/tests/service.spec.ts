@@ -515,24 +515,22 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('keeps chained iOS info and io on one generation and re-queries after replacement', async () => {
-    const first = await stageFake({
+    const fake = await stageFake({
       devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 3 } }],
       infoDelayMs: 200,
     })
-    const second = await stageFake({
-      devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 2 } }],
-    })
-    fakes.push(first, second)
-    const context = await mountWith(first)
-    const staleIo = context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 })
-    const staleAssertion = expect(staleIo).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
-    await waitFor(async () => (await first.counters()).infoCount === 1)
-    await second.claim()
-    await context.phoneDevices.activateExecutable(second.executablePath)
-    await staleAssertion
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const staleFailure = errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 }))
+    await waitFor(async () => (await fake.counters()).infoCount === 1)
+    await fake.setLaunchDevices([
+      { ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 2 } },
+    ])
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    await expect(staleFailure).resolves.toMatchObject({ code: 'PHONE_ABORTED' })
 
     await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 })
-    expect((await first.counters())).toMatchObject({
+    expect((await fake.counters())).toMatchObject({
       infoCount: 1,
       io: [{ method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 6, y: 9 } }],
     })

@@ -76,6 +76,8 @@ export interface StagedFake {
   /** Release the placeholder port reservation and wait until the child can bind it. */
   claim(): Promise<void>
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
+  /** Rewrite the device seed that the next server generation reads at startup. */
+  setLaunchDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
   /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
   setAgent(agent: FakeAgentKnobs): Promise<void>
   /** Read the persistent agent state the fake CLI invocations record. */
@@ -201,6 +203,7 @@ export async function stageFake(
     }
     const profilePath = join(fixturesDir, 'profile.mobileprovision')
     await writeFile(profilePath, 'fake provisioning profile payload')
+    const configPath = join(fixturesDir, 'fakemobilecli.config.json')
     const port = await randomPort()
     const hold = await holdPort(port)
     const baseUrl = `http://127.0.0.1:${String(port)}`
@@ -221,8 +224,11 @@ export async function stageFake(
         })
         if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
       },
+      async setLaunchDevices(devices): Promise<void> {
+        const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+        await writeFile(configPath, JSON.stringify({ ...current, devices }))
+      },
       async setAgent(agent): Promise<void> {
-        const configPath = join(fixturesDir, 'fakemobilecli.config.json')
         const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
         await writeFile(configPath, JSON.stringify({ ...current, agent }))
       },

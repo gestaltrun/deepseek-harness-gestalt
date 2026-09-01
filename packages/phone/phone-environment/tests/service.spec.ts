@@ -545,7 +545,7 @@ describe('PhoneEnvironment', () => {
     await service.setEnabled(true)
     await service.prepare()
     expect(activateExecutable).toHaveBeenCalledWith(
-      expect.stringContaining('/versions/'), expect.any(AbortSignal),
+      expect.stringMatching(/[\\/]versions[\\/]/u), expect.any(AbortSignal),
     )
     expect(service.snapshot()).toMatchObject({ enabled: true, runtime: { kind: 'ready', source: 'managed' } })
   })

@@ -11,7 +11,7 @@ import { isExpectedSessionSurface } from './session-surface.ts'
 const ADMIN_PREFIX = '/plugins/dsh-sub2api/admin'
 const REAL_PROVIDER_CREDENTIAL_REF = 'ZAI_CODING_CN_API_KEY'
 const SUB2API_PUBLIC_MODEL = 'claude-sonnet-4-5-20250929'
-export const ACCOUNT_PROVIDER_MODEL = 'claude-fable-5'
+export const ACCOUNT_PROVIDER_MODEL = SUB2API_PUBLIC_MODEL
 const execFileAsync = promisify(execFile)
 
 interface Sub2ApiSnapshot {
@@ -557,7 +557,29 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
     }),
   })
   if (!Number.isInteger(account.id)) throw new Error('Sub2API account creation omitted its numeric id')
-  await adminJson(hostOrigin, `/accounts/${String(account.id)}/models/sync-upstream`, { method: 'POST' })
+  const catalog = await adminJson<{
+    models?: string[]
+    metadata?: Record<string, {
+      reasoning?: boolean
+      supported_reasoning_levels?: string[]
+      input_modalities?: string[]
+      context_window?: number
+      max_output_tokens?: number
+    }>
+  }>(hostOrigin, `/accounts/${String(account.id)}/models/sync-upstream`, { method: 'POST' })
+  const targetModel = Object.entries(catalog.metadata ?? {}).find(([, metadata]) =>
+    metadata.reasoning === true
+      && Array.isArray(metadata.supported_reasoning_levels)
+      && metadata.supported_reasoning_levels.length > 0
+      && Array.isArray(metadata.input_modalities)
+      && metadata.input_modalities.includes('text')
+      && Number.isInteger(metadata.context_window)
+      && (metadata.context_window ?? 0) > 0
+      && Number.isInteger(metadata.max_output_tokens)
+      && (metadata.max_output_tokens ?? 0) > 0)?.[0]
+  if (targetModel === undefined) {
+    throw new Error('Sub2API account sync returned no reasoning model with complete capability metadata')
+  }
   const routes = await adminJson<Array<{ id: number; public_model: string }>>(
     hostOrigin,
     `/groups/${String(composite.id)}/composite-routes`,
@@ -572,7 +594,7 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
       public_model: SUB2API_PUBLIC_MODEL,
       match_type: 'exact',
       target_platform: 'zhipu',
-      upstream_model: 'glm-5.3-flash',
+      upstream_model: targetModel,
       endpoint: 'chat_completions',
       priority: 100,
       enabled: true,

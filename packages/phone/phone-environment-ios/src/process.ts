@@ -79,7 +79,7 @@ async function settleChild(
 ): Promise<IosCommandResult> {
   const stdoutChunks: Buffer[] = []
   let stdoutBytes = 0
-  let stderrTail = Buffer.alloc(0)
+  let stderrTail: Buffer = Buffer.alloc(0)
   let timedOut = false
   let escape: ReturnType<typeof setTimeout> | undefined
   let abandon: ReturnType<typeof setTimeout> | undefined

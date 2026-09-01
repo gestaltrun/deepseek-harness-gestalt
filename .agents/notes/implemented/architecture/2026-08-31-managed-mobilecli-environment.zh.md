@@ -16,6 +16,8 @@ Desktop 只有在运维方提供 mobilecli 可执行文件时才能组合手机�
 
 浏览器通过共享同源信任栅栏保护的 Host 路由读取全量快照，并调用准备、取消或刷新。Android 与 iOS 平台行使用独立可扩展状态。非 macOS 的 iOS 行报告不支持，且不存在可执行操作。
 
+激活结果只能由仍持有当前 controller 的操作发布。被替换的 generation 会拒绝自己的调用方，但不能覆盖较新 generation 的快照。
+
 mobilecli 使用 FSL-1.1，并带 Apache-2.0 future license。运行时从上游 Release 直接下载不等于本仓库随包分发或再分发，但也不等于获得法务许可。在法务或上游许可方确认预期产品用途获准之前，Desktop 发布仍保持阻塞。
 
 ## 考虑过的替代方案

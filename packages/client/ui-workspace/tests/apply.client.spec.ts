@@ -183,7 +183,7 @@ describe('ui-workspace apply', () => {
     await expect(browser.projectMembership?.createProject({
       name: 'Atlas', localWorkspaceId: 'ws' as never,
     })).resolves.toEqual({
-      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r', receivingAccountId: 'account-1',
     })
     expect(createProject).toHaveBeenCalledWith({ name: 'Atlas', remoteUrl: 'https://github.com/o/r' })
     expect(b.bindWorkspace).toHaveBeenCalledWith({
@@ -196,7 +196,7 @@ describe('ui-workspace apply', () => {
     await expect(browser.projectMembership?.createProject({ name: 'Missing', localWorkspaceId: 'ws' as never }))
       .rejects.toThrow('must be a Git checkout with an origin remote')
     await expect(browser.projectMembership?.projectForWorkspace('ws' as never)).resolves.toMatchObject({
-      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r', receivingAccountId: 'account-1',
     })
     expect(projectByRemote).toHaveBeenCalledWith('https://github.com/o/r')
     expect(b.ensureWorkspaceBinding).toHaveBeenCalledWith({

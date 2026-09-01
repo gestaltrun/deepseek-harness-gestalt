@@ -103,7 +103,12 @@ function projectMembershipGateway(
         projectId: project.id,
         workspaceId: localWorkspaceId,
       })
-      return { id: project.id, name: project.name, boundRemoteUrl: project.boundRemoteUrl }
+      return {
+        id: project.id,
+        name: project.name,
+        boundRemoteUrl: project.boundRemoteUrl,
+        receivingAccountId: project.receivingAccountId,
+      }
     },
     projectForWorkspace: async (workspaceId) => {
       const remoteUrl = await workspaces.gitRemote(workspaceId)
@@ -124,7 +129,12 @@ function projectMembershipGateway(
       if (boundWorkspaceId !== workspaceId) {
         throw new Error(`Cloud Project "${project.name}" is already linked to another local Workspace.`)
       }
-      return { id: project.id, name: project.name, boundRemoteUrl: project.boundRemoteUrl }
+      return {
+        id: project.id,
+        name: project.name,
+        boundRemoteUrl: project.boundRemoteUrl,
+        receivingAccountId: project.receivingAccountId,
+      }
     },
     roster: async (projectId) => {
       const roster = await client.roster(projectId as ProjectId)

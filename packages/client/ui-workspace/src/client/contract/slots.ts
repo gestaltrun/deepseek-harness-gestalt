@@ -34,11 +34,17 @@ import type {
 import type { ProjectMembershipAccessSnapshot } from '@deepseek-ai/dsh-project-membership-client'
 import type { createWorkspaceViewStore } from '../stores.ts'
 
-/** Client-face projection of one bound cloud project. */
-export interface WorkspaceProjectView {
+/** Client-face project fields shared by bound-project and roster reads. */
+export interface WorkspaceProjectSummary {
   id: string
   name: string
   boundRemoteUrl: string
+}
+
+/** One bound cloud project authorized for the current Platform Account. */
+export interface WorkspaceProjectView extends WorkspaceProjectSummary {
+  /** Current Platform Account whose membership authorized this local binding. */
+  receivingAccountId: string
 }
 
 /** Permission role inside one cloud project. */
@@ -83,7 +89,7 @@ export interface ProjectMembershipGateway {
   createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
   /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
   projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
-  roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
+  roster(projectId: string): Promise<{ project: WorkspaceProjectSummary; members: readonly WorkspaceMemberRow[] }>
   invite(input: { projectId: string; githubLogin: string }): Promise<WorkspaceIssuedInvitation>
   issuedInvitations(projectId: string): Promise<readonly WorkspaceIssuedInvitation[]>
   retractInvitation(invitationId: string): Promise<void>

@@ -56,14 +56,22 @@ const SAME_REMOTE = 'https://github.com/octocat/repo'
 function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
   return {
     createProject: vi.fn<ProjectMembershipGateway['createProject']>()
-      .mockResolvedValue({ id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE }),
+      .mockResolvedValue({
+        id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-actor',
+      }),
     projectForWorkspace: vi.fn<ProjectMembershipGateway['projectForWorkspace']>().mockResolvedValue(undefined),
     roster: vi.fn<ProjectMembershipGateway['roster']>().mockResolvedValue({
       project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
-      members: [{
-        membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
-        role: 'member', tags: ['triage'], presence: 'online',
-      }],
+      members: [
+        {
+          membershipId: 'membership-actor', accountId: 'account-actor', displayName: 'actor',
+          role: 'owner', tags: [], presence: 'online',
+        },
+        {
+          membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
+          role: 'member', tags: ['triage'], presence: 'online',
+        },
+      ],
     }),
     invite: vi.fn<ProjectMembershipGateway['invite']>()
       .mockResolvedValue({ invitationId: 'invitation-9', inviteeName: 'mona' }),
@@ -166,7 +174,9 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
-const projectView = { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE }
+const projectView = {
+  id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-actor',
+}
 const pendingInvitation = {
   invitationId: 'invitation-1',
   receivingAccountId: 'account-2',
@@ -320,7 +330,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       .mockResolvedValueOnce([])
     const membership = gateway({
       projectForWorkspace: vi.fn(async () => ({
-        id: 'project-1', name: 'Restored', boundRemoteUrl: SAME_REMOTE,
+        id: 'project-1', name: 'Restored', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-actor',
       })),
       issuedInvitations,
     })
@@ -344,6 +354,47 @@ describe('workspace settings and invite wizard (M4)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('shows an ordinary member a read-only roster without issuer-only reads', async () => {
+    const issuedInvitations = vi.fn<ProjectMembershipGateway['issuedInvitations']>()
+      .mockRejectedValue(new Error('issuer-only read must not run'))
+    const membership = gateway({
+      projectForWorkspace: vi.fn(async () => ({
+        ...projectView,
+        receivingAccountId: 'account-member',
+      } as never)),
+      roster: vi.fn(async () => ({
+        project: projectView,
+        members: [
+          {
+            membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'alice-owner',
+            role: 'owner' as const, tags: [], presence: 'online' as const,
+          },
+          {
+            membershipId: 'membership-member', accountId: 'account-member', displayName: 'current-member',
+            role: 'member' as const, tags: ['triage'], presence: 'online' as const,
+          },
+        ],
+      })),
+      issuedInvitations,
+    })
+
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+    await flush()
+
+    expect(screen.getByText('alice-owner')).toBeTruthy()
+    expect(screen.getByText('current-member')).toBeTruthy()
+    for (const presenceLabel of screen.getAllByText(t('members.online'))) {
+      expect(presenceLabel.className).toContain('visuallyHidden')
+    }
+    expect(issuedInvitations).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText(t('members.inviteLogin'))).toBeNull()
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByLabelText(t('members.tagsPlaceholder'))).toBeNull()
+    expect(screen.queryByRole('button', { name: t('members.remove') })).toBeNull()
   })
 
   it('runs the invite wizard: accept, mandatory link with same-remote advice, close returns undecided', async () => {
@@ -527,16 +578,32 @@ describe('workspace settings and invite wizard (M4)', () => {
   })
 
   it('contains roster and issued-invitation completion after unmount and reports both failure forms', async () => {
-    for (const [rosterReason, issuedReason] of [
-      [new Error('roster error'), 'issued string'],
-      ['roster string', new Error('issued error')],
-    ] as const) {
+    const administrativeMembers = [{
+      membershipId: 'membership-actor', accountId: 'account-actor', displayName: 'actor',
+      role: 'owner' as const, tags: [], presence: 'online' as const,
+    }]
+    for (const rosterReason of [new Error('roster error'), 'roster string'] as const) {
       render(<WorkspaceSettingsModal
         workspaceId={wid('proj')}
         workspaceTitle="proj"
         gateway={gateway({
           projectForWorkspace: vi.fn(async () => projectView as never),
           roster: vi.fn().mockRejectedValue(rosterReason),
+        })}
+        onClose={vi.fn()}
+        t={t}
+      />)
+      await flush()
+      expect(screen.getByRole('alert')).toBeTruthy()
+      cleanup()
+    }
+    for (const issuedReason of [new Error('issued error'), 'issued string'] as const) {
+      render(<WorkspaceSettingsModal
+        workspaceId={wid('proj')}
+        workspaceTitle="proj"
+        gateway={gateway({
+          projectForWorkspace: vi.fn(async () => projectView as never),
+          roster: vi.fn(async () => ({ project: projectView, members: administrativeMembers })),
           issuedInvitations: vi.fn().mockRejectedValue(issuedReason),
         })}
         onClose={vi.fn()}
@@ -561,11 +628,14 @@ describe('workspace settings and invite wizard (M4)', () => {
       t={t}
     />)
     await flush()
+    await act(async () => {
+      rosterRead.resolve({ project: projectView, members: administrativeMembers })
+      await rosterRead.promise
+    })
     completed.unmount()
     await act(async () => {
-      rosterRead.resolve({ project: projectView, members: [] })
       issuedRead.resolve([])
-      await Promise.all([rosterRead.promise, issuedRead.promise])
+      await issuedRead.promise
     })
 
     const lateRoster = deferred<Awaited<ReturnType<ProjectMembershipGateway['roster']>>>()
@@ -582,12 +652,36 @@ describe('workspace settings and invite wizard (M4)', () => {
       t={t}
     />)
     await flush()
+    await act(async () => {
+      lateRoster.resolve({ project: projectView, members: administrativeMembers })
+      await lateRoster.promise
+    })
     failed.unmount()
     await act(async () => {
-      lateRoster.reject(new Error('late roster'))
       lateIssued.reject('late issued')
-      await Promise.allSettled([lateRoster.promise, lateIssued.promise])
+      await Promise.allSettled([lateIssued.promise])
     })
+
+    for (const outcome of ['resolve', 'reject'] as const) {
+      const lateRosterOnly = deferred<Awaited<ReturnType<ProjectMembershipGateway['roster']>>>()
+      const view = render(<WorkspaceSettingsModal
+        workspaceId={wid('proj')}
+        workspaceTitle="proj"
+        gateway={gateway({
+          projectForWorkspace: vi.fn(async () => projectView as never),
+          roster: vi.fn(() => lateRosterOnly.promise),
+        })}
+        onClose={vi.fn()}
+        t={t}
+      />)
+      await flush()
+      view.unmount()
+      await act(async () => {
+        if (outcome === 'resolve') lateRosterOnly.resolve({ project: projectView, members: [] })
+        else lateRosterOnly.reject(new Error('late roster'))
+        await Promise.allSettled([lateRosterOnly.promise])
+      })
+    }
 
     render(<WorkspaceSettingsModal
       workspaceId={wid('proj')}
@@ -629,7 +723,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       },
     ]
     const membership = gateway({
-      projectForWorkspace: vi.fn(async () => projectView as never),
+      projectForWorkspace: vi.fn(async () => ({ ...projectView, receivingAccountId: 'account-3' } as never)),
       roster: vi.fn(async () => ({ project: projectView, members } as never)),
       issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat' }]),
       invite,

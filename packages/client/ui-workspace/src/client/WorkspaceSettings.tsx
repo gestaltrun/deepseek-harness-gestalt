@@ -207,6 +207,7 @@ function MemberManagement({ gateway, project, t }: {
 }) {
   const [members, setMembers] = useState<readonly WorkspaceMemberRow[] | null>(null)
   const [issued, setIssued] = useState<readonly WorkspaceIssuedInvitation[]>([])
+  const [actorRole, setActorRole] = useState<WorkspaceMemberRow['role'] | null>(null)
   const [retractingId, setRetractingId] = useState<string | null>(null)
   const [login, setLogin] = useState('')
   const [inviting, setInviting] = useState(false)
@@ -216,13 +217,6 @@ function MemberManagement({ gateway, project, t }: {
     alive.current = true
     return () => { alive.current = false }
   }, [])
-  const reloadRoster = () => {
-    gateway.roster(project.id).then((view) => {
-      if (alive.current) setMembers(view.members)
-    }).catch((reason: unknown) => {
-      if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
-    })
-  }
   const reloadIssued = () => {
     gateway.issuedInvitations(project.id).then((rows) => {
       if (alive.current) setIssued(rows)
@@ -230,10 +224,22 @@ function MemberManagement({ gateway, project, t }: {
       if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
     })
   }
+  const reloadRoster = () => {
+    gateway.roster(project.id).then((view) => {
+      if (!alive.current) return
+      setMembers(view.members)
+      const currentRole = view.members.find(row => row.accountId === project.receivingAccountId)?.role ?? null
+      setActorRole(currentRole)
+      if (currentRole === 'owner' || currentRole === 'admin') reloadIssued()
+      else setIssued([])
+    }).catch((reason: unknown) => {
+      if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
   useEffect(() => {
     reloadRoster()
-    reloadIssued()
-  }, [gateway, project.id])
+  }, [gateway, project.id, project.receivingAccountId])
+  const canAdminister = actorRole === 'owner' || actorRole === 'admin'
   const trimmedLogin = login.trim()
   const inviteBlocked = inviting || trimmedLogin === ''
   const submitInvite = () => {
@@ -284,13 +290,14 @@ function MemberManagement({ gateway, project, t }: {
                   key={row.membershipId}
                   row={row}
                   gateway={gateway}
+                  editable={canAdminister}
                   onAct={act}
                   t={t}
                 />
               ))}
             </ul>
           )}
-      {issued.length > 0 && (
+      {canAdminister && issued.length > 0 && (
         <div>
           <div className={css.subTitle}>{t('invitations.pending')}</div>
           <ul className={css.memberList}>
@@ -309,28 +316,31 @@ function MemberManagement({ gateway, project, t }: {
           </ul>
         </div>
       )}
-      <div className={css.inviteRow}>
-        <input
-          className={css.fieldInput}
-          value={login}
-          aria-label={t('members.inviteLogin')}
-          placeholder={t('members.inviteLogin')}
-          disabled={inviting}
-          onChange={(e) => { setLogin(e.target.value); setActionError(null) }}
-        />
-        <Button variant="primary" disabled={inviteBlocked} onClick={submitInvite}>
-          {inviting ? t('members.inviting') : t('members.invite')}
-        </Button>
-      </div>
+      {canAdminister && (
+        <div className={css.inviteRow}>
+          <input
+            className={css.fieldInput}
+            value={login}
+            aria-label={t('members.inviteLogin')}
+            placeholder={t('members.inviteLogin')}
+            disabled={inviting}
+            onChange={(e) => { setLogin(e.target.value); setActionError(null) }}
+          />
+          <Button variant="primary" disabled={inviteBlocked} onClick={submitInvite}>
+            {inviting ? t('members.inviting') : t('members.invite')}
+          </Button>
+        </div>
+      )}
       {actionError !== null && <div className={css.actionError} role="alert">{actionError}</div>}
     </div>
   )
 }
 
 /** One roster row: presence dot, display name, role picker, tag editor, removal. */
-function MemberRowItem({ row, gateway, onAct, t }: {
+function MemberRowItem({ row, gateway, editable, onAct, t }: {
   row: WorkspaceMemberRow
   gateway: ProjectMembershipGateway
+  editable: boolean
   onAct: (run: () => Promise<void>) => void
   t: SettingsTranslate
 }) {
@@ -345,43 +355,54 @@ function MemberRowItem({ row, gateway, onAct, t }: {
     <li className={css.memberRow}>
       <span className={css.presence} title={row.presence === 'online' ? t('members.online') : t('members.offline')}>
         {row.presence === 'online' ? <StateDot state="done" /> : <span className={css.offlineDot} aria-hidden="true" />}
-        <span className="visually-hidden">{row.presence === 'online' ? t('members.online') : t('members.offline')}</span>
+        <span className={css.visuallyHidden}>{row.presence === 'online' ? t('members.online') : t('members.offline')}</span>
       </span>
       <span className={css.memberName}>{row.displayName === '' ? row.accountId : row.displayName}</span>
-      <select
-        className={css.roleSelect}
-        aria-label={t('members.title')}
-        value={row.role}
-        onChange={(e) => {
-          const role = e.target.value
-          /* v8 ignore next -- a controlled select only emits its declared option values. */
-          if (role !== 'owner' && role !== 'admin' && role !== 'member') return
-          /* v8 ignore next -- selecting the current controlled option emits no change. */
-          if (role === row.role) return
-          onAct(() => gateway.changeRole(row.membershipId, role))
-        }}
-      >
-        <option value="owner">owner</option>
-        <option value="admin">admin</option>
-        <option value="member">member</option>
-      </select>
-      <input
-        className={css.tagsInput}
-        value={tagsDraft}
-        aria-label={t('members.tagsPlaceholder')}
-        placeholder={t('members.tagsPlaceholder')}
-        onChange={(e) => { setTagsDraft(e.target.value) }}
-        onBlur={commitTags}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            commitTags()
-          }
-        }}
-      />
-      <Button variant="outline" onClick={() => { onAct(() => gateway.removeMember(row.membershipId)) }}>
-        {t('members.remove')}
-      </Button>
+      {editable
+        ? (
+          <>
+            <select
+              className={css.roleSelect}
+              aria-label={t('members.title')}
+              value={row.role}
+              onChange={(e) => {
+                const role = e.target.value
+                /* v8 ignore next -- a controlled select only emits its declared option values. */
+                if (role !== 'owner' && role !== 'admin' && role !== 'member') return
+                /* v8 ignore next -- selecting the current controlled option emits no change. */
+                if (role === row.role) return
+                onAct(() => gateway.changeRole(row.membershipId, role))
+              }}
+            >
+              <option value="owner">owner</option>
+              <option value="admin">admin</option>
+              <option value="member">member</option>
+            </select>
+            <input
+              className={css.tagsInput}
+              value={tagsDraft}
+              aria-label={t('members.tagsPlaceholder')}
+              placeholder={t('members.tagsPlaceholder')}
+              onChange={(e) => { setTagsDraft(e.target.value) }}
+              onBlur={commitTags}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  commitTags()
+                }
+              }}
+            />
+            <Button variant="outline" onClick={() => { onAct(() => gateway.removeMember(row.membershipId)) }}>
+              {t('members.remove')}
+            </Button>
+          </>
+        )
+        : (
+          <>
+            <span className={css.memberValue}>{row.role}</span>
+            <span className={css.memberTags}>{row.tags.join(', ')}</span>
+          </>
+        )}
     </li>
   )
 }

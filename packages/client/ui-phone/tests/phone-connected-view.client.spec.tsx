@@ -463,18 +463,19 @@ describe('PhoneConnectedView touch and keys', () => {
 
   it('coalesces a trackpad wheel burst into one WDA swipe', async () => {
     const { gateway } = await withSurface()
+    const surface = frame()
     vi.useFakeTimers()
     try {
-      fireEvent.wheel(frame(), { deltaY: 0, deltaMode: 0 })
-      fireEvent.wheel(frame(), { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_LINE })
-      fireEvent.wheel(frame(), { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE })
+      fireEvent.wheel(surface, { deltaY: 0, deltaMode: 0 })
+      fireEvent.wheel(surface, { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_LINE })
+      fireEvent.wheel(surface, { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE })
       expect(gateway.lastSocket!.sent).toEqual([])
       await act(async () => { vi.advanceTimersByTime(50) })
-      const sent = parseSentFrame(gateway.lastSocket!.sent[0]!) as {
+      const frame = parseSentFrame(gateway.lastSocket!.sent[0]!) as {
         readonly params: { readonly actions: ReadonlyArray<{ readonly y?: number }> }
       }
-      const originY = sent.params.actions[0]?.y
-      const destinationY = sent.params.actions[2]?.y
+      const originY = frame.params.actions[0]?.y
+      const destinationY = frame.params.actions[2]?.y
       expect(originY).toEqual(expect.any(Number))
       expect(destinationY).toEqual(expect.any(Number))
       expect(originY).not.toBe(destinationY)

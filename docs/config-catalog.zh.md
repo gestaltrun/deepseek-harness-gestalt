@@ -1814,7 +1814,7 @@ interface MemberQuestionHumanImageContent {
 
 Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md) · [`HostSessionId`](subsystems/core.zh.md) · [`ImageAttachmentRef`](subsystems/attachment.zh.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.zh.md) · [`ProjectId`](subsystems/project-membership.zh.md)
 
-Source: [`packages/interaction/member-question-receiver/src/index.ts:115`](../packages/interaction/member-question-receiver/src/index.ts)
+Source: [`packages/interaction/member-question-receiver/src/index.ts:117`](../packages/interaction/member-question-receiver/src/index.ts)
 
 <a id="deepseek-aidsh-member-question-sender"></a>
 
@@ -1868,6 +1868,7 @@ export interface MemberQuestionDeliveryPort {
   deliver(encoded: EncodedMemberQuestion & {
     toProjectMember: string
     projectId: ProjectId
+    documents: readonly EncodedMemberQuestionDocument[]
   }): Promise<void>
 
   /**
@@ -1921,6 +1922,18 @@ export interface EncodedMemberQuestion {
   readonly encoded: Uint8Array
 }
 
+/** Bounded Companion frames carrying one routed reference document. */
+export interface EncodedMemberQuestionDocument {
+  /** Workspace-relative path matching the operation's reference entry. */
+  readonly path: string
+  /** Transfer identity derived from the question and reference position. */
+  readonly transferId: DocumentTransferId
+  /** Typed Companion messages in chunk order. */
+  readonly messages: readonly CompanionMessage[]
+  /** Encoded Companion application frames in chunk order. */
+  readonly encoded: readonly Uint8Array[]
+}
+
 /** Result of one atomic terminal publication attempt. */
 export interface MemberQuestionTerminalClaim {
   /** Whether this publication committed the first terminal for the question. */
@@ -1956,9 +1969,9 @@ export interface MemberMembershipWatchInput {
 }
 ```
 
-依赖：[`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.zh.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.zh.md)
+依赖：[`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`DocumentTransferId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.zh.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.zh.md)
 
-来源：[`packages/interaction/member-question-sender/src/index.ts:167`](../packages/interaction/member-question-sender/src/index.ts)
+来源：[`packages/interaction/member-question-sender/src/index.ts:176`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -3379,7 +3392,7 @@ export interface MemberQuestionRoute {
 
 依赖：[`Agent`](subsystems/core.zh.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
 
-来源：[`packages/interaction/tool-ask-user/src/index.ts:85`](../packages/interaction/tool-ask-user/src/index.ts)
+来源：[`packages/interaction/tool-ask-user/src/index.ts:90`](../packages/interaction/tool-ask-user/src/index.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 

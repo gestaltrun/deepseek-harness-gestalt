@@ -280,7 +280,7 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.memberQuestionReceiver` — `MemberQuestionReceiverService` (abstract seam)
 
-Host authority for member-question arrival, projection, settlement, expiry, and one-step explicit human admission.
+Host authority for member-question arrival, Host Session materialization, projection, settlement, expiry, and one-step explicit human admission.
 
 ```ts cordis-catalog
 /**
@@ -312,7 +312,7 @@ abstract changes(listener: MemberQuestionReceiverListener): () => void
 abstract settle( questionId: MemberQuestionId, settlement: MemberQuestionReceiverSettlement, ): Promise<CompanionMemberQuestionSettledResult>
 
 /**
- * Reserve, materialize, and admit one explicit human turn under one rpc id.
+ * Reserve and admit one explicit human turn under one rpc id.
  * @param input - Host receiving identity, observed revision, rpc id, content, and mode.
  * @returns the durable idempotent admission result.
  */
@@ -321,8 +321,18 @@ abstract admitHumanTurn( input: AdmitMemberQuestionHumanTurnInput, ): Promise<Ad
 /** Resume every durable human action left reserved by an interrupted Host. */
 abstract resumeReservedHumanTurns(): Promise<void>
 
+/** Resume every durable Host Session materialization left reserved by an interrupted Host. */
+abstract resumeReservedSessionMaterializations(): Promise<void>
+
 /**
- * Install the single Host materialize-and-admit adapter.
+ * Install the single Host arrival materializer.
+ * @param materializer - high-level Host Session creation adapter.
+ * @returns disposer for this exact registration.
+ */
+abstract registerSessionMaterializer(materializer: MemberQuestionSessionMaterializer): () => void
+
+/**
+ * Install the single Host human-turn adapter.
  * @param admitter - high-level Host transaction adapter.
  * @returns disposer for this exact registration.
  */

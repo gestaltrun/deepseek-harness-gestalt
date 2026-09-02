@@ -372,7 +372,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'seam',
     implementations: ['member-question-receiver'],
     consumers: ['member-question-receiver'],
-    note: 'Persists authenticated arrivals, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer.',
+    note: 'Persists authenticated arrivals, Host Session materialization, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer.',
   },
   {
     key: 'memberQuestionWorkspaceBinding',

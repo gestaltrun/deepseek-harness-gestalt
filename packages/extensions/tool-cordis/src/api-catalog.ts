@@ -1229,8 +1229,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'memberQuestionReceiver',
-    summary: 'Host authority for member-question arrival, projection, settlement, expiry, and one-step explicit human admission.',
-    description: 'Host authority for member-question arrival, projection, settlement, expiry, and one-step explicit human admission.',
+    summary: 'Host authority for member-question arrival, Host Session materialization, projection, settlement, expiry, and one-step explicit human admission.',
+    description: 'Host authority for member-question arrival, Host Session materialization, projection, settlement, expiry, and one-step explicit human admission.',
     methods: [
       {
         signature: 'abstract ingest(envelope: AuthenticatedMemberQuestionEnvelope): Promise<MemberQuestionIngestResult>',
@@ -1258,7 +1258,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'abstract admitHumanTurn( input: AdmitMemberQuestionHumanTurnInput, ): Promise<AdmitMemberQuestionHumanTurnResult>',
-        description: 'Reserve, materialize, and admit one explicit human turn under one rpc id.',
+        description: 'Reserve and admit one explicit human turn under one rpc id.',
         parameters: [{ name: 'input', description: 'Host receiving identity, observed revision, rpc id, content, and mode.' }],
         returns: 'the durable idempotent admission result.',
       },
@@ -1268,8 +1268,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
+        signature: 'abstract resumeReservedSessionMaterializations(): Promise<void>',
+        description: 'Resume every durable Host Session materialization left reserved by an interrupted Host.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract registerSessionMaterializer(materializer: MemberQuestionSessionMaterializer): () => void',
+        description: 'Install the single Host arrival materializer.',
+        parameters: [{ name: 'materializer', description: 'high-level Host Session creation adapter.' }],
+        returns: 'disposer for this exact registration.',
+      },
+      {
         signature: 'abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void',
-        description: 'Install the single Host materialize-and-admit adapter.',
+        description: 'Install the single Host human-turn adapter.',
         parameters: [{ name: 'admitter', description: 'high-level Host transaction adapter.' }],
         returns: 'disposer for this exact registration.',
       },
@@ -4973,6 +4984,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
   },
   {
+    name: 'MaterializeMemberQuestionSessionInput',
+    declaration: 'export interface MaterializeMemberQuestionSessionInput {\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n    readonly questionId: MemberQuestionId;\n}',
+  },
+  {
     name: 'MemberQuestionAnswer',
     declaration: 'export type MemberQuestionAnswer = CompanionMemberQuestionAnswer;',
   },
@@ -5047,6 +5062,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'MemberQuestionSendResult',
     declaration: 'export type MemberQuestionSendResult = MemberQuestionAnsweredResult | MemberQuestionDeclinedResult;',
+  },
+  {
+    name: 'MemberQuestionSessionMaterializer',
+    declaration: 'export type MemberQuestionSessionMaterializer = (input: MaterializeMemberQuestionSessionInput, context: MemberQuestionHumanTurnAdmissionContext) => Promise<MemberQuestionHumanTurnAdmissionReceipt>;',
   },
   {
     name: 'MemberQuestionSettlement',

@@ -1128,15 +1128,20 @@ export class SessionManager {
       if (row.active !== undefined) continue
       this.pendingInteractions.delete(row.sessionId)
     }
-    // Receiving Sessions are renderer-only rows: the receiver Host baseline
-    // supplies them separately from session.list, so they prepend the merge.
-    const receivingRows: TitledSessionSummary[] = this.receiving.rows().map(row => ({
-      sessionId: row.sessionId,
-      updatedAt: row.updatedAt,
-      running: false,
-      blank: false,
-      title: row.title,
-    }))
+    // Materialized receiving Sessions already appear in session.list after
+    // Workspace attach. Keep only Host-unlisted rows so grouping follows the
+    // invitation-bound Workspace instead of Ungrouped.
+    const listed = new Set(this.summaries.map(summary => summary.sessionId))
+    const receivingById = new Map(this.receiving.rows().map(row => [row.sessionId, row]))
+    const receivingRows: TitledSessionSummary[] = this.receiving.rows()
+      .filter(row => !listed.has(row.sessionId))
+      .map(row => ({
+        sessionId: row.sessionId,
+        updatedAt: row.updatedAt,
+        running: false,
+        blank: false,
+        title: row.title,
+      }))
     const merged: TitledSessionSummary[] = [
       ...receivingRows,
       ...this.summaries.map((summary) => {
@@ -1145,9 +1150,13 @@ export class SessionManager {
         const projectionStore = this.projectionStores.get(summary.sessionId)
         const title = projectionStore?.get('title')
         const projectionValues = projectionStore?.values()
+        const receiving = receivingById.get(summary.sessionId)
+        const listedTitle = receiving?.title
+          ?? (typeof title === 'string' && title !== '' ? title : undefined)
         return {
           ...summary,
-          ...(typeof title === 'string' && title !== '' ? { title } : {}),
+          ...(receiving === undefined ? {} : { blank: false }),
+          ...(listedTitle === undefined ? {} : { title: listedTitle }),
           ...(projectionValues === undefined ? {} : { projectionValues }),
         }
       }),

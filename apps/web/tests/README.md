@@ -8,7 +8,7 @@ the deliberate composition divergences from `dsh web` — are documented in
 [`scaffold.ts`](scaffold.ts) and the
 [browser e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.md).
 
-`member-question-receiving.e2e.ts` uses a mock remote Agent only as the sender identity, then exercises the shipped `userQuestions.ask()` provider, api-proxy pending registry, WebSocket mux, Client Runtime, dynamic module table, receiving sidebar row, member-question composite card, shared question presentation, document-focus panel, and response POST. It uses no model replay fixture and asserts that receiving adds no Host Session and issues no `session.create` or `session.history` request.
+`member-question-receiving.e2e.ts` uses a mock remote Agent only as the sender identity, then exercises the shipped Host receiver, API Proxy, WebSocket mux, Client Runtime, dynamic module table, receiving sidebar row, member-question composite card, shared question presentation, and Host settlement RPC. Arrival materializes one Host Session in the invitation-bound Workspace and injects the Decision Brief without starting a model turn; a local answer leaves no permanent answered strip.
 
 ## These are Host-face tests
 

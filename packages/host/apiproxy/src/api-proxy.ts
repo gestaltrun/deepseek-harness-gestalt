@@ -496,12 +496,12 @@ function jobViews(snapshots: readonly JobSnapshot[]): JobView[] {
  * (list-hidden, reusable).
  */
 function sessionBlank(session: Session): boolean {
-  return !session.events.some(event => event.type === 'turn/start')
+  return !session.events.some(event => event.type === 'turn/start' || event.type === 'member-question/received')
 }
 
 /** Advance the Session-list hint projection by one committed event. */
 function applySessionListMetadata(state: SessionListMetadata, event: SessionEvent): SessionListMetadata {
-  const blank = state.blank && event.type !== 'turn/start'
+  const blank = state.blank && event.type !== 'turn/start' && event.type !== 'member-question/received'
   const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
     ? event.time
     : state.lastPromptAt
@@ -1849,46 +1849,62 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return content.map(block => structuredClone(block))
   }
 
-  if (memberQuestionReceiver !== undefined) {
-    ctx.effect(() => memberQuestionReceiver.registerHumanTurnAdmitter(async (input, admission) => {
-      const workspace = workspaceFromId(admission.workspaceId)
-      const sessionId = input.receivingSessionId as unknown as SessionId
-      const agent = await ensureSession(sessionId, workspace.path, true)
-      await workspace.attachSession(sessionId)
-
-      for (const question of admission.questions) {
-        const operation = 'operation' in question ? question.operation : question.brief
-        if (!agent.session.events.some(event => event.type === 'member-question/received'
-          && event.data.questionId === operation.questionId)) {
-          agent.session.append('member-question/received', {
-            questionId: operation.questionId,
-            projectId: operation.projectId,
-            originSessionId: operation.originSessionId as unknown as SessionId,
-            arrivedAt: question.arrivedAt,
-            expiresAt: operation.expiresAt,
-            origin: operation.origin,
-            background: operation.background,
-            questions: operation.questions,
-            references: operation.references,
-          }, { ignorable: true })
-        }
-        if ('terminal' in question && !agent.session.events.some(event =>
-          event.type === 'member-question/settled'
-          && event.data.questionId === question.terminal.questionId)) {
-          agent.session.append('member-question/settled', question.terminal, { ignorable: true })
-        }
-        const briefId = MessageId(`member-question-brief:${operation.questionId}`)
-        if (!hasMessage(agent.session, briefId)) {
-          agent.inject(freezeMessage({
-            id: briefId,
-            role: 'user',
-            content: [{ type: 'text', text: decisionBrief(question) }],
-            source: { kind: 'plugin', plugin: 'member-question-receiver', form: 'relay' },
-          }))
-        }
+  async function materializeReceivingSession(
+    sessionId: SessionId,
+    admission: MemberQuestionHumanTurnAdmissionContext,
+  ): Promise<Agent> {
+    const workspace = workspaceFromId(admission.workspaceId)
+    const agent = await ensureSession(sessionId, workspace.path, true)
+    await workspace.attachSession(sessionId)
+    const titles = ctx.get('sessionTitle')
+    const origin = admission.questions[0] === undefined
+      ? undefined
+      : ('operation' in admission.questions[0] ? admission.questions[0].operation : admission.questions[0].brief).origin
+    if (titles !== undefined && origin !== undefined && titles.get(agent.session) === undefined) {
+      titles.rename(agent.session, `${origin.projectName} — ${origin.originSessionTitle}`)
+    }
+    for (const question of admission.questions) {
+      const operation = 'operation' in question ? question.operation : question.brief
+      if (!agent.session.events.some(event => event.type === 'member-question/received'
+        && event.data.questionId === operation.questionId)) {
+        agent.session.append('member-question/received', {
+          questionId: operation.questionId,
+          projectId: operation.projectId,
+          originSessionId: operation.originSessionId as unknown as SessionId,
+          arrivedAt: question.arrivedAt,
+          expiresAt: operation.expiresAt,
+          origin: operation.origin,
+          background: operation.background,
+          questions: operation.questions,
+          references: operation.references,
+        }, { ignorable: true })
       }
-      await ctx.sessions.flush(agent.session)
+      if ('terminal' in question && !agent.session.events.some(event =>
+        event.type === 'member-question/settled'
+        && event.data.questionId === question.terminal.questionId)) {
+        agent.session.append('member-question/settled', question.terminal, { ignorable: true })
+      }
+      const briefId = MessageId(`member-question-brief:${operation.questionId}`)
+      if (!hasMessage(agent.session, briefId)) {
+        agent.inject(freezeMessage({
+          id: briefId,
+          role: 'user',
+          content: [{ type: 'text', text: decisionBrief(question) }],
+          source: { kind: 'plugin', plugin: 'member-question-receiver', form: 'relay' },
+        }))
+      }
+    }
+    await ctx.sessions.flush(agent.session)
+    return agent
+  }
 
+  if (memberQuestionReceiver !== undefined) {
+    ctx.effect(() => memberQuestionReceiver.registerSessionMaterializer(async (input, admission) => {
+      await materializeReceivingSession(input.receivingSessionId as unknown as SessionId, admission)
+      return { accepted: true }
+    }), 'api-proxy: member-question Session materialization')
+    ctx.effect(() => memberQuestionReceiver.registerHumanTurnAdmitter(async (input, admission) => {
+      const agent = await materializeReceivingSession(input.receivingSessionId as unknown as SessionId, admission)
       const humanId = MessageId(`member-question-human:${input.rpcId}`)
       if (!hasMessage(agent.session, humanId)) {
         const message = freezeMessage({
@@ -1988,6 +2004,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       })
       const recover = async (): Promise<void> => {
         try {
+          await memberQuestionReceiver.resumeReservedSessionMaterializations()
           await memberQuestionReceiver.resumeReservedHumanTurns()
           const snapshot = await memberQuestionReceiver.snapshot()
           for (const view of snapshot.terminal) await scheduleTerminalSync(view)

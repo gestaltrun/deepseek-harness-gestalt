@@ -125,7 +125,7 @@ class ReceivingSessionFace implements SessionFace {
     signal?: AbortSignal,
   ): ReturnType<SessionFace['prompt']> {
     const pending = this.#pending
-    if (pending === undefined) {
+    if (pending === undefined || this.#host !== undefined) {
       return this.#host?.prompt(content, mode, signal) ?? this.unroutable('prompt')
     }
     const retained = this.#promptAdmission
@@ -338,14 +338,15 @@ export class ReceivingQuestionBook {
     if (exemplar === undefined) return
     const accountId = group.pending?.receivingAccountId ?? group.terminal[0]?.receivingAccountId
     if (accountId === undefined) return
-    const records = group.terminal.map((view): ReceivingMemberQuestionRecord => {
+    const records = group.terminal.flatMap((view): ReceivingMemberQuestionRecord[] => {
       const terminal = view.terminal
-      const state = terminal.outcome === 'answered'
-        && this.#currentInstallationId !== undefined
-        && terminal.settledByInstallationId !== this.#currentInstallationId
-        ? 'answered-elsewhere'
-        : terminal.outcome
-      return {
+      if (terminal.outcome === 'answered'
+        && (this.#currentInstallationId === undefined
+          || terminal.settledByInstallationId === this.#currentInstallationId)) {
+        return []
+      }
+      const state = terminal.outcome === 'answered' ? 'answered-elsewhere' : terminal.outcome
+      return [{
         questionId: view.questionId,
         state,
         askedAt: view.arrivedAt,
@@ -354,7 +355,7 @@ export class ReceivingQuestionBook {
         ...(terminal.outcome === 'answered' || terminal.outcome === 'declined'
           ? { settledByDeviceName: terminal.settledByDeviceName }
           : {}),
-      }
+      }]
     })
     const pending = group.pending
     const active = pending === undefined ? undefined : {

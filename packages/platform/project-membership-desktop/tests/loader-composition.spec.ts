@@ -63,7 +63,7 @@ describe('bound Desktop routed-ask Loader composition', () => {
       '',
     ].join('\n'))
 
-    const fetch = vi.fn(async (input: string | URL | Request) => {
+    const fetch = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
       const href = input instanceof Request ? input.url : String(input)
       if (href.endsWith('/v1/context') || href.endsWith('/v1/account')) {
         return Response.json({
@@ -127,12 +127,12 @@ describe('bound Desktop routed-ask Loader composition', () => {
     })
     expect(JSON.stringify(result)).not.toMatch(/SENDER_UNAVAILABLE/)
     expect(JSON.stringify(result)).not.toMatch(/account-b/)
-    const rosterBodies = fetch.mock.calls
-      .map(([input, init]) => {
-        const href = input instanceof Request ? input.url : String(input)
-        return href.endsWith('/v1/roster') ? String(init && typeof init === 'object' && 'body' in init ? init.body : '') : undefined
-      })
-      .filter((body): body is string => body !== undefined)
+    const rosterBodies = fetch.mock.calls.flatMap(([input, init]) => {
+      const href = input instanceof Request ? input.url : String(input)
+      if (!href.endsWith('/v1/roster')) return []
+      const body = init?.body
+      return [typeof body === 'string' ? body : '']
+    })
     expect(rosterBodies.some(body => body.includes('account-a'))).toBe(true)
     expect(rosterBodies.every(body => !body.includes('GRACE') && !body.includes('account-b'))).toBe(true)
   }, 30_000)

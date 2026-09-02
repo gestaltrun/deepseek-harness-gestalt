@@ -10,7 +10,7 @@ Presence already means live Installation connection, per [the project membership
 
 ## Decision
 
-Last-window close is an explicit presence close of the same heartbeat entry. Desktop POSTs `/v1/projects/presence/close` with the current-Installation proof before destroying the window; the registry drops that installation immediately, and a later roster read on any other online Installation shows Offline. Reopening the window restores Online through the existing heartbeat derivation. TTL expiry remains the crash and partition path. A routed ask after that close fails fast with `MEMBER_OFFLINE` and writes nothing to a queue.
+Last-window close is an explicit presence close of the same heartbeat entry. Desktop POSTs `/v1/projects/presence/close` with the current-Installation proof before destroying the window; the registry drops that installation immediately, and a later roster read on any other online Installation shows Offline. Closing the last window also quits the Desktop Host, so reopening starts a new process whose boot `setSignedIn(true)` restores Online through the existing heartbeat derivation. TTL expiry remains the crash and partition path. A routed ask after that close fails fast with `MEMBER_OFFLINE` and writes nothing to a queue.
 
 ## Alternatives considered
 
@@ -22,4 +22,4 @@ Last-window close is an explicit presence close of the same heartbeat entry. Des
 
 ## Consequences
 
-Crash and sleep without a close POST still wait for TTL; that remains the honest answer when the Installation cannot speak. Keyless assembled coverage asserts the Offline transition from window close rather than clock advance, then pins the `MEMBER_OFFLINE` no-queue ask.
+Crash and sleep without a close POST still wait for TTL; that remains the honest answer when the Installation cannot speak. Keyless assembled coverage asserts the Offline transition from window close rather than clock advance, then pins the `MEMBER_OFFLINE` no-queue ask. Desktop unit coverage pins that `setSignedIn(true)` after `closeWindow()` resumes heartbeats, which is the derivation a new process uses at boot.

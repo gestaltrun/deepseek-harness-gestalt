@@ -91,7 +91,6 @@ import { createDesktopSystemNodeFetch } from './system-node-fetch-helper.ts'
 import {
   createDesktopProjectMembershipClient,
   createDesktopProjectMembershipPresence,
-  restoreDesktopProjectMembershipPresence,
   parseInvitationDecision,
   parseInvitationId,
   parseMembershipId,
@@ -379,7 +378,6 @@ async function focusOrReopen(): Promise<void> {
     return
   }
   window = createWindow()
-  restoreDesktopProjectMembershipPresence(projectMembershipPresence, accountSignedIn)
   try {
     await window.loadURL(host.url)
     void ensureChromeOverlay(window, host.url)

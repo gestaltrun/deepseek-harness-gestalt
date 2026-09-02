@@ -10,7 +10,7 @@ Presence 已经表示实时 Installation 连接，见[项目成员权威 Agent N
 
 ## Decision
 
-最后窗口关闭是同一心跳条目的显式 presence close。Desktop 在销毁窗口前用当前 Installation 证明 POST `/v1/projects/presence/close`；注册表立即清除该安装，之后任一其他在线 Installation 的花名册读取都会显示 Offline。重新打开窗口通过既有心跳推导恢复 Online。TTL 过期仍是崩溃与分区路径。关闭后的路由提问以 `MEMBER_OFFLINE` 快速失败，且不写入任何队列。
+最后窗口关闭是同一心跳条目的显式 presence close。Desktop 在销毁窗口前用当前 Installation 证明 POST `/v1/projects/presence/close`；注册表立即清除该安装，之后任一其他在线 Installation 的花名册读取都会显示 Offline。关闭最后一个窗口也会退出 Desktop Host，因此重新打开会启动新进程，其启动时的 `setSignedIn(true)` 通过既有心跳推导恢复 Online。TTL 过期仍是崩溃与分区路径。关闭后的路由提问以 `MEMBER_OFFLINE` 快速失败，且不写入任何队列。
 
 ## Alternatives considered
 
@@ -22,4 +22,4 @@ Presence 已经表示实时 Installation 连接，见[项目成员权威 Agent N
 
 ## Consequences
 
-没有 close POST 的崩溃与休眠仍等待 TTL；当 Installation 无法发言时，这仍是诚实答案。无密钥装配覆盖从窗口关闭而非时钟推进断言 Offline 转换，并钉住 `MEMBER_OFFLINE` 的无队列提问。
+没有 close POST 的崩溃与休眠仍等待 TTL；当 Installation 无法发言时，这仍是诚实答案。无密钥装配覆盖从窗口关闭而非时钟推进断言 Offline 转换，并钉住 `MEMBER_OFFLINE` 的无队列提问。Desktop 单元覆盖钉住 `closeWindow()` 之后的 `setSignedIn(true)` 会恢复心跳，这正是新进程启动时使用的推导。

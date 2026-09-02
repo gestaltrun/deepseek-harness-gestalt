@@ -10,9 +10,9 @@ Repository agents need shared workflows for visual explanations, skill assessmen
 
 ## Decision
 
-The repository stores `show-me`, `skill-doctor`, `retro`, `unslop`, and `ego-browser` under `.agents/skills`. These are repository agent workflows; they do not add DeepSeek Harness runtime packages or change a shipped bundle. [`.agents/skills/SOURCES.json`](../../../skills/SOURCES.json) pins each upstream source and records local adaptations, while each Skill directory preserves its upstream MIT notice. The generated [third-party notices](../../../../THIRD_PARTY_NOTICES.md) disclose the same records.
+The repository stores `show-me`, `skill-doctor`, `retro`, `unslop`, `ego-browser`, and `dsh-desktop-test-instance` under `.agents/skills`. These are repository agent workflows; they do not add DeepSeek Harness runtime packages or change a shipped bundle. [`.agents/skills/SOURCES.json`](../../../skills/SOURCES.json) pins each vendored source and records local adaptations, while each vendored Skill directory preserves its upstream MIT notice. The generated [third-party notices](../../../../THIRD_PARTY_NOTICES.md) disclose the same records.
 
-The repository copy of `ego-browser` requires the ego profile named `DSH`. Its helpers resolve that profile through `listProfiles()` before creation, reuse, claim, takeover, or completion; pass the returned id to `globalThis.ego.createTaskSpace(name, profileId)` for creation; and reject an existing matching task space owned by another profile. The helpers fail when the profile name is absent or ambiguous. Installation remains a user-operated download and macOS trust flow; the Skill does not download installers, replace applications, remove quarantine metadata, or invoke an installer as root.
+The repository copy of `ego-browser` requires the ego profile named `DSH`. Its helpers resolve that profile through `listProfiles()` before creation, reuse, claim, takeover, or completion; pass the returned id to `globalThis.ego.createTaskSpace(name, profileId)` for creation; and reject an existing matching task space owned by another profile. The helpers fail when the profile name is absent or ambiguous. One user goal reuses one DSH task space through the gitignored [runtime memo](2026-09-02-desktop-test-instance-and-runtime-memo.md). Installation remains a user-operated download and macOS trust flow; the Skill does not download installers, replace applications, remove quarantine metadata, or invoke an installer as root.
 
 Generated interpreter caches and local skill reports remain outside version control. `skill-doctor` renders proposed diffs with self-contained HTML instead of committing a third-party JavaScript bundle.
 
@@ -32,4 +32,4 @@ Repository skill metadata and documentation checks cover the installed files. A 
 
 ## Consequences
 
-Agents operating in this repository receive the same five workflows. Browser work stops with a profile configuration error instead of silently using another account. Upstream Skill updates must refresh `SOURCES.json`, retain the license, and preserve or deliberately revise repository adaptations.
+Agents operating in this repository receive the same shared workflows. Browser work stops with a profile configuration error instead of silently using another account. Upstream Skill updates must refresh `SOURCES.json`, retain the license, and preserve or deliberately revise repository adaptations.

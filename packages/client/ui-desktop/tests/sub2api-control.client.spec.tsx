@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { DesktopBridge, DesktopSub2ApiSnapshot } from '../src/protocol.ts'
 import { Sub2ApiControl } from '../src/client/Sub2ApiControl.tsx'
 import { en } from '../src/client/locales.ts'
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   delete window.dshDesktop
+  document.documentElement.style.colorScheme = ''
+  document.documentElement.lang = ''
 })
 
 const t = (key: string) => (en as Record<string, string>)[key] ?? key
@@ -44,14 +47,14 @@ describe('Sub2ApiControl', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('offers restart while installed and enabled', () => {
+  it('does not require a manual restart action while installed and enabled', () => {
     const desktop = bridge()
     window.dshDesktop = desktop
     renderControl({ state: 'installed', enabled: true, version: '0.1.0' })
 
     expect(screen.getByText('Installed · 0.1.0')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Restart Web Host and start' }))
-    expect(desktop.sub2ApiEnable).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Restart Web Host and start' })).toBeNull()
+    expect(desktop.sub2ApiEnable).not.toHaveBeenCalled()
 
     // An install whose package manifest is unreadable renders without a version.
     cleanup()
@@ -75,13 +78,11 @@ describe('Sub2ApiControl', () => {
     expect(desktop.sub2ApiUninstall).toHaveBeenCalledWith(false)
   })
 
-  it('drives console, disable, and the two-step uninstall while running', () => {
+  it('drives disable and the two-step uninstall while running', () => {
     const desktop = bridge()
     window.dshDesktop = desktop
     renderControl({ state: 'running', enabled: true, version: '0.1.0' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open account console' }))
-    expect(desktop.sub2ApiOpenConsole).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
     expect(desktop.sub2ApiDisable).toHaveBeenCalledOnce()
 
@@ -98,6 +99,113 @@ describe('Sub2ApiControl', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Uninstall' }))
     fireEvent.click(screen.getByRole('button', { name: 'Uninstall and delete account data' }))
     expect(desktop.sub2ApiUninstall).toHaveBeenCalledWith(true)
+  })
+
+  it('embeds the native account workspace by default while running', () => {
+    window.dshDesktop = bridge()
+    document.documentElement.style.colorScheme = 'dark'
+    document.documentElement.lang = 'zh-CN'
+    renderControl({ state: 'running', enabled: true, version: '0.1.0' })
+
+    expect(screen.queryByRole('button', { name: 'Open account console' })).toBeNull()
+    expect(screen.getByTitle('Sub2API account console').getAttribute('src')).toBe(
+      '/plugins/dsh-sub2api/ui/admin/accounts?embed=desktop&theme=dark&lang=zh',
+    )
+    expect(screen.getByText('Running · 0.1.0').closest('header')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Disable' }).closest('header')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Uninstall' }).closest('header')).not.toBeNull()
+  })
+
+  it('grows the native account workspace so Settings owns vertical scrolling', () => {
+    const observers: Array<{ callback: ResizeObserverCallback; disconnect: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      readonly callback: ResizeObserverCallback
+      readonly disconnect = vi.fn()
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback
+        observers.push(this)
+      }
+      observe = vi.fn()
+      unobserve = vi.fn()
+    })
+    window.dshDesktop = bridge()
+    renderControl({ state: 'running', enabled: true })
+    const frame = screen.getByTitle('Sub2API account console') as HTMLIFrameElement
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: null,
+    })
+    fireEvent.load(frame)
+    expect(observers).toHaveLength(0)
+
+    const embeddedRoot = document.createElement('html')
+    const embeddedBody = document.createElement('body')
+    Object.defineProperty(embeddedRoot, 'scrollHeight', {
+      configurable: true,
+      value: 1180,
+    })
+    Object.defineProperty(embeddedBody, 'scrollHeight', {
+      configurable: true,
+      value: 1120,
+    })
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: { documentElement: embeddedRoot, body: embeddedBody },
+    })
+
+    fireEvent.load(frame)
+
+    expect(frame.style.height).toBe('1180px')
+    expect(observers).toHaveLength(1)
+    observers[0]?.callback([], {} as ResizeObserver)
+    expect(frame.style.height).toBe('1180px')
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: null,
+    })
+    observers[0]?.callback([], {} as ResizeObserver)
+    cleanup()
+    expect(observers[0]?.disconnect).toHaveBeenCalledOnce()
+  })
+
+  it('follows live Desktop theme and locale changes', async () => {
+    window.dshDesktop = bridge()
+    document.documentElement.style.colorScheme = 'light'
+    document.documentElement.lang = 'en'
+    renderControl({ state: 'running', enabled: true })
+    const frame = screen.getByTitle('Sub2API account console')
+    expect(frame.getAttribute('src')).toContain('theme=light&lang=en')
+
+    document.documentElement.style.colorScheme = 'dark'
+    document.documentElement.lang = 'zh-CN'
+    await waitFor(() => {
+      expect(frame.getAttribute('src')).toContain('theme=dark&lang=zh')
+    })
+  })
+
+  it('uses the system theme without reloading for an equivalent presentation', () => {
+    const addEventListener = vi.fn()
+    const removeEventListener = vi.fn()
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener,
+      removeEventListener,
+    })))
+    window.dshDesktop = bridge()
+    document.documentElement.lang = 'en'
+    renderControl({ state: 'running', enabled: true })
+    const frame = screen.getByTitle('Sub2API account console')
+    const initialUrl = frame.getAttribute('src')
+
+    expect(initialUrl).toContain('theme=dark&lang=en')
+    document.documentElement.lang = 'en-US'
+    const listener = addEventListener.mock.calls[0]?.[1] as (() => void) | undefined
+    if (listener === undefined) throw new Error('system theme listener was not registered')
+    listener()
+    expect(frame.getAttribute('src')).toBe(initialUrl)
+
+    cleanup()
+    expect(removeEventListener).toHaveBeenCalledWith('change', listener)
   })
 
   it('shows the actionable error with retry and uninstall exits', () => {
@@ -160,7 +268,6 @@ function bridge(): DesktopBridge {
     sub2ApiEnable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
     sub2ApiDisable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
     sub2ApiUninstall: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
-    sub2ApiOpenConsole: vi.fn(),
     onSub2ApiSnapshot: () => () => {},
     chromeOverlayShow: async () => {},
     chromeOverlayHide: async () => {},

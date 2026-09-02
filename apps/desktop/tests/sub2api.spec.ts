@@ -6,11 +6,11 @@ import {
   createDesktopSub2Api,
   DesktopSub2ApiController,
   parseSub2ApiDeleteData,
-  PLACEHOLDER_ERROR,
   probeByProxySeam,
   ROLLBACK_ERROR_PREFIX,
   STARTUP_TIMEOUT_ERROR,
   sub2ApiPathsFromHome,
+  sub2ApiBootHostStartTimeout,
   uninstallSub2ApiFromIpc,
   UnavailableDesktopSub2ApiController,
   type DesktopSub2ApiActions,
@@ -89,7 +89,7 @@ async function harness(overrides?: {
   disabled?: boolean
   noPackage?: boolean
   probe?: (origin: string) => Promise<boolean>
-  restart?: () => Promise<string>
+  restart?: (startTimeoutMs?: number) => Promise<string>
   origin?: string | undefined
   installGate?: (input: Sub2ApiInstallInput) => Promise<void>
 }): Promise<Harness> {
@@ -152,6 +152,13 @@ async function rowPresent(profileDir: string): Promise<boolean> {
 }
 
 describe('DesktopSub2ApiController', () => {
+  it('extends ordinary Desktop boot only for an installed enabled component', () => {
+    expect(sub2ApiBootHostStartTimeout({ state: 'installed', enabled: true, version: '0.1.4' })).toBe(180_000)
+    expect(sub2ApiBootHostStartTimeout({ state: 'installed', enabled: false, version: '0.1.4' })).toBeUndefined()
+    expect(sub2ApiBootHostStartTimeout({ state: 'missing', enabled: true })).toBeUndefined()
+    expect(sub2ApiBootHostStartTimeout({ state: 'error', enabled: true, error: 'failed' })).toBeUndefined()
+  })
+
   it('starts missing and enables through install, restart, and probe', async () => {
     const h = await harness()
     expect(h.controller.getSnapshot().state).toBe('missing')
@@ -162,16 +169,33 @@ describe('DesktopSub2ApiController', () => {
     expect(final.version).toBe('0.9.9')
     expect(h.installRuns()).toBe(1)
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     expect(await rowPresent(h.profileDir)).toBe(true)
     expect(h.events.map(event => event.state)).toEqual([
       'missing', 'downloading', 'installed', 'starting', 'running',
     ])
   })
 
-  it('reports the unpublished-source placeholder as an actionable error', async () => {
+  it('announces starting before waiting for the Web Host replacement', async () => {
+    let finishRestart: ((origin: string) => void) | undefined
+    const restart = vi.fn(() => new Promise<string>((resolve) => { finishRestart = resolve }))
+    const h = await harness({ restart })
+
+    const enabling = h.controller.enable()
+    await vi.waitFor(() => { expect(restart).toHaveBeenCalledOnce() })
+    expect(h.controller.getSnapshot()).toMatchObject({ state: 'starting', enabled: true, version: '0.9.9' })
+
+    finishRestart?.('http://127.0.0.1:10/')
+    await expect(enabling).resolves.toMatchObject({ state: 'running', enabled: true, version: '0.9.9' })
+  })
+
+  it('reports missing deployment sources as an actionable error', async () => {
     const h = await harness({ sources: undefined })
     const final = await h.controller.enable()
-    expect(final).toMatchObject({ state: 'error', error: PLACEHOLDER_ERROR })
+    expect(final).toMatchObject({
+      state: 'error',
+      error: 'Sub2API 组件下载源未配置。请使用包含 sub2api-sources.json 的 Desktop 发行版，或通过 DSH_DESKTOP_SUB2API_SOURCES 指向经批准的发布源。',
+    })
     expect(h.installRuns()).toBe(0)
     expect(h.host.restart).not.toHaveBeenCalled()
   })
@@ -187,6 +211,8 @@ describe('DesktopSub2ApiController', () => {
     })
     const final = await h.controller.enable()
     expect(restarts).toBe(2)
+    expect(h.host.restart).toHaveBeenNthCalledWith(1, 180_000)
+    expect(h.host.restart).toHaveBeenNthCalledWith(2, 180_000)
     expect(final.state).toBe('error')
     expect(final.error?.startsWith(ROLLBACK_ERROR_PREFIX)).toBe(true)
     expect(final.error).toContain('dsh web exited')
@@ -208,6 +234,7 @@ describe('DesktopSub2ApiController', () => {
     expect(final.error).toBe('restart refused')
     expect(final.error?.startsWith(ROLLBACK_ERROR_PREFIX)).toBe(false)
     expect(h.installRuns()).toBe(0)
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     expect(await rowPresent(h.profileDir)).toBe(true)
   })
 
@@ -223,6 +250,7 @@ describe('DesktopSub2ApiController', () => {
     const disabled = await h.controller.disable()
     expect(disabled).toMatchObject({ state: 'installed', enabled: false })
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     const patch = await readFile(join(h.profileDir, 'cordis.patch.yml'), 'utf8')
     expect(patch).toContain('disabled: true')
 
@@ -235,6 +263,7 @@ describe('DesktopSub2ApiController', () => {
     expect(enabled).toMatchObject({ state: 'running', enabled: true })
     expect(h.installRuns()).toBe(0)
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     const patchAfter = await readFile(join(h.profileDir, 'cordis.patch.yml'), 'utf8')
     expect(patchAfter).not.toContain('disabled: true')
   })
@@ -247,6 +276,7 @@ describe('DesktopSub2ApiController', () => {
     const removed = await h.controller.uninstall(true)
     expect(removed.state).toBe('missing')
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     expect(await rowPresent(h.profileDir)).toBe(false)
     await expect(stat(h.dataDir)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(h.runtimeDir)).rejects.toMatchObject({ code: 'ENOENT' })
@@ -531,7 +561,7 @@ describe('createDesktopSub2Api', () => {
     const originalSources = process.env[SUB2API_SOURCES_ENV]
     try {
       process.env['DSH_HOME'] = root
-      process.env[SUB2API_SOURCES_ENV] = undefined
+      delete process.env.DSH_DESKTOP_SUB2API_SOURCES
       const host: Sub2ApiHostControl = { restart: async () => 'http://127.0.0.1:12/', origin: () => undefined }
       const actions = await createDesktopSub2Api({ fetch, host })
       expect(actions.getSnapshot().state).toBe('missing')
@@ -545,7 +575,7 @@ describe('createDesktopSub2Api', () => {
     } finally {
       if (originalHome === undefined) delete process.env['DSH_HOME']
       else process.env['DSH_HOME'] = originalHome
-      if (originalSources === undefined) process.env[SUB2API_SOURCES_ENV] = undefined
+      if (originalSources === undefined) delete process.env.DSH_DESKTOP_SUB2API_SOURCES
       else process.env[SUB2API_SOURCES_ENV] = originalSources
     }
   })

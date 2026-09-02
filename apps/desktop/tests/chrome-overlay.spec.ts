@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  hideChromeOverlayView, isOverlaySender, overlayBoundsFromContentSize, overlayUrlFromHost,
+  bindChromeOverlayHost, hideChromeOverlayView, isOverlaySender, isOverlaySettingsUpdate,
+  overlayBoundsFromContentSize, overlayUrlFromHost,
   parseChromeOverlayResult, parseChromeOverlayShow, prepareChromeOverlayView,
   showChromeOverlayView, syncChromeOverlayBounds,
 } from '../src/chrome-overlay.ts'
@@ -12,6 +13,41 @@ describe('chrome overlay helpers', () => {
     )
   })
 
+  it('rebinds an existing overlay document when the Web Host origin changes', async () => {
+    const loadURL = vi.fn(async () => {})
+    const view = {
+      webContents: {
+        getURL: () => 'http://127.0.0.1:55352/?dsh-desktop-overlay=1',
+        loadURL,
+      },
+    }
+
+    await bindChromeOverlayHost(view, 'http://127.0.0.1:64654/')
+    expect(loadURL).toHaveBeenCalledWith('http://127.0.0.1:64654/?dsh-desktop-overlay=1')
+
+    loadURL.mockClear()
+    view.webContents.getURL = () => 'http://127.0.0.1:64654/?dsh-desktop-overlay=1'
+    await bindChromeOverlayHost(view, 'http://127.0.0.1:64654/')
+    expect(loadURL).not.toHaveBeenCalled()
+  })
+
+  it('keeps a hidden overlay hidden when its Host document finishes loading', async () => {
+    let visible = false
+    const setVisible = vi.fn((next: boolean) => { visible = next })
+    const view = {
+      getVisible: () => visible,
+      setVisible,
+      webContents: {
+        getURL: () => 'http://127.0.0.1:55352/?dsh-desktop-overlay=1',
+        loadURL: vi.fn(async () => { visible = true }),
+      },
+    }
+
+    await bindChromeOverlayHost(view, 'http://127.0.0.1:64654/')
+
+    expect(setVisible).toHaveBeenLastCalledWith(false)
+  })
+
   it('sizes a full-window overlay and rejects a tiny content box', () => {
     expect(overlayBoundsFromContentSize([1280, 800])).toEqual({ x: 0, y: 0, width: 1280, height: 800 })
     expect(overlayBoundsFromContentSize([7, 800])).toBeUndefined()
@@ -20,13 +56,14 @@ describe('chrome overlay helpers', () => {
   })
 
   it('prepares, shows, syncs, and hides a view', () => {
+    const calls: string[] = []
     const view = {
       setBackgroundColor: vi.fn(),
-      setVisible: vi.fn(),
+      setVisible: vi.fn((visible: boolean) => { calls.push(`visible:${String(visible)}`) }),
       setBounds: vi.fn(),
       webContents: { focus: vi.fn(), send: vi.fn() },
     }
-    const addChildView = vi.fn()
+    const addChildView = vi.fn(() => { calls.push('attach') })
     const window = { contentView: { addChildView }, getContentSize: () => [640, 480] }
     prepareChromeOverlayView(view)
     expect(view.setBackgroundColor).toHaveBeenCalledWith('#00000000')
@@ -35,6 +72,7 @@ describe('chrome overlay helpers', () => {
     expect(view.setBounds).toHaveBeenCalledWith({ x: 0, y: 0, width: 640, height: 480 })
     expect(view.setVisible).toHaveBeenCalledWith(true)
     expect(addChildView).toHaveBeenCalledWith(view)
+    expect(calls.slice(-2)).toEqual(['attach', 'visible:true'])
     expect(view.webContents.focus).toHaveBeenCalledOnce()
     syncChromeOverlayBounds({ getContentSize: () => [8, 8] }, view)
     expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 8, height: 8 })
@@ -151,5 +189,21 @@ describe('chrome overlay helpers', () => {
     expect(isOverlaySender(3, 3)).toBe(true)
     expect(isOverlaySender(3, 4)).toBe(false)
     expect(isOverlaySender(3, undefined)).toBe(false)
+  })
+
+  it('accepts only same-request Settings navigation from the overlay document', () => {
+    const current = { kind: 'settings' as const, requestId: 'settings-live', sectionId: 'general' }
+    expect(isOverlaySettingsUpdate(current, {
+      kind: 'settings', requestId: 'settings-live', sectionId: 'sub2api',
+    })).toBe(true)
+    expect(isOverlaySettingsUpdate(current, {
+      kind: 'settings', requestId: 'other', sectionId: 'sub2api',
+    })).toBe(false)
+    expect(isOverlaySettingsUpdate(null, {
+      kind: 'settings', requestId: 'settings-live', sectionId: 'sub2api',
+    })).toBe(false)
+    expect(isOverlaySettingsUpdate(current, {
+      kind: 'menu', requestId: 'settings-live', items: [], anchor: { x: 0, y: 0, width: 1, height: 1 },
+    })).toBe(false)
   })
 })

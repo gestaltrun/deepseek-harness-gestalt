@@ -7,7 +7,7 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, powerMonitor, safeStorage,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, net, powerMonitor, safeStorage,
   session, shell,
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
@@ -19,7 +19,7 @@ import {
   CHROME_OVERLAY_GET_STATE, CHROME_OVERLAY_HIDE, CHROME_OVERLAY_RESULT,
   CHROME_OVERLAY_SHOW, CHROME_OVERLAY_STATE,
   PAIRING_GET_SNAPSHOT, PAIRING_REJECT, PAIRING_REVOKE, PAIRING_SET_ENABLED, PAIRING_SNAPSHOT_CHANGED,
-  SUB2API_DISABLE, SUB2API_ENABLE, SUB2API_GET_SNAPSHOT, SUB2API_OPEN_CONSOLE,
+  SUB2API_DISABLE, SUB2API_ENABLE, SUB2API_GET_SNAPSHOT,
   SUB2API_SNAPSHOT_CHANGED, SUB2API_UNINSTALL,
   UPDATER_CHECK_NOW, UPDATER_DOWNLOAD_NOW, UPDATER_GET_STATUS,
   UPDATER_QUIT_AND_INSTALL, UPDATER_STATUS_CHANGED,
@@ -69,13 +69,14 @@ import {
 import { DesktopSnowPairingVault, EncryptedDesktopSnowPairingStore } from './snow-pairing-vault.ts'
 import { disposeDesktopOwners } from './shutdown.ts'
 import {
-  createDesktopSub2Api, uninstallSub2ApiFromIpc,
+  createDesktopSub2Api, sub2ApiBootHostStartTimeout, uninstallSub2ApiFromIpc,
   type DesktopSub2ApiActions,
 } from './sub2api.ts'
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
 import { parseBrowserPresentRequest, parseBrowserPresentTarget } from './browser-present.ts'
 import {
-  hideChromeOverlayView, isOverlaySender, overlayUrlFromHost, parseChromeOverlayResult,
+  bindChromeOverlayHost, hideChromeOverlayView, isOverlaySender, isOverlaySettingsUpdate,
+  parseChromeOverlayResult,
   parseChromeOverlayShow, prepareChromeOverlayView, showChromeOverlayView,
   syncChromeOverlayBounds,
 } from './chrome-overlay.ts'
@@ -248,19 +249,22 @@ async function boot(): Promise<void> {
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   sub2api = await createDesktopSub2Api({
-    fetch: systemFetch,
+    fetch: async (input, init) => await net.fetch(input, init),
     host: {
-      restart: async () => (await replaceWebHost()).url,
+      restart: async startTimeoutMs => (await replaceWebHost(startTimeoutMs)).url,
       origin: () => host?.url,
     },
   })
   stopSub2ApiEvents = sub2api.subscribe(pushSub2ApiSnapshot)
   installIntegrationsOnce()
+  const initialHostStartTimeout = sub2ApiBootHostStartTimeout(sub2api.getSnapshot())
+  const startInitialHost = (): Promise<RunningWebHost> =>
+    startHost(initialHostStartTimeout)
   try {
     const started = respawned
-      ? { value: await startHost(), retried: false }
+      ? { value: await startInitialHost(), retried: false }
       : await startWithOneRetry(
-        startHost,
+        startInitialHost,
         () => { respawned = true },
         () => !hostStartController.signal.aborted,
       )
@@ -460,7 +464,7 @@ function syncTrafficLights(target: BrowserWindow, fullscreen: boolean): void {
   }
 }
 
-async function startHost(): Promise<RunningWebHost> {
+async function startHost(timeoutMs?: number): Promise<RunningWebHost> {
   if (hostStartController.signal.aborted) throw new Error('dsh web startup aborted')
   const paths = resolveDesktopRuntime({
     packaged: app.isPackaged,
@@ -481,7 +485,7 @@ async function startHost(): Promise<RunningWebHost> {
       DSH_ELECTRON_BROWSER_TOKEN_FILE: browserRuntime.tokenFile,
     },
     signal: hostStartController.signal,
-  })
+  }, timeoutMs)
   pendingHost = pending
   try {
     return await pending
@@ -499,7 +503,7 @@ function observeHostExit(running: RunningWebHost): void {
  * point the window and the native overlay at its new URL. The Electron window
  * stays alive across the swap; sessions survive on disk.
  */
-async function replaceWebHost(): Promise<RunningWebHost> {
+async function replaceWebHost(startTimeoutMs?: number): Promise<RunningWebHost> {
   const starting = pendingHost
   const previous = host
   host = undefined
@@ -507,7 +511,7 @@ async function replaceWebHost(): Promise<RunningWebHost> {
   const startedEarly = await starting?.catch(() => undefined)
   if (startedEarly !== undefined && startedEarly !== previous) await startedEarly.stop()
   await previous?.stop()
-  const started = await startHost()
+  const started = await startHost(startTimeoutMs)
   host = started
   installCompanionHost(started)
   observeHostExit(started)
@@ -821,13 +825,6 @@ function installIpc(): void {
     if (sub2api === undefined) return Promise.resolve({ state: 'missing', enabled: true })
     return uninstallSub2ApiFromIpc(sub2api, deleteData)
   })
-  ipcMain.on(SUB2API_OPEN_CONSOLE, () => {
-    if (window === undefined || host === undefined) return
-    void window.loadURL(new URL('/plugins/dsh-sub2api/ui/', host.url).toString())
-      .catch((error: unknown) => {
-        console.error('[desktop-sub2api] openConsole failed:', error)
-      })
-  })
   ipcMain.handle(BROWSER_PRESENT, (_event, raw: unknown) => {
     const request = parseBrowserPresentRequest(raw)
     if (request === undefined || window === undefined || browserRuntime === undefined) return
@@ -855,8 +852,16 @@ function installIpc(): void {
   })
 }
 
-function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<WebContentsView> {
-  if (overlayReady !== undefined) return overlayReady
+async function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<WebContentsView> {
+  if (overlayReady !== undefined) {
+    const view = await overlayReady
+    await bindChromeOverlayHost(view, hostUrl)
+    if (overlayOpen !== undefined) {
+      view.webContents.send(CHROME_OVERLAY_STATE, overlayOpen)
+      showChromeOverlayView(target, view)
+    }
+    return view
+  }
   overlayReady = (async () => {
     const view = new WebContentsView({
       webPreferences: {
@@ -869,7 +874,7 @@ function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<We
     prepareChromeOverlayView(view)
     target.contentView.addChildView(view)
     syncChromeOverlayBounds(target, view)
-    await view.webContents.loadURL(overlayUrlFromHost(hostUrl))
+    await bindChromeOverlayHost(view, hostUrl)
     overlayView = view
     if (overlayOpen !== undefined) {
       view.webContents.send(CHROME_OVERLAY_STATE, overlayOpen)
@@ -877,14 +882,17 @@ function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<We
     }
     return view
   })()
-  return overlayReady
+  return await overlayReady
 }
 
 async function showNativeOverlay(event: IpcMainInvokeEvent, raw: unknown): Promise<void> {
   if (window === undefined || host === undefined) return
-  if (isOverlaySender(event.sender.id, overlayView?.webContents.id)) return
   const request = parseChromeOverlayShow(raw)
   if (request === undefined) return
+  if (
+    isOverlaySender(event.sender.id, overlayView?.webContents.id)
+    && !isOverlaySettingsUpdate(overlayOpen, request)
+  ) return
   overlayOpen = request
   const view = await ensureChromeOverlay(window, host.url)
   if (window.isDestroyed()) return

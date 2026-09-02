@@ -1,0 +1,4 @@
+interface:
+  display_name: "DSH Desktop Test Instance"
+  short_description: "Start or replace one isolated Desktop test Electron"
+  default_prompt: "Use $dsh-desktop-test-instance to start, replace, or clean the Desktop test Electron for this goal."

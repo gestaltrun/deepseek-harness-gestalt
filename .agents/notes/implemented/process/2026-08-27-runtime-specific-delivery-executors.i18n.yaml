@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-27-runtime-specific-delivery-executors.md
-2026-08-27-runtime-specific-delivery-executors.md: 002f4afb31a671e24cc900cba2d3f969e60ac0dc
-2026-08-27-runtime-specific-delivery-executors.zh.md: 24e2ff5b51ea1aecff608aeb7f7d647a566964ee
+2026-08-27-runtime-specific-delivery-executors.md: ad458b2e2bed210f15477e3d8763569a915f0b81
+2026-08-27-runtime-specific-delivery-executors.zh.md: 0d91ee3f2115790b1231212d5f10cd9b77df710c

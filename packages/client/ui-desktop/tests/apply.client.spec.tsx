@@ -99,7 +99,6 @@ describe('ui-desktop apply', () => {
       sub2ApiEnable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
       sub2ApiDisable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
       sub2ApiUninstall: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
-      sub2ApiOpenConsole: vi.fn(),
       onSub2ApiSnapshot: vi.fn(() => () => {}),
       chromeOverlayShow: async () => {},
       chromeOverlayHide: async () => {},

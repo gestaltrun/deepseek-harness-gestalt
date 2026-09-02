@@ -14,6 +14,8 @@ Desktop 使用 `gestalt-v<version>`，Mobile 使用 `mobile-v<version>`，Platfo
 
 当 `master` 上仍有未消费的可选 `.release-intents/*.json` 记录时，`Product Release Plan` 会运行 `pnpm product-release:prepare --write`，并创建或更新 Draft `automation/product-release` pull request。普通产品 pull request 不再添加或校验这些记录。仓库变量 `DSH_RELEASE_APP_CLIENT_ID` 与 secret `DSH_RELEASE_APP_PRIVATE_KEY` 标识一个对仓库 Contents 和 Pull requests 具有写权限、对 Issues 具有读权限的 GitHub App 安装；与工作流 `GITHUB_TOKEN` 产生的变更不同，它的 commit 与 PR 事件会触发普通 CI。生成器只消费每条已合并 intent 一次，为各发布单元应用最高请求 bump，在选中 Mobile 时只递增一次构建号，按每条 intent 选中的端过滤双语摘要，并提交带序号的 `product-releases/NNNN.json` 计划与 `product-releases/state.json`。
 
+选中的 Desktop 版本只有在 `gestalt-v<version>` tag 存在后，才能成为下一份 Desktop 发布说明的基线。未发布的已选版本不是有效基线：准备操作会在修改任何版本、plan、state 或发布说明文件前失败，并指示维护者先发布或恢复上一项 Desktop 发布。规划工作流会把生成器失败传播出输出捕获流水线，并在 `git add`、commit、push 或修改 pull request 之前停止；成功的 JSON 输出仍可用于 pull request 正文与证据。
+
 CI 会根据基线 ledger、基线版本、受跟踪的 Mobile build 和全部未消费 intent 重算生成的 Product Release PR。提交的 plan、选中端、bump、版本、tag、摘要、已消费 intent 状态、Mobile build 与 Desktop notes 必须与重算结果一致；手工修改生成事务不能漏掉或伪造发布。
 
 合并 Product Release PR 会批准版本、发布说明和选中集合。它不会授权签名、TestFlight 上传、GitHub Release 发布、镜像发布或生产部署。

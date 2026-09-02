@@ -384,7 +384,11 @@ function aggregateProductReleaseFromAuthorities(
   }
 }
 
-/** Atomically write one retry-stable plan, its selected version authorities, and consumed-intent state. */
+/**
+ * Write one retry-stable plan, selected versions, Mobile build, Desktop notes,
+ * and consumed-intent state. A missing Desktop release tag rejects before any
+ * of those files change.
+ */
 export async function writeProductRelease(root: string, plan: ProductReleasePlan, priorState: ProductReleaseState): Promise<void> {
   validateState(priorState)
   if (plan.sequence !== priorState.nextSequence) throw new Error('product release plan sequence is stale')
@@ -393,6 +397,10 @@ export async function writeProductRelease(root: string, plan: ProductReleasePlan
   await mkdir(dirname(planPath), { recursive: true })
   const existing = await readOptional(planPath)
   if (existing !== undefined && existing !== plannedText) throw new Error(`product release plan ${plan.sequence} already exists with different content`)
+  const desktop = plan.releaseUnits.desktop
+  const desktopBaselineCommit = desktop.selected
+    ? resolveDesktopReleaseBaseline(root, desktop.previousVersion)
+    : undefined
 
   for (const unit of PRODUCT_RELEASE_UNITS) {
     const release = plan.releaseUnits[unit]
@@ -408,10 +416,9 @@ export async function writeProductRelease(root: string, plan: ProductReleasePlan
       await writeAtomic(join(root, 'apps/mobile/release.json'), stableJson({ version: 1, buildNumber: release.buildNumber }))
     }
   }
-  const desktop = plan.releaseUnits.desktop
   if (desktop.selected) {
-    const baselineCommit = runGit(root, ['rev-parse', `${TAG_PREFIX.desktop}${desktop.previousVersion}^{commit}`]).trim()
-    const releaseNotes = renderDesktopReleaseNotes(plan, baselineCommit)
+    if (desktopBaselineCommit === undefined) throw new TypeError('Desktop baseline resolution did not run')
+    const releaseNotes = renderDesktopReleaseNotes(plan, desktopBaselineCommit)
     await writeAtomic(
       join(root, 'apps/desktop/release-notes', `${desktop.version}.json`),
       stableJson(releaseNotes),
@@ -540,7 +547,7 @@ export async function validateProductReleasePlanChange(root: string, changedPath
     }
     const desktop = expected.releaseUnits.desktop
     if (desktop.selected) {
-      const baselineCommit = runGit(root, ['rev-parse', `${TAG_PREFIX.desktop}${desktop.previousVersion}^{commit}`]).trim()
+      const baselineCommit = resolveDesktopReleaseBaseline(root, desktop.previousVersion)
       const notesPath = `apps/desktop/release-notes/${desktop.version}.json`
       if (stableJson(await readJson(join(root, notesPath))) !== stableJson(renderDesktopReleaseNotes(expected, baselineCommit))) {
         throw new Error(`${notesPath}: content does not match the recomputed Desktop summaries`)
@@ -1041,6 +1048,15 @@ function runGit(root: string, args: string[]): string {
   const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`git ${args[0] ?? ''} failed: ${result.stderr.trim()}`)
   return result.stdout
+}
+
+function resolveDesktopReleaseBaseline(root: string, version: string): string {
+  const tag = `${TAG_PREFIX.desktop}${version}`
+  const result = spawnSync('git', ['-C', root, 'rev-parse', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error(`publish or recover Desktop ${tag} before preparing another Desktop release`)
+  }
+  return result.stdout.trim()
 }
 
 function gitJsonAt(root: string, ref: string, path: string): unknown {

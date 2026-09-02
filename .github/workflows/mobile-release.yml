@@ -490,7 +490,7 @@ jobs:
   publish:
     name: GitHub Mobile prerelease
     needs: [release-authorization, release-version, channel-evidence]
-    if: ${{ inputs.publish_github && needs.release-authorization.result == 'success' && needs.release-version.result == 'success' && needs.channel-evidence.result == 'success' }}
+    if: ${{ always() && inputs.publish_github && needs.release-authorization.result == 'success' && needs.release-version.result == 'success' && needs.channel-evidence.result == 'success' }}
     runs-on: ubuntu-24.04
     environment: mobile-release
     permissions:

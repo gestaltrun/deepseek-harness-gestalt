@@ -73,6 +73,7 @@ describe('product release workflows', () => {
     expect(source).toContain('TestFlight recovery from signed IPA')
     const publish = job(mobile, 'publish')
     expect(publish.needs).toEqual(['release-authorization', 'release-version', 'channel-evidence'])
+    expect(publish.if).toBe("${{ always() && inputs.publish_github && needs.release-authorization.result == 'success' && needs.release-version.result == 'success' && needs.channel-evidence.result == 'success' }}")
     const serialized = JSON.stringify(publish)
     expect(serialized).toContain('gh release create')
     expect(serialized).toContain('--prerelease')
@@ -136,6 +137,7 @@ describe('product release workflows', () => {
 
   it('updates a Product Release PR without publishing and coordinates only selected lanes', () => {
     const planner = text('.github/workflows/product-release-plan.yml')
+    const plannerWorkflow = workflow('.github/workflows/product-release-plan.yml')
     const coordinatorSource = text('.github/workflows/product-release.yml')
     const coordinator = workflow('.github/workflows/product-release.yml')
     expect(planner).toContain('product-release:prepare --write')
@@ -146,6 +148,10 @@ describe('product release workflows', () => {
     expect(planner).toContain('steps.app-token.outputs.token')
     expect(planner).toContain('gh pr create')
     expect(planner).not.toContain('gh release create')
+    const prepare = stepRun(plannerWorkflow, 'prepare', 'Apply unconsumed release intent')
+    expect(prepare).toContain('set -o pipefail')
+    expect(prepare.indexOf('set -o pipefail')).toBeLessThan(prepare.indexOf('product-release:prepare --write | tee'))
+    expect(prepare.indexOf('product-release:prepare --write | tee')).toBeLessThan(prepare.indexOf('git add '))
     expect(input(coordinator, 'workflow_dispatch', 'candidate_sha')).toMatchObject({ required: true, type: 'string' })
     expect(coordinatorSource).toContain('ref: ${{ inputs.candidate_sha }}')
     expect(coordinatorSource).toContain('candidate checkout does not match')
@@ -204,6 +210,16 @@ function input(owner: Record<string, unknown>, event: string, name: string): Rec
 
 function job(owner: Record<string, unknown>, name: string): Record<string, unknown> {
   return record(record(owner.jobs, 'jobs')[name], name)
+}
+
+function stepRun(owner: Record<string, unknown>, jobName: string, stepName: string): string {
+  const stepValue = job(owner, jobName).steps
+  if (!Array.isArray(stepValue)) throw new TypeError(`${jobName}.steps must be an array`)
+  const steps: unknown[] = stepValue
+  const selected: unknown = steps.find(value => record(value, `${jobName} step`).name === stepName)
+  const run = record(selected, stepName).run
+  if (typeof run !== 'string') throw new TypeError(`${stepName}.run must be a string`)
+  return run
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {

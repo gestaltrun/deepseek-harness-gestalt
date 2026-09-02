@@ -520,7 +520,7 @@ describe('memberQuestion Session materializer cache', () => {
     }, {
       receivingAccountId: 'account-receiver' as never,
       projectId: 'project-1' as never,
-      workspaceId: workspace.workspaceId as never,
+      workspaceId: workspace.workspaceId,
       documents: [{ path: 'docs/architecture.md', bytes: Buffer.from('# transferred brief\n') }],
       questions: [{
         questionId: 'question-cache' as never,

@@ -15,8 +15,6 @@ import type {
   MemberQuestionTransferredDocument,
 } from './document-cache.ts'
 
-export type { MemberQuestionCachedReference, MemberQuestionTransferredDocument } from './document-cache.ts'
-
 /** Host-owned durable identity of one member-question receiving thread. */
 export type ReceivingSessionId = Branded<'ReceivingSessionId'>
 /** Stable caller idempotency identity for one explicit human turn. */

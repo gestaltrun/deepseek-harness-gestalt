@@ -53,8 +53,10 @@ describe('Desktop Project Membership bridge', () => {
   it('parses exact hostile IPC payloads before any Platform request', () => {
     expect(parseProjectCreation({ name: ' Atlas ', remoteUrl: ' https://github.com/o/r ' }))
       .toEqual({ name: 'Atlas', remoteUrl: 'https://github.com/o/r' })
-    expect(parseProjectInvitation({ projectId: 'project-1', githubLogin: ' mona ' }))
-      .toEqual({ projectId: 'project-1', githubLogin: 'mona' })
+    expect(parseProjectInvitation({ projectId: 'project-1', githubLogin: ' mona ', grantedRole: 'admin' }))
+      .toEqual({ projectId: 'project-1', githubLogin: 'mona', grantedRole: 'admin' })
+    expect(() => parseProjectInvitation({ projectId: 'project-1', githubLogin: 'mona', grantedRole: 'superadmin' }))
+      .toThrow('grantedRole must be owner, admin, or member')
     expect(parseInvitationDecision({
       invitationId: 'invitation-1',
       input: {

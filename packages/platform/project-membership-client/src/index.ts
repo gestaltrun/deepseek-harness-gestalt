@@ -1,7 +1,7 @@
 /**
  * Browser client for Project Membership: one transport over the membership
  * HTTP consumer's `/v1/projects` routes (project creation, roster reads,
- * invitation issue/decision/retraction/poll, and member role, tag, and
+ * invitation issue with granted role, decision/retraction/poll, and member role, tag, and
  * removal). Authorization rides the caller-supplied Account session
  * presentation headers (bearer token plus installation proof); this client
  * never touches the signing key. Error answers keep the domain envelope:
@@ -80,6 +80,8 @@ export interface PendingInvitationView {
   readonly projectName: string
   readonly remoteUrl: string
   readonly inviterName: string
+  /** Role conferred when the invitee completes accept-with-workspace-link. */
+  readonly grantedRole: InvitationView['grantedRole']
   readonly invitedAt: number
 }
 
@@ -87,6 +89,8 @@ export interface PendingInvitationView {
 export interface IssuedInvitationView {
   readonly invitationId: InvitationId
   readonly inviteeName: string
+  /** Role conferred when the invitee completes accept-with-workspace-link. */
+  readonly grantedRole: InvitationView['grantedRole']
   readonly invitedAt: number
 }
 
@@ -105,7 +109,7 @@ export interface ProjectMembershipTransport {
   roster(authorization: MembershipAuthorization, projectId: ProjectId): Promise<RosterReadView>
   invite(
     authorization: MembershipAuthorization,
-    input: { projectId: ProjectId; githubLogin: string },
+    input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole },
   ): Promise<InvitationView>
   decideInvitation(
     authorization: MembershipAuthorization,
@@ -145,10 +149,10 @@ export interface ProjectMembershipClient {
   roster(projectId: ProjectId): Promise<RosterReadView>
   /**
    * Invite one uniquely resolved public GitHub login.
-   * @param input - Project and public GitHub login.
-   * @returns created pending invitation.
+   * @param input - Project, public GitHub login, and the role granted at accept time.
+   * @returns created pending invitation carrying that granted role.
    */
-  invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>
+  invite(input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole }): Promise<InvitationView>
   /**
    * Decline, or accept atomically with a local Workspace link.
    * @param invitationId - invitation to decide.
@@ -237,7 +241,7 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
 
   invite(
     authorization: MembershipAuthorization,
-    input: { projectId: ProjectId; githubLogin: string },
+    input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole },
   ): Promise<InvitationView> {
     return this.json('/v1/projects/invitations', {
       method: 'POST', headers: authorization, body: JSON.stringify(input),
@@ -397,6 +401,7 @@ function parseInvitationView(value: unknown): InvitationView {
     inviterAccountId: string(view, 'inviterAccountId', 'invitation view') as PlatformAccountId,
     inviteeAccountId: string(view, 'inviteeAccountId', 'invitation view') as PlatformAccountId,
     state: parseInvitationState(view.state),
+    grantedRole: parseGrantedRole(view.grantedRole),
     invitedAt: epochMs(view, 'invitedAt', 'invitation view'),
     ...(settledAt === undefined ? {} : { settledAt }),
   }
@@ -418,6 +423,7 @@ function parsePendingInvitationView(value: unknown): PendingInvitationView {
     projectName: string(view, 'projectName', 'pending invitation view'),
     remoteUrl: string(view, 'remoteUrl', 'pending invitation view'),
     inviterName: string(view, 'inviterName', 'pending invitation view'),
+    grantedRole: parseGrantedRole(view.grantedRole),
     invitedAt: epochMs(view, 'invitedAt', 'pending invitation view'),
   }
 }
@@ -427,6 +433,7 @@ function parseIssuedInvitationView(value: unknown): IssuedInvitationView {
   return {
     invitationId: string(view, 'invitationId', 'issued invitation view') as InvitationId,
     inviteeName: string(view, 'inviteeName', 'issued invitation view'),
+    grantedRole: parseGrantedRole(view.grantedRole),
     invitedAt: epochMs(view, 'invitedAt', 'issued invitation view'),
   }
 }
@@ -467,6 +474,13 @@ function parseWorkspaceLink(value: unknown): WorkspaceLink {
 function parseRole(value: unknown): ProjectRole {
   if (value !== 'owner' && value !== 'admin' && value !== 'member') {
     throw new TypeError('member view role must be owner, admin, or member')
+  }
+  return value
+}
+
+function parseGrantedRole(value: unknown): InvitationView['grantedRole'] {
+  if (value !== 'admin' && value !== 'member') {
+    throw new TypeError('invitation grantedRole must be admin or member')
   }
   return value
 }

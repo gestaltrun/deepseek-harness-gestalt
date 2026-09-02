@@ -1,7 +1,9 @@
 {
   "arrival": {
-    "sessionCount": 0,
-    "requestCount": 0
+    "sessionCount": 1,
+    "requestCount": 0,
+    "receivedCount": 1,
+    "attached": true
   },
   "firstHumanTurn": {
     "eventTypes": [

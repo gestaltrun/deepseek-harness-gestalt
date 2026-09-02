@@ -28,6 +28,7 @@ import type {
   AuthenticatedMemberQuestionEnvelope,
   MemberQuestionHumanTurnAdmitter,
   MemberQuestionHumanTurnAdmissionContext,
+  MemberQuestionSessionMaterializer,
   MemberQuestionIngestResult,
   MemberQuestionWorkspaceBinding,
   MemberQuestionReceiverListener,
@@ -48,6 +49,8 @@ export type {
   AuthenticatedMemberQuestionIngress,
   MemberQuestionHumanTurnAdmitter,
   MemberQuestionHumanTurnAdmissionContext,
+  MemberQuestionSessionMaterializer,
+  MaterializeMemberQuestionSessionInput,
   MemberQuestionWorkspaceBinding,
   MemberQuestionHumanTurnContent,
   MemberQuestionIngestResult,
@@ -88,7 +91,9 @@ export interface MemberQuestionReceiverConfig {
   readonly terminalAuthorityMode?: 'deferred' | 'development-local'
   /** Authoritative wall clock; production uses Date.now. */
   readonly clock?: () => number
-  /** High-level materialize-and-admit adapter; absent keeps human turns fail-closed. */
+  /** High-level arrival adapter; absent keeps Host Session creation fail-closed. */
+  readonly materializer?: MemberQuestionSessionMaterializer
+  /** High-level human-turn adapter; absent keeps human turns fail-closed. */
   readonly admitter?: MemberQuestionHumanTurnAdmitter
   /** Injectable expiry scheduler; production uses platform timers. */
   readonly timer?: MemberQuestionReceiverTimer
@@ -107,14 +112,15 @@ export const Config: z<Config> = z.object({
   terminalAuthority: z.any(),
   terminalAuthorityMode: z.union(['deferred', 'development-local'] as const).default('deferred'),
   clock: z.any(),
+  materializer: z.any(),
   admitter: z.any(),
   timer: z.any(),
   stateWriter: z.any(),
 })
 
 /**
- * Host authority for member-question arrival, projection, settlement,
- * expiry, and one-step explicit human admission.
+ * Host authority for member-question arrival, Host Session materialization,
+ * projection, settlement, expiry, and one-step explicit human admission.
  */
 export abstract class MemberQuestionReceiverService extends Service implements MemberQuestionWorkspaceBinding {
   constructor(ctx: Context) {
@@ -153,7 +159,7 @@ export abstract class MemberQuestionReceiverService extends Service implements M
   ): Promise<CompanionMemberQuestionSettledResult>
 
   /**
-   * Reserve, materialize, and admit one explicit human turn under one rpc id.
+   * Reserve and admit one explicit human turn under one rpc id.
    * @param input - Host receiving identity, observed revision, rpc id, content, and mode.
    * @returns the durable idempotent admission result.
    */
@@ -164,8 +170,18 @@ export abstract class MemberQuestionReceiverService extends Service implements M
   /** Resume every durable human action left reserved by an interrupted Host. */
   abstract resumeReservedHumanTurns(): Promise<void>
 
+  /** Resume every durable Host Session materialization left reserved by an interrupted Host. */
+  abstract resumeReservedSessionMaterializations(): Promise<void>
+
   /**
-   * Install the single Host materialize-and-admit adapter.
+   * Install the single Host arrival materializer.
+   * @param materializer - high-level Host Session creation adapter.
+   * @returns disposer for this exact registration.
+   */
+  abstract registerSessionMaterializer(materializer: MemberQuestionSessionMaterializer): () => void
+
+  /**
+   * Install the single Host human-turn adapter.
    * @param admitter - high-level Host transaction adapter.
    * @returns disposer for this exact registration.
    */
@@ -243,6 +259,9 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
   private readonly maxRecords: number
   private readonly terminalAuthority: MemberQuestionTerminalAuthority | undefined
   private readonly clock: () => number
+  private readonly materializer: MemberQuestionSessionMaterializer | undefined
+  private runtimeMaterializer: MemberQuestionSessionMaterializer | undefined
+  private runtimeMaterializerRevision = 0
   private readonly admitter: MemberQuestionHumanTurnAdmitter | undefined
   private runtimeAdmitter: MemberQuestionHumanTurnAdmitter | undefined
   private runtimeAdmitterRevision = 0
@@ -266,6 +285,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     this.terminalAuthority = resolved.terminalAuthority
       ?? (resolved.terminalAuthorityMode === 'development-local' ? DEVELOPMENT_LOCAL_TERMINAL_AUTHORITY : undefined)
     this.clock = resolved.clock ?? Date.now
+    this.materializer = resolved.materializer
     this.admitter = resolved.admitter
     this.timer = resolved.timer ?? SYSTEM_TIMER
     this.terminalRetryMs = resolved.terminalRetryMs
@@ -291,7 +311,11 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
           || JSON.stringify(existing.operation) !== JSON.stringify(envelope.operation)) {
           throw new Error(`member-question-receiver: question ${envelope.operation.questionId} was replayed with different authority or content`)
         }
-        return ingestResult(existing)
+        await this.ensureSessionMaterialized(existing, 'replay')
+        const current = this.state.questions.find(question => question.questionId === existing.questionId)
+        /* v8 ignore next -- ingest already proved this question id exists. */
+        if (current === undefined) throw new Error(`member-question-receiver: question ${existing.questionId} vanished during materialization`)
+        return ingestResult(current)
       }
       if (this.state.questions.length >= this.maxRecords) {
         throw new Error(`member-question-receiver: maxRecords ${this.maxRecords} is exhausted`)
@@ -354,7 +378,11 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
         state: terminal?.outcome ?? 'pending',
       })
       this.scheduleExpiry()
-      return ingestResult(question)
+      await this.ensureSessionMaterialized(question, 'arrival')
+      const current = this.state.questions.find(row => row.questionId === question.questionId)
+      /* v8 ignore next -- ingest just committed this question id. */
+      if (current === undefined) throw new Error(`member-question-receiver: question ${question.questionId} vanished during materialization`)
+      return ingestResult(current)
     })
   }
 
@@ -542,26 +570,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       if (admitter === undefined) {
         throw new Error('member-question-receiver: admitter is required to admit a human turn')
       }
-      const questions = this.state.questions.filter(row => row.receivingSessionId === request.receivingSessionId)
-      /* v8 ignore next -- every persisted receiving Session is created with its first question in one commit. */
-      if (questions[0] === undefined) throw new Error('member-question-receiver: receiving Session has no questions')
-      const projectId = questions[0].operation.projectId
-      const workspaceId = this.state.workspaceBindings.find(binding =>
-        binding.receivingAccountId === session.receivingAccountId
-        && binding.projectId === projectId)?.workspaceId
-      if (workspaceId === undefined) {
-        throw new Error(
-          `member-question-receiver: no local Workspace binding for account ${session.receivingAccountId} and project ${projectId}`,
-        )
-      }
-      const context: MemberQuestionHumanTurnAdmissionContext = {
-        receivingAccountId: session.receivingAccountId as PlatformAccountId,
-        projectId,
-        workspaceId: workspaceId as Branded<'WorkspaceId'>,
-        questions: questions.map(row => row.terminal === undefined
-          ? toPendingView(row)
-          : toTerminalView(row)),
-      }
+      const context = this.admissionContext(session)
       await admitter({ ...request, content: structuredClone(admission.content) }, context)
       const revision = this.state.revision + 1
       const committed: PersistedHumanTurnAdmission = {
@@ -598,6 +607,33 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
         content: admission.content,
         mode: admission.mode,
       })
+    }
+  }
+
+  override async resumeReservedSessionMaterializations(): Promise<void> {
+    const questions = await this.enqueue(() => Promise.resolve(
+      this.state.sessions.flatMap((session) => {
+        if (session.materialized) return []
+        const question = this.state.questions.findLast(row => row.receivingSessionId === session.id)
+        /* v8 ignore next -- every unmaterialized receiving Session is created with its first question in one commit. */
+        return question === undefined ? [] : [structuredClone(question)]
+      }),
+    ))
+    for (const question of questions) {
+      await this.enqueue(() => this.ensureSessionMaterialized(question, 'replay'))
+    }
+  }
+
+  override registerSessionMaterializer(materializer: MemberQuestionSessionMaterializer): () => void {
+    if (this.runtimeMaterializer !== undefined) {
+      throw new Error('member-question-receiver: a Host Session materializer is already registered')
+    }
+    this.runtimeMaterializer = materializer
+    const revision = ++this.runtimeMaterializerRevision
+    return () => {
+      if (this.runtimeMaterializerRevision !== revision) return
+      this.runtimeMaterializer = undefined
+      this.runtimeMaterializerRevision += 1
     }
   }
 
@@ -702,6 +738,66 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     return this.state.sessions.find(session => session.id === question.receivingSessionId)?.materialized === true
   }
 
+  private admissionContext(session: PersistedReceivingSession): MemberQuestionHumanTurnAdmissionContext {
+    const questions = this.state.questions.filter(row => row.receivingSessionId === session.id)
+    /* v8 ignore next -- every persisted receiving Session is created with its first question in one commit. */
+    if (questions[0] === undefined) throw new Error('member-question-receiver: receiving Session has no questions')
+    const projectId = questions[0].operation.projectId
+    const workspaceId = this.state.workspaceBindings.find(binding =>
+      binding.receivingAccountId === session.receivingAccountId
+      && binding.projectId === projectId)?.workspaceId
+    if (workspaceId === undefined) {
+      throw new Error(
+        `member-question-receiver: no local Workspace binding for account ${session.receivingAccountId} and project ${projectId}`,
+      )
+    }
+    return {
+      receivingAccountId: session.receivingAccountId as PlatformAccountId,
+      projectId,
+      workspaceId: workspaceId as Branded<'WorkspaceId'>,
+      questions: questions.map(row => row.terminal === undefined
+        ? toPendingView(row, this.materialized(row))
+        : toTerminalView(row, this.materialized(row))),
+    }
+  }
+
+  private async ensureSessionMaterialized(
+    question: PersistedReceivingQuestion,
+    mode: 'arrival' | 'replay',
+  ): Promise<void> {
+    const session = this.state.sessions.find(row => row.id === question.receivingSessionId)
+    /* v8 ignore next -- ingest and resume only pass questions that already name a persisted Session. */
+    if (session === undefined) {
+      throw new Error(`member-question-receiver: unknown receiving Session ${question.receivingSessionId}`)
+    }
+    if (mode === 'replay' && session.materialized) return
+    const materializer = this.runtimeMaterializer ?? this.materializer
+    if (materializer === undefined) return
+    await materializer({
+      receivingSessionId: session.id as ReceivingSessionId,
+      revision: question.revision,
+      questionId: question.questionId as MemberQuestionId,
+    }, this.admissionContext(session))
+    if (session.materialized) return
+    const revision = this.state.revision + 1
+    await this.commit({
+      ...this.state,
+      revision,
+      sessions: this.state.sessions.map(row => row.id === session.id
+        ? { ...row, revision, materialized: true }
+        : row),
+      questions: this.state.questions.map(row => row.receivingSessionId === session.id
+        ? { ...row, revision }
+        : row),
+    })
+    this.ctx.emit('member-question-receiver/changed', {
+      revision,
+      questionId: question.questionId as MemberQuestionId,
+      state: question.terminal?.outcome ?? 'pending',
+    })
+    this.scheduleExpiry()
+  }
+
   private async expireDue(): Promise<void> {
     const now = this.clock()
     for (const question of this.state.questions) {
@@ -783,6 +879,9 @@ function resolveConfig(config: Config): Config {
   }
   if (config.clock !== undefined && typeof config.clock !== 'function') {
     throw new TypeError('member-question-receiver: config.clock must be a function')
+  }
+  if (config.materializer !== undefined && typeof config.materializer !== 'function') {
+    throw new TypeError('member-question-receiver: config.materializer must be a function')
   }
   if (config.admitter !== undefined && typeof config.admitter !== 'function') {
     throw new TypeError('member-question-receiver: config.admitter must be a function')

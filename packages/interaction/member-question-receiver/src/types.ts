@@ -41,7 +41,7 @@ export interface PendingMemberQuestionView {
   readonly arrivedAt: number
   /** Bounded authenticated member-question operation. */
   readonly operation: CompanionMemberQuestionOperation
-  /** Ordinary Host Session identity after the first explicit human admission. */
+  /** Ordinary Host Session identity after authenticated arrival materializes the Session. */
   readonly hostSessionId?: HostSessionId
   /** Durable retry identity while a human-turn admission remains reserved. */
   readonly reservedAdmission?: {
@@ -229,11 +229,31 @@ export interface MemberQuestionWorkspaceBinding {
 }
 
 /**
- * High-level Host adapter that materializes the receiving Session if needed
- * and admits the human turn atomically under `rpcId` idempotency.
+ * High-level Host adapter that admits one explicit human turn under `rpcId`
+ * idempotency after the receiving Session already exists.
  */
 export type MemberQuestionHumanTurnAdmitter = (
   input: AdmitMemberQuestionHumanTurnInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/** One authenticated arrival that must materialize or continue a Host Session. */
+export interface MaterializeMemberQuestionSessionInput {
+  /** Host-owned receiving thread to create or continue. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Durable receiver revision that published this arrival. */
+  readonly revision: number
+  /** Authenticated question identity being recorded. */
+  readonly questionId: MemberQuestionId
+}
+
+/**
+ * High-level Host adapter that creates the receiving Session, attaches the
+ * invitation-bound Workspace, and injects bounded Decision Brief context
+ * without starting a model turn.
+ */
+export type MemberQuestionSessionMaterializer = (
+  input: MaterializeMemberQuestionSessionInput,
   context: MemberQuestionHumanTurnAdmissionContext,
 ) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
 

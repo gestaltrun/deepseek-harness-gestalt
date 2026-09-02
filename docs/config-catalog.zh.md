@@ -1628,7 +1628,9 @@ export interface MemberQuestionReceiverConfig {
   readonly terminalAuthorityMode?: 'deferred' | 'development-local'
   /** Authoritative wall clock; production uses Date.now. */
   readonly clock?: () => number
-  /** High-level materialize-and-admit adapter; absent keeps human turns fail-closed. */
+  /** High-level arrival adapter; absent keeps Host Session creation fail-closed. */
+  readonly materializer?: MemberQuestionSessionMaterializer
+  /** High-level human-turn adapter; absent keeps human turns fail-closed. */
   readonly admitter?: MemberQuestionHumanTurnAdmitter
   /** Injectable expiry scheduler; production uses platform timers. */
   readonly timer?: MemberQuestionReceiverTimer
@@ -1647,8 +1649,18 @@ export interface MemberQuestionTerminalAuthority {
 }
 
 /**
- * High-level Host adapter that materializes the receiving Session if needed
- * and admits the human turn atomically under `rpcId` idempotency.
+ * High-level Host adapter that creates the receiving Session, attaches the
+ * invitation-bound Workspace, and injects bounded Decision Brief context
+ * without starting a model turn.
+ */
+export type MemberQuestionSessionMaterializer = (
+  input: MaterializeMemberQuestionSessionInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/**
+ * High-level Host adapter that admits one explicit human turn under `rpcId`
+ * idempotency after the receiving Session already exists.
  */
 export type MemberQuestionHumanTurnAdmitter = (
   input: AdmitMemberQuestionHumanTurnInput,
@@ -1672,18 +1684,14 @@ export interface MemberQuestionTerminalClaim {
   readonly terminal: CompanionMemberQuestionSettledResult
 }
 
-/** One explicit human turn addressed to a receiving Session. */
-export interface AdmitMemberQuestionHumanTurnInput {
-  /** Host-owned receiving thread to materialize or continue. */
+/** One authenticated arrival that must materialize or continue a Host Session. */
+export interface MaterializeMemberQuestionSessionInput {
+  /** Host-owned receiving thread to create or continue. */
   readonly receivingSessionId: ReceivingSessionId
-  /** Exact receiving-thread revision the human observed. */
+  /** Durable receiver revision that published this arrival. */
   readonly revision: number
-  /** Stable idempotency identity retained across retries. */
-  readonly rpcId: MemberQuestionReceiverRpcId
-  /** Human-authored content retained durably for crash-safe admission replay. */
-  readonly content: readonly MemberQuestionHumanTurnContent[]
-  /** Ordinary Host queue or steering admission mode. */
-  readonly mode: 'queue' | 'steer'
+  /** Authenticated question identity being recorded. */
+  readonly questionId: MemberQuestionId
 }
 
 /** Durable receiver facts needed by one Host materialize-and-admit operation. */
@@ -1704,14 +1712,22 @@ interface MemberQuestionHumanTurnAdmissionReceipt {
   readonly accepted: true
 }
 
+/** One explicit human turn addressed to a receiving Session. */
+export interface AdmitMemberQuestionHumanTurnInput {
+  /** Host-owned receiving thread to materialize or continue. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Exact receiving-thread revision the human observed. */
+  readonly revision: number
+  /** Stable idempotency identity retained across retries. */
+  readonly rpcId: MemberQuestionReceiverRpcId
+  /** Human-authored content retained durably for crash-safe admission replay. */
+  readonly content: readonly MemberQuestionHumanTurnContent[]
+  /** Ordinary Host queue or steering admission mode. */
+  readonly mode: 'queue' | 'steer'
+}
+
 /** Host-owned durable identity of one member-question receiving thread. */
 export type ReceivingSessionId = Branded<'ReceivingSessionId'>
-
-/** Stable caller idempotency identity for one explicit human turn. */
-export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
-
-/** Durable human content handed to the Host Session adapter. */
-export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
 
 /** Pending receiver projection retained without referenced document bodies. */
 export interface PendingMemberQuestionView {
@@ -1727,7 +1743,7 @@ export interface PendingMemberQuestionView {
   readonly arrivedAt: number
   /** Bounded authenticated member-question operation. */
   readonly operation: CompanionMemberQuestionOperation
-  /** Ordinary Host Session identity after the first explicit human admission. */
+  /** Ordinary Host Session identity after authenticated arrival materializes the Session. */
   readonly hostSessionId?: HostSessionId
   /** Durable retry identity while a human-turn admission remains reserved. */
   readonly reservedAdmission?: {
@@ -1749,6 +1765,12 @@ export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionVi
   }
 }
 
+/** Stable caller idempotency identity for one explicit human turn. */
+export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
+
+/** Durable human content handed to the Host Session adapter. */
+export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
+
 /** Human-authored text handed to the future Host Session adapter. */
 interface MemberQuestionHumanTextContent {
   /** Content discriminant. */
@@ -1768,7 +1790,7 @@ interface MemberQuestionHumanImageContent {
 
 Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md) · [`HostSessionId`](subsystems/core.zh.md) · [`ImageAttachmentRef`](subsystems/attachment.zh.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.zh.md) · [`ProjectId`](subsystems/project-membership.zh.md)
 
-Source: [`packages/interaction/member-question-receiver/src/index.ts:100`](../packages/interaction/member-question-receiver/src/index.ts)
+Source: [`packages/interaction/member-question-receiver/src/index.ts:105`](../packages/interaction/member-question-receiver/src/index.ts)
 
 <a id="deepseek-aidsh-member-question-sender"></a>
 

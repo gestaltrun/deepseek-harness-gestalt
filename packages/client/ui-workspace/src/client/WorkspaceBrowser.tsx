@@ -292,13 +292,24 @@ function SessionTree({
     () => ungroupedSessionIds.filter(id => list.byId[id]?.pendingInteraction !== undefined),
     [list, ungroupedSessionIds],
   )
-  const observedPendingUngrouped = useRef(new Set<SessionId>())
+  const pendingWorkspaceKeys = useMemo(() => {
+    const keys: string[] = []
+    for (const workspace of workspaces) {
+      if (workspace.sessionIds.some(id => list.byId[id]?.pendingInteraction !== undefined)) {
+        keys.push(workspace.workspaceId as string)
+      }
+    }
+    if (pendingUngroupedSessionIds.length > 0) keys.push(UNGROUPED_KEY)
+    return keys
+  }, [list, pendingUngroupedSessionIds, workspaces])
+  const observedPendingGroups = useRef(new Set<string>())
   useEffect(() => {
-    const next = new Set(pendingUngroupedSessionIds)
-    const arrived = pendingUngroupedSessionIds.some(id => !observedPendingUngrouped.current.has(id))
-    observedPendingUngrouped.current = next
-    if (arrived) setGroupExpanded(UNGROUPED_KEY, true)
-  }, [pendingUngroupedSessionIds, setGroupExpanded])
+    const next = new Set(pendingWorkspaceKeys)
+    for (const key of pendingWorkspaceKeys) {
+      if (!observedPendingGroups.current.has(key)) setGroupExpanded(key, true)
+    }
+    observedPendingGroups.current = next
+  }, [pendingWorkspaceKeys, setGroupExpanded])
   useEffect(() => {
     if (list.phase !== 'ready') return
     const switchedToUpdated = previousOrderBy.current !== 'updated' && orderBy === 'updated'

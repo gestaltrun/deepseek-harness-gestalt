@@ -59,10 +59,13 @@ describe('member-question receiving keyless assembled snapshot', () => {
           references: [{ path: 'docs/receiver-decision.md', reason: 'Lists the rollout constraints' }],
         },
       })
+      const sessionAfterArrival = scaffold.ctx.sessions.get(arrived.receivingSessionId as never)
+      if (sessionAfterArrival === undefined) throw new Error('member-question snapshot: Host Session was not materialized on arrival')
       const arrival = {
         sessionCount: scaffold.ctx.sessions.list().length,
-        requestCount: scaffold.ctx.sessions.list().flatMap(session =>
-          session.events.filter(event => event.type === 'request/header')).length,
+        requestCount: sessionAfterArrival.events.filter(event => event.type === 'request/header').length,
+        receivedCount: sessionAfterArrival.events.filter(event => event.type === 'member-question/received').length,
+        attached: workspace.sessionIds.includes(arrived.receivingSessionId as never),
       }
 
       await receiver.admitHumanTurn({

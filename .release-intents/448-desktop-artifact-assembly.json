@@ -1,0 +1,20 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "448-desktop-artifact-assembly",
+  "summary": {
+    "en": "Assemble the signed Desktop candidate from exactly its three required pack artifacts.",
+    "zh": "仅使用桌面端所需的三个打包产物组装签名候选。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The publish condition only promotes the already signed and candidate-bound APK after either mutually exclusive evidence path; it does not change the Mobile binary or runtime behavior."
+    }
+  ]
+}

@@ -674,6 +674,26 @@ describe('PlatformAccount', () => {
     })).rejects.toMatchObject({ code: 'SESSION_EXPIRED' })
   })
 
+  it('accepts ordinary mobile clock skew while retaining single-use proof enforcement', async () => {
+    let now = NOW
+    const harness = accountHarness({ clock: { now: () => now } })
+    const { key, session } = await login(harness.first)
+    const binding = hashAccountToken(session.accessToken)
+    const behind = key.proof('current', binding, NOW - 3 * 60 * 1000)
+
+    await expect(harness.first.current({ accessToken: session.accessToken, proof: behind }))
+      .resolves.toMatchObject({ githubLogin: 'octocat' })
+    await expect(harness.first.current({ accessToken: session.accessToken, proof: behind }))
+      .rejects.toMatchObject({ code: 'PROOF_REPLAYED' })
+
+    const ahead = key.proof('current', binding, NOW + 3 * 60 * 1000)
+    await expect(harness.first.current({ accessToken: session.accessToken, proof: ahead }))
+      .resolves.toMatchObject({ githubLogin: 'octocat' })
+    now = NOW + 5 * 60 * 1000 + 1
+    await expect(harness.first.current({ accessToken: session.accessToken, proof: ahead }))
+      .rejects.toMatchObject({ code: 'PROOF_REPLAYED' })
+  })
+
   it('handles backend compare-and-mutate failures, proof pruning, and bus disposal', async () => {
     const backend = new MemoryAccountBackend(ENVIRONMENT.databaseIdentity)
     const missingAttempt = 'missing-attempt' as LoginAttemptId

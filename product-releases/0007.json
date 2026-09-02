@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sequence": 7,
+  "intentIds": [
+    "507-windows-atomic-replace"
+  ],
+  "summaries": [
+    {
+      "en": "Retry transient Windows access errors while atomically saving Desktop account and other file-backed state.",
+      "zh": "原子保存 Desktop 账号及其他文件型状态时，重试 Windows 瞬时访问错误。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": true,
+      "previousVersion": "0.1.11",
+      "version": "0.1.12",
+      "tag": "gestalt-v0.1.12",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Retry transient Windows access errors while atomically saving Desktop account and other file-backed state.",
+          "zh": "原子保存 Desktop 账号及其他文件型状态时，重试 Windows 瞬时访问错误。"
+        }
+      ]
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.2"
+    }
+  }
+}

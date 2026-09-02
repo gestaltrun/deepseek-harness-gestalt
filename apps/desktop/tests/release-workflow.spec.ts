@@ -70,6 +70,20 @@ describe('Desktop release workflow', () => {
     expect(workflow).not.toContain('dist/**/*')
   })
 
+  it('assembles candidate evidence from sequential named Desktop artifacts', () => {
+    const downloads = steps('candidate-evidence').filter(step => step.uses === 'actions/download-artifact@v4')
+    expect(downloads.map(step => record(step.with).name)).toEqual([
+      'gestalt-mac-arm64',
+      'gestalt-mac-x64',
+      'gestalt-win-x64',
+    ])
+    expect(downloads.map(step => record(step.with).path)).toEqual([
+      'dist/gestalt-mac-arm64',
+      'dist/gestalt-mac-x64',
+      'dist/gestalt-win-x64',
+    ])
+  })
+
   it('projects the deployment Platform identity into every packaged artifact', () => {
     expect(workflow.match(/Project operated Platform identity/g)).toHaveLength(2)
     expect(workflow.match(/write-operated-platform-config\.mjs/g)).toHaveLength(2)

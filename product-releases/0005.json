@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sequence": 5,
+  "intentIds": [
+    "499-alb-relay-idle-timeout"
+  ],
+  "summaries": [
+    {
+      "en": "Reject production ALB listeners whose idle timeout is shorter than the authenticated Relay liveness window.",
+      "zh": "拒绝空闲超时短于已鉴别 Relay 存活窗口的生产 ALB listener。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": false,
+      "version": "0.1.11"
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": true,
+      "previousVersion": "0.1.1",
+      "version": "0.1.2",
+      "tag": "platform-v0.1.2",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Reject production ALB listeners whose idle timeout is shorter than the authenticated Relay liveness window.",
+          "zh": "拒绝空闲超时短于已鉴别 Relay 存活窗口的生产 ALB listener。"
+        }
+      ]
+    }
+  }
+}

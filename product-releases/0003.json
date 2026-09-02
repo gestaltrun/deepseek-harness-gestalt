@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "sequence": 3,
+  "intentIds": [
+    "475-mobile-webview-compatibility"
+  ],
+  "summaries": [
+    {
+      "en": "Render the Mobile application on Android System WebView 83 while preserving cryptographic identifiers and visible startup failures.",
+      "zh": "让移动应用可在 Android System WebView 83 上渲染，同时保留密码学标识符与可见的启动错误。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": false,
+      "version": "0.1.11"
+    },
+    "mobile": {
+      "selected": true,
+      "previousVersion": "0.1.1",
+      "version": "0.1.2",
+      "tag": "mobile-v0.1.2",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Render the Mobile application on Android System WebView 83 while preserving cryptographic identifiers and visible startup failures.",
+          "zh": "让移动应用可在 Android System WebView 83 上渲染，同时保留密码学标识符与可见的启动错误。"
+        }
+      ],
+      "buildNumber": 7
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.1"
+    }
+  }
+}

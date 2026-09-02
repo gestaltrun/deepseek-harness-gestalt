@@ -405,9 +405,21 @@ jobs:
         with:
           ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v4
         with:
-          path: dist
+          name: gestalt-mac-arm64
+          path: dist/gestalt-mac-arm64
+      - name: Download macOS x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gestalt-mac-x64
+          path: dist/gestalt-mac-x64
+      - name: Download Windows x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gestalt-win-x64
+          path: dist/gestalt-win-x64
       - name: Assemble signed-candidate manifest
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}

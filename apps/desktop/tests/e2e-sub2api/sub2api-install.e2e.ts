@@ -6,10 +6,11 @@ import {
   connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput, fillTopAccountDialogProviderCredential,
   gatewayModelIds, gatewayModelProfile, mainWindowSnapshot,
   openProviderEditor,
-  openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
+  openSettings, overlayAccountConsoleSnapshot, overlayAccountWorkspaceLayout,
   overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
   providerModelIds, providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, syncRealProviderAccount,
-  topAccountDialogButtonEnabled, verifyCompositeModelRoute, waitForSessionSurface,
+  topAccountDialogButtonEnabled, verifyCompositeModelRoute, waitForAccountConsoleText, waitForSessionSurface,
+  waitForTopAccountDialog,
 } from './helpers.ts'
 
 async function disableAndReEnable(cycle: number): Promise<void> {
@@ -31,10 +32,11 @@ async function disableAndReEnable(cycle: number): Promise<void> {
   const reenabled = await sub2apiSnapshot()
   if (reenabled?.state === 'error') throw new Error(`Sub2API cycle ${String(cycle)} re-enable failed: ${String(reenabled.error)}`)
   expect(reenabled).toMatchObject({ state: 'running', enabled: true })
-  await browser.waitUntil(async () => /添加账号|Create Account/u.test((await overlayAccountConsoleSnapshot()).text), {
-    timeout: 60_000,
-    timeoutMsg: `Native Sub2API account workspace did not return after re-enable cycle ${String(cycle)}`,
-  })
+  await waitForAccountConsoleText(
+    /添加账号|Create Account/u,
+    `Native Sub2API account workspace did not return after re-enable cycle ${String(cycle)}`,
+    60_000,
+  )
   await recordOwnedProcesses()
 }
 
@@ -61,10 +63,11 @@ describe('Sub2API Desktop installation', () => {
     const snapshot = await sub2apiSnapshot()
     if (snapshot?.state === 'error') throw new Error(`Sub2API startup failed: ${String(snapshot.error)}`)
     expect(snapshot).toMatchObject({ state: 'running', enabled: true })
-    await browser.waitUntil(async () => /添加账号|Create Account/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 60_000,
-      timeoutMsg: 'Settings did not render the native Sub2API account workspace by default',
-    })
+    await waitForAccountConsoleText(
+      /添加账号|Create Account/u,
+      'Settings did not render the native Sub2API account workspace by default',
+      60_000,
+    )
     await recordOwnedProcesses()
 
     await disableAndReEnable(1)
@@ -89,17 +92,18 @@ describe('Sub2API Desktop installation', () => {
       timeoutMsg: 'Native account form did not finish syncing the upstream-supported model list',
     })
     await clickTopAccountDialogButton(['创建', 'Create'])
-    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(accountName), {
-      timeout: 60_000,
-      timeoutMsg: 'Embedded account form did not save the real provider account',
-    })
+    await waitForAccountConsoleText(
+      accountName,
+      'Embedded account form did not save the real provider account',
+      60_000,
+    )
     const { targetModel, supportedModels } = await syncRealProviderAccount(hostOrigin, accountName)
 
     await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
-    await browser.waitUntil(async () => /已保存路由|Saved Routes/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 15_000,
-      timeoutMsg: 'Composite route dialog did not open inside the account workspace',
-    })
+    await waitForAccountConsoleText(
+      /已保存路由|Saved Routes/u,
+      'Composite route dialog did not open inside the account workspace',
+    )
     await fillTopAccountDialogInput(['公开模型', 'Public Model'], targetModel)
     await clickAccountConsoleFieldSelector(['端点', 'Endpoint'])
     await clickAccountConsoleOption(['Chat Completions'])
@@ -107,10 +111,10 @@ describe('Sub2API Desktop installation', () => {
     await clickAccountConsoleOption(['Zhipu GLM'])
     await fillTopAccountDialogInput(['上游模型', 'Upstream Model'], targetModel)
     await clickTopAccountDialogButton(['创建', 'Create'])
-    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(targetModel), {
-      timeout: 15_000,
-      timeoutMsg: 'Embedded Composite form did not save the real model route',
-    })
+    await waitForAccountConsoleText(
+      targetModel,
+      'Embedded Composite form did not save the real model route',
+    )
     await verifyCompositeModelRoute(hostOrigin, targetModel)
     await clickTopAccountDialogButton(['关闭', 'Close'])
 
@@ -173,11 +177,11 @@ describe('Sub2API Desktop installation', () => {
     }
 
     await clickOverlayButton(['账号池', 'Account pool'])
-    await browser.waitUntil(async () => /添加账号|Create Account/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 30_000,
-      interval: 500,
-      timeoutMsg: 'Native account workspace did not finish rendering after returning from provider settings',
-    })
+    await waitForAccountConsoleText(
+      /添加账号|Create Account/u,
+      'Native account workspace did not finish rendering after returning from provider settings',
+      30_000,
+    )
     const consoleWindow = await overlayAccountConsoleSnapshot()
     // The sidecar shim loads through the host prefix. The upstream router may
     // retain that route or expose its absolute-base inner route after boot.
@@ -220,41 +224,28 @@ describe('Sub2API Desktop installation', () => {
     expect((layout.tableClientHeight ?? 0) + 1).toBeGreaterThanOrEqual(layout.tableScrollHeight ?? 1)
 
     await clickAccountConsoleButton(['添加账号', 'Create Account'])
-    await browser.waitUntil(async () => /代理|Proxy/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 15_000,
-      timeoutMsg: 'Native add-account dialog did not open',
-    })
+    await waitForAccountConsoleText(/代理|Proxy/u, 'Native add-account dialog did not open')
     expect((await overlayAccountConsoleSnapshot()).text).not.toMatch(
       /池模式|Pool Mode|账号计费倍率|Billing Rate Multiplier|自动探测上游声明倍率|Automatically probe upstream declared rate|配额控制|Quota Control/u,
     )
     await clickTopAccountDialogButton(['Anthropic'])
     await clickAccountConsoleButton(['下一步', 'Next'])
-    await browser.waitUntil(async () => /代理|Proxy/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 15_000,
-      timeoutMsg: 'Native account flow did not reach the authorization form',
-    })
+    await waitForAccountConsoleText(/代理|Proxy/u, 'Native account flow did not reach the authorization form')
     await clickAccountConsoleFieldSelector(['代理', 'Proxy'])
-    await browser.waitUntil(async () => /代理管理|Proxy Management|IP管理|IP Management/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 15_000,
-      timeoutMsg: 'Proxy selector did not expose the integrated IP management entry',
-    })
+    await waitForAccountConsoleText(
+      /代理管理|Proxy Management|IP管理|IP Management/u,
+      'Proxy selector did not expose the integrated IP management entry',
+    )
     await clickAccountConsoleSelector('.select-manage')
-    await browser.waitUntil(async () => /添加代理|Create Proxy/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 15_000,
-      timeoutMsg: 'Integrated IP management did not open inside the account form',
-    })
+    await waitForAccountConsoleText(
+      /添加代理|Create Proxy/u,
+      'Integrated IP management did not open inside the account form',
+    )
     await clickAccountConsoleButton(['添加代理', 'Create Proxy'])
-    await browser.waitUntil(async () => {
-      const dialogs = await overlayAccountDialogStack()
-      return dialogs.some(dialog =>
-        /添加代理|Create Proxy/u.test(dialog.text) && dialog.ownsCenter)
-    }, {
-      timeout: 15_000,
-      timeoutMsg: 'Create Proxy dialog did not become the topmost integrated IP-management surface',
-    })
-    const dialogStack = await overlayAccountDialogStack()
-    const createProxyDialog = dialogStack.find(dialog =>
-      /添加代理|Create Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    const createProxyDialog = await waitForTopAccountDialog(
+      ['添加代理', 'Create Proxy'],
+      'Create Proxy dialog did not become the topmost integrated IP-management surface',
+    )
     expect(createProxyDialog?.zIndex).toBe('80')
 
     const proxyName = 'dsh-e2e-proxy'
@@ -262,34 +253,21 @@ describe('Sub2API Desktop installation', () => {
     await fillTopAccountDialogInput(['主机', 'Host'], '127.0.0.1')
     await fillTopAccountDialogInput(['端口', 'Port'], '9')
     await clickTopAccountDialogButton(['创建', 'Create'])
-    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes(proxyName), {
-      timeout: 15_000,
-      timeoutMsg: 'New proxy did not appear in integrated IP management',
-    })
+    await waitForAccountConsoleText(proxyName, 'New proxy did not appear in integrated IP management')
 
     await clickAccountConsoleRowAction(proxyName, ['编辑', 'Edit'])
-    await browser.waitUntil(async () => {
-      const dialogs = await overlayAccountDialogStack()
-      return dialogs.some(dialog => /编辑代理|Edit Proxy/u.test(dialog.text) && dialog.ownsCenter)
-    }, {
-      timeout: 15_000,
-      timeoutMsg: 'Edit Proxy dialog did not become the topmost integrated IP-management surface',
-    })
-    const editProxyDialog = (await overlayAccountDialogStack()).find(dialog =>
-      /编辑代理|Edit Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    const editProxyDialog = await waitForTopAccountDialog(
+      ['编辑代理', 'Edit Proxy'],
+      'Edit Proxy dialog did not become the topmost integrated IP-management surface',
+    )
     expect(editProxyDialog?.zIndex).toBe('80')
     await clickTopAccountDialogButton(['取消', 'Cancel'])
 
     await clickAccountConsoleRowAction(proxyName, ['删除', 'Delete'])
-    await browser.waitUntil(async () => {
-      const dialogs = await overlayAccountDialogStack()
-      return dialogs.some(dialog => /删除代理|Delete Proxy/u.test(dialog.text) && dialog.ownsCenter)
-    }, {
-      timeout: 15_000,
-      timeoutMsg: 'Delete Proxy confirmation did not become the topmost integrated IP-management surface',
-    })
-    const deleteProxyDialog = (await overlayAccountDialogStack()).find(dialog =>
-      /删除代理|Delete Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    const deleteProxyDialog = await waitForTopAccountDialog(
+      ['删除代理', 'Delete Proxy'],
+      'Delete Proxy confirmation did not become the topmost integrated IP-management surface',
+    )
     expect(deleteProxyDialog?.zIndex).toBe('80')
     await clickTopAccountDialogButton(['取消', 'Cancel'])
 

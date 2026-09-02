@@ -60,6 +60,11 @@ export interface ProviderModelProfileSnapshot {
   readonly defaultReasoningLevel: string | undefined
 }
 
+type TopAccountDialogAction =
+  | { readonly kind: 'button-enabled'; readonly labels: readonly string[] }
+  | { readonly kind: 'click-button'; readonly labels: readonly string[] }
+  | { readonly kind: 'fill-input'; readonly labels: readonly string[]; readonly value: string }
+
 function requiredEnv(name: string): string {
   const value = process.env[name]
   if (value === undefined || value.length === 0) throw new Error(`${name} is required`)
@@ -256,6 +261,18 @@ export async function overlayAccountConsoleSnapshot(): Promise<MainWindowSnapsho
   })
 }
 
+/** Wait until the embedded account workspace contains one expected label. */
+export async function waitForAccountConsoleText(
+  expected: string | RegExp,
+  timeoutMsg: string,
+  timeout = 15_000,
+): Promise<void> {
+  await browser.waitUntil(async () => {
+    const text = (await overlayAccountConsoleSnapshot()).text
+    return typeof expected === 'string' ? text.includes(expected) : expected.test(text)
+  }, { timeout, interval: 500, timeoutMsg })
+}
+
 /** Read the visible account table contract from the embedded native workspace. */
 export async function overlayAccountWorkspaceUi(): Promise<AccountWorkspaceUiSnapshot> {
   await switchToDesktopOverlay()
@@ -392,6 +409,22 @@ export async function overlayAccountDialogStack(): Promise<readonly AccountDialo
   })
 }
 
+/** Wait for one visible native dialog to own the account-workspace viewport. */
+export async function waitForTopAccountDialog(
+  labels: readonly string[],
+  timeoutMsg: string,
+): Promise<AccountDialogSnapshot> {
+  await browser.waitUntil(async () => (await overlayAccountDialogStack()).some(dialog =>
+    dialog.ownsCenter && labels.some(label => dialog.text.includes(label))), {
+    timeout: 15_000,
+    timeoutMsg,
+  })
+  const dialog = (await overlayAccountDialogStack()).find(candidate =>
+    candidate.ownsCenter && labels.some(label => candidate.text.includes(label)))
+  if (dialog === undefined) throw new Error(timeoutMsg)
+  return dialog
+}
+
 /** Click a bilingual button inside the native Sub2API account workspace. */
 export async function clickAccountConsoleButton(labels: readonly string[]): Promise<void> {
   await switchToDesktopOverlay()
@@ -408,53 +441,24 @@ export async function clickAccountConsoleButton(labels: readonly string[]): Prom
 
 /** Click a bilingual button in the topmost visible native account-workspace dialog. */
 export async function clickTopAccountDialogButton(labels: readonly string[]): Promise<void> {
-  await switchToDesktopOverlay()
-  const clicked = await browser.execute((buttonLabels: readonly string[]) => {
-    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
-    const content = frame?.contentDocument
-    if (content === null || content === undefined) return false
-    const dialogs = [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
-      .filter((dialog) => {
-        const style = getComputedStyle(dialog)
-        return dialog.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
-      })
-      .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
-        - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
-    const top = dialogs.at(-1)
-    const button = [...(top?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(element =>
-      element.offsetParent !== null && buttonLabels.some(label => element.textContent?.includes(label)))
-    if (button === undefined) return false
-    button.click()
-    return true
-  }, labels)
+  const clicked = await runTopAccountDialogAction({ kind: 'click-button', labels })
   if (!clicked) throw new Error(`Top Sub2API dialog has no button matching ${labels.join(' / ')}`)
 }
 
 /** Whether the topmost native account dialog exposes one enabled button. */
 export async function topAccountDialogButtonEnabled(labels: readonly string[]): Promise<boolean> {
-  await switchToDesktopOverlay()
-  return await browser.execute((buttonLabels: readonly string[]) => {
-    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
-    const content = frame?.contentDocument
-    if (content === null || content === undefined) return false
-    const dialogs = [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
-      .filter((dialog) => {
-        const style = getComputedStyle(dialog)
-        return dialog.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
-      })
-      .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
-        - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
-    return [...(dialogs.at(-1)?.querySelectorAll<HTMLButtonElement>('button') ?? [])].some(button =>
-      button.offsetParent !== null
-        && !button.disabled
-        && buttonLabels.some(label => button.textContent?.includes(label)))
-  }, labels)
+  return await runTopAccountDialogAction({ kind: 'button-enabled', labels })
 }
 
 /** Fill one labelled input in the topmost visible native account-workspace dialog. */
 export async function fillTopAccountDialogInput(labels: readonly string[], value: string): Promise<void> {
+  const filled = await runTopAccountDialogAction({ kind: 'fill-input', labels, value })
+  if (!filled) throw new Error(`Top Sub2API dialog has no input matching ${labels.join(' / ')}`)
+}
+
+async function runTopAccountDialogAction(action: TopAccountDialogAction): Promise<boolean> {
   await switchToDesktopOverlay()
-  const filled = await browser.execute((fieldLabels: readonly string[], nextValue: string) => {
+  return await browser.execute((operation: TopAccountDialogAction) => {
     const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
     const content = frame?.contentDocument
     if (content === null || content === undefined) return false
@@ -466,16 +470,23 @@ export async function fillTopAccountDialogInput(labels: readonly string[], value
       .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
         - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
     const top = dialogs.at(-1)
-    const label = [...(top?.querySelectorAll<HTMLLabelElement>('label') ?? [])]
-      .find(element => fieldLabels.some(text => element.textContent?.includes(text)))
-    const input = label?.parentElement?.querySelector<HTMLInputElement>('input')
-    if (input === null || input === undefined) return false
-    input.value = nextValue
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-    input.dispatchEvent(new Event('change', { bubbles: true }))
+    if (operation.kind === 'fill-input') {
+      const label = [...(top?.querySelectorAll<HTMLLabelElement>('label') ?? [])]
+        .find(element => operation.labels.some(text => element.textContent?.includes(text)))
+      const input = label?.parentElement?.querySelector<HTMLInputElement>('input')
+      if (input === null || input === undefined) return false
+      input.value = operation.value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }
+    const button = [...(top?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(element =>
+      element.offsetParent !== null && operation.labels.some(label => element.textContent?.includes(label)))
+    if (button === undefined) return false
+    if (operation.kind === 'button-enabled') return !button.disabled
+    button.click()
     return true
-  }, labels, value)
-  if (!filled) throw new Error(`Top Sub2API dialog has no input matching ${labels.join(' / ')}`)
+  }, action)
 }
 
 /** Click one row action in the native proxy table by proxy identity and bilingual action label. */
@@ -683,11 +694,7 @@ export async function syncRealProviderAccount(
 
 /** Read every model id from the current Sub2API provider settings profile. */
 export async function providerModelIds(): Promise<string[]> {
-  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
-  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
-  const models = record(providers?.['sub2api'])?.['models']
-  if (!Array.isArray(models)) return []
-  return models.map(record)
+  return (await providerModels())
     .map(model => model?.['id'])
     .filter((id): id is string => typeof id === 'string')
     .sort()
@@ -724,12 +731,7 @@ export async function verifyCompositeModelRoute(hostOrigin: string, targetModel:
 
 /** Read one live Sub2API model entry from the settings document the sidecar writes. */
 export async function providerModelProfile(modelId: string): Promise<ProviderModelProfileSnapshot | undefined> {
-  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
-  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
-  const profile = record(providers?.['sub2api'])
-  const models = profile?.['models']
-  if (!Array.isArray(models)) return undefined
-  const model = models.map(record).find(candidate => candidate?.['id'] === modelId)
+  const model = (await providerModels()).find(candidate => candidate?.['id'] === modelId)
   if (model === undefined) return undefined
   const reasoningEfforts = model['reasoningEfforts']
   return {
@@ -750,23 +752,7 @@ export async function providerModelProfile(modelId: string): Promise<ProviderMod
 
 /** Read one model directly from the release-backed Sub2API gateway. */
 export async function gatewayModelProfile(modelId: string): Promise<ProviderModelProfileSnapshot | undefined> {
-  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
-  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
-  const profile = record(providers?.['sub2api'])
-  const baseURL = profile?.['baseURL']
-  const apiKeyEnv = profile?.['apiKeyEnv']
-  if (typeof baseURL !== 'string' || typeof apiKeyEnv !== 'string') return undefined
-  const credentials = record(load(await readFile(join(requiredEnv('DSH_HOME'), '.credentials.yaml'), 'utf8')))
-  const apiKey = record(credentials?.['refs'])?.[apiKeyEnv]
-  if (typeof apiKey !== 'string' || apiKey.length === 0) return undefined
-  const response = await fetch(`${baseURL}/models`, {
-    headers: { authorization: `Bearer ${apiKey}` },
-  })
-  if (!response.ok) return undefined
-  const payload = record(await response.json())
-  const data = payload?.['data']
-  if (!Array.isArray(data)) return undefined
-  const model = data.map(record).find(candidate => candidate?.['id'] === modelId)
+  const model = (await gatewayModels()).find(candidate => candidate?.['id'] === modelId)
   if (model === undefined) return undefined
   const reasoningLevels = Array.isArray(model['supported_reasoning_levels'])
     ? model['supported_reasoning_levels'].filter((value): value is string => typeof value === 'string')
@@ -792,6 +778,20 @@ export async function gatewayModelProfile(modelId: string): Promise<ProviderMode
 
 /** Read every model id advertised by the release-backed Sub2API gateway. */
 export async function gatewayModelIds(): Promise<string[]> {
+  return (await gatewayModels())
+    .map(model => model?.['id'])
+    .filter((id): id is string => typeof id === 'string')
+    .sort()
+}
+
+async function providerModels(): Promise<Array<Record<string, unknown> | undefined>> {
+  const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
+  const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
+  const models = record(providers?.['sub2api'])?.['models']
+  return Array.isArray(models) ? models.map(record) : []
+}
+
+async function gatewayModels(): Promise<Array<Record<string, unknown> | undefined>> {
   const settings = record(load(await readFile(join(requiredEnv('DSH_HOME'), 'settings.yaml'), 'utf8')))
   const providers = record(record(settings?.['llm-pi-ai'])?.['providers'])
   const profile = record(providers?.['sub2api'])
@@ -804,11 +804,7 @@ export async function gatewayModelIds(): Promise<string[]> {
   const response = await fetch(`${baseURL}/models`, { headers: { authorization: `Bearer ${apiKey}` } })
   if (!response.ok) return []
   const data = record(await response.json())?.['data']
-  if (!Array.isArray(data)) return []
-  return data.map(record)
-    .map(model => model?.['id'])
-    .filter((id): id is string => typeof id === 'string')
-    .sort()
+  return Array.isArray(data) ? data.map(record) : []
 }
 
 /** Connect an empty temporary workspace so the first Session composer unlocks. */

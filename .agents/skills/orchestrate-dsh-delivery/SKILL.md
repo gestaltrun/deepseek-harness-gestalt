@@ -1,45 +1,47 @@
 ---
 name: orchestrate-dsh-delivery
-description: Orchestrate DeepSeek Harness issue and specification delivery from the Gestalt GitHub tracker through isolated implementation, review, CI, and merge. Use by default when the user asks to implement, fix, continue, or land a ticket or specification in this repository, including short requests such as "implement #123" or "continue this spec".
+description: Orchestrate DeepSeek Harness issue and specification delivery from the Gestalt GitHub tracker through isolated ticket writers, a merger subagent, one specification pull request, a retro gate, and merge. Use by default when the user asks to implement, fix, continue, or land a ticket or specification in this repository, including short requests such as "implement #123" or "continue this spec".
 ---
 
 # Orchestrate DSH Delivery
 
-Own the delivery graph from the root task. Treat GitHub Issues, pull requests, checks, and official stacks as durable coordination state. Use Codex tasks and DSH subagents or forks as replaceable executors, not as the source of truth.
+Own the delivery graph from the root task. Treat GitHub Issues, the specification pull request, checks, and remote heads as durable coordination state. Use Codex tasks and DSH subagents or forks as replaceable executors, not as the source of truth. Pull-request cardinality, merger ownership, scratch exploration notes, and the retro gate live in [the spec-PR decision](../../notes/implemented/process/2026-09-02-spec-pr-delivery-and-retro.md). Request authority, isolated writers, GUI evidence, cleanup proofs, and the release stop remain in [the default-orchestration decision](../../notes/implemented/process/2026-08-16-default-ticket-delivery-orchestration.md).
 
 ## Establish authority
 
 1. Read [the tracker contract](../../../docs/agents/issue-tracker.md), [domain routing](../../../docs/agents/domain.md), `CONTEXT-MAP.md`, and the applicable repository instructions and active Agent Notes.
 2. Fetch the complete issue or specification, including comments, labels, acceptance criteria, dependencies, and current pull requests. Resolve ambiguous GitHub numbers as the tracker contract requires.
-3. Interpret a request to implement, fix, continue, or land the work as authorization to create branches and isolated worktrees, edit files, commit, push, open or update pull requests, respond to review, and merge after required evidence passes. An explicit user limit such as "do not push" or "stop before merge" overrides this default.
+3. Interpret a request to implement, fix, continue, or land the work as authorization to create branches and isolated worktrees, edit files, commit, push, open or update the specification pull request, respond to review, and merge after required evidence and the retro gate pass. An explicit user limit such as "do not push" or "stop before merge" overrides this default.
 4. Keep tag creation, GitHub Releases, registry publication, signing, notarization, deployment, and other release mutations behind explicit per-release approval. Ticket delivery does not authorize them.
 
 Complete this phase when the requested outcome, live ticket graph, mutation authority, and release stop point are explicit.
 
-## Establish the delivery baseline
+## Establish the specification branch
 
-1. Before the first workspace write, require a clean checkout, fetch `origin/master`, and create and push one remote `codex/feature-<slug>` baseline from its exact SHA. If work already exists in a dirty checkout, stop new writes, preserve the diff, and migrate it into a clean baseline worktree without moving or cleaning the dirty checkout first.
-2. Keep planning authority on the baseline: confirmed prototype conclusions, specification, Agent Notes, Context documents, and published tickets must be committed and pushed before implementation dispatch. Local conversation history and uncommitted files are not handoff artifacts.
-3. Record the baseline branch and exact remote SHA in every worker handoff. Verify the ticket's accepted requirements and mapped domain sources are readable from that SHA.
-4. Keep one baseline per independently releasable feature or fix. Parallel delivery scopes use separate baselines; extract genuinely shared foundations into their own master-bound delivery instead of copying them between baselines.
+1. Before the first workspace write, require a clean checkout, fetch `origin/master`, and create and push one remote `codex/feature-<slug>` specification branch from its exact SHA. If work already exists in a dirty checkout, stop new writes, preserve the diff, and migrate it into a clean specification worktree without moving or cleaning the dirty checkout first.
+2. Keep planning authority on that branch: confirmed prototype conclusions, specification, Agent Notes, Context documents, and published tickets must be committed and pushed before implementation dispatch. Local conversation history is not a handoff artifact.
+3. Record the specification branch and exact remote SHA in every worker handoff. Verify the ticket's accepted requirements and mapped domain sources are readable from that SHA.
+4. Keep one specification branch per independently releasable feature or fix. Parallel delivery scopes use separate branches; extract genuinely shared foundations into their own master-bound delivery instead of copying them between scopes.
+5. Open or update one Draft pull request from that branch to `master`. It is the only pull request that will close the specification and tickets. Do not open a pull request per ticket.
 
-Complete this phase when the baseline is remotely visible, the planning checkout is clean, and every implementation input is durable at the recorded SHA.
+Complete this phase when the specification branch is remotely visible, the planning checkout is clean, the Draft pull request exists, and every implementation input is durable at the recorded SHA.
 
 ## Build the delivery frontier
 
 1. Decompose only when the source is not already ticketed. Use the Matt specification and ticket skills for product shaping and blocker-first ticket publication; do not rewrite accepted ticket scope during implementation.
-2. Order tickets by live dependency state. A ready frontier contains only tickets whose blockers are merged into the delivery baseline or represented by an intentional official PR stack.
-3. Keep independent tickets as independent pull requests. Use a stack only for a real code dependency, never merely to gain parallelism.
-4. Follow the [runtime-specific executor decision](../../notes/implemented/process/2026-08-27-runtime-specific-delivery-executors.md) for product-shaping work. Do not draw UI or write a scheme in the coordinating session. Under Codex, create an independent Codex Worktree task with a short brief. Under DSH, use `subagent_fork` only when the brief is already written; otherwise dispatch a plain `subagent`. A UI question follows [prototype](../prototype/SKILL.md): fuse interaction variants into the existing page, self-check headless through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md), then open a headed instance only to ask the user to review. A structural question follows [codebase-design/SCHEME.md](../codebase-design/SCHEME.md): write the proposed Agent Note on the planning branch, self-check it, then open a gitignored HTML review pack for the human. Keep prototype code on its own pushed worktree and branch. Implementation tickets adapt that code instead of merging it verbatim; retire the prototype branch once its consuming tickets have landed.
+2. Order tickets by live dependency state. A ready frontier contains only tickets whose blockers are already on the specification branch.
+3. Keep independent tickets as independent writer branches. Stack pull requests only when a leftover dependency still needs GitHub's official stack after this topology cannot express it.
+4. Follow the [runtime-specific executor decision](../../notes/implemented/process/2026-08-27-runtime-specific-delivery-executors.md) for product-shaping work. Do not draw UI or write a scheme in the coordinating session. Under Codex, create an independent Codex Worktree task with a short brief. Under DSH, use `subagent_fork` only when the brief is already written; otherwise dispatch a plain `subagent`. A UI question follows [prototype](../prototype/SKILL.md): fuse interaction variants into the existing page, self-check headless through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md), then open a headed instance only to ask the user to review. A structural question follows [codebase-design/SCHEME.md](../codebase-design/SCHEME.md): write the proposed Agent Note on the specification branch, self-check it, then open a gitignored HTML review pack for the human. Keep prototype code on its own pushed worktree and branch. Implementation tickets adapt that code instead of merging it verbatim; retire the prototype branch once its consuming tickets have landed.
+5. Put exploration notes in a scratch directory outside the repository. Record its absolute path in the gitignored runtime memo so later writers can read it. Do not commit those notes.
 
-Complete this phase when every selected ticket has one base, one acceptance source, and a known dependency position.
+Complete this phase when every selected ticket has one writer branch, one acceptance source, and a known dependency position.
 
 ## Dispatch isolated writers
 
-1. Keep the root task as the sole coordinator and merger. Match the writer executor to the runtime: under Codex, prefer one Codex Worktree task per ready ticket when task/worktree tools are available; under DSH, dispatch one `subagent_fork` writer per ready ticket and use plain `subagent` where conversation inheritance adds nothing. Choose each ticket's model at dispatch by the root's judgment; no role pins a model. On the normal path, every writer commits only inside its own isolated worktree. Assign the project `ticket_worker` role when custom agents are available.
-2. Give each worker exactly one ticket, one `codex/<issue>-<slug>` branch, one worktree, the verified remote baseline branch and SHA, the acceptance criteria, and the required reporting format. Never let two writers mutate the same worktree.
+1. Keep the root task as coordinator and monitor. It does not merge writer branches. Match the writer executor to the runtime: under Codex, prefer one Codex Worktree task per ready ticket when task/worktree tools are available; under DSH, dispatch one `subagent_fork` writer per ready ticket and use plain `subagent` where conversation inheritance adds nothing. Choose each ticket's model at dispatch by the root's judgment; no role pins a model. On the normal path, every writer commits only inside its own isolated worktree. Assign the project `ticket_worker` role when custom agents are available.
+2. Give each worker exactly one ticket, one `codex/<issue>-<slug>` branch, one worktree, the verified remote specification branch and SHA, the scratch exploration path when one exists, the acceptance criteria, and the required reporting format. Never let two writers mutate the same worktree.
 3. Allow read-heavy exploration, log analysis, and review to run as subagents inside a ticket. Keep one writer for that ticket unless every writer has a disjoint worktree and branch.
-4. Route follow-ups and dependency discoveries through the root task. Sibling agents need no direct communication. Record durable cross-ticket facts in the relevant Issue, pull request, Context document, or Agent Note.
+4. Route follow-ups and dependency discoveries through the root task. Sibling agents need no direct communication. Record durable cross-ticket facts in the relevant Issue, the specification pull request, Context document, or Agent Note.
 5. Under Codex, when task creation is unavailable but an isolated worktree can still be created, the root executes tickets sequentially as the sole writer in one dedicated worktree at a time. Keep subagents read-only on this root-writer path. If the active runtime cannot create an isolated worktree, the root executes tickets sequentially as the sole writer in the current checkout, keeps subagents read-only, and reports the reduced isolation.
 
 Complete this phase when every ready ticket has one accountable writer and no mutable checkout has multiple owners.
@@ -57,37 +59,43 @@ Complete this phase when every dispatched task's final state has been observed a
 
 Require each ticket worker to:
 
-1. Fetch the recorded remote baseline, create the ticket branch from its exact SHA, and re-read the ticket and mapped domain sources from that checkout.
-2. Use the Matt [`implement`](../implement/SKILL.md) workflow and TDD at an agreed seam where practical. That skill owns one ticket in the current worktree: red-green at the agreed seam, narrow checks, `code-review`, then commit. Do not run [`implement-spec`](../implement-spec/SKILL.md) as this repository's coordinator. It lands a whole spec on one pull request that closes the spec and tickets; this skill keeps one pull request per ticket, a feature baseline, and closing keywords on the baseline-to-master pull request. Repository instructions and [DSH pre-push checks](../dsh-pre-push-checks/SKILL.md) override the Matt `implement` workflow's generic full-suite advice.
-3. Preserve unrelated worktree changes. Add the required documentation, Agent Note, and real runnable snapshot when their repository rules apply. For a GUI change, prove the flow with a non-recording smoke before review through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md) (headless until the user asks to look) and [ego-browser](../ego-browser/SKILL.md) (one DSH task space per goal); defer GIF recording until the reviewed head is frozen.
-4. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote head.
-5. Open or update a pull request targeting the delivery baseline. Link the ticket with `Refs`, carry canonical labels, explain the behavior and evidence, and leave release work out of scope; the final baseline-to-master pull request owns closing keywords.
-6. Return the branch, commit, pull request, checks run, CI state, review blockers, and any changed dependency to the root task.
+1. Fetch the recorded remote specification branch, create the ticket branch from its exact SHA, and re-read the ticket and mapped domain sources from that checkout. Read scratch exploration notes when the handoff recorded a path.
+2. Use the Matt [`implement`](../implement/SKILL.md) workflow and TDD at an agreed seam where practical. That skill owns one ticket in the current worktree: red-green at the agreed seam, narrow checks, `code-review`, then commit. Repository instructions and [DSH pre-push checks](../dsh-pre-push-checks/SKILL.md) override the Matt `implement` workflow's generic full-suite advice.
+3. Preserve unrelated worktree changes. Add the required documentation, Agent Note, and real runnable snapshot when their repository rules apply. For a GUI change, prove the flow with a non-recording smoke before review through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md) (headless until the user asks to look) and [ego-browser](../ego-browser/SKILL.md) (one DSH task space per goal); defer GIF recording until the reviewed specification head is frozen.
+4. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote ticket head. Do not open a pull request.
+5. Return the branch, commit, checks run, review blockers, scratch notes path, and any changed dependency to the root task.
 
-Complete a worker phase only when the remote pull request represents its full ticket diff and its reported evidence is reproducible.
+Complete a worker phase only when the remote ticket branch represents its full ticket diff and its reported evidence is reproducible.
 
-## Review and land
+## Merge through a merger subagent
 
-1. Before each batch and before a ticket's final evidence sequence, have the root merge-forward current `origin/master` into the delivery baseline once and push it. Each affected worker then merge-forwards the updated remote baseline into its ticket branch, audits semantic conflicts, and republishes the exact head. Sibling workers do not merge master independently.
-2. Run the narrow deterministic checks and any non-recording real smoke needed to prove that the acceptance flow can complete. Drive Desktop smoke through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md) and browser work through [ego-browser](../ego-browser/SKILL.md). Do not spend model calls or capture frames for a final GIF yet.
-3. Review each pull request against both the repository standards and its ticket/specification with `code-review` and `dsh-code-review`; use the project `dsh_reviewer` role when available. Send fixes to the owning worker and repeat the affected checks and review until no code finding remains.
-4. Freeze the exact reviewed head. For a product-user-visible GUI change, record and publish the required GIF from that head with `record-browser-gif`; verify the served revision before the first real-model call or captured frame. Any code change after freezing invalidates the review and recording sequence: merge-forward if needed, re-run affected checks, re-review, freeze the new head, and re-record.
+1. Dispatch a merger subagent, not the root session, to integrate each completed ticket branch into the specification branch. Fast-forward when the histories allow it; otherwise create a merge commit. Push the specification branch and report the new head.
+2. After a successful merge, recompute the ready frontier and dispatch newly unblocked writers.
+3. Before each batch, have the merger subagent merge-forward current `origin/master` into the specification branch once and push it. Affected in-flight writers then merge-forward that updated remote head into their ticket branches, audit semantic conflicts, and republish the exact head. Sibling writers do not merge master independently.
+4. For leftover GitHub-level dependencies that this single pull request cannot express, follow [the official stack workflow](../dsh-merging-stacked-prs/SKILL.md).
+
+Complete this phase when every selected ticket commit is on the specification branch or has a concrete reported merge blocker.
+
+## Review, retro, and land
+
+1. Run the narrow deterministic checks and any non-recording real smoke needed to prove that the acceptance flow can complete. Drive Desktop smoke through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md) and browser work through [ego-browser](../ego-browser/SKILL.md). Do not spend model calls or capture frames for a final GIF yet.
+2. Review the specification pull request against both the repository standards and the specification with `code-review` and `dsh-code-review`; use the project `dsh_reviewer` role when available. Send code fixes to the owning writer, then merge them through the merger subagent, until no code finding remains.
+3. Freeze the exact reviewed specification head. For a product-user-visible GUI change, record and publish the required GIF from that head with `record-browser-gif`; verify the served revision before the first real-model call or captured frame. Any code change after freezing invalidates the review and recording sequence: merge-forward if needed, re-run affected checks, re-review, freeze the new head, and re-record.
+4. Ask each writer session to run [`retro`](../retro/SKILL.md) on its own session. Collect the candidates in the root task, present a synthesized list to the user, and wait for an explicit keep-or-drop decision per item. Land only accepted environment changes on the specification branch through a writer or the root planning checkout, then re-run the affected checks. Do not merge to `master` before that decision.
 5. Wait for required CI and live review state. Re-fetch the exact head, base, unresolved threads, approvals, checks, and mergeability after every rewrite or base change.
-6. Merge an independent pull request into the delivery baseline only after its required local evidence, CI, review, and merge requirements pass. For dependent pull requests, follow [the official stack workflow](../dsh-merging-stacked-prs/SKILL.md) and land blocker-first.
-7. Confirm GitHub reports the ticket pull request as merged, comment its verification evidence without closing the ticket, and recompute the ready frontier.
-8. After every selected ticket is on the baseline, merge-forward current `origin/master`, run the feature-level assembled evidence, and open the reviewed baseline-to-master pull request with all closing keywords. Close tickets only after GitHub reports that final pull request merged into the default branch.
-9. Resume a failed or interrupted worker from GitHub state. Ask the user only for missing credentials, permissions, a material product decision, conflicting official stack metadata, or release authorization.
+6. Mark the specification pull request ready. Its body carries `Closes` for the specification and every delivered ticket. Merge it only after local evidence, CI, review, the retro decision, and merge requirements pass.
+7. Confirm GitHub reports that pull request as merged and its tickets closed. Resume a failed or interrupted worker from GitHub state. Ask the user only for missing credentials, permissions, a material product decision, a retro keep-or-drop, conflicting official stack metadata, or release authorization.
 
-Complete delivery when every selected ticket is merged or has a concrete reported blocker, GitHub reflects the final state, and no release mutation has occurred without approval.
+Complete delivery when every selected ticket is on `master` or has a concrete reported blocker, GitHub reflects the final state, the retro decision is recorded, and no release mutation has occurred without approval.
 
 ## Retire completed work
 
-1. After a ticket pull request lands on the baseline, verify the writer is terminal through the owning runtime's task, subagent, or session state; a root-writer fallback is terminal when its sequential ticket execution has completed. Verify that its exact worktree has no uncommitted files, stash, unpushed commit, or unique commit absent from the remote merged result. Preserve the worktree and report the discrepancy when any check fails.
-2. Archive a terminal Codex task only when that writer created one. Remove only a validated dedicated worktree, retain any shared checkout, delete merged local and remote ticket branches, and run `git worktree prune`. For an official stack, wait until its descendants no longer depend on the branch.
-3. After the baseline-to-master pull request lands and its tickets close, apply the same checks before removing the baseline worktree and branches. Record an explicit retention reason instead when follow-up work still needs them.
+1. After the specification pull request lands, verify each writer is terminal through the owning runtime's task, subagent, or session state; a root-writer fallback is terminal when its sequential ticket execution has completed. Verify that its exact worktree has no uncommitted files, stash, unpushed commit, or unique commit absent from the remote merged result. Preserve the worktree and report the discrepancy when any check fails.
+2. Archive a terminal Codex task only when that writer created one. Remove only a validated dedicated worktree, retain any shared checkout, delete merged local and remote ticket branches and the specification branch, and run `git worktree prune`.
+3. Record an explicit retention reason instead when follow-up work still needs a path or branch. Delete the scratch exploration directory after the user has not asked to keep it.
 
 Complete cleanup when every removed path and branch was exact, merged, clean, and replaceable from GitHub, and every retained artifact has a named owner and reason.
 
 ## Report
 
-Report baseline and ticket branches, merged ticket and final pull requests, checks actually run, cleanup or retention results, unresolved blockers, remaining ready tickets, and the explicit release stop point. After an explicitly authorized Product Release, read its machine-readable manifest and report Desktop, Mobile, and Platform as separate released, skipped, or blocked states; a merged release plan is not publication evidence. If a newly installed skill or project agent is absent from the current task's catalog, ask the user to start one fresh Codex task once; do not require a new task per ticket.
+Report the specification branch and pull request, ticket branches, checks actually run, merger results, retro candidates and user decisions, cleanup or retention results, unresolved blockers, remaining ready tickets, and the explicit release stop point. After an explicitly authorized Product Release, read its machine-readable manifest and report Desktop, Mobile, and Platform as separate released, skipped, or blocked states; a merged release plan is not publication evidence. If a newly installed skill or project agent is absent from the current task's catalog, ask the user to start one fresh Codex task once; do not require a new task per ticket.

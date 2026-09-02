@@ -15,7 +15,7 @@ These third-party workflows are copied into the repository for contributor agent
 
 | Skill | Upstream | Source revision | License | Repository changes |
 | --- | --- | --- | --- | --- |
-| `ego-browser` | [github.com/citrolabs/ego-lite](https://github.com/citrolabs/ego-lite) | [`ego-lite-app-0.4.7.3`](https://github.com/citrolabs/ego-lite) | MIT | resolve and validate the DSH profile for every Task Space operation path; require manual installation through the signed macOS application flow; align GitHub learning manifests with their tool results |
+| `ego-browser` | [github.com/citrolabs/ego-lite](https://github.com/citrolabs/ego-lite) | [`ego-lite-app-0.4.7.3`](https://github.com/citrolabs/ego-lite) | MIT | resolve and validate the DSH profile for every Task Space operation path; require manual installation through the signed macOS application flow; align GitHub learning manifests with their tool results; reuse one DSH task space per user goal through .agents/local/runtime-memo.json |
 | `retro` | [github.com/mattpocock/skills](https://github.com/mattpocock/skills) | [`6654f6b60cd9d5be8b54c6fafe44346dabeb3b76`](https://github.com/mattpocock/skills/tree/6654f6b60cd9d5be8b54c6fafe44346dabeb3b76/skills/in-progress/retro) | MIT | use the Codex skill invocation policy and DeepSeek Harness standards sources |
 | `show-me` | [github.com/humanlayer/skills](https://github.com/humanlayer/skills) | [`3c2629142c5d437428269b1b722b08c0b87f574d`](https://github.com/humanlayer/skills/tree/3c2629142c5d437428269b1b722b08c0b87f574d/plugins/show-me/skills/show-me) | MIT | none |
 | `skill-doctor` | [github.com/warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) | [`59d10d6d0fed69b76c392c7e12f8813a49edd6a2`](https://github.com/warpdotdev/common-skills/tree/59d10d6d0fed69b76c392c7e12f8813a49edd6a2/.agents/skills/skill-doctor) | MIT | render diffs with self-contained HTML instead of a bundled JavaScript dependency; cover Codex and Warp session parsing |
@@ -137,6 +137,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`sharp`](https://github.com/lovell/sharp) | Apache-2.0 |
 | [`shiki`](https://github.com/shikijs/shiki) | MIT |
 | [`supports-color`](https://github.com/chalk/supports-color) | MIT |
+| [`tar`](https://github.com/isaacs/node-tar) | BlueOak-1.0.0 |
 | [`tsx`](https://github.com/privatenumber/tsx) | MIT |
 | [`turndown`](https://github.com/mixmark-io/turndown) | MIT |
 | [`typescript`](https://github.com/microsoft/TypeScript) | Apache-2.0 |
@@ -199,6 +200,14 @@ External packages **directly declared** only by repository tooling, test infrast
 | [`@types/ws`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@vitejs/plugin-react`](https://github.com/vitejs/vite-plugin-react) | MIT |
 | [`@vitest/coverage-v8`](https://github.com/vitest-dev/vitest) | MIT |
+| [`@wdio/cli`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/electron-service`](https://github.com/webdriverio/desktop-mobile) | MIT |
+| [`@wdio/globals`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/local-runner`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/mocha-framework`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/native-types`](https://github.com/webdriverio/desktop-mobile) | MIT |
+| [`@wdio/spec-reporter`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/types`](https://github.com/webdriverio/webdriverio) | MIT |
 | [`@yarnpkg/cli-dist`](https://github.com/yarnpkg/berry) | BSD-2-Clause |
 | [`cytoscape`](https://github.com/cytoscape/cytoscape.js) | MIT |
 | [`cytoscape-cose-bilkent`](https://github.com/cytoscape/cytoscape.js-cose-bilkent) | MIT |
@@ -230,6 +239,7 @@ External packages **directly declared** only by repository tooling, test infrast
 | [`vitepress`](https://github.com/vuejs/vitepress) | MIT |
 | [`vitepress-plugin-mermaid`](https://github.com/emersonbottero/vitepress-plugin-mermaid) | MIT |
 | [`vitest`](https://github.com/vitest-dev/vitest) | MIT |
+| [`webdriverio`](https://github.com/webdriverio/webdriverio) | MIT |
 
 `eslint-plugin-sonarjs` (LGPL-3.0-only) and `lightningcss` (MPL-2.0) run only as development tooling; their code is not linked into or distributed with any DeepSeek Harness artifact.
 

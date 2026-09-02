@@ -300,6 +300,8 @@ export function ModelSelect(
                             className={clsx(css.option, selected && css.selected)}
                             key={model.id}
                             title={model.name}
+                            data-provider-id={group.id}
+                            data-model-id={model.id}
                             disabled={busy}
                             onClick={() => { choose({ provider: group.id, model: model.id }) }}
                           >

@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ComponentProps } from 'react'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ModelDirectoryState } from '../src/client/directory.ts'
 import { ModelSelect } from '../src/client/ModelSelect.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -28,6 +30,11 @@ const reasoning = {
   ],
   defaultEffort: 'high',
 }
+
+const modelSelectCss = readFileSync(
+  join(process.cwd(), 'packages/client/ui-model-selection/src/client/ModelSelect.module.css'),
+  'utf8',
+)
 
 function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryState {
   return {
@@ -133,6 +140,36 @@ describe('ModelSelect reasoning effort', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
     expect(screen.queryByText('removed-model')).toBeNull()
     expect(screen.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash' })).toBeTruthy()
+  })
+
+  it('exposes the model id independently from its display name', () => {
+    const directory = createSnapshotStore(state({
+      groups: [{
+        id: 'sub2api',
+        name: 'Sub2API',
+        models: [{ id: 'glm-5.2', name: 'GLM-5.2' }],
+      }],
+      current: null,
+    }))
+    render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '选择模型' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+
+    const option = screen.getByRole('menuitemradio', { name: 'GLM-5.2' })
+    expect(option.getAttribute('data-provider-id')).toBe('sub2api')
+    expect(option.getAttribute('data-model-id')).toBe('glm-5.2')
+  })
+
+  it('keeps long model names inside the vertical menu scroller', () => {
+    expect(modelSelectCss).toMatch(/\.groups\s*\{[^}]*overflow-x:\s*hidden/u)
   })
 
   it('announces a rejected selection as a transient toast and keeps the in-menu strip for loads', async () => {

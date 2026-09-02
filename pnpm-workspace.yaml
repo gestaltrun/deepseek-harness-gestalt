@@ -65,6 +65,10 @@ allowBuilds:
   # Desktop ships NSIS, not Squirrel.Windows; electron-winstaller's lifecycle
   # is unused by the selected target.
   electron-winstaller: false
+  # WebdriverIO pulls these browser drivers; the Desktop Electron service uses
+  # Chromedriver via Electron, so their install scripts stay denied.
+  edgedriver: false
+  geckodriver: false
   # core-js runtime modules are complete in the package; its postinstall only reports project metadata.
   core-js: false
 

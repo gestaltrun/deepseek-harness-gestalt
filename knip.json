@@ -8,11 +8,14 @@
     "gh",
     "icacls",
     "initdb",
+    "ipcrm",
+    "ipcs",
     "jar",
     "javac",
     "keytool",
     "musl-gcc",
     "openssl",
+    "ps",
     "postgres",
     "python3",
     "postgres",
@@ -728,12 +731,21 @@
         "src/main.ts",
         "src/preload.cjs",
         "scripts/**/*.mjs",
-        "tests/**/*.spec.ts"
+        "tests/**/*.spec.ts",
+        "tests/e2e-sub2api/**/*.ts"
       ],
       "project": [
         "src/**/*.ts",
         "scripts/**/*.mjs",
         "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "@wdio/cli",
+        "@wdio/electron-service",
+        "@wdio/local-runner",
+        "@wdio/mocha-framework",
+        "@wdio/spec-reporter",
+        "@wdio/types"
       ]
     },
     "apps/platform": {

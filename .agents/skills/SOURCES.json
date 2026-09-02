@@ -11,7 +11,8 @@
       "localChanges": [
         "resolve and validate the DSH profile for every Task Space operation path",
         "require manual installation through the signed macOS application flow",
-        "align GitHub learning manifests with their tool results"
+        "align GitHub learning manifests with their tool results",
+        "reuse one DSH task space per user goal through .agents/local/runtime-memo.json"
       ]
     },
     {

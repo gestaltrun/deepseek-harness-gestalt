@@ -14,6 +14,7 @@
 
 import { builtinProviders, getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type {
   AnthropicMessagesCompat,
   Api,
@@ -565,6 +566,8 @@ export interface PiAiModelProfile {
    * declares the offered levels and their wire spellings.
    */
   reasoningEfforts?: false | PiAiReasoningEfforts
+  /** Default selectable reasoning level for this model; omission uses the route default when supported. */
+  defaultReasoningLevel?: ModelThinkingLevel
   /** pi-ai wire-compatibility switches for this model, winning over the route's per field; one its protocol does not declare is refused. */
   compat?: PiAiCompatProfile
 }
@@ -769,6 +772,8 @@ export interface RouteCatalog {
    * picked, so only an explicit configuration lands here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Per-model reasoning defaults explicitly declared by the deployment. */
+  modelReasoningDefaults: ReadonlyMap<string, ModelThinkingLevel>
 }
 
 /**
@@ -830,6 +835,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
   }
   const seen = new Set<string>()
   const configuredMaxTokens = new Map<string, number>()
+  const modelReasoningDefaults = new Map<string, ModelThinkingLevel>()
   const models = entries.map((entry) => {
     if (entry.id.length === 0) invalid(provider, 'has a model with an empty id')
     if (seen.has(entry.id)) invalid(provider, `lists model "${entry.id}" more than once`)
@@ -859,7 +865,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
     // Only a value the profile named is a deployment choice; the catalog's is
     // the model's capability and stays out of request defaults.
     if (entry.maxTokens !== undefined) configuredMaxTokens.set(entry.id, entry.maxTokens)
-    return {
+    const model: Model<Api> = {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
       // package does not model — reasoning-level spellings, compatibility
@@ -878,6 +884,17 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
       ...resolveModelReasoning(provider, entry, base),
       ...resolveModelCompat(provider, entry, request.compat, base, api),
     }
+    if (entry.defaultReasoningLevel !== undefined) {
+      if (!model.reasoning) {
+        invalid(provider, `model "${entry.id}" defaultReasoningLevel "${entry.defaultReasoningLevel}" requires a reasoning model`)
+      }
+      if (!getSupportedThinkingLevels(model).some(level => level === entry.defaultReasoningLevel)) {
+        invalid(provider, `model "${entry.id}" defaultReasoningLevel "${entry.defaultReasoningLevel}" is not`
+          + ' present in its reasoningEfforts')
+      }
+      modelReasoningDefaults.set(entry.id, entry.defaultReasoningLevel)
+    }
+    return model
   })
   // Per field, not per block: a route may default a switch its completions
   // models take beside one only its anthropic models do, and neither should
@@ -889,5 +906,5 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
     invalid(provider, `sets compat "${field}", but no model on the route speaks a protocol that takes it;`
       + ` it exists on ${takers.join(', ')}`)
   }
-  return { models, configuredMaxTokens }
+  return { models, configuredMaxTokens, modelReasoningDefaults }
 }

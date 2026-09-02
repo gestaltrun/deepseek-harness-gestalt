@@ -12,7 +12,7 @@ Status: implemented
 
 `project-membership-http` 拥有一个心跳注册表。`POST /v1/projects/presence/heartbeat` 经既有账号会话证明完成鉴权，并经 `currentInstallation` 解析安装身份，然后记录 `(accountId, installationId)` 及其新过期时间。Desktop 按 `presenceHeartbeatIntervalMs` 节奏（Config 默认 60 秒）调用；每次心跳在 `presenceTtlMs`（Config 默认 90 秒）内保持有效，TTL 不大于间隔时组合加载即失败出声。`POST /v1/projects/presence/close` 会立即清除该安装，使最后窗口关闭不必等待 TTL；TTL 过期仍是崩溃与分区路径。花名册读取按账户合并存活条目，为每个成员附上 `presence: 'online' | 'offline'`——没有手动状态，没有空闲推断，也没有 TTL 之外的宽限窗口。每条路由读取的会话表示——bearer 访问令牌加 `x-gestalt-proof-*` 安装证明头——统一来自 Account HTTP 消费者导出的 `accountSessionPresentation`，让 Account-over-HTTP 会话格式在其各消费者间只保留一份实现。
 
-存储是 `PresenceStore` 预留接口（`record`、`onlineAccountIds`）背后的进程内 TTL 映射。运行多个 Platform 实例的部署以共享 TTL 存储实现该适配接口；注册表、路由与花名册投影均不改变。
+存储是 `PresenceStore` 预留接口（`record`、`clear`、`onlineAccountIds`）背后的进程内 TTL 映射。运行多个 Platform 实例的部署以共享 TTL 存储实现该适配接口；注册表、路由与花名册投影均不改变。
 
 ## Supersession check
 

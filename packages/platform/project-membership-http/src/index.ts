@@ -163,7 +163,8 @@ export function apply(ctx: Context, config: Config): void {
     requireMethod(req, 'POST')
     const authenticated = await requireInstallation(ctx, req)
     if (authenticated.installation.kind !== 'desktop') {
-      throw new HttpError(403, 'INSTALLATION_KIND_UNSUPPORTED', 'presence heartbeats are accepted from Desktop installations only')
+      const operation = heartbeat !== undefined ? 'presence heartbeat' : 'presence close'
+      throw new HttpError(403, 'INSTALLATION_KIND_UNSUPPORTED', `${operation} is accepted from Desktop installations only`)
     }
     if (heartbeat !== undefined) await presence.beat(authenticated.account.id, authenticated.installation.id)
     else await presence.close(authenticated.account.id, authenticated.installation.id)

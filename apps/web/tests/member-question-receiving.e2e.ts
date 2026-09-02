@@ -114,6 +114,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     const receiverWorkspace = scaffold.ctx.workspaceRegistry.list()
       .find(candidate => candidate.path === join(scaffold.workspaceCwd, 'workspace'))
     if (receiverWorkspace === undefined) throw new Error('member-question e2e: connected workspace unavailable')
+    await receiverWorkspace.setTitle('Atlas Bound Workspace')
     const projectId = 'project-atlas'
     await bindReceiverWorkspace(receiver, projectId, receiverWorkspace.id)
     const create = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'create')
@@ -129,7 +130,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const title = 'Project Atlas — Receiver launch decision'
       const row = sessionRow(page, title)
       await row.waitFor({ timeout: 30_000 })
-      await expect.poll(() => sessionGroupHeader(row).textContent()).toContain('workspace')
+      await expect.poll(() => sessionGroupHeader(row).textContent()).toContain('Atlas Bound Workspace')
       expect(await sessionGroupHeader(row).textContent()).not.toMatch(/Ungrouped/)
       expect(await page.getByText('Ungrouped', { exact: true }).count()).toBe(0)
       await row.click()

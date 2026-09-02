@@ -65,7 +65,9 @@ describe('deriveGroups', () => {
     )
     expect(groups.map(group => group.key)).toEqual(['bound'])
     expect(groups[0]!.workspaceId).toEqual(wid('bound'))
+    expect(groups[0]!.label).toBe('bound')
     expect(groups[0]!.sessions.map(session => session.id)).toEqual([sid('receiving')])
+    expect(groups.some(group => group.key === UNGROUPED_KEY)).toBe(false)
   })
 
   it('applies stored Ungrouped order and appends new loose Sessions by recency', () => {

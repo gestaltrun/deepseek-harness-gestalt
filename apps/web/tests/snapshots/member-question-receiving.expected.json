@@ -3,7 +3,8 @@
     "sessionCount": 1,
     "requestCount": 0,
     "receivedCount": 1,
-    "attached": true
+    "attached": true,
+    "treeParent": "Atlas Bound Workspace"
   },
   "conversation": {
     "eventTypes": [

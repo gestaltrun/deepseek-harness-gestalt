@@ -23,6 +23,7 @@ describe('member-question receiving keyless assembled snapshot', () => {
       const workspacePath = join(scaffold.workspaceCwd, 'workspace')
       await mkdir(workspacePath, { recursive: true })
       const workspace = await scaffold.ctx.workspaceRegistry.create(workspacePath)
+      await workspace.setTitle('Atlas Bound Workspace')
       await receiver.bind(
         'account:receiver' as PlatformAccountId,
         'project-snapshot' as never,
@@ -66,6 +67,9 @@ describe('member-question receiving keyless assembled snapshot', () => {
         requestCount: sessionAfterArrival.events.filter(event => event.type === 'request/header').length,
         receivedCount: sessionAfterArrival.events.filter(event => event.type === 'member-question/received').length,
         attached: workspace.sessionIds.includes(arrived.receivingSessionId as never),
+        treeParent: workspace.sessionIds.includes(arrived.receivingSessionId as never)
+          ? workspace.title
+          : 'Ungrouped',
       }
 
       const firstTurn = scaffold.whenTurnSettled()

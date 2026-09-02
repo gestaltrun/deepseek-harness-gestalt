@@ -287,4 +287,48 @@ describe('bundled Mobile product entry', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
     await context.close()
   })
+
+  it('boots the real bundle when WebView 83 lacks newer standard APIs', async () => {
+    const activeBrowser = browser
+    if (activeBrowser === undefined) throw new Error('Mobile snapshot browser unavailable')
+    const context = await activeBrowser.newContext({
+      viewport: { width: 390, height: 844 },
+      locale: 'en-US',
+      userAgent: 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 Chrome/83.0.4103.101 Mobile Safari/537.36',
+    })
+    await context.addInitScript(() => {
+      Object.defineProperty(globalThis, 'AggregateError', { configurable: true, value: undefined, writable: true })
+      Object.defineProperty(Array.prototype, 'at', { configurable: true, value: undefined, writable: true })
+      Object.defineProperty(Object, 'hasOwn', { configurable: true, value: undefined, writable: true })
+      Object.defineProperty(String.prototype, 'replaceAll', { configurable: true, value: undefined, writable: true })
+      Object.defineProperty(Element.prototype, 'replaceChildren', { configurable: true, value: undefined, writable: true })
+      Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined, writable: true })
+    })
+    const page = await context.newPage()
+    await page.goto(origin)
+    const main = page.locator('[data-mobile-platform-account]')
+    await expect.poll(async () => await main.getAttribute('data-mobile-platform-account')).toBe('signed-in')
+    const compatibility = await page.evaluate(() => {
+      const root = document.createElement('div')
+      root.append('old')
+      root.replaceChildren('new')
+      return {
+        aggregateErrors: new AggregateError(['failure'], 'aggregate').errors.length,
+        arrayTail: ['first', 'last'].at(-1),
+        hasOwn: Object.hasOwn({ current: true }, 'current'),
+        replacementToken: 'a'.replaceAll('a', '$&x'),
+        replacedChild: root.textContent,
+        uuid: crypto.randomUUID(),
+      }
+    })
+    expect(compatibility).toMatchObject({
+      aggregateErrors: 1,
+      arrayTail: 'last',
+      hasOwn: true,
+      replacementToken: 'ax',
+      replacedChild: 'new',
+    })
+    expect(compatibility.uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u)
+    await context.close()
+  })
 })

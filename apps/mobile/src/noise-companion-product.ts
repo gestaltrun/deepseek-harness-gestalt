@@ -32,6 +32,7 @@ import type {
   MobileCompanionMutationChannel,
   MobileCompanionTrackedSubmission,
 } from './companion-surface.ts'
+import { randomUuid } from './random-uuid.ts'
 
 interface ActiveMobileSnowChannel {
   channel: SnowCompanionProtocolChannel
@@ -574,7 +575,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 }
 
 function operationId(): ReturnType<typeof parseCompanionOperationId> {
-  return parseCompanionOperationId(crypto.randomUUID())
+  return parseCompanionOperationId(randomUuid())
 }
 
 function asError(value: unknown, fallback: string): Error {

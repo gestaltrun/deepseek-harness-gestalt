@@ -200,6 +200,7 @@ jobs:
           PLATFORM_ALIYUN_DEPLOY_ROLE_ARN: ${{ vars.PLATFORM_ALIYUN_DEPLOY_ROLE_ARN }}
           PLATFORM_ECS_INSTANCE_IDS: ${{ vars.PLATFORM_ECS_INSTANCE_IDS }}
           PLATFORM_ALB_SERVER_GROUP_ID: ${{ vars.PLATFORM_ALB_SERVER_GROUP_ID }}
+          PLATFORM_ALB_LISTENER_ID: ${{ vars.PLATFORM_ALB_LISTENER_ID }}
           PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: ${{ vars.PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT }}
           PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_DEPLOY_OSS_OBJECT_PREFIX }}
         run: node --import tsx/esm apps/platform/src/production-env-cli.ts
@@ -270,6 +271,8 @@ jobs:
           PLATFORM_ALIYUN_REGION: ${{ vars.PLATFORM_ALIYUN_REGION }}
           PLATFORM_ECS_INSTANCE_IDS: ${{ vars.PLATFORM_ECS_INSTANCE_IDS }}
           PLATFORM_ALB_SERVER_GROUP_ID: ${{ vars.PLATFORM_ALB_SERVER_GROUP_ID }}
+          PLATFORM_ALB_LISTENER_ID: ${{ vars.PLATFORM_ALB_LISTENER_ID }}
+          PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS: '45000'
         run: |
           set -euo pipefail
           IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
@@ -284,6 +287,11 @@ jobs:
           jq -e --arg first "${instance_ids[0]// /}" --arg second "${instance_ids[1]// /}" \
             '.TotalCount == 2 and (.Servers | length) == 2 and ([.Servers[] | select(.Status == "Available" and .Port == 80) | .ServerId] | sort == ([$first, $second] | sort))' \
             <<< "$server_group" >/dev/null
+          listener=$(aliyun alb GetListenerAttribute --region "$PLATFORM_ALIYUN_REGION" \
+            --ListenerId "$PLATFORM_ALB_LISTENER_ID")
+          jq -e --argjson heartbeatTimeoutMs "$PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS" \
+            '.ListenerProtocol == "HTTPS" and .IdleTimeout * 1000 >= $heartbeatTimeoutMs' \
+            <<< "$listener" >/dev/null
 
   deploy:
     name: Deploy to private ECS through Cloud Assistant

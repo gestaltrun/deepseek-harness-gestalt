@@ -8,5 +8,5 @@ export default defineConfig({
     react(),
     tsconfigPaths({ projects: [fileURLToPath(new URL('../../tsconfig.base.json', import.meta.url))] }),
   ],
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: { outDir: 'dist', emptyOutDir: true, target: 'chrome83' },
 })

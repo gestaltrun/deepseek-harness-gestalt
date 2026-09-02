@@ -98,6 +98,7 @@
     "apps/web/stress-tests/reasoning-chunks.stress.ts",
     "apps/cli/tests/**/*.ts",
     "apps/mobile/src/personal-pairing-model.ts",
+    "apps/mobile/src/random-uuid.ts",
     "apps/mobile/src/personal-pairing.ts",
     "apps/mobile/src/companion-mutation.ts",
     "apps/mobile/src/companion-attachment.ts",

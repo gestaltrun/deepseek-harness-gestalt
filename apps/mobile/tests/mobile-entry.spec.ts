@@ -186,9 +186,12 @@ afterEach(() => {
 describe('Mobile Platform Account entry', () => {
   it('fails loud when the browsing context cannot create an Installation id', async () => {
     configureEnvironment()
-    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    document.body.innerHTML = '<div id="root"></div>'
+    vi.stubGlobal('crypto', {})
     const { mobileProductStarted } = await import('../src/main.tsx')
     await expect(mobileProductStarted).rejects.toThrow(/system cryptography/)
+    expect(document.querySelector('[data-mobile-startup="failed"]')?.textContent)
+      .toContain('Mobile 启动失败 / Startup failed')
   })
 
   it('opens the prepared GitHub URL through Capacitor from the user click and polls over HTTPS', async () => {

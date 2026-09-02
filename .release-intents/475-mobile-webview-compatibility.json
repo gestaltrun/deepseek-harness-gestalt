@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "475-mobile-webview-compatibility",
+  "summary": {
+    "en": "Render the Mobile application on Android System WebView 83 while preserving cryptographic identifiers and visible startup failures.",
+    "zh": "让移动应用可在 Android System WebView 83 上渲染，同时保留密码学标识符与可见的启动错误。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "patch",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "The repository lockfile, build-script policy, third-party notice, and host aggregate changes only register the Mobile-owned core-js dependency and UUID helper; Desktop imports no new module and its runtime behavior is unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The repository lockfile, build-script policy, third-party notice, and host aggregate changes only register the Mobile-owned core-js dependency and UUID helper; no Platform entry, route, deployment input, or runtime behavior changes."
+    }
+  ]
+}

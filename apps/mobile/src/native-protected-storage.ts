@@ -1,6 +1,7 @@
 /** Native-only protected persistence for long-lived Mobile Companion authority. */
 
 import { Capacitor, registerPlugin } from '@capacitor/core'
+import { randomUuid } from './random-uuid.ts'
 
 interface ProtectedStoragePlugin {
   get(options: { key: string }): Promise<{ value?: string }>
@@ -51,13 +52,14 @@ export async function loadProtectedInstallationId(
   storage: MobileProtectedStorage,
   identityNamespace: string,
 ): Promise<string> {
+  const systemCrypto = globalThis.crypto as Partial<Crypto> | undefined
+  if (typeof systemCrypto?.getRandomValues !== 'function') {
+    throw new TypeError('Mobile requires system cryptography for secure identifiers')
+  }
   const key = `installation:${identityNamespace}`
   const retained = await storage.get(key)
   if (retained !== undefined) return retained
-  if (typeof crypto.randomUUID !== 'function') {
-    throw new TypeError('Mobile requires system cryptography to create an Installation id')
-  }
-  const installationId = crypto.randomUUID()
+  const installationId = randomUuid()
   await storage.set(key, installationId)
   return installationId
 }

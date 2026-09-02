@@ -68,8 +68,9 @@ export type AskUserQuestionIntent =
     /**
      * Workspace-relative referenced documents with their rendering reasons.
      * `cachedPath` is the receiver-owned hidden Workspace copy the Files
-     * viewer opens. `content` is optional inline body for tests and older
-     * payloads; the product Files viewer reads the cache path instead.
+     * viewer opens. A chip without it is a no-op and never opens `path`.
+     * `content` is optional inline body for tests and older payloads; the
+     * product Files viewer reads the cache path instead.
      */
     references: readonly { path: string; reason: string; cachedPath?: string; content?: string }[]
     /** Epoch milliseconds after which the routed ask expires on both endpoints. */

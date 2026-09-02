@@ -49,9 +49,11 @@ export interface MemberQuestionReferenceChip {
   filename: string
   /** Why this document matters, rendered as the chip subtitle. */
   reason: string
-  /** Workspace-relative document path, forwarded on document focus. */
+  /** Workspace-relative document path named by the asking Session. */
   path: string
-  /** Inline document body for the renderable kinds; absent renders the bare file tab. */
+  /** Receiver-owned hidden Workspace path opened through the Files viewer. */
+  cachedPath?: string
+  /** Inline document body for tests and older payloads. */
   content?: string
 }
 
@@ -152,9 +154,10 @@ export function memberBriefOf(wait: MemberQuestionWait): MemberQuestionBrief {
     }),
     ...(background === '' ? {} : { background }),
     references: (carried?.references ?? []).map(reference => ({
-      filename: filenameOf(reference.path),
+      filename: filenameOf(reference.cachedPath ?? reference.path),
       reason: reference.reason,
       path: reference.path,
+      ...(reference.cachedPath === undefined ? {} : { cachedPath: reference.cachedPath }),
       ...(reference.content === undefined ? {} : { content: reference.content }),
     })),
     ...(carried === undefined ? {} : { expiresAt: carried.expiresAt }),
@@ -206,6 +209,13 @@ export type MemberQuestionComposerProps =
      * a no-op, and providers registered after this entry are available.
      */
     focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
+    /**
+     * Open the receiver-owned cached copy through the registered Files viewer,
+     * or the Host system opener when no Files viewer is registered. Callers
+     * pass only `cachedPath`; a missing cache is a no-op so a same-named
+     * Workspace file is never opened.
+     */
+    openReference: (sessionId: SessionId, path: string, title?: string) => void
   }
 
 /** Additive input-dock carrier that leaves the product composer mounted. */
@@ -213,4 +223,4 @@ export type MemberQuestionDockProps =
   PropsRuntime<'conversation.input.dock'>
   & PropsLocale<'member-question'>
   & { questionT: TranslateNS<'question'> }
-  & Pick<MemberQuestionComposerProps, 'focusDocument'>
+  & Pick<MemberQuestionComposerProps, 'focusDocument' | 'openReference'>

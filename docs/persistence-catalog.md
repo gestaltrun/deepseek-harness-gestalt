@@ -565,10 +565,11 @@ Source: [`packages/interaction/member-question-sender/src/index.ts:85`](../packa
   background: string
   questions: CompanionMemberQuestionOperation['questions']
   references: CompanionMemberQuestionOperation['references']
+  cachedReferences?: readonly MemberQuestionCachedReference[]
 }
 ```
 
-Source: [`packages/interaction/member-question-receiver/src/types.ts:263`](../packages/interaction/member-question-receiver/src/types.ts)
+Source: [`packages/interaction/member-question-receiver/src/types.ts:275`](../packages/interaction/member-question-receiver/src/types.ts)
 
 <a id="member-questionsettled--log-only"></a>
 
@@ -579,7 +580,7 @@ Source: [`packages/interaction/member-question-receiver/src/types.ts:263`](../pa
 'member-question/settled': CompanionMemberQuestionSettledResult
 ```
 
-Source: [`packages/interaction/member-question-receiver/src/types.ts:275`](../packages/interaction/member-question-receiver/src/types.ts)
+Source: [`packages/interaction/member-question-receiver/src/types.ts:288`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

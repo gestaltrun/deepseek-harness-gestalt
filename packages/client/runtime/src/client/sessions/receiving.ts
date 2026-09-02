@@ -351,7 +351,7 @@ export class ReceivingQuestionBook {
         state,
         askedAt: view.arrivedAt,
         terminalAt: terminal.settledAt,
-        intent: intentOf(view.brief, view.receivingAccountId),
+        intent: intentOf(view.brief, view.receivingAccountId, view.cachedReferences),
         ...(terminal.outcome === 'answered' || terminal.outcome === 'declined'
           ? { settledByDeviceName: terminal.settledByDeviceName }
           : {}),
@@ -360,7 +360,7 @@ export class ReceivingQuestionBook {
     const pending = group.pending
     const active = pending === undefined ? undefined : {
       questionId: pending.questionId,
-      intent: intentOf(pending.operation, pending.receivingAccountId),
+      intent: intentOf(pending.operation, pending.receivingAccountId, pending.cachedReferences),
       wait: this.waitFor(pending),
     }
     this.#rows.get(sessionId)?.active?.wait.markSettled()
@@ -368,7 +368,7 @@ export class ReceivingQuestionBook {
     const revision = Math.max(pending?.revision ?? 0, ...group.terminal.map(record => record.revision))
     const row: ReceivingSessionRow = {
       sessionId,
-      title: briefSourceLine(intentOf(exemplar, accountId).origin),
+      title: briefSourceLine(intentOf(exemplar, accountId, pending?.cachedReferences).origin),
       updatedAt,
       revision,
       materialized: pending?.hostSessionId !== undefined
@@ -387,7 +387,7 @@ export class ReceivingQuestionBook {
 
   private waitFor(pending: MemberQuestionReceiverSnapshot['pending'][number]): PendingWait<'question'> {
     const rpcId = pending.questionId as unknown as RpcId
-    const intent = intentOf(pending.operation, pending.receivingAccountId)
+    const intent = intentOf(pending.operation, pending.receivingAccountId, pending.cachedReferences)
     const questions: AskUserQuestionItem[] = pending.operation.questions.map(question => ({
       id: question.id,
       question: question.question,
@@ -421,6 +421,7 @@ export class ReceivingQuestionBook {
 function intentOf(
   operation: MemberQuestionReceiverSnapshot['pending'][number]['operation'],
   receivingAccountId: string,
+  cachedReferences?: readonly { path: string; cachedPath: string }[],
 ): MemberQuestionIntent {
   return {
     kind: 'member-question',
@@ -429,7 +430,13 @@ function intentOf(
     toProjectMember: receivingAccountId,
     origin: operation.origin,
     background: operation.background,
-    references: operation.references.map(reference => ({ ...reference })),
+    references: operation.references.map((reference) => {
+      const cached = cachedReferences?.find(entry => entry.path === reference.path)?.cachedPath
+      return {
+        ...reference,
+        ...(cached === undefined ? {} : { cachedPath: cached }),
+      }
+    }),
     expiresAt: operation.expiresAt,
   }
 }

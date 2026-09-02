@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,7 +14,10 @@ import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type { DirectoryPickerCapability } from '@deepseek-ai/dsh-host-directory-picker'
 import type { NativeCommandRunner } from '@deepseek-ai/dsh-native-command'
-import type { MemberQuestionWorkspaceBinding } from '@deepseek-ai/dsh-member-question-receiver'
+import type {
+  MemberQuestionSessionMaterializer,
+  MemberQuestionWorkspaceBinding,
+} from '@deepseek-ai/dsh-member-question-receiver'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import type { HostFrame, WorkspaceId } from '@deepseek-ai/dsh-host-apiproxy/api'
@@ -446,6 +449,125 @@ describe('workspace Git operations', () => {
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'origin') }))).workspace
     expect((await api.workspace.gitRemote(request({ workspaceId: workspace.workspaceId }), abort.signal)).result)
       .toMatchObject({ ok: false, error: { code: 'cancelled' } })
+  })
+})
+
+describe('memberQuestion Session materializer cache', () => {
+  it('writes transferred bytes under a hidden receiver-owned path and leaves the same-named Workspace file unchanged', async () => {
+    let materializer: MemberQuestionSessionMaterializer | undefined
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-apiproxy-cache-')))
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(Storage)
+    ctx.storage.backend.register('memory', new MemoryStorageBackend())
+    const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
+    ctx.storage.mount('domain', storageDomain)
+    ctx.provide('storageDomain', storageDomain)
+    ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
+    await ctx.plugin(WorkspaceRegistry)
+    const factory: AgentFactory = {
+      async createAgent(_ownerCtx, options) {
+        const session = ctx.sessions.create(
+          options.sessionId,
+          options.meta === undefined ? {} : { meta: options.meta },
+        )
+        const agent = stubAgent(session)
+        const unregister = ctx.agents.register(agent)
+        return {
+          agent,
+          dispose: () => {
+            unregister()
+            return Promise.resolve()
+          },
+        }
+      },
+      async resume() {
+        throw new Error('test harness has no persisted sessions')
+      },
+    }
+    ctx.agents.setFactory(factory)
+    ctx.provide('directoryPicker', { capability: () => ({ kind: 'native', pick: async () => null }) } as never)
+    ctx.provide('memberQuestionReceiver', {
+      registerSessionMaterializer: (next: MemberQuestionSessionMaterializer) => {
+        materializer = next
+        return () => { materializer = undefined }
+      },
+      registerHumanTurnAdmitter: () => () => {},
+      changes: () => () => {},
+      snapshot: async () => ({ revision: 0, pending: [], terminal: [] }),
+      resumeReservedSessionMaterializations: async () => {},
+      resumeReservedHumanTurns: async () => {},
+    })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'test', model: 'test-model' }),
+      cwd: root,
+    })
+    if (materializer === undefined) throw new Error('member-question materializer was not registered')
+
+    const workspace = expectOk(await api.workspace.create(request({
+      path: stageDir(root, 'receiver-cache'),
+    }))).workspace
+    const localPath = join(workspace.path, 'docs', 'architecture.md')
+    mkdirSync(join(workspace.path, 'docs'))
+    writeFileSync(localPath, 'LOCAL WORKSPACE COPY\n')
+    const sessionId = SessionId('receiving-cache-1')
+    const receipt = await materializer({
+      receivingSessionId: sessionId as never,
+      revision: 1,
+      questionId: 'question-cache' as never,
+    }, {
+      receivingAccountId: 'account-receiver' as never,
+      projectId: 'project-1' as never,
+      workspaceId: workspace.workspaceId,
+      documents: [{ path: 'docs/architecture.md', bytes: Buffer.from('# transferred brief\n') }],
+      questions: [{
+        questionId: 'question-cache' as never,
+        receivingSessionId: sessionId as never,
+        receivingAccountId: 'account-receiver' as never,
+        revision: 1,
+        arrivedAt: 1_000,
+        operation: {
+          type: 'member-question',
+          operationId: 'operation-cache' as never,
+          questionId: 'question-cache' as never,
+          projectId: 'project-1' as never,
+          originSessionId: 'origin-cache' as never,
+          expiresAt: 9_000,
+          origin: {
+            projectName: 'Atlas',
+            originSessionTitle: 'Cache isolation',
+            askerAccountId: 'account-alice',
+            askerRole: 'owner',
+            askerDisplayName: 'Alice',
+            askerAvatarUrl: 'https://example.test/alice.png',
+          },
+          background: 'Keep the local file.',
+          questions: [{ id: 'choice', question: 'Keep it?' }],
+          references: [{ path: 'docs/architecture.md', reason: 'Current ownership map' }],
+        },
+      }],
+    })
+    expect(receipt).toMatchObject({
+      accepted: true,
+      cachedReferences: [{
+        path: 'docs/architecture.md',
+        reason: 'Current ownership map',
+        cachedPath: '.dsh/member-questions/question-cache/architecture.md',
+      }],
+    })
+    expect(readFileSync(localPath, 'utf8')).toBe('LOCAL WORKSPACE COPY\n')
+    expect(readFileSync(join(workspace.path, '.dsh', 'member-questions', 'question-cache', 'architecture.md'), 'utf8'))
+      .toBe('# transferred brief\n')
+    const session = ctx.sessions.get(sessionId)
+    expect(session?.events.find(event => event.type === 'member-question/received')?.data)
+      .toMatchObject({
+        cachedReferences: [{
+          path: 'docs/architecture.md',
+          cachedPath: '.dsh/member-questions/question-cache/architecture.md',
+        }],
+      })
   })
 })
 

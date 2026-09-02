@@ -50,8 +50,9 @@ export const askUserQuestionItemSchema = z.object({
       references: z.array(z.object({
         path: z.string().min(1),
         reason: z.string(),
+        cachedPath: z.string().min(1).optional(),
         // Inline document body for the renderable kinds (.md/.html); absent
-        // renders the receiver's bare file tab.
+        // when the Files viewer reads the receiver-owned cache path.
         content: z.string().optional(),
       })),
       // oxlint-disable-next-line typescript/no-deprecated -- Zod's default v3-compatible export accepts infinite numbers.

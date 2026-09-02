@@ -1702,12 +1702,16 @@ export interface MemberQuestionHumanTurnAdmissionContext {
   readonly workspaceId: Branded<'WorkspaceId'>
   /** Every retained question on this receiving thread, in arrival order. */
   readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
+  /** Transferred document bytes for the question currently being materialized. */
+  readonly documents: readonly MemberQuestionTransferredDocument[]
 }
 
 /** Successful high-level Host adapter receipt. */
 interface MemberQuestionHumanTurnAdmissionReceipt {
   /** The adapter completed without starting a second Session. */
   readonly accepted: true
+  /** Receiver-owned hidden Workspace paths assigned while materializing documents. */
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
 }
 
 /** One explicit human turn addressed to a receiving Session. */
@@ -1743,6 +1747,8 @@ export interface PendingMemberQuestionView {
   readonly operation: CompanionMemberQuestionOperation
   /** Ordinary Host Session identity after authenticated arrival materializes the Session. */
   readonly hostSessionId?: HostSessionId
+  /** Receiver-owned hidden Workspace paths for transferred documents. */
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
   /** Durable retry identity while a human-turn admission remains reserved. */
   readonly reservedAdmission?: {
     /** Envelope identity the Client must reuse for the reserved action. */
@@ -1761,6 +1767,24 @@ export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionVi
     /** Original question batch retained with the terminal record. */
     readonly questions: CompanionMemberQuestionOperation['questions']
   }
+}
+
+/** One transferred document written beside its Decision Brief metadata. */
+export interface MemberQuestionTransferredDocument {
+  /** Workspace-relative path named by the asking Session. */
+  readonly path: string
+  /** Exact transferred bytes; never written over a same-named Workspace file. */
+  readonly bytes: Uint8Array
+}
+
+/** Decision Brief reference after the receiver-owned cache path is assigned. */
+export interface MemberQuestionCachedReference {
+  /** Workspace-relative path named by the asking Session. */
+  readonly path: string
+  /** Why this document matters, rendered as the chip subtitle. */
+  readonly reason: string
+  /** Receiver-owned hidden Workspace path of the transferred copy. */
+  readonly cachedPath: string
 }
 
 /** Stable caller idempotency identity for one explicit human turn. */
@@ -1788,7 +1812,7 @@ interface MemberQuestionHumanImageContent {
 
 Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`HostSessionId`](subsystems/core.md) · [`ImageAttachmentRef`](subsystems/attachment.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.md) · [`ProjectId`](subsystems/project-membership.md)
 
-Source: [`packages/interaction/member-question-receiver/src/index.ts:105`](../packages/interaction/member-question-receiver/src/index.ts)
+Source: [`packages/interaction/member-question-receiver/src/index.ts:115`](../packages/interaction/member-question-receiver/src/index.ts)
 
 <a id="deepseek-aidsh-member-question-sender"></a>
 

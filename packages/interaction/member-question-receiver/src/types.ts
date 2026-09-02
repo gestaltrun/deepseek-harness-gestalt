@@ -10,6 +10,10 @@ import type {
   InstallationId,
   MemberQuestionId,
 } from '@deepseek-ai/dsh-remote-protocol'
+import type {
+  MemberQuestionCachedReference,
+  MemberQuestionTransferredDocument,
+} from './document-cache.ts'
 
 /** Host-owned durable identity of one member-question receiving thread. */
 export type ReceivingSessionId = Branded<'ReceivingSessionId'>
@@ -25,6 +29,8 @@ export interface MemberQuestionReceiverAuthority {
 export interface AuthenticatedMemberQuestionEnvelope {
   readonly authority: MemberQuestionReceiverAuthority
   readonly operation: CompanionMemberQuestionOperation
+  /** Transferred document bodies correlated by reference path; omitted when none arrived. */
+  readonly documents?: readonly MemberQuestionTransferredDocument[]
 }
 
 /** Pending receiver projection retained without referenced document bodies. */
@@ -43,6 +49,8 @@ export interface PendingMemberQuestionView {
   readonly operation: CompanionMemberQuestionOperation
   /** Ordinary Host Session identity after authenticated arrival materializes the Session. */
   readonly hostSessionId?: HostSessionId
+  /** Receiver-owned hidden Workspace paths for transferred documents. */
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
   /** Durable retry identity while a human-turn admission remains reserved. */
   readonly reservedAdmission?: {
     /** Envelope identity the Client must reuse for the reserved action. */
@@ -175,6 +183,8 @@ export interface AdmitMemberQuestionHumanTurnResult {
 interface MemberQuestionHumanTurnAdmissionReceipt {
   /** The adapter completed without starting a second Session. */
   readonly accepted: true
+  /** Receiver-owned hidden Workspace paths assigned while materializing documents. */
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
 }
 
 /** Durable receiver facts needed by Host Session materialization or a later human turn. */
@@ -187,6 +197,8 @@ export interface MemberQuestionHumanTurnAdmissionContext {
   readonly workspaceId: Branded<'WorkspaceId'>
   /** Every retained question on this receiving thread, in arrival order. */
   readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
+  /** Transferred document bytes for the question currently being materialized. */
+  readonly documents: readonly MemberQuestionTransferredDocument[]
 }
 
 /** Local project-member Workspace association supplied by the Host composition. */
@@ -270,6 +282,7 @@ declare module '@deepseek-ai/dsh-session/types' {
       background: string
       questions: CompanionMemberQuestionOperation['questions']
       references: CompanionMemberQuestionOperation['references']
+      cachedReferences?: readonly MemberQuestionCachedReference[]
     }
     /** Canonical terminal metadata for one received member question. */
     'member-question/settled': CompanionMemberQuestionSettledResult

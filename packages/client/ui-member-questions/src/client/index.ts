@@ -10,6 +10,7 @@
  * dictionary through the standard locale seat for it.
  */
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import { resolveWorkspacePath } from '@deepseek-ai/dsh-client-runtime/client'
 import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MemberQuestionDock } from './MemberQuestionCard.tsx'
 import { en, zh, type MemberQuestionKey } from './locales.ts'
@@ -31,8 +32,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin. */
 const NS = 'member-question'
 
-/** Required services: the slot registry, this package's copy, and the shared question dictionary. */
-export const inject = ['slots', 'locale']
+/** Required services: the slot registry, dictionaries, and Files-open path. */
+export const inject = ['slots', 'locale', 'workspaces', 'sessions']
 
 /**
  * Client plugin body: register the `member-question` dictionaries and the
@@ -55,13 +56,27 @@ export function apply(ctx: ClientContext): void {
     ctx.get('detailsFocus')?.focus(sessionId, document)
   }
 
+  const openReference = (sessionId: SessionId, path: string, title?: string): void => {
+    const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+    const absolute = resolveWorkspacePath(cwd, path)
+    const sidebar = ctx.get('betterSidebar') as {
+      getTab(id: string): unknown
+      openFile(scope: { sessionId: string; cwd?: string }, path: string, title?: string): void
+    } | undefined
+    if (sidebar?.getTab('editor') !== undefined) {
+      sidebar.openFile(cwd === undefined ? { sessionId } : { sessionId, cwd }, absolute, title)
+      return
+    }
+    void ctx.workspaces.openPath(absolute)
+  }
+
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register(
     {
       name: 'conversation.input.dock',
       id: 'member-question',
       order: -20,
       locale: NS,
-      inject: () => ({ questionT, focusDocument }),
+      inject: () => ({ questionT, focusDocument, openReference }),
     },
     MemberQuestionDock,
   ))

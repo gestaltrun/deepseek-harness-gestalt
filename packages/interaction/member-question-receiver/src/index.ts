@@ -21,6 +21,7 @@ import {
   type PersistedReceivingQuestion,
   type PersistedReceivingSession,
 } from './persisted-state.ts'
+import type { MemberQuestionTransferredDocument } from './document-cache.ts'
 import type {
   AdmitMemberQuestionHumanTurnInput,
   AdmitMemberQuestionHumanTurnResult,
@@ -41,6 +42,15 @@ import type {
   ReceivingSessionId,
   TerminalMemberQuestionView,
 } from './types.ts'
+
+export {
+  MEMBER_QUESTION_DOCUMENT_CACHE_ROOT,
+  writeMemberQuestionDocumentCache,
+} from './document-cache.ts'
+export type {
+  MemberQuestionCachedReference,
+  MemberQuestionTransferredDocument,
+} from './document-cache.ts'
 
 export type {
   AdmitMemberQuestionHumanTurnInput,
@@ -311,7 +321,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
           || JSON.stringify(existing.operation) !== JSON.stringify(envelope.operation)) {
           throw new Error(`member-question-receiver: question ${envelope.operation.questionId} was replayed with different authority or content`)
         }
-        await this.ensureSessionMaterialized(existing, 'replay')
+        await this.ensureSessionMaterialized(existing, 'replay', envelope.documents ?? [])
         const current = this.state.questions.find(question => question.questionId === existing.questionId)
         /* v8 ignore next -- ingest already proved this question id exists. */
         if (current === undefined) throw new Error(`member-question-receiver: question ${existing.questionId} vanished during materialization`)
@@ -378,7 +388,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
         state: terminal?.outcome ?? 'pending',
       })
       this.scheduleExpiry()
-      await this.ensureSessionMaterialized(question, 'arrival')
+      await this.ensureSessionMaterialized(question, 'arrival', envelope.documents ?? [])
       const current = this.state.questions.find(row => row.questionId === question.questionId)
       /* v8 ignore next -- ingest just committed this question id. */
       if (current === undefined) throw new Error(`member-question-receiver: question ${question.questionId} vanished during materialization`)
@@ -738,7 +748,10 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     return this.state.sessions.find(session => session.id === question.receivingSessionId)?.materialized === true
   }
 
-  private admissionContext(session: PersistedReceivingSession): MemberQuestionHumanTurnAdmissionContext {
+  private admissionContext(
+    session: PersistedReceivingSession,
+    documents: readonly MemberQuestionTransferredDocument[] = [],
+  ): MemberQuestionHumanTurnAdmissionContext {
     const questions = this.state.questions.filter(row => row.receivingSessionId === session.id)
     /* v8 ignore next -- every persisted receiving Session is created with its first question in one commit. */
     if (questions[0] === undefined) throw new Error('member-question-receiver: receiving Session has no questions')
@@ -758,12 +771,14 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       questions: questions.map(row => row.terminal === undefined
         ? toPendingView(row, this.materialized(row))
         : toTerminalView(row, this.materialized(row))),
+      documents,
     }
   }
 
   private async ensureSessionMaterialized(
     question: PersistedReceivingQuestion,
     mode: 'arrival' | 'replay',
+    documents: readonly MemberQuestionTransferredDocument[] = [],
   ): Promise<void> {
     const session = this.state.sessions.find(row => row.id === question.receivingSessionId)
     /* v8 ignore next -- ingest and resume only pass questions that already name a persisted Session. */
@@ -773,12 +788,13 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     if (mode === 'replay' && session.materialized) return
     const materializer = this.runtimeMaterializer ?? this.materializer
     if (materializer === undefined) return
-    await materializer({
+    const receipt = await materializer({
       receivingSessionId: session.id as ReceivingSessionId,
       revision: question.revision,
       questionId: question.questionId as MemberQuestionId,
-    }, this.admissionContext(session))
-    if (session.materialized) return
+    }, this.admissionContext(session, documents))
+    const cachedReferences = question.cachedReferences ?? receipt.cachedReferences
+    if (session.materialized && cachedReferences === question.cachedReferences) return
     const revision = this.state.revision + 1
     await this.commit({
       ...this.state,
@@ -787,7 +803,13 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
         ? { ...row, revision, materialized: true }
         : row),
       questions: this.state.questions.map(row => row.receivingSessionId === session.id
-        ? { ...row, revision }
+        ? {
+          ...row,
+          revision,
+          ...(row.questionId === question.questionId && cachedReferences !== undefined
+            ? { cachedReferences: structuredClone(cachedReferences) }
+            : {}),
+        }
         : row),
     })
     this.ctx.emit('member-question-receiver/changed', {
@@ -937,6 +959,7 @@ function toPendingView(
     arrivedAt: question.arrivedAt,
     operation: structuredClone(question.operation),
     ...(materialized ? { hostSessionId: question.receivingSessionId as unknown as import('@deepseek-ai/dsh-session/types').SessionId } : {}),
+    ...(question.cachedReferences === undefined ? {} : { cachedReferences: structuredClone(question.cachedReferences) }),
     ...(admission === undefined ? {} : {
       reservedAdmission: {
         rpcId: admission.rpcId as import('./types.ts').MemberQuestionReceiverRpcId,
@@ -959,5 +982,6 @@ function toTerminalView(question: PersistedReceivingQuestion, materialized = fal
     terminal: structuredClone(terminal),
     brief: structuredClone(question.operation),
     ...(materialized ? { hostSessionId: question.receivingSessionId as unknown as import('@deepseek-ai/dsh-session/types').SessionId } : {}),
+    ...(question.cachedReferences === undefined ? {} : { cachedReferences: structuredClone(question.cachedReferences) }),
   }
 }

@@ -4,7 +4,13 @@
     "requestCount": 0,
     "receivedCount": 1,
     "attached": true,
-    "treeParent": "Atlas Bound Workspace"
+    "treeParent": "Atlas Bound Workspace",
+    "cachedPath": ".dsh/member-questions/question-snapshot/receiver-decision.md",
+    "cachedBytes": "# transferred receiver brief\n",
+    "localBytes": "LOCAL WORKSPACE COPY\n",
+    "filesOpenPath": ".dsh/member-questions/question-snapshot/receiver-decision.md",
+    "filesOpenTarget": ".dsh/member-questions/question-snapshot/receiver-decision.md",
+    "filesDidNotOpenLocalTwin": true
   },
   "conversation": {
     "eventTypes": [
@@ -59,6 +65,13 @@
         {
           "path": "docs/receiver-decision.md",
           "reason": "Lists the rollout constraints"
+        }
+      ],
+      "cachedReferences": [
+        {
+          "path": "docs/receiver-decision.md",
+          "reason": "Lists the rollout constraints",
+          "cachedPath": ".dsh/member-questions/question-snapshot/receiver-decision.md"
         }
       ]
     },

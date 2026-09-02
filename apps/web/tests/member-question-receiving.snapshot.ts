@@ -24,6 +24,8 @@ describe('member-question receiving keyless assembled snapshot', () => {
       await mkdir(workspacePath, { recursive: true })
       const workspace = await scaffold.ctx.workspaceRegistry.create(workspacePath)
       await workspace.setTitle('Atlas Bound Workspace')
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(join(workspacePath, 'docs', 'receiver-decision.md'), 'LOCAL WORKSPACE COPY\n')
       await receiver.bind(
         'account:receiver' as PlatformAccountId,
         'project-snapshot' as never,
@@ -32,6 +34,10 @@ describe('member-question receiving keyless assembled snapshot', () => {
       const ingress = createAuthenticatedMemberQuestionIngress(receiver)
       const arrived = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: [{
+          path: 'docs/receiver-decision.md',
+          bytes: Buffer.from('# transferred receiver brief\n'),
+        }],
         operation: {
           type: 'member-question',
           operationId: 'operation-snapshot' as never,
@@ -62,6 +68,14 @@ describe('member-question receiving keyless assembled snapshot', () => {
       })
       const sessionAfterArrival = scaffold.ctx.sessions.get(arrived.receivingSessionId as never)
       if (sessionAfterArrival === undefined) throw new Error('member-question snapshot: Host Session was not materialized on arrival')
+      const receivedOnArrival = sessionAfterArrival.events.find(event => event.type === 'member-question/received')
+      if (receivedOnArrival?.type !== 'member-question/received') {
+        throw new Error('member-question snapshot: received event missing on arrival')
+      }
+      const filesOpenTarget = receivedOnArrival.data.cachedReferences?.[0]?.cachedPath
+      if (filesOpenTarget === undefined) throw new Error('member-question snapshot: cachedPath missing after materialization')
+      const filesOpenPath = join(workspacePath, ...filesOpenTarget.split('/'))
+      const localTwinPath = join(workspacePath, 'docs', 'receiver-decision.md')
       const arrival = {
         sessionCount: scaffold.ctx.sessions.list().length,
         requestCount: sessionAfterArrival.events.filter(event => event.type === 'request/header').length,
@@ -70,6 +84,13 @@ describe('member-question receiving keyless assembled snapshot', () => {
         treeParent: workspace.sessionIds.includes(arrived.receivingSessionId as never)
           ? workspace.title
           : 'Ungrouped',
+        cachedPath: filesOpenTarget,
+        cachedBytes: await readFile(filesOpenPath, 'utf8'),
+        localBytes: await readFile(localTwinPath, 'utf8'),
+        filesOpenPath: filesOpenTarget,
+        filesOpenTarget,
+        filesDidNotOpenLocalTwin: filesOpenPath !== localTwinPath
+          && !filesOpenTarget.startsWith('docs/'),
       }
 
       const firstTurn = scaffold.whenTurnSettled()
@@ -132,6 +153,7 @@ describe('member-question receiving keyless assembled snapshot', () => {
             background: received.data.background,
             questions: received.data.questions,
             references: received.data.references,
+            cachedReferences: received.data.cachedReferences,
           },
           messages: session.deriveMessages()
             .filter(message => message.source.kind === 'user'

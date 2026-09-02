@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,7 +14,9 @@ import {
 import FileMemberQuestionReceiver from '../src/index.ts'
 import type {
   MemberQuestionHumanTurnAdmitter,
+  MemberQuestionHumanTurnAdmissionContext,
   MemberQuestionReceiverConfig,
+  MemberQuestionSessionMaterializer,
   MemberQuestionTerminalAuthority,
   MemberQuestionTerminalClaim,
   MemberQuestionReceiverTimer,
@@ -339,6 +341,7 @@ describe('FileMemberQuestionReceiver', () => {
       receivingSessionId: arrived.receivingSessionId,
     })
     expect('terminal' in (contextsSeen[0]?.questions[0] ?? {})).toBe(false)
+    expect(contextsSeen[0]?.documents).toEqual([])
 
     await contexts.pop()!.fiber.dispose()
     const resumed = vi.fn(async () => ({ accepted: true as const }))
@@ -349,6 +352,65 @@ describe('FileMemberQuestionReceiver', () => {
     await reopened.resumeReservedSessionMaterializations()
     expect(resumed).not.toHaveBeenCalled()
     expect((await reopened.snapshot()).pending[0]?.hostSessionId).toBe(arrived.receivingSessionId)
+  })
+
+  it('hands transferred document bytes to the Session materializer without storing them in the ledger', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-docs-'))
+    roots.push(storagePath)
+    const bytes = Buffer.from('# transferred brief\n')
+    const contextsSeen: MemberQuestionHumanTurnAdmissionContext[] = []
+    const materializer: MemberQuestionSessionMaterializer = async (_request, context) => {
+      contextsSeen.push(context)
+      return { accepted: true }
+    }
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      materializer,
+    })
+    await bindReceiverWorkspace(receiver)
+    await receiver.ingest({
+      ...envelopeWith('question-docs', 3_000),
+      documents: [{ path: 'docs/architecture.md', bytes }],
+    })
+    expect(contextsSeen).toHaveLength(1)
+    expect(contextsSeen[0]?.documents).toEqual([{ path: 'docs/architecture.md', bytes }])
+    const ledger = await readFile(join(storagePath, 'development', 'member-question-receiver.json'), 'utf8')
+    expect(ledger).not.toContain('# transferred brief')
+    expect((await receiver.snapshot()).pending[0]?.operation.references).toEqual([
+      { path: 'docs/architecture.md', reason: 'Current ownership map' },
+    ])
+  })
+
+  it('persists materializer cachedReferences on the current pending question and keeps them after settlement', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-cached-'))
+    roots.push(storagePath)
+    const cachedReferences = [{
+      path: 'docs/architecture.md',
+      reason: 'Current ownership map',
+      cachedPath: '.dsh/member-questions/question-cached/architecture.md',
+    }]
+    const materializer: MemberQuestionSessionMaterializer = async () => ({
+      accepted: true,
+      cachedReferences,
+    })
+    const terminalAuthority = new MemoryTerminalAuthority()
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      materializer,
+      terminalAuthority,
+    })
+    await bindReceiverWorkspace(receiver)
+    await receiver.ingest(envelopeWith('question-cached', 3_000))
+    expect((await receiver.snapshot()).pending[0]?.cachedReferences).toEqual(cachedReferences)
+
+    await receiver.settle('question-cached' as never, {
+      kind: 'declined',
+      settledByInstallationId: 'install-cached' as never,
+      settledByDeviceName: 'Receiver',
+      settledAt: 1_500,
+    })
+    const terminal = (await receiver.snapshot()).terminal.find(row => row.questionId === 'question-cached')
+    expect(terminal?.cachedReferences).toEqual(cachedReferences)
   })
 
   it('retries an interrupted arrival materialization on replay and Host resume', async () => {

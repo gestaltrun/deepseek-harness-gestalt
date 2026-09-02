@@ -102,30 +102,30 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'offline'],
       [String(b1.accountId), 'offline'],
-    ])
+    ].sort(([left], [right]) => left.localeCompare(right)))
     expect((await platform.heartbeat(a1)).status).toBe(204)
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'online'],
       [String(b1.accountId), 'online'],
-    ])
+    ].sort(([left], [right]) => left.localeCompare(right)))
     expect((await platform.closePresence(b2)).status).toBe(204)
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'online'],
       [String(b1.accountId), 'online'],
-    ])
+    ].sort(([left], [right]) => left.localeCompare(right)))
     expect((await platform.closePresence(b1)).status).toBe(204)
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'online'],
       [String(b1.accountId), 'offline'],
-    ])
+    ].sort(([left], [right]) => left.localeCompare(right)))
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'online'],
       [String(b1.accountId), 'online'],
-    ])
+    ].sort(([left], [right]) => left.localeCompare(right)))
 
     const membershipPlatform = platform
     await aCtx.plugin(CompanionMemberQuestionSender, {
@@ -328,7 +328,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'offline'],
       [String(b1.accountId), 'offline'],
-    ])
+    ].sort(([left], [right]) => left.localeCompare(right)))
     const deliveries = broker.audit.filter(entry => entry.operation === 'deliver').length
     await expect(aCtx.memberQuestionSender.send({
       toProjectMember: String(b1.accountId),
@@ -354,7 +354,11 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     const payloadBytes = await readFile(join(workspaceB1, cachedBinary))
     return [
       { type: 'invite', incompletePending: 1, acceptedPending: 0 },
-      { type: 'presence', afterHeartbeats: ['online', 'online'], afterLastWindowClose: ['online', 'offline'] },
+      {
+        type: 'presence',
+        afterHeartbeats: ['online', 'online'],
+        afterLastWindowClose: ['offline', 'online'],
+      },
       {
         type: 'documents',
         paths: ['decision.md', 'preview.html', 'payload.bin'],
@@ -439,5 +443,8 @@ async function rosterPresence(
   const response = await platform.get(`/v1/projects/${projectId}/members`, session)
   expect(response.status).toBe(200)
   const view = await response.json() as { members: Array<{ accountId: string; presence: string }> }
-  return view.members.map(member => [member.accountId, member.presence])
+  return view.members
+    .map(member => [member.accountId, member.presence] as [string, string])
+    .sort(([leftId, leftPresence], [rightId, rightPresence]) =>
+      leftId.localeCompare(rightId) || leftPresence.localeCompare(rightPresence))
 }

@@ -140,13 +140,13 @@ describe('Project Members three-installation Electron journey', () => {
 
     const b1 = getInstance('b1')
     const b2 = getInstance('b2')
-    const approve = await b1.$('//button[.//*[normalize-space(.)="approve"]]')
-    const revise = await b2.$('//button[.//*[normalize-space(.)="revise"]]')
+    const approve = await $(b1, '//button[.//*[normalize-space(.)="approve"]]')
+    const revise = await $(b2, '//button[.//*[normalize-space(.)="revise"]]')
     await approve.waitForClickable({ timeout: 10_000 })
     await revise.waitForClickable({ timeout: 10_000 })
     await Promise.all([approve.click(), revise.click()])
-    const submitB1 = await b1.$('//button[normalize-space(.)="Submit"]')
-    const submitB2 = await b2.$('//button[normalize-space(.)="Submit"]')
+    const submitB1 = await $(b1, '//button[normalize-space(.)="Submit"]')
+    const submitB2 = await $(b2, '//button[normalize-space(.)="Submit"]')
     await Promise.all([
       submitB1.waitForClickable({ timeout: 10_000 }),
       submitB2.waitForClickable({ timeout: 10_000 }),
@@ -258,7 +258,7 @@ describe('Project Members three-installation Electron journey', () => {
     await postControl('b2', '/online', { online: true })
     await getInstance('b1').pause(1_000)
     for (const name of ['b1', 'b2'] as const) {
-      const row = await getInstance(name).$(`//*[@role="treeitem" and contains(normalize-space(.), "${offline.title}")]`)
+      const row = await $(getInstance(name), `//*[@role="treeitem" and contains(normalize-space(.), "${offline.title}")]`)
       expect(await row.isExisting()).toBe(false)
     }
     await Promise.all([signOut('b1'), signOut('b2')])
@@ -271,6 +271,14 @@ function getInstance(name: InstallationName): WebdriverIO.Browser {
   return (browser as unknown as WebdriverIO.MultiRemoteBrowser).getInstance(name)
 }
 
+function $(root: { $(selector: string): unknown }, selector: string): Promise<WebdriverIO.Element> {
+  return Promise.resolve(root.$(selector) as WebdriverIO.Element)
+}
+
+function $$(root: { $$(selector: string): unknown }, selector: string): Promise<WebdriverIO.ElementArray> {
+  return Promise.resolve(root.$$(selector) as WebdriverIO.ElementArray)
+}
+
 function requiredEvidence(name: InstallationName): InstallationEvidence {
   const value = evidence[name]
   if (value === undefined) throw new Error(`${name} boot evidence is unavailable`)
@@ -280,7 +288,7 @@ function requiredEvidence(name: InstallationName): InstallationEvidence {
 async function signIn(name: InstallationName, login: string): Promise<string> {
   const instance = getInstance(name)
   await switchToSessionSurface(instance)
-  await (await instance.$('button[aria-haspopup="dialog"]')).click()
+  await (await $(instance, 'button[aria-haspopup="dialog"]')).click()
   await switchToOverlaySurface(instance)
   await clickExactButton(instance, 'Mobile pairing')
   return await finishPlatformSignIn(name, login)
@@ -289,7 +297,7 @@ async function signIn(name: InstallationName, login: string): Promise<string> {
 async function signInFromWorkspaceSettings(name: InstallationName, login: string): Promise<string> {
   const instance = getInstance(name)
   await openWorkspaceSettings(instance)
-  const dialog = await instance.$('[role="dialog"][aria-label="Workspace settings"]')
+  const dialog = await $(instance, '[role="dialog"][aria-label="Workspace settings"]')
   await waitForBodyText(instance, 'Platform Account required')
   await waitForBodyText(instance, 'Project Members uses the same Platform Account as Mobile pairing.')
   await instance.saveScreenshot(join(
@@ -300,24 +308,24 @@ async function signInFromWorkspaceSettings(name: InstallationName, login: string
   await waitForBodyText(instance, 'Mobile pairing')
   const accountId = await finishPlatformSignIn(name, login)
   await dialog.waitForExist({ timeout: 10_000 })
-  await instance.waitUntil(async () => !await (await dialog.$('//button[normalize-space(.)="Sign in to Platform"]')).isExisting(), {
+  await instance.waitUntil(async () => !await (await $(dialog, '//button[normalize-space(.)="Sign in to Platform"]')).isExisting(), {
     timeout: 10_000,
     timeoutMsg: 'Workspace settings did not resume after Platform Account sign-in',
   })
-  await (await dialog.$('input[aria-label="Cloud project name"]')).waitForExist({
+  await (await $(dialog, 'input[aria-label="Cloud project name"]')).waitForExist({
     timeout: 10_000,
     timeoutMsg: 'Workspace settings did not finish Project recovery after Platform Account sign-in',
   })
   await instance.saveScreenshot(join(
     required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), name, 'project-members-signed-in-resumed.png',
   ))
-  await (await dialog.$('button[aria-label="Close"]')).click()
+  await (await $(dialog, 'button[aria-label="Close"]')).click()
   return accountId
 }
 
 async function finishPlatformSignIn(name: InstallationName, login: string): Promise<string> {
   const instance = getInstance(name)
-  const consent = await instance.$('input[type="checkbox"]')
+  const consent = await $(instance, 'input[type="checkbox"]')
   if (!await consent.isSelected()) await consent.click()
   await clickExactButton(instance, 'Continue to GitHub')
   let snapshot: {
@@ -351,8 +359,8 @@ async function finishPlatformSignIn(name: InstallationName, login: string): Prom
 async function createProjectAndInvite(): Promise<{ id: string }> {
   const instance = getInstance('a1')
   await openWorkspaceSettings(instance)
-  const dialog = await instance.$('[role="dialog"][aria-label="Workspace settings"]')
-  await (await dialog.$('input[aria-label="Cloud project name"]')).setValue('Atlas')
+  const dialog = await $(instance, '[role="dialog"][aria-label="Workspace settings"]')
+  await (await $(dialog, 'input[aria-label="Cloud project name"]')).setValue('Atlas')
   await clickExactButton(instance, 'Create cloud project')
   await waitForBodyText(instance, 'Bound cloud project: Atlas')
   const project = await instance.execute(async remote =>
@@ -361,22 +369,22 @@ async function createProjectAndInvite(): Promise<{ id: string }> {
     }).dshDesktop?.projectMembership?.projectByRemote(remote),
   'https://github.com/gestaltrun/atlas') as { id?: string } | undefined
   if (typeof project?.id !== 'string') throw new Error('A1 project creation did not expose the Project id')
-  await (await dialog.$('input[aria-label="GitHub login"]')).setValue('grace')
+  await (await $(dialog, 'input[aria-label="GitHub login"]')).setValue('grace')
   await clickExactButton(instance, 'Invite')
   await waitForBodyText(instance, 'Pending invitations')
-  await (await dialog.$('button[aria-label="Close"]')).click()
+  await (await $(dialog, 'button[aria-label="Close"]')).click()
   return { id: project.id }
 }
 
 async function acceptInvitationOnB1(): Promise<void> {
   const instance = getInstance('b1')
   await switchToSessionSurface(instance)
-  const invitation = await instance.$('[role="dialog"][aria-label="Project invitation"]')
+  const invitation = await $(instance, '[role="dialog"][aria-label="Project invitation"]')
   await invitation.waitForExist({ timeout: 30_000 })
   await clickExactButton(instance, 'Accept')
-  const link = await instance.$('[role="dialog"][aria-label="Link a local workspace"]')
+  const link = await $(instance, '[role="dialog"][aria-label="Link a local workspace"]')
   await link.waitForExist({ timeout: 10_000 })
-  await (await link.$('button[aria-label="Close"]')).click()
+  await (await $(link, 'button[aria-label="Close"]')).click()
   await link.waitForExist({ reverse: true, timeout: 10_000 })
   const pending = await instance.execute(async () => await (window as unknown as {
     dshDesktop?: { projectMembership?: { pendingInvitations(): Promise<unknown[]> } }
@@ -388,7 +396,7 @@ async function acceptInvitationOnB1(): Promise<void> {
   ))
   await clickExactButton(instance, 'Accept')
   await link.waitForExist({ timeout: 10_000 })
-  await (await link.$('input[name="wizard-link-candidate"]')).click()
+  await (await $(link, 'input[name="wizard-link-candidate"]')).click()
   await clickExactButton(instance, 'Link and join')
   await link.waitForExist({ reverse: true, timeout: 15_000 })
 }
@@ -396,22 +404,22 @@ async function acceptInvitationOnB1(): Promise<void> {
 async function closeStaleInvitation(name: InstallationName): Promise<void> {
   const instance = getInstance(name)
   await switchToSessionSurface(instance)
-  const dialog = await instance.$('[role="dialog"][aria-label="Project invitation"]')
-  if (await dialog.isExisting()) await (await dialog.$('button[aria-label="Close"]')).click()
+  const dialog = await $(instance, '[role="dialog"][aria-label="Project invitation"]')
+  if (await dialog.isExisting()) await (await $(dialog, 'button[aria-label="Close"]')).click()
 }
 
 async function assertReceiverRoster(presence: 'Online' | 'Offline'): Promise<void> {
   const instance = getInstance('a1')
   await openWorkspaceSettings(instance)
-  const dialog = await instance.$('[role="dialog"][aria-label="Workspace settings"]')
+  const dialog = await $(instance, '[role="dialog"][aria-label="Workspace settings"]')
   await waitForBodyText(instance, 'grace')
-  const graceRow = await dialog.$('//li[.//*[normalize-space(.)="grace"]]')
+  const graceRow = await $(dialog, '//li[.//*[normalize-space(.)="grace"]]')
   await graceRow.waitForExist({ timeout: 10_000 })
-  await (await graceRow.$(`[title="${presence}"]`)).waitForExist({ timeout: 10_000 })
+  await (await $(graceRow, `[title="${presence}"]`)).waitForExist({ timeout: 10_000 })
   await instance.saveScreenshot(join(
     required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), 'a1', `project-roster-${presence.toLowerCase()}.png`,
   ))
-  await (await dialog.$('button[aria-label="Close"]')).click()
+  await (await $(dialog, 'button[aria-label="Close"]')).click()
 }
 
 async function signOut(name: 'b1' | 'b2'): Promise<void> {
@@ -430,25 +438,25 @@ async function signOut(name: 'b1' | 'b2'): Promise<void> {
 
 async function openWorkspaceSettings(instance: WebdriverIO.Browser): Promise<void> {
   await switchToSessionSurface(instance)
-  const row = await instance.$('//*[@role="treeitem" and contains(normalize-space(.), "workspace")]')
+  const row = await $(instance, '//*[@role="treeitem" and contains(normalize-space(.), "workspace")]')
   await row.waitForExist({ timeout: 15_000 })
   await row.moveTo()
-  const actions = await instance.$('button[aria-label="Workspace actions for workspace"]')
+  const actions = await $(instance, 'button[aria-label="Workspace actions for workspace"]')
   await actions.waitForClickable({ timeout: 5_000 })
   await actions.click()
   await clickExactButtonOrMenuItem(instance, 'Workspace settings')
-  await (await instance.$('[role="dialog"][aria-label="Workspace settings"]')).waitForExist({ timeout: 10_000 })
+  await (await $(instance, '[role="dialog"][aria-label="Workspace settings"]')).waitForExist({ timeout: 10_000 })
 }
 
 async function startA1SessionAndAsk(): Promise<void> {
   const instance = getInstance('a1')
   await switchToSessionSurface(instance)
-  const empty = await instance.$('textarea[placeholder="Choose a workspace to start"]')
+  const empty = await $(instance, 'textarea[placeholder="Choose a workspace to start"]')
   if (await empty.isExisting()) {
     await empty.click()
     await clickExactButtonOrMenuItem(instance, 'workspace')
   }
-  const composer = await instance.$('textarea[placeholder="Describe what you want to build"]')
+  const composer = await $(instance, 'textarea[placeholder="Describe what you want to build"]')
   await composer.waitForEnabled({ timeout: 20_000 })
   await composer.setValue('Ask Grace whether the guarded rollout should proceed after reviewing all three materials.')
   await instance.keys(['Enter'])
@@ -462,7 +470,7 @@ async function openReceivingQuestion(
 ): Promise<void> {
   const instance = getInstance(name)
   await switchToSessionSurface(instance)
-  const row = await instance.$(`//*[@role="treeitem" and contains(normalize-space(.), "${title}")]`)
+  const row = await $(instance, `//*[@role="treeitem" and contains(normalize-space(.), "${title}")]`)
   await row.waitForExist({ timeout: 30_000 })
   await row.click()
   await waitForBodyText(instance, question)
@@ -475,8 +483,8 @@ async function waitForAnswerRace(
   let winner: 'b1' | 'b2' | undefined
   await b1.waitUntil(async () => {
     const [b1Text, b2Text] = await Promise.all([
-      (await b1.$('body')).getText(),
-      (await b2.$('body')).getText(),
+      (await $(b1, 'body')).getText(),
+      (await $(b2, 'body')).getText(),
     ])
     if (b1Text.includes('Answered on B2 Electron')) winner = 'b2'
     if (b2Text.includes('Answered on B1 Electron')) winner = 'b1'
@@ -492,11 +500,11 @@ async function focusTransferredDocument(
   marker: string,
 ): Promise<void> {
   const instance = getInstance(name)
-  const chip = await instance.$(`//button[.//*[normalize-space(.)="${filename}"]]`)
+  const chip = await $(instance, `//button[.//*[normalize-space(.)="${filename}"]]`)
   await chip.waitForClickable({ timeout: 5_000 })
   await chip.click()
   if (filename.endsWith('.html')) {
-    const preview = await instance.$(`//iframe[@title="${filename}"]`)
+    const preview = await $(instance, `//iframe[@title="${filename}"]`)
     await preview.waitForExist({ timeout: 10_000 })
     await instance.waitUntil(async () => (await preview.getAttribute('srcdoc'))?.includes(marker) === true, {
       timeout: 10_000,
@@ -509,7 +517,7 @@ async function focusTransferredDocument(
   await instance.saveScreenshot(join(
     required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), name, `${filename.replace('.', '-')}-focused.png`,
   ))
-  const foldedBar = await instance.$('//button[@aria-label="Remote · Ada"]')
+  const foldedBar = await $(instance, '//button[@aria-label="Remote · Ada"]')
   if (await foldedBar.isClickable()) {
     await foldedBar.click()
   }
@@ -555,17 +563,17 @@ async function assertA1SessionLog(): Promise<void> {
 
 async function assertSingleA1ComposerCard(): Promise<void> {
   const instance = getInstance('a1')
-  const composerCards = await instance.$$('[data-composer-card]')
-  const memberComposer = await instance.$('textarea[aria-label="Answer this member question"]')
+  const composerCards = await $$(instance, '[data-composer-card]')
+  const memberComposer = await $(instance, 'textarea[aria-label="Answer this member question"]')
   expect(composerCards).toHaveLength(1)
   expect(await memberComposer.isExisting()).toBe(false)
 }
 
 async function assertNoLocalComposerCard(name: 'b1' | 'b2'): Promise<void> {
   const instance = getInstance(name)
-  const composerCard = await instance.$('[data-composer-card]')
-  const productComposer = await instance.$('textarea[placeholder="Describe what you want to build"]')
-  const memberComposer = await instance.$('textarea[aria-label="Answer this member question"]')
+  const composerCard = await $(instance, '[data-composer-card]')
+  const productComposer = await $(instance, 'textarea[placeholder="Describe what you want to build"]')
+  const memberComposer = await $(instance, 'textarea[aria-label="Answer this member question"]')
   expect(await composerCard.isExisting()).toBe(false)
   expect(await productComposer.isExisting()).toBe(false)
   expect(await memberComposer.isExisting()).toBe(false)
@@ -684,13 +692,13 @@ async function rpc<T = unknown>(origin: string, method: string, payload: unknown
 }
 
 async function clickExactButton(instance: WebdriverIO.Browser, label: string): Promise<void> {
-  const button = await instance.$(`//button[normalize-space(.)="${label}"]`)
+  const button = await $(instance, `//button[normalize-space(.)="${label}"]`)
   await button.waitForClickable({ timeout: 10_000 })
   await button.click()
 }
 
 async function clickExactButtonOrMenuItem(instance: WebdriverIO.Browser, label: string): Promise<void> {
-  const target = await instance.$(`//*[self::button or @role="menuitem"][normalize-space(.)="${label}"]`)
+  const target = await $(instance, `//*[self::button or @role="menuitem"][normalize-space(.)="${label}"]`)
   await target.waitForClickable({ timeout: 10_000 })
   await target.click()
 }
@@ -700,7 +708,11 @@ async function waitForBodyText(
   text: string,
   timeout = 30_000,
 ): Promise<void> {
-  await instance.waitUntil(async () => (await instance.$('body')).getText().then(value => value.includes(text)), {
+  await instance.waitUntil(async () => {
+    const body = await $(instance, 'body')
+    const value = await Promise.resolve(body.getText() as unknown as string | Promise<string>)
+    return value.includes(text)
+  }, {
     timeout,
     timeoutMsg: `visible text did not contain ${JSON.stringify(text)}`,
   })

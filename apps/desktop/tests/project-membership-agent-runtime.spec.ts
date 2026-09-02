@@ -50,8 +50,10 @@ describe('Desktop Project Membership agent runtime', () => {
       gitRemote: vi.fn().mockResolvedValue('https://github.com/gestaltrun/atlas.git'),
     })
     const token = (await readFile(runtime.tokenFile, 'utf8')).trim()
-    expect((await stat(runtime.tokenFile)).mode & 0o777).toBe(0o600)
-    expect((await stat(dirname(runtime.tokenFile))).mode & 0o777).toBe(0o700)
+    if (process.platform !== 'win32') {
+      expect((await stat(runtime.tokenFile)).mode & 0o777).toBe(0o600)
+      expect((await stat(dirname(runtime.tokenFile))).mode & 0o777).toBe(0o700)
+    }
 
     expect((await call(runtime.origin, token, '/v1/account', { cwd: process.cwd() })).body)
       .toMatchObject({ account: { id: 'account-a', githubLogin: 'ada' } })

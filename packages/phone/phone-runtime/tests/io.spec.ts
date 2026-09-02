@@ -4,8 +4,8 @@ import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phon
 import {
   ioParams,
   iosScreenScale,
-  phoneSwipeActions,
 } from '../src/io.ts'
+import { phoneSwipeActions } from '../src/swipe.ts'
 import { stageFake, wireDevice } from './helpers.ts'
 
 const contexts: Context[] = []
@@ -68,7 +68,7 @@ describe('iOS input coordinate normalization', () => {
     ])
   })
 
-  it('rejects a sent gesture that does not change device UI scroll position', async () => {
+  it('records destination-move swipe offset and leaves Speak Selection at 0', async () => {
     const fake = await stageFake({
       devices: [wireDevice('SIM-UDID', 'ios', 'simulator', 'online')],
     })
@@ -101,10 +101,25 @@ describe('iOS input coordinate normalization', () => {
     await context.phoneDevices.io({
       deviceId: deviceId('SIM-UDID'),
       method: 'gesture',
+      actions: [
+        { type: 'pointerMove', x: 100, y: 400 },
+        { type: 'pointerDown' },
+        { type: 'pause', duration: 500 },
+        { type: 'pointerMove', x: 100, y: 100 },
+        { type: 'pointerUp' },
+      ],
+    })
+    const afterSpeakSelection = await fake.counters()
+    expect(afterSpeakSelection.io).toHaveLength(2)
+    expect(afterSpeakSelection.scroll['SIM-UDID'] ?? 0).toBe(0)
+
+    await context.phoneDevices.io({
+      deviceId: deviceId('SIM-UDID'),
+      method: 'gesture',
       actions: phoneSwipeActions([{ x: 100, y: 400 }, { x: 100, y: 100 }]),
     })
     const afterSwipe = await fake.counters()
-    expect(afterSwipe.io).toHaveLength(2)
+    expect(afterSwipe.io).toHaveLength(3)
     expect(afterSwipe.scroll['SIM-UDID']).toBe(100)
   })
 

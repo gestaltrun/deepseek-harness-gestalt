@@ -13,15 +13,16 @@ import { fileURLToPath } from 'node:url'
 import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
 /**
- * Vertical page-offset delta for one gesture list. A tap-shaped list, or a
- * Speak Selection long-press (pause after pointerDown before destination move),
- * keeps offset 0.
+ * Vertical page-offset delta for one gesture list. A tap-shaped list, any
+ * pause after pointerDown before destination move (Speak Selection), or a
+ * destination move with no post-move pause keeps offset 0.
  */
 function phoneSwipeScrollDelta(actions) {
   let origin
   let destination
   let pressed = false
   let longPress = false
+  let travelPause = false
   for (const action of actions ?? []) {
     if (action?.type === 'pointerMove' && typeof action.x === 'number' && typeof action.y === 'number') {
       if (!pressed) origin = { x: action.x, y: action.y }
@@ -35,12 +36,16 @@ function phoneSwipeScrollDelta(actions) {
       }
       continue
     }
-    if (action?.type === 'pause' && pressed && destination === undefined
-      && typeof action.duration === 'number' && action.duration >= 300) {
-      longPress = true
+    if (action?.type === 'pointerUp') {
+      pressed = false
+      continue
+    }
+    if (action?.type === 'pause' && pressed) {
+      if (destination === undefined) longPress = true
+      else travelPause = true
     }
   }
-  if (longPress || origin === undefined || destination === undefined) return 0
+  if (longPress || !travelPause || origin === undefined || destination === undefined) return 0
   return origin.y - destination.y
 }
 

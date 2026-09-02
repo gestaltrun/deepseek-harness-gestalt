@@ -295,6 +295,12 @@ export async function overlayAccountWorkspaceUi(): Promise<AccountWorkspaceUiSna
   })
 }
 
+/** Save the release-backed Account Pool Settings surface before the journey leaves it. */
+export async function captureAccountWorkspaceEvidence(): Promise<void> {
+  await switchToDesktopOverlay()
+  await browser.saveScreenshot(join(requiredEnv('DSH_SUB2API_E2E_ARTIFACT_DIR'), 'account-workspace.png'))
+}
+
 /** Open one provider editor in Models Settings by its visible identity. */
 export async function openProviderEditor(providerLabels: readonly string[]): Promise<void> {
   await switchToDesktopOverlay()

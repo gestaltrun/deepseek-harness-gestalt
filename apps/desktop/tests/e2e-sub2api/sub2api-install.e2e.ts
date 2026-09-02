@@ -1,7 +1,7 @@
 /** Release-backed Electron flow: Settings offer, installer, Web Host restart, embedded console. */
 import { browser, expect } from '@wdio/globals'
 import {
-  clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
+  captureAccountWorkspaceEvidence, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
   clickAccountConsoleRowAction, clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
   connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput, fillTopAccountDialogProviderCredential,
   gatewayModelIds, gatewayModelProfile, mainWindowSnapshot,
@@ -198,8 +198,9 @@ describe('Sub2API Desktop installation', () => {
     expect(workspaceUi.actionButtonCount).toBe(3)
     expect(workspaceUi.actionRightGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1)
     expect(workspaceUi.pageHeight ?? 0).toBeGreaterThanOrEqual(workspaceUi.viewportHeight ?? 1)
-    expect(workspaceUi.pageBackgroundColor).toMatch(/rgb\(36, 36, 36\)|rgb\(245, 245, 245\)/u)
-    expect(workspaceUi.tableBackgroundColor).toMatch(/rgb\(43, 43, 43\)|rgb\(255, 255, 255\)/u)
+    expect(workspaceUi.pageBackgroundColor).toBe('rgb(36, 36, 36)')
+    expect(workspaceUi.tableBackgroundColor).toBe('rgb(43, 43, 43)')
+    await captureAccountWorkspaceEvidence()
     expect([
       [
         '名称', '账号ID', '平台/类型', '容量', '状态', '调度', '今日统计', '用量窗口',

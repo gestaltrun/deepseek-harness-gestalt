@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`。该子路径对浏览器安全，并由 client bundle 内联；Host 包根再导出同一函数。列表是五步动作：定位 `pointerMove`、不带坐标的 `pointerDown`、终点 `pointerMove`、150 ms `pause`、`pointerUp`。终点 move 之后的 pause 是位移时长。`pointerDown` 之后的 pause 会延长按下，变成 iOS 长按，包括「朗读所选内容」。按下前的 `pointerMove` 保存接触点，按下后的 `pointerMove` 才是拖动，`pause` 延长上一动作的 duration。中间采样轨迹点不转发；swipe 由起点与松开界定。滚轮突发合并 50 ms 后，沿纵轴发送同一条 swipe。触控映射仍使用 H264 解码显示尺寸或 MJPEG `naturalWidth`/`naturalHeight`，不用 CSS 布局尺寸。
+GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`。该子路径对浏览器安全，并由 client bundle 内联；Host 包根再导出同一函数。列表是 `pointerMove(start)`、`pointerDown`、`pointerMove(end)`、pause 150、`pointerUp`。`pointerDown` 之后的 pause 就是「朗读所选内容」这条 bug。终点 move 之后的 pause 是位移时长。按下前的 `pointerMove` 保存接触点，按下后的 `pointerMove` 才是拖动，`pause` 延长上一动作的 duration。中间采样轨迹点不转发；swipe 由起点与松开界定。滚轮突发合并 50 ms 后，沿纵轴发送同一条 swipe。触控映射仍使用 H264 解码显示尺寸或 MJPEG `naturalWidth`/`naturalHeight`，不用 CSS 布局尺寸。
 
 ## Alternatives considered
 

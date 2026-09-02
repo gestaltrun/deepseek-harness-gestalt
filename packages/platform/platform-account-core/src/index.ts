@@ -58,8 +58,8 @@ export const LOGIN_ATTEMPT_TTL_MS = 5 * 60 * 1000
 export const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000
 /** Maximum and issued refresh-token lifetime. */
 export const MAX_REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000
-/** Accepted clock skew for one installation proof. */
-export const ACCOUNT_PROOF_WINDOW_MS = 60 * 1000
+/** Fixed five-minute accepted clock skew for one installation proof. */
+export const ACCOUNT_PROOF_WINDOW_MS = 5 * 60 * 1000
 
 /** GitHub public identity retained after the provider token is discarded. */
 export interface GitHubIdentity {
@@ -879,7 +879,11 @@ export class PlatformAccount extends AccountService {
       dsaEncoding: 'ieee-p1363',
     }, signature)
     if (!valid) throw new AccountError('PROOF_INVALID', 'installation proof signature is invalid')
-    const consumed = await this.backend.consumeProof(proof.jti, now + ACCOUNT_PROOF_WINDOW_MS, now)
+    const consumed = await this.backend.consumeProof(
+      proof.jti,
+      proof.issuedAt + ACCOUNT_PROOF_WINDOW_MS,
+      now,
+    )
     if (!consumed) throw new AccountError('PROOF_REPLAYED', 'installation proof was already used')
   }
 

@@ -256,6 +256,34 @@ describe('member-question receiver durable state', () => {
     expect(() => parseReceiverState(JSON.stringify(duplicate))).toThrow('duplicate question ids')
   })
 
+  it('round-trips cachedReferences and rejects malformed cache metadata', () => {
+    const cached = [{
+      path: 'docs/architecture.md',
+      reason: 'Current ownership map',
+      cachedPath: '.dsh/member-questions/question-persisted/architecture.md',
+    }]
+    const valid = document()
+    const questions = valid.questions as Array<Record<string, unknown>>
+    questions[0]!.cachedReferences = cached
+    questions[1]!.cachedReferences = cached
+    const parsed = parseReceiverState(JSON.stringify(valid))
+    expect(parsed.questions[0]?.cachedReferences).toEqual(cached)
+    expect(parsed.questions[1]?.cachedReferences).toEqual(cached)
+
+    const cases: Array<[unknown, string]> = [
+      ['not-an-array', 'must be an array'],
+      [[null], 'must be an object'],
+      [[{ path: '', reason: 'why', cachedPath: '.dsh/ok' }], 'cached reference path'],
+      [[{ path: 'docs/a.md', reason: 1, cachedPath: '.dsh/ok' }], 'cached reference reason'],
+      [[{ path: 'docs/a.md', reason: 'why', cachedPath: '' }], 'cached reference cachedPath'],
+    ]
+    for (const [value, message] of cases) {
+      const invalid = document()
+      ;(invalid.questions as Array<Record<string, unknown>>)[0]!.cachedReferences = value
+      expect(() => parseReceiverState(JSON.stringify(invalid))).toThrow(message)
+    }
+  })
+
   it('rejects malformed, dangling, inconsistent, and duplicate admissions', () => {
     const cases: Array<(admission: Record<string, unknown>) => void> = [
       (admission) => { admission.receivingSessionId = 'missing' },

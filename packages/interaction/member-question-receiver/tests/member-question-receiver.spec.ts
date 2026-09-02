@@ -381,6 +381,38 @@ describe('FileMemberQuestionReceiver', () => {
     ])
   })
 
+  it('persists materializer cachedReferences on the current pending question and keeps them after settlement', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-cached-'))
+    roots.push(storagePath)
+    const cachedReferences = [{
+      path: 'docs/architecture.md',
+      reason: 'Current ownership map',
+      cachedPath: '.dsh/member-questions/question-cached/architecture.md',
+    }]
+    const materializer: MemberQuestionSessionMaterializer = async () => ({
+      accepted: true,
+      cachedReferences,
+    })
+    const terminalAuthority = new MemoryTerminalAuthority()
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      materializer,
+      terminalAuthority,
+    })
+    await bindReceiverWorkspace(receiver)
+    await receiver.ingest(envelopeWith('question-cached', 3_000))
+    expect((await receiver.snapshot()).pending[0]?.cachedReferences).toEqual(cachedReferences)
+
+    await receiver.settle('question-cached' as never, {
+      kind: 'declined',
+      settledByInstallationId: 'install-cached' as never,
+      settledByDeviceName: 'Receiver',
+      settledAt: 1_500,
+    })
+    const terminal = (await receiver.snapshot()).terminal.find(row => row.questionId === 'question-cached')
+    expect(terminal?.cachedReferences).toEqual(cachedReferences)
+  })
+
   it('retries an interrupted arrival materialization on replay and Host resume', async () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
     roots.push(storagePath)

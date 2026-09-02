@@ -296,7 +296,7 @@ function SessionTree({
     const keys: string[] = []
     for (const workspace of workspaces) {
       if (workspace.sessionIds.some(id => list.byId[id]?.pendingInteraction !== undefined)) {
-        keys.push(workspace.workspaceId as string)
+        keys.push(workspace.workspaceId)
       }
     }
     if (pendingUngroupedSessionIds.length > 0) keys.push(UNGROUPED_KEY)

@@ -266,6 +266,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Carries current-installation membership operations into Desktop UI composition; the Desktop provider obtains a fresh Account presentation for every call, while renderer consumers receive no credentials.',
   },
   {
+    key: 'desktopProjectMembership',
+    pkg: 'project-membership-desktop',
+    title: 'Desktop agent Project Membership reads',
+    mode: 'core',
+    consumers: ['tool-project-members', 'tool-ask-user'],
+    note: 'Validates the token-protected Desktop loopback projection and supplies authenticated Account, Workspace Project, roster, and eligible member-question route reads to agent-preset tools without exposing Platform credentials.',
+  },
+  {
     key: 'remoteAccess',
     pkg: 'remote-access',
     title: 'Personal Pairing lifecycle seam',

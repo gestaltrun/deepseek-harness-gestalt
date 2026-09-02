@@ -100,6 +100,10 @@ import {
   parseProjectInvitation,
   parseProjectRemote,
 } from './project-membership.ts'
+import {
+  startDesktopProjectMembershipAgentRuntime,
+  type DesktopProjectMembershipAgentRuntime,
+} from './project-membership-agent-runtime.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 let systemFetch: typeof globalThis.fetch
@@ -114,6 +118,7 @@ function smokeLog(line: string): void {
 
 let host: RunningWebHost | undefined
 let browserRuntime: DesktopBrowserRuntime | undefined
+let projectMembershipAgentRuntime: DesktopProjectMembershipAgentRuntime | undefined
 let window: BrowserWindow | undefined
 let overlayView: WebContentsView | undefined
 let overlayOpen: ReturnType<typeof parseChromeOverlayShow>
@@ -468,6 +473,17 @@ async function startHost(): Promise<RunningWebHost> {
     throw new Error('Desktop Host needs a real Node executable; set DSH_NODE or run via pnpm gestalt:dev')
   }
   browserRuntime ??= await startDesktopBrowserRuntime(app.getPath('userData'))
+  projectMembershipAgentRuntime ??= await startDesktopProjectMembershipAgentRuntime({
+    userData: app.getPath('userData'),
+    account: () => account,
+    membership: (expectedAccountId, signal) => createDesktopProjectMembershipClient({
+      account: () => account,
+      environment: accountEnvironment,
+      fetch: systemFetch,
+      expectedAccountId,
+      signal,
+    }),
+  })
   const pending = spawnWebHost({
     node: paths.node,
     args: paths.args,
@@ -476,6 +492,8 @@ async function startHost(): Promise<RunningWebHost> {
       DSH_DESKTOP: '1',
       DSH_ELECTRON_BROWSER_ORIGIN: browserRuntime.origin,
       DSH_ELECTRON_BROWSER_TOKEN_FILE: browserRuntime.tokenFile,
+      DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN: projectMembershipAgentRuntime.origin,
+      DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE: projectMembershipAgentRuntime.tokenFile,
     },
     signal: hostStartController.signal,
   })
@@ -710,7 +728,9 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
       await running?.stop()
       const runtime = browserRuntime
       browserRuntime = undefined
-      await runtime?.dispose()
+      const membershipRuntime = projectMembershipAgentRuntime
+      projectMembershipAgentRuntime = undefined
+      await Promise.all([runtime?.dispose(), membershipRuntime?.dispose()])
       if (mode === 'exit') app.exit(exitCode)
     } catch (error) {
       console.error('dsh desktop: shutdown failed', error)

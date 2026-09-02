@@ -103,7 +103,11 @@ async function setupRouted(delivery = new MemoryMemberQuestionDelivery()) {
   await ctx.plugin(UserQuestionService)
   await ctx.plugin(CompanionMemberQuestionSender, { delivery })
   await ctx.plugin(toolAskUser, {
-    originResolver: () => Promise.resolve(routedOrigin),
+    routeResolver: ({ toProjectMember }) => Promise.resolve(
+      toProjectMember.toLowerCase() === 'grace'
+        ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer' }
+        : undefined,
+    ),
     boundProjectResolver: () => Promise.resolve('project-atlas'),
   })
   return { ctx, delivery }
@@ -435,7 +439,7 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?' }],
-        to_project_member: 'account-peer',
+        to_project_member: 'Grace',
       },
     })
     expect(result).toMatchObject({
@@ -452,7 +456,7 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?' }],
-        to_project_member: 'account-peer',
+        to_project_member: 'Grace',
         background: '文'.repeat(BACKGROUND_MAX_CODE_POINTS + 1),
       },
     })
@@ -460,6 +464,44 @@ describe('ask_user_question tool', () => {
       isError: true,
       error: { info: { name: 'AskUserQuestionError', code: 'BACKGROUND_TOO_LONG' } },
     })
+  })
+
+  it('rejects an addressee absent from the current Project roster before delivery', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-ineligible-addressee'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'nobody',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'INELIGIBLE_ADDRESSEE' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects an injected Account id that skips live roster login matching', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-account-id-skip'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'account-peer',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'INELIGIBLE_ADDRESSEE' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
   })
 
   it('rejects references that leave the workspace or carry an overlong reason', async () => {
@@ -547,7 +589,7 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?', options: [{ label: 'yes' }] }],
-        to_project_member: 'account-peer',
+        to_project_member: 'Grace',
         background: 'Need a rollback window before Friday.',
         references: [{ path: 'plan.md' }, { path: 'plan.md', reason: 'Current rollout plan' }],
       },
@@ -587,7 +629,7 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?' }],
-        to_project_member: 'account-peer',
+        to_project_member: 'grace',
         background: 'Need a rollback window before Friday.',
       },
     })
@@ -608,7 +650,7 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?' }],
-        to_project_member: 'account-peer',
+        to_project_member: 'Grace',
         background: 'Need a rollback window before Friday.',
       },
     })
@@ -661,19 +703,29 @@ describe('ask_user_question tool', () => {
     expect(parameters?.properties).not.toHaveProperty('to_project_member')
   })
 
-  it('rejects a non-function injected resolver at construction', async () => {
+  it('cancels a pending bound-project read with prompt assembly', async () => {
     const ctx = new Context()
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(UserQuestionService)
-    await expect(ctx.plugin(toolAskUser, { originResolver: {} as never }))
-      .rejects.toThrow(/originResolver must be a resolver function/)
-    await expect(ctx.plugin(toolAskUser, { boundProjectResolver: {} as never }))
-      .rejects.toThrow(/boundProjectResolver must be a resolver function/)
+    await ctx.plugin(toolAskUser, {
+      boundProjectResolver: ({ signal } = {}) => new Promise((_resolve, reject) => {
+        if (signal?.aborted === true) {
+          reject(signal.reason)
+          return
+        }
+        signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+      }),
+    })
+    const controller = new AbortController()
+    const assembly = ctx.systemPrompt.assemble({ signal: controller.signal })
+    controller.abort(new Error('prompt cancelled'))
+
+    await expect(assembly).rejects.toThrow('prompt cancelled')
   })
 
-  it('forwards the addressee as project id when boundProjectResolver is omitted', async () => {
+  it('cancels a pending routeResolver through the tool signal', async () => {
     const ctx = new Context()
     const delivery = new MemoryMemberQuestionDelivery()
     await ctx.plugin(AgentRegistry)
@@ -682,7 +734,64 @@ describe('ask_user_question tool', () => {
     await ctx.plugin(UserQuestionService)
     await ctx.plugin(CompanionMemberQuestionSender, { delivery })
     await ctx.plugin(toolAskUser, {
-      originResolver: () => Promise.resolve(routedOrigin),
+      routeResolver: ({ signal }) => new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason)
+          return
+        }
+        signal.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+      }),
+      boundProjectResolver: () => Promise.resolve('project-atlas'),
+    })
+    const controller = new AbortController()
+    const executing = ctx.tools.execute({
+      signal: controller.signal,
+      callId: CallId('ask-route-cancelled'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    controller.abort(new Error('route cancelled'))
+    const result = await executing
+    expect(result.isError).toBe(true)
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects a non-function injected resolver at construction', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await expect(ctx.plugin(toolAskUser, { routeResolver: {} as never }))
+      .rejects.toThrow(/routeResolver must be a resolver function/)
+    await expect(ctx.plugin(toolAskUser, { boundProjectResolver: {} as never }))
+      .rejects.toThrow(/boundProjectResolver must be a resolver function/)
+  })
+
+  it('uses the authoritative route project when boundProjectResolver is omitted', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    const addressees: string[] = []
+    const deliver = delivery.deliver.bind(delivery)
+    delivery.deliver = (encoded) => {
+      addressees.push(encoded.toProjectMember)
+      return deliver(encoded)
+    }
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(CompanionMemberQuestionSender, { delivery })
+    await ctx.plugin(toolAskUser, {
+      routeResolver: ({ toProjectMember }) => Promise.resolve(
+        toProjectMember.toLowerCase() === 'grace'
+          ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer' }
+          : undefined,
+      ),
     })
     const executing = ctx.tools.execute({
       signal: testToolSignal,
@@ -690,13 +799,14 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?' }],
-        to_project_member: 'account-peer',
+        to_project_member: 'Grace',
         background: 'Need a rollback window before Friday.',
       },
     })
     await waitForDelivery(delivery)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
+    expect(addressees).toEqual(['account-peer'])
     await ctx.memberQuestionSender.settle(
       questionId!,
       humanSettlement({ answers: [{ id: 'pkg', selected: [], custom: 'later' }] }),
@@ -720,7 +830,9 @@ describe('ask_user_question tool', () => {
       presenceLookup: () => Promise.resolve('offline'),
     })
     await ctx.plugin(toolAskUser, {
-      originResolver: () => Promise.resolve(routedOrigin),
+      routeResolver: () => Promise.resolve({
+        projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer',
+      }),
       boundProjectResolver: () => Promise.resolve('project-atlas'),
     })
     const result = await ctx.tools.execute({
@@ -729,7 +841,7 @@ describe('ask_user_question tool', () => {
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'pkg', question: 'Ship it?' }],
-        to_project_member: 'account-peer',
+        to_project_member: 'Grace',
         background: 'Need a rollback window before Friday.',
       },
     })

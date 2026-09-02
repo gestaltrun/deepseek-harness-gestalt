@@ -184,13 +184,13 @@ describe('project_members tool', () => {
     // A default export would make Loader unwrap only apply and drop `inject`.
     expect('default' in toolProjectMembers).toBe(false)
     expect(toolProjectMembers.name).toBe('tool-project-members')
-    expect(toolProjectMembers.inject).toEqual(['tools', 'projectMembership'])
+    expect(toolProjectMembers.inject).toEqual(['tools'])
 
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(toolProjectMembers) as Record<string, unknown>
     expect(unwrapped).toBe(toolProjectMembers)
     expect(unwrapped.name).toBe('tool-project-members')
-    expect(unwrapped.inject).toEqual(['tools', 'projectMembership'])
+    expect(unwrapped.inject).toEqual(['tools'])
     expect(typeof unwrapped.apply).toBe('function')
     expect(unwrapped.Config).toBeDefined()
   })
@@ -399,5 +399,69 @@ describe('project_members tool', () => {
     expect(() => {
       toolProjectMembers.apply(new Context(), broken)
     }).toThrow('tool-project-members: config.currentAccountResolver must be a resolver function')
+  })
+
+  it('reads the roster through an injected bridge without requiring ctx.projectMembership', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(toolProjectMembers, {
+      currentAccountResolver: async ({ signal } = {}) => {
+        expect(signal).toBe(testToolSignal)
+        return account('acc-owner')
+      },
+      rosterResolver: async (actor, requestedProjectId, { signal } = {}) => {
+        expect(actor).toBe('acc-owner')
+        expect(requestedProjectId).toBe('proj-alpha')
+        expect(signal).toBe(testToolSignal)
+        return {
+          project: PROJECT,
+          members: [{
+            id: 'mem-owner' as MembershipId,
+            accountId: account('acc-owner'),
+            role: 'owner',
+            tags: ['founding'] as FunctionTag[],
+            joinedAt: 1_000,
+          }],
+        }
+      },
+    })
+    const result = await execute(ctx, 'pm-bridge', { projectId: 'proj-alpha' })
+    expect(result.isError).toBe(false)
+    expect(resultValue(result)).toEqual([
+      { accountId: 'acc-owner', role: 'owner', tags: ['founding'], presence: 'offline' },
+    ])
+  })
+
+  it('cancels a pending current-account read through the tool signal', async () => {
+    let started: (() => void) | undefined
+    const waiting = new Promise<void>((resolve) => { started = resolve })
+    const ctx = await setup({
+      currentAccountResolver: async ({ signal } = {}) => {
+        started?.()
+        return new Promise((_resolve, reject) => {
+          if (signal?.aborted === true) {
+            reject(signal.reason)
+            return
+          }
+          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+        })
+      },
+    })
+    const controller = new AbortController()
+    const executing = ctx.tools.execute({
+      signal: controller.signal,
+      callId: CallId('pm-account-cancelled'),
+      name: 'project_members',
+      arguments: { projectId: 'proj-alpha' },
+    })
+    await waiting
+    controller.abort(new Error('account cancelled'))
+    const result = await executing
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ProjectMembersToolError', code: 'ACCOUNT_UNAVAILABLE' } },
+    })
   })
 })

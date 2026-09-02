@@ -15,11 +15,18 @@ describe('Desktop overlay isolation', () => {
     const desktop = readFileSync(join(here, '..', 'cordis.patch.yml'), 'utf8')
     expect(web).not.toMatch(/ui-desktop|dsh-client-ui-desktop|dsh-time-context|dsh-schedule/)
     expect(web).not.toMatch(/browser-runtime-electron-http|DSH_ELECTRON_BROWSER/)
+    expect(web).not.toMatch(/DSH_DESKTOP_PROJECT_MEMBERSHIP|project-membership-desktop/)
     expect(desktop).not.toMatch(/id: time-context|dsh-time-context/)
     expect(desktop).toMatch(/id: schedule/)
     expect(desktop).toMatch(/@deepseek-ai\/dsh-schedule/)
     expect(desktop).toMatch(/id: ui-desktop/)
     expect(desktop).toMatch(/@deepseek-ai\/dsh-client-ui-desktop/)
+    expect(desktop).toMatch(/id: project-membership-desktop/)
+    expect(desktop).toMatch(/@deepseek-ai\/dsh-project-membership-desktop/)
+    expect(desktop).toMatch(/DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN/)
+    expect(desktop).toMatch(
+      /id: project-membership-desktop[\s\S]*disabled: !!js process\.env\.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN == null/,
+    )
     expect(desktop).toMatch(/id: browser-runtime-electron-http/)
     expect(desktop).toMatch(/@deepseek-ai\/dsh-browser-runtime-tandem/)
     expect(desktop).toMatch(/DSH_ELECTRON_BROWSER_ORIGIN/)
@@ -55,6 +62,7 @@ describe('Desktop overlay isolation', () => {
     try {
       const web = run(['web', '--dump-default-config'])
       expect(web).not.toMatch(/ui-desktop|dsh-client-ui-desktop|dsh-time-context|dsh-schedule|browser-runtime-electron-http/)
+      expect(web).not.toMatch(/project-membership-desktop/)
       expect(web).toMatch(/@deepseek-ai\/dsh-host-directory-picker-auto/)
 
       const desktop = run(['web', '--patch', patch, '--dump-config'])
@@ -67,6 +75,7 @@ describe('Desktop overlay isolation', () => {
       expect(schedule).toBeGreaterThan(agents)
       expect(schedule).toBeGreaterThan(persistence)
       expect(desktop).toMatch(/@deepseek-ai\/dsh-client-ui-desktop/)
+      expect(desktop).toMatch(/@deepseek-ai\/dsh-project-membership-desktop/)
       expect(desktop).toMatch(/@deepseek-ai\/dsh-browser-runtime-deterministic/)
       expect(desktop).toMatch(/@deepseek-ai\/dsh-browser-runtime-tandem/)
       expect(desktop).toMatch(/sidecar: false/)

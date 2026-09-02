@@ -22,7 +22,7 @@ Desktop 将 `build/icon.icns`、`build/icon.ico` 和 `build/icon.png` 作为自�
 
 Dock / 开始菜单的 cwd 是 Launch Directory（Application Support / `%APPDATA%` 下的 `defaultWorkspace`）。用户数据仍在 `~/.dsh`。
 
-Project Membership 使用同一套实际运行的 Platform environment，并在每次请求时于 Electron main 内获取新的 current-Installation proof。Preload 只暴露不含 credential 的项目操作。Desktop client plugin 把该 bridge 提供给 Workspace surface；bearer token、proof 字段与 installation signing key 永远不会进入 renderer state。
+Project Membership 使用同一套实际运行的 Platform environment，并在每次请求时于 Electron main 内获取新的 current-Installation proof。Preload 只暴露不含 credential 的项目操作。Desktop client plugin 把该 bridge 提供给 Workspace surface；bearer token、proof 字段与 installation signing key 永远不会进入 renderer state。对于 agent preset，Electron 还会发布受属主 token 保护的 loopback 只读投影，内容仅为当前公开 Account 身份、工作区绑定的 Project，以及带公开展示字段的完整名册。Web Host 通过 `ctx.desktopProjectMembership` 读取该投影；token 文件位于 Electron userData，权限仅属主可读，并在 Host 关闭时删除。纯浏览器 `dsh web` 没有该投影，也不会注册 `project_members` 工具。绑定 Desktop 会话同时暴露 `project_members` 与 `ask_user_question.to_project_member`；模型按公开 GitHub 登录名匹配实时名册，再路由提问。未绑定会话隐藏该路由参数。任意非名册收件人以 `INELIGIBLE_ADDRESSEE` 失败关闭。
 
 ## Schedule 与能力默认值
 

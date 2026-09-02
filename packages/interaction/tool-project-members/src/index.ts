@@ -15,6 +15,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -31,10 +32,32 @@ import z from '@deepseek-ai/schemastery'
 export type AccountRef = Branded<'PlatformAccountId'>
 
 /** Resolves the session-bound platform account that reads the roster. */
-export type CurrentAccountResolver = () => Promise<AccountRef | undefined>
+export type CurrentAccountResolver = (input?: {
+  /** Agent making the tool call, when one is live. */
+  readonly agent?: Agent
+  /** Tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<AccountRef | undefined>
 
 /** Resolves the workspace-bound cloud project for calls that omit `projectId`. */
-export type BoundProjectResolver = () => Promise<Branded<'ProjectId'> | undefined>
+export type BoundProjectResolver = (input?: {
+  /** Agent whose immutable Session cwd selects the Workspace. */
+  readonly agent?: Agent
+  /** Tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<Branded<'ProjectId'> | undefined>
+
+/** Provider face for compositions whose authoritative roster is behind another process boundary. */
+export type RosterResolver = (
+  actor: AccountRef,
+  projectId: Branded<'ProjectId'>,
+  input?: {
+    /** Agent making the tool call, when one is live. */
+    readonly agent?: Agent
+    /** Tool cancellation signal for provider I/O. */
+    readonly signal?: AbortSignal
+  },
+) => Promise<RosterView>
 
 /** Whether any of a member's installations held a live heartbeat at the read. */
 export type MemberPresence = 'online' | 'offline'
@@ -117,6 +140,11 @@ export interface Config {
    * verdict a composed presence registry with no live heartbeats produces.
    */
   rosterPresenter?: RosterPresenter
+  /**
+   * Reads the canonical roster through a composition-owned authenticated bridge.
+   * Absent, the tool uses `ctx.projectMembership.roster()` as before.
+   */
+  rosterResolver?: RosterResolver
 }
 
 /** Schemastery configuration for the tool consumer. */
@@ -124,10 +152,11 @@ export const Config: z<Config> = z.object({
   currentAccountResolver: z.any(),
   boundProjectResolver: z.any(),
   rosterPresenter: z.any(),
+  rosterResolver: z.any(),
 })
 
 /** Config keys whose injected values must be callable. */
-const RESOLVER_KEYS = ['currentAccountResolver', 'boundProjectResolver', 'rosterPresenter'] as const
+const RESOLVER_KEYS = ['currentAccountResolver', 'boundProjectResolver', 'rosterPresenter', 'rosterResolver'] as const
 
 /**
  * Validate the injected faces loudly for both Loader-normalized and
@@ -153,8 +182,8 @@ const TOOL_DESCRIPTION =
 
 /** Cordis plugin name. */
 export const name = 'tool-project-members'
-/** Required tool registry and project-membership Service Definition. */
-export const inject = ['tools', 'projectMembership']
+/** Required tool registry; roster authority comes from the Service Definition or an injected bridge resolver. */
+export const inject = ['tools']
 
 /**
  * Register the `project_members` tool on `ctx.tools`.
@@ -190,10 +219,22 @@ export function apply(ctx: Context, config: Config = {}): void {
       },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
-    async execute(args) {
-      const actor = await resolveActor(resolved)
-      const projectId = await resolveProjectId(args, resolved)
-      const view = await ctx.projectMembership.roster(actor, projectId)
+    async execute(args, exec) {
+      const actor = await resolveActor(resolved, exec.agent, exec.signal)
+      const projectId = await resolveProjectId(args, resolved, exec.agent, exec.signal)
+      const rosterResolver = resolved.rosterResolver
+      const membership = ctx.get('projectMembership')
+      let view
+      if (rosterResolver !== undefined) {
+        view = await rosterResolver(actor, projectId, {
+          ...exec.agent === undefined ? {} : { agent: exec.agent },
+          signal: exec.signal,
+        })
+      } else if (membership === undefined) {
+        throw new Error('tool-project-members: no project-membership roster provider is composed')
+      } else {
+        view = await membership.roster(actor, projectId)
+      }
       return toMemberViews(view, resolved)
     },
   }))
@@ -211,10 +252,15 @@ export function apply(ctx: Context, config: Config = {}): void {
 async function resolveProjectId(
   args: { projectId?: string },
   config: Config,
+  agent?: Agent,
+  signal?: AbortSignal,
 ): Promise<Branded<'ProjectId'>> {
   if (args.projectId !== undefined) return args.projectId as Branded<'ProjectId'>
   try {
-    const bound = await config.boundProjectResolver?.()
+    const bound = await config.boundProjectResolver?.({
+      ...agent === undefined ? {} : { agent },
+      ...signal === undefined ? {} : { signal },
+    })
     if (bound !== undefined) return bound
   } catch (cause: unknown) {
     throw new ProjectMembersToolError(PROJECT_UNBOUND_MESSAGE, 'PROJECT_UNBOUND', { cause })
@@ -230,9 +276,12 @@ async function resolveProjectId(
  * @returns the branded account id for the roster read.
  * @throws {ProjectMembersToolError} `ACCOUNT_UNAVAILABLE` when no account resolves.
  */
-async function resolveActor(config: Config): Promise<AccountRef> {
+async function resolveActor(config: Config, agent?: Agent, signal?: AbortSignal): Promise<AccountRef> {
   try {
-    const account = await config.currentAccountResolver?.()
+    const account = await config.currentAccountResolver?.({
+      ...agent === undefined ? {} : { agent },
+      ...signal === undefined ? {} : { signal },
+    })
     if (account !== undefined) return account
   } catch (cause: unknown) {
     throw new ProjectMembersToolError(ACCOUNT_UNAVAILABLE_MESSAGE, 'ACCOUNT_UNAVAILABLE', { cause })

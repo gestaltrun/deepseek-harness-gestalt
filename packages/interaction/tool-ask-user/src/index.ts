@@ -46,58 +46,66 @@ const description = 'Ask the user a concise question when you need confirmation,
   + 'routed asks require background (1 to 600 characters). '
   + 'references attaches workspace files that support the decision, locally or routed.'
 
-/** Inputs for resolving the Decision Brief origin of one routed ask. */
+/** Inputs for resolving one authenticated member-question route. */
 export interface OriginResolverInput {
   /** Single project-member addressee from `to_project_member`. */
   toProjectMember: string
   /** Calling agent, when the tool ran from a live session. */
   agent?: Agent
+  /** Tool cancellation signal for every route-authority read. */
+  signal: AbortSignal
 }
 
-/**
- * Resolves the Decision Brief origin of one routed ask. The composition
- * supplies project name and asker identity; the tool forwards the resolved
- * origin to the sender.
- * @param input - addressee and optional calling agent.
- * @returns the origin fields the sender encodes onto the Companion operation.
- */
-export type OriginResolver = (input: OriginResolverInput) => Promise<MemberQuestionOrigin>
+/** Authenticated Project, Decision Brief origin, and live-roster Account for one eligible addressee. */
+export interface MemberQuestionRoute {
+  /** Cloud Project whose current roster contains the addressee. */
+  readonly projectId: string
+  /** Authenticated Decision Brief origin from the same roster read. */
+  readonly origin: MemberQuestionOrigin
+  /** Durable Account id matched from the live roster, never the model-supplied login. */
+  readonly toProjectMember: string
+}
+
+/** Resolve one authenticated route, or no value when the addressee is absent from the current Project roster. */
+export type RouteResolver = (input: OriginResolverInput) => Promise<MemberQuestionRoute | undefined>
 
 /**
- * Resolves the cloud project whose peer grant addresses the member. Absent,
- * the tool forwards `to_project_member` as the project id so schema-level
- * routing can be tested without a membership face. The same resolver drives
- * runtime eligibility: an unbound (undefined) result hides `to_project_member`
- * from assembled prompts.
+ * Resolves the current Workspace's cloud project for runtime eligibility. An
+ * unbound (undefined) result hides `to_project_member` from assembled prompts;
+ * execution uses {@link RouteResolver} as the addressee authority.
  */
-export type BoundProjectResolver = () => Promise<string | undefined>
+export type BoundProjectResolver = (input?: {
+  /** Agent whose immutable Session cwd selects the Workspace. */
+  readonly agent?: Agent
+  /** Prompt-assembly or tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<string | undefined>
 
 /** Injected faces for routed asks. Local asks ignore every field. */
 export interface Config {
   /**
-   * Resolves Decision Brief origin fields for a routed ask. Absent, the tool
-   * answers `SENDER_UNAVAILABLE` rather than inventing identity.
+   * Resolves the current Project and authenticated Decision Brief origin only
+   * when its current roster contains the addressee. Absent, the tool answers
+   * `SENDER_UNAVAILABLE`; resolving no value answers `INELIGIBLE_ADDRESSEE`.
    */
-  originResolver?: OriginResolver
+  routeResolver?: RouteResolver
   /**
    * Resolves the workspace-bound cloud project for a routed ask and for
    * runtime eligibility of `to_project_member`. Absent or resolving to
    * undefined hides the parameter from assembled prompts; a present id
-   * surfaces it. Execute still forwards the addressee as the project id
-   * when this resolver is absent so schema-level routing can be tested
-   * without a membership face.
+   * surfaces it. It never authorizes execution.
    */
   boundProjectResolver?: BoundProjectResolver
 }
 
 /** Schemastery configuration for the tool consumer. */
 export const Config: z<Config> = z.object({
-  originResolver: z.any(),
+  routeResolver: z.any(),
   boundProjectResolver: z.any(),
 })
 
 /** Config keys whose injected values must be callable. */
-const RESOLVER_KEYS = ['originResolver', 'boundProjectResolver'] as const
+const RESOLVER_KEYS = ['routeResolver', 'boundProjectResolver'] as const
 
 /**
  * Validate the injected faces loudly for both Loader-normalized and
@@ -250,27 +258,33 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
       }
       const sender = ctx.get('memberQuestionSender')
-      if (sender === undefined || resolved.originResolver === undefined) {
+      if (sender === undefined || resolved.routeResolver === undefined) {
         throw new AskUserQuestionError(
-          'SENDER_UNAVAILABLE: to_project_member requires ctx.memberQuestionSender and an originResolver',
+          'SENDER_UNAVAILABLE: to_project_member requires ctx.memberQuestionSender and a routeResolver',
           'SENDER_UNAVAILABLE',
         )
       }
-      const origin = await resolved.originResolver({
+      const route = await resolved.routeResolver({
         toProjectMember: addressee,
         ...exec.agent !== undefined ? { agent: exec.agent } : {},
+        signal: exec.signal,
       })
-      const projectId = (await resolved.boundProjectResolver?.()) ?? addressee
+      if (route === undefined) {
+        throw new AskUserQuestionError(
+          'INELIGIBLE_ADDRESSEE: to_project_member must name a current member of the bound cloud project',
+          'INELIGIBLE_ADDRESSEE',
+        )
+      }
       const result = await sender.send({
-        toProjectMember: addressee,
-        projectId: parseMemberQuestionProjectId(projectId),
+        toProjectMember: route.toProjectMember,
+        projectId: parseMemberQuestionProjectId(route.projectId),
         background,
         questions,
         references: (references ?? []).map(reference => ({
           path: reference.path,
           reason: reference.reason ?? reference.path,
         })),
-        origin,
+        origin: route.origin,
         originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
       }, {
         ...exec.agent !== undefined ? { session: exec.agent.session } : {},
@@ -286,9 +300,9 @@ export function apply(ctx: Context, config: Config = {}): void {
       }
     },
   }))
-  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+  ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
-    return filterAskUserQuestionSchema(assembled, resolved)
+    return filterAskUserQuestionSchema(assembled, resolved, context.agent, context.signal)
   })
 }
 
@@ -299,13 +313,17 @@ export function apply(ctx: Context, config: Config = {}): void {
  * leak a stale parameter into the next request.
  * @param assembly - waterfall-authoritative prompt assembly.
  * @param config - injected project-binding face.
+ * @param agent - Agent whose Workspace selects the binding.
+ * @param signal - optional prompt-assembly cancellation signal.
  * @returns the same assembly, or a clone with the routing parameter omitted.
  */
 async function filterAskUserQuestionSchema(
   assembly: PromptAssembly,
   config: Config,
+  agent?: Agent,
+  signal?: AbortSignal,
 ): Promise<PromptAssembly> {
-  const bound = await resolveBoundProject(config)
+  const bound = await resolveBoundProject(config, agent, signal)
   if (bound !== undefined) return assembly
   return {
     ...assembly,
@@ -320,13 +338,23 @@ async function filterAskUserQuestionSchema(
  * Resolve the workspace-bound cloud project. A rejecting or absent resolver
  * is unbound — the routing parameter stays hidden rather than leaking.
  * @param config - injected project-binding face.
+ * @param agent - Agent whose Workspace selects the binding.
+ * @param signal - optional prompt-assembly cancellation signal.
  * @returns the bound project id, or undefined when the workspace is unbound.
  */
-async function resolveBoundProject(config: Config): Promise<string | undefined> {
+async function resolveBoundProject(
+  config: Config,
+  agent?: Agent,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
   if (config.boundProjectResolver === undefined) return undefined
   try {
-    return await config.boundProjectResolver()
-  } catch {
+    return await config.boundProjectResolver({
+      ...agent === undefined ? {} : { agent },
+      ...signal === undefined ? {} : { signal },
+    })
+  } catch (error) {
+    if (signal?.aborted === true) throw error
     return undefined
   }
 }

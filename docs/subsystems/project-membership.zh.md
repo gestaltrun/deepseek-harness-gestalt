@@ -16,6 +16,63 @@
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxdesktopprojectmembership--desktopprojectmembershipservice"></a>
+
+### `ctx.desktopProjectMembership` — `DesktopProjectMembershipService`
+
+Client-side Service Provider over the Desktop Host's token-protected loopback projection.
+
+```ts cordis-catalog
+/**
+ * Resolve the signed-in Account and the current session Workspace's optional Cloud Project.
+ * @param agent - live Agent whose immutable session cwd selects the Workspace.
+ * @param signal - optional cancellation for the loopback read.
+ * @returns current Desktop context, or no value for diagnostics without a cwd.
+ */
+async context(agent?: Agent, signal?: AbortSignal): Promise<DesktopProjectMembershipContext | undefined>
+
+/**
+ * Read the current signed-in Desktop Account independently of any Workspace.
+ * @param signal - optional cancellation for the loopback read.
+ * @returns current public Account identity.
+ * @throws when Desktop has no signed-in Account or the bridge response is invalid.
+ */
+async currentAccount(signal?: AbortSignal): Promise<DesktopProjectMembershipContext['account']>
+
+/**
+ * Read one complete authoritative roster and retain its identity/presence decorations for the presenter.
+ * @param actor - current Desktop Account id.
+ * @param projectId - Cloud Project to read.
+ * @param signal - optional cancellation for the loopback read.
+ * @returns canonical stored roster fields.
+ * @throws when the actor differs from Desktop Account or the roster response is invalid.
+ */
+async roster(actor: PlatformAccountId, projectId: ProjectId, signal?: AbortSignal): Promise<RosterView>
+
+/**
+ * Project the decorations retained by the exact roster read.
+ * @param view - roster returned by {@link roster}.
+ * @returns one presentation per member in stored order.
+ * @throws when `view` was not returned by this service instance.
+ */
+present(view: RosterView): Promise<readonly DesktopMemberPresentation[]>
+
+/**
+ * Resolve one member-question route from the current bound-Project roster.
+ * @param agent - live asking Agent.
+ * @param addresseeLogin - public GitHub login from `to_project_member`.
+ * @param originSessionTitle - latest public Session title, or the product fallback.
+ * @param signal - optional cancellation for both route-authority reads.
+ * @returns authenticated Project, matched Account, and origin, or no value when the login is not a current member.
+ * @throws when the Workspace is unbound or the current Account is absent from the roster.
+ */
+async questionRoute( agent: Agent | undefined, addresseeLogin: string, originSessionTitle: string, signal?: AbortSignal, ): Promise<DesktopMemberQuestionRoute | undefined>
+```
+
+Types: [Agent](core.zh.md) · [PlatformAccountId](platform-account.zh.md)
+
+Source: [`packages/platform/project-membership-desktop/src/index.ts`](../../packages/platform/project-membership-desktop/src/index.ts)
+
 <a id="ctxprojectmembership--projectmembershipservice-abstract-seam"></a>
 
 ### `ctx.projectMembership` — `ProjectMembershipService` (abstract seam)

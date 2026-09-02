@@ -10,14 +10,15 @@ Model-facing `project_members` tool over `ctx.projectMembership`: one read that 
 
 - `projectId` — the cloud project to query. Omitted, the tool asks the composition's workspace binding which project the current workspace maps to; an explicit id wins.
 
-The call resolves the session-bound account first, then the project binding, then reads the stored roster through `ctx.projectMembership.roster()`. The canonical result is the member array `[{ accountId, displayName?, avatarRef?, role, tags, presence }]` in join order; every stored member appears or the call fails — there are no partial rosters.
+The call resolves the session-bound account first, then the project binding, then reads the stored roster through an injected resolver or `ctx.projectMembership.roster()`. The canonical result is the member array `[{ accountId, displayName?, avatarRef?, role, tags, presence }]` in join order; every stored member appears or the call fails — there are no partial rosters.
 
 ## Injected provider faces
 
-The package depends only on the membership Service Definition — never a platform package. The composition injects three optional Config functions, and the platform provider face wires them to the Account Service Definition, the workspace remote, and the presence registry:
+The package imports only the membership Service Definition — never a platform provider package. The composition injects four optional Config functions; account, project, and roster resolvers receive the current Agent and tool cancellation signal so a Host adapter can derive Workspace context without model-supplied identity and stop pending reads:
 
 - `currentAccountResolver` — resolves the current session-bound account. Absent, rejecting, or resolving to `undefined` answers the stable `ACCOUNT_UNAVAILABLE` error.
 - `boundProjectResolver` — resolves the workspace-bound project for calls that omit `projectId`. Unresolvable answers the stable `PROJECT_UNBOUND` error.
+- `rosterResolver` — reads the authoritative roster through a composition-owned authenticated bridge. Absent, the tool uses `ctx.projectMembership.roster()` and fails if neither source is composed.
 - `rosterPresenter` — attaches presence and public display identity to one read. Absent, every member reads `presence: "offline"` with no identity fields — the same verdict a composed presence registry with no live heartbeats produces.
 
 ## Rendering

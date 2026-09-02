@@ -18,7 +18,7 @@
 - `background`：agent 撰写的决策简报文本。与 `to_project_member` 一起时必填；1 到 600 个 Unicode 码点，构建期以 `BACKGROUND_REQUIRED` 或 `BACKGROUND_TOO_LONG` 拒绝。
 - `references`：可选的 `{ path, reason? }[]`，本地与路由提问均可使用。每个 `path` 必须解析为提问会话工作区内的现存文件；每个 `reason` 至多 100 个码点。失败会抛出 `REFERENCES_INVALID` 并指出具体项。本地提问接受 references 且不改变路由；将 details 面板聚焦到被引用文件被推迟。
 
-没有 `to_project_member` 时，工具调用 `ctx.userQuestions.ask()`，并返回规范的 `{ answers: [{ id, selected, custom? }] }`。`selected` 包含选项标签；`custom` 携带自由填写的回答，对于多选题会补充 `selected`，对于单选题则会覆盖它。Native 渲染器会保留紧凑的 JSON 文本形式 `{ "answers": [{ "id": "...", "selected": ["..."], "custom": "..." }] }`。无法到达已组合发送器的路由提问会以 `SENDER_UNAVAILABLE` 失败。发送器生命周期失败（`MEMBER_OFFLINE`、`QUESTION_EXPIRED`、`QUESTION_WITHDRAWN`、`QUESTION_SUPERSEDED`、`REVOKED_DURING_FLIGHT`）仍作为普通工具结果保留。
+没有 `to_project_member` 时，工具调用 `ctx.userQuestions.ask()`，并返回规范的 `{ answers: [{ id, selected, custom? }] }`。`selected` 包含选项标签；`custom` 携带自由填写的回答，对于多选题会补充 `selected`，对于单选题则会覆盖它。Native 渲染器会保留紧凑的 JSON 文本形式 `{ "answers": [{ "id": "...", "selected": ["..."], "custom": "..." }] }`。路由提问需要 `routeResolver` 从包含收件人的当前名册中解析绑定 Project 与已鉴权来源；公开登录名匹配大小写不敏感。成员缺失时会在投递前以 `INELIGIBLE_ADDRESSEE` 失败，发送器或 resolver 缺失时以 `SENDER_UNAVAILABLE` 失败。工具取消会传递到 route resolver。发送器生命周期失败（`MEMBER_OFFLINE`、`QUESTION_EXPIRED`、`QUESTION_WITHDRAWN`、`QUESTION_SUPERSEDED`、`REVOKED_DURING_FLIGHT`）仍作为普通工具结果保留。
 
 ## 职责
 

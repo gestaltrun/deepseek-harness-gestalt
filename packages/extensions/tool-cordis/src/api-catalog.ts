@@ -1536,9 +1536,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>',
         description: 'Issue one invitation to a platform account.',
-        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner on the project.' }, { name: 'input', description: 'target project and invitee account.' }],
-        returns: 'the invitation in `pending` state.',
-        throws: ['{ProjectMembershipError} `ROLE_REQUIRED` below admin, `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.'],
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner on the project.' }, { name: 'input', description: 'target project, invitee account, and the role granted at accept time.' }],
+        returns: 'the invitation in `pending` state, carrying that granted role.',
+        throws: ['{ProjectMembershipError} `ROLE_REQUIRED` below admin or when the actor cannot grant the requested role, `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.'],
       },
       {
         signature: 'abstract retractInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>',
@@ -1658,10 +1658,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'fulfillment after Platform drops this installation.',
       },
       {
-        signature: 'invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>',
+        signature: 'invite(input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole }): Promise<InvitationView>',
         description: 'Invite one uniquely resolved public GitHub login.',
-        parameters: [{ name: 'input', description: 'Project and public GitHub login.' }],
-        returns: 'created pending invitation.',
+        parameters: [{ name: 'input', description: 'Project, public GitHub login, and the role granted at accept time.' }],
+        returns: 'created pending invitation carrying that granted role.',
       },
       {
         signature: 'decideInvitation(invitationId: InvitationId, input: InvitationDecisionInput): Promise<MemberView | undefined>',
@@ -4673,6 +4673,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
   },
   {
+    name: 'GrantableInviteRole',
+    declaration: 'export type GrantableInviteRole = Exclude<ProjectRole, \'owner\'>;',
+  },
+  {
     name: 'GrantRecord',
     declaration: 'export interface GrantRecord {\n    readonly kind: \'grant\';\n    readonly payload: unknown;\n}',
   },
@@ -4750,11 +4754,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'InvitationView',
-    declaration: 'export interface InvitationView {\n    readonly id: InvitationId;\n    readonly projectId: ProjectId;\n    readonly inviterAccountId: PlatformAccountId;\n    readonly inviteeAccountId: PlatformAccountId;\n    readonly state: InvitationState;\n    readonly invitedAt: number;\n    readonly settledAt?: number;\n}',
+    declaration: 'export interface InvitationView {\n    readonly id: InvitationId;\n    readonly projectId: ProjectId;\n    readonly inviterAccountId: PlatformAccountId;\n    readonly inviteeAccountId: PlatformAccountId;\n    readonly state: InvitationState;\n    readonly grantedRole: GrantableInviteRole;\n    readonly invitedAt: number;\n    readonly settledAt?: number;\n}',
   },
   {
     name: 'InviteInput',
-    declaration: 'export interface InviteInput {\n    readonly projectId: ProjectId;\n    readonly inviteeAccountId: PlatformAccountId;\n}',
+    declaration: 'export interface InviteInput {\n    readonly projectId: ProjectId;\n    readonly inviteeAccountId: PlatformAccountId;\n    readonly grantedRole: ProjectRole;\n}',
   },
   {
     name: 'InvocationDescriptor',
@@ -4774,7 +4778,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'IssuedInvitationView',
-    declaration: 'export interface IssuedInvitationView {\n    readonly invitationId: InvitationId;\n    readonly inviteeName: string;\n    readonly invitedAt: number;\n}',
+    declaration: 'export interface IssuedInvitationView {\n    readonly invitationId: InvitationId;\n    readonly inviteeName: string;\n    readonly grantedRole: InvitationView[\'grantedRole\'];\n    readonly invitedAt: number;\n}',
   },
   {
     name: 'JobDoneListener',
@@ -5222,7 +5226,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PendingInvitationView',
-    declaration: 'export interface PendingInvitationView {\n    readonly invitationId: InvitationId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly projectName: string;\n    readonly remoteUrl: string;\n    readonly inviterName: string;\n    readonly invitedAt: number;\n}',
+    declaration: 'export interface PendingInvitationView {\n    readonly invitationId: InvitationId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly projectName: string;\n    readonly remoteUrl: string;\n    readonly inviterName: string;\n    readonly grantedRole: InvitationView[\'grantedRole\'];\n    readonly invitedAt: number;\n}',
   },
   {
     name: 'PendingMemberQuestionView',

@@ -219,11 +219,19 @@ export function parseProjectRemote(value: unknown): string {
 }
 
 /** Parse one GitHub-login invitation IPC payload. */
-export function parseProjectInvitation(value: unknown): { projectId: ProjectId; githubLogin: string } {
-  const input = exactRecord(value, ['projectId', 'githubLogin'], 'Project invitation')
+export function parseProjectInvitation(value: unknown): {
+  projectId: ProjectId
+  githubLogin: string
+  grantedRole: ProjectRole
+} {
+  const input = exactRecord(value, ['projectId', 'githubLogin', 'grantedRole'], 'Project invitation')
+  if (input.grantedRole !== 'owner' && input.grantedRole !== 'admin' && input.grantedRole !== 'member') {
+    throw new TypeError('Project invitation grantedRole must be owner, admin, or member')
+  }
   return {
     projectId: parseProjectId(input.projectId),
     githubLogin: nonEmptyString(input.githubLogin, 'GitHub login'),
+    grantedRole: input.grantedRole,
   }
 }
 

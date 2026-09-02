@@ -84,15 +84,18 @@ describe('Project Membership HTTP consumer', () => {
     })
     expect(issued.status).toBe(200)
     expect(await issued.json()).toEqual([{
-      invitationId: 'invitation-1', inviteeName: 'mona', invitedAt: 1,
+      invitationId: 'invitation-1', inviteeName: 'mona', grantedRole: 'member', invitedAt: 1,
     }])
     expect(membership.pendingInvitationsIssuedBy).toHaveBeenCalledWith('account-1', 'project-1')
 
     const invited = await post(server.origin, '/v1/projects/invitations', {
-      projectId: 'project-1', githubLogin: 'mona',
+      projectId: 'project-1', githubLogin: 'mona', grantedRole: 'admin',
     }, session)
     expect(invited.status).toBe(201)
-    expect(await invited.json()).toMatchObject({ id: 'invitation-1', state: 'pending' })
+    expect(await invited.json()).toMatchObject({ id: 'invitation-1', state: 'pending', grantedRole: 'member' })
+    expect(membership.invite).toHaveBeenCalledWith('account-1', {
+      projectId: 'project-1', inviteeAccountId: 'account-2', grantedRole: 'admin',
+    })
 
     const accepted = await post(server.origin, '/v1/projects/invitations/invitation-1/decision', {
       decision: 'accept-with-link', link: { workspaceName: 'mona-local' },
@@ -187,7 +190,7 @@ describe('Project Membership HTTP consumer', () => {
     expect(pending.status).toBe(200)
     expect(await pending.json()).toMatchObject([{
       invitationId: 'invitation-1', receivingAccountId: 'account-1', projectName: 'Assembled',
-      remoteUrl: 'https://github.com/octocat/Repo', inviterName: 'octocat',
+      remoteUrl: 'https://github.com/octocat/Repo', inviterName: 'octocat', grantedRole: 'member',
     }])
     expect(membership.pendingInvitationContextsFor).toHaveBeenCalledWith('account-1')
     expect(await error(post(server.origin, '/v1/projects/invitations/pending', {}, authHeaders())))
@@ -221,7 +224,7 @@ describe('Project Membership HTTP consumer', () => {
     account.publicIdentityByGithubLogin.mockResolvedValueOnce(undefined)
     const server = await start(membershipService(), account)
     expect(await error(post(server.origin, '/v1/projects/invitations', {
-      projectId: 'project-1', githubLogin: 'missing',
+      projectId: 'project-1', githubLogin: 'missing', grantedRole: 'member',
     }, authHeaders()))).toEqual([404, 'ACCOUNT_NOT_FOUND'])
   })
 
@@ -236,9 +239,9 @@ describe('Project Membership HTTP consumer', () => {
     const server = await start(membership, account)
     const headers = { origin: ENVIRONMENT.origin, ...authHeaders() }
     const issued = await fetch(`${server.origin}/v1/projects/project-1/invitations`, { headers })
-    expect(await issued.json()).toMatchObject([{ inviteeName: '' }])
+    expect(await issued.json()).toMatchObject([{ inviteeName: '', grantedRole: 'member' }])
     const pending = await fetch(`${server.origin}/v1/projects/invitations/pending`, { headers })
-    expect(await pending.json()).toMatchObject([{ inviterName: '' }])
+    expect(await pending.json()).toMatchObject([{ inviterName: '', grantedRole: 'member' }])
   })
 
   it('rejects the wrong method and a heartbeat path that no subroute owns', async () => {
@@ -307,6 +310,9 @@ describe('Project Membership HTTP consumer', () => {
     expect(await error(nonStringRemote)).toEqual([400, 'INVALID_REQUEST'])
 
     expect(await error(post(server.origin, '/v1/projects/invitations', {}, session))).toEqual([400, 'INVALID_REQUEST'])
+    expect(await error(post(server.origin, '/v1/projects/invitations', {
+      projectId: 'project-1', githubLogin: 'mona', grantedRole: 'spectator',
+    }, session))).toEqual([400, 'INVALID_REQUEST'])
 
     expect(await error(post(server.origin, '/v1/projects/invitations/invitation-1/decision', {
       decision: 'later',
@@ -439,7 +445,7 @@ function invitation(): InvitationView {
   return {
     id: 'invitation-1' as InvitationId, projectId: 'project-1' as ProjectId,
     inviterAccountId: 'account-1' as PlatformAccountId, inviteeAccountId: 'account-2' as PlatformAccountId,
-    state: 'pending', invitedAt: 1,
+    state: 'pending', grantedRole: 'member', invitedAt: 1,
   }
 }
 

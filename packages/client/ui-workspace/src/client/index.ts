@@ -97,7 +97,12 @@ function projectMembershipGateway(
         projectId: project.id,
         workspaceId: localWorkspaceId,
       })
-      return { id: project.id, name: project.name, boundRemoteUrl: project.boundRemoteUrl }
+      return {
+        id: project.id,
+        name: project.name,
+        boundRemoteUrl: project.boundRemoteUrl,
+        receivingAccountId: project.receivingAccountId,
+      }
     },
     projectForWorkspace: async (workspaceId) => {
       const remoteUrl = await workspaces.gitRemote(workspaceId)
@@ -118,7 +123,12 @@ function projectMembershipGateway(
       if (boundWorkspaceId !== workspaceId) {
         throw new Error(`Cloud Project "${project.name}" is already linked to another local Workspace.`)
       }
-      return { id: project.id, name: project.name, boundRemoteUrl: project.boundRemoteUrl }
+      return {
+        id: project.id,
+        name: project.name,
+        boundRemoteUrl: project.boundRemoteUrl,
+        receivingAccountId: project.receivingAccountId,
+      }
     },
     roster: async (projectId) => {
       const roster = await client.roster(projectId as ProjectId)
@@ -138,14 +148,17 @@ function projectMembershipGateway(
         })),
       }
     },
-    invite: async ({ projectId, githubLogin }) => {
-      const invitation = await client.invite({ projectId: projectId as ProjectId, githubLogin })
-      return { invitationId: invitation.id, inviteeName: githubLogin }
+    invite: async ({ projectId, githubLogin, grantedRole }) => {
+      const invitation = await client.invite({
+        projectId: projectId as ProjectId, githubLogin, grantedRole,
+      })
+      return { invitationId: invitation.id, inviteeName: githubLogin, grantedRole: invitation.grantedRole }
     },
     issuedInvitations: async projectId => (await client.issuedInvitations(projectId as ProjectId))
       .map(invitation => ({
         invitationId: invitation.invitationId,
         inviteeName: invitation.inviteeName,
+        grantedRole: invitation.grantedRole,
       })),
     retractInvitation: async (invitationId) => {
       await client.retractInvitation(invitationId as InvitationId)
@@ -181,6 +194,7 @@ function projectMembershipGateway(
       projectName: invitation.projectName,
       inviterName: invitation.inviterName,
       remoteUrl: invitation.remoteUrl,
+      grantedRole: invitation.grantedRole,
     })),
     localRemoteFor: async (workspaceId) => {
       const remote = await workspaces.gitRemote(workspaceId)

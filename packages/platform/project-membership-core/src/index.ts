@@ -15,6 +15,7 @@ import z from '@deepseek-ai/schemastery'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
+  canGrantInviteRole,
   duplicateInvitee,
   normalizeGitRemoteUrl,
   ProjectMembershipError,
@@ -23,6 +24,7 @@ import {
   type ChangeRoleInput,
   type CreateProjectInput,
   type FunctionTag,
+  type GrantableInviteRole,
   type InvitationId,
   type InvitationState,
   type InvitationView,
@@ -37,7 +39,7 @@ import {
   type SetMemberTagsInput,
   type WorkspaceLink,
 } from '@deepseek-ai/dsh-project-membership'
-import { parse, serialize, type PersistedInvitation, type PersistedMembership, type PersistedState } from './persisted-state.ts'
+import { parse, serialize, PROJECT_MEMBERSHIP_FORMAT_VERSION, type PersistedInvitation, type PersistedMembership, type PersistedState } from './persisted-state.ts'
 
 /** Absolute document path for one environment namespace. */
 function stateFilePath(storagePath: string, environment: string): string {
@@ -109,6 +111,7 @@ interface InvitationRow {
   inviterAccountId: PlatformAccountId
   inviteeAccountId: PlatformAccountId
   state: InvitationState
+  grantedRole: GrantableInviteRole
   invitedAt: number
   settledAt?: number | undefined
 }
@@ -348,7 +351,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   /** Atomically publish the complete committed state. */
   private async persist(): Promise<void> {
     const state: PersistedState = {
-      formatVersion: 0,
+      formatVersion: PROJECT_MEMBERSHIP_FORMAT_VERSION,
       projects: [...this.projects.values()].map(project => ({
         id: project.id,
         name: project.name,
@@ -501,7 +504,14 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private async inviteOp(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView> {
-    this.requireAdmin(actor, input.projectId)
+    const actorMembership = this.requireAdmin(actor, input.projectId)
+    const grantedRole = input.grantedRole
+    if (!canGrantInviteRole(actorMembership.role, grantedRole)) {
+      throw new ProjectMembershipError(
+        'ROLE_REQUIRED',
+        `the ${actorMembership.role} role cannot invite as ${grantedRole}`,
+      )
+    }
     if (this.requireMembershipRowOrUndefined(input.inviteeAccountId, input.projectId) !== undefined
       || this.pendingInvitees.has(duplicateKey(input.projectId, input.inviteeAccountId))) {
       throw duplicateInvitee(input.inviteeAccountId)
@@ -512,6 +522,7 @@ export class FileProjectMembership extends ProjectMembershipService {
       inviterAccountId: actor,
       inviteeAccountId: input.inviteeAccountId,
       state: 'pending',
+      grantedRole,
       invitedAt: Date.now(),
       settledAt: undefined,
     }
@@ -572,7 +583,7 @@ export class FileProjectMembership extends ProjectMembershipService {
       id: randomUUID() as MembershipId,
       projectId: invitation.projectId,
       accountId: invitation.inviteeAccountId,
-      role: 'member',
+      role: invitation.grantedRole,
       tags: [],
       link,
       joinedAt: Date.now(),
@@ -753,6 +764,7 @@ function restoreInvitation(persisted: PersistedInvitation): InvitationRow {
     inviterAccountId: persisted.inviterAccountId as PlatformAccountId,
     inviteeAccountId: persisted.inviteeAccountId as PlatformAccountId,
     state: persisted.state,
+    grantedRole: persisted.grantedRole,
     invitedAt: persisted.invitedAt,
     ...(persisted.settledAt === undefined ? {} : { settledAt: persisted.settledAt }),
   }
@@ -779,6 +791,7 @@ function toPersistedInvitation(row: InvitationRow): PersistedInvitation {
     inviterAccountId: row.inviterAccountId,
     inviteeAccountId: row.inviteeAccountId,
     state: row.state,
+    grantedRole: row.grantedRole,
     invitedAt: row.invitedAt,
     ...(row.settledAt === undefined ? {} : { settledAt: row.settledAt }),
   }
@@ -811,6 +824,7 @@ function cloneInvitation(invitation: InvitationRow): InvitationView {
     inviterAccountId: invitation.inviterAccountId,
     inviteeAccountId: invitation.inviteeAccountId,
     state: invitation.state,
+    grantedRole: invitation.grantedRole,
     invitedAt: invitation.invitedAt,
     /* v8 ignore next 2 -- only pending rows are cloned, so a settled stamp never reaches a view. */
     ...(invitation.settledAt === undefined ? {} : { settledAt: invitation.settledAt }),

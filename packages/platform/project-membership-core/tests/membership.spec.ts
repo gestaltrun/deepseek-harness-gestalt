@@ -1,6 +1,6 @@
 /**
  * Executor-level behavior for the file-backed Project Membership provider:
- * atomic invite/accept under concurrency, role gates enforced inside each
+ * atomic invite/accept under concurrency, granted-role invite gates inside each
  * operation, tag-edit authority, LAST_OWNER protection, durable
  * environment-namespaced persistence, failed durable writes committing
  * nothing, and roster projection invalidation.
@@ -65,7 +65,7 @@ async function joinWith(
   invitee: PlatformAccountId,
   workspaceName: string,
 ): Promise<MemberView> {
-  await store.invite(alice, { projectId, inviteeAccountId: invitee })
+  await store.invite(alice, { projectId, inviteeAccountId: invitee, grantedRole: 'member' })
   const pending = await store.pendingInvitationsFor(invitee)
   const invitation: InvitationId = pending.at(-1)!.id
   return store.acceptInvitation(invitee, { invitationId: invitation, link: { workspaceName } })
@@ -120,7 +120,7 @@ describe('file-backed project membership', () => {
   it('settles concurrent invitations to one account into exactly one pending row', async () => {
     const { store, projectId } = await foundProject(alice, 'Race')
     const attempts = await Promise.allSettled(Array.from({ length: 8 }, () =>
-      store.invite(alice, { projectId, inviteeAccountId: bob })))
+      store.invite(alice, { projectId, inviteeAccountId: bob, grantedRole: 'member' })))
     const rejected = attempts.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     expect(attempts.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(rejected.every(result => (result.reason as ProjectMembershipError).code === 'DUPLICATE_INVITEE')).toBe(true)
@@ -146,10 +146,10 @@ describe('file-backed project membership', () => {
       .mockReturnValueOnce(20)
       .mockReturnValueOnce(10)
     try {
-      await store.invite(alice, { projectId: alpha, inviteeAccountId: carol })
-      await store.invite(bob, { projectId: alpha, inviteeAccountId: eve })
-      await store.invite(bob, { projectId: alpha, inviteeAccountId: dave })
-      await store.invite(bob, { projectId: beta, inviteeAccountId: dave })
+      await store.invite(alice, { projectId: alpha, inviteeAccountId: carol, grantedRole: 'member' })
+      await store.invite(bob, { projectId: alpha, inviteeAccountId: eve, grantedRole: 'member' })
+      await store.invite(bob, { projectId: alpha, inviteeAccountId: dave, grantedRole: 'member' })
+      await store.invite(bob, { projectId: beta, inviteeAccountId: dave, grantedRole: 'member' })
     } finally {
       now.mockRestore()
     }
@@ -174,8 +174,8 @@ describe('file-backed project membership', () => {
       await expect(run).rejects.toMatchObject({ code })
     }
     // Members invite nobody; strangers see nothing at all.
-    await denial(store.invite(carol, { projectId, inviteeAccountId: dave }), 'ROLE_REQUIRED')
-    await denial(store.invite(dave, { projectId, inviteeAccountId: dave }), 'NOT_A_MEMBER')
+    await denial(store.invite(carol, { projectId, inviteeAccountId: dave, grantedRole: 'member' }), 'ROLE_REQUIRED')
+    await denial(store.invite(dave, { projectId, inviteeAccountId: dave, grantedRole: 'member' }), 'NOT_A_MEMBER')
     await denial(store.roster(dave, projectId), 'NOT_A_MEMBER')
     await denial(store.pendingInvitationsIssuedBy(carol, projectId), 'ROLE_REQUIRED')
     // Admins invite but every owner-facing surface answers only to owners.
@@ -192,6 +192,44 @@ describe('file-backed project membership', () => {
     await denial(store.changeRole(bob, { membershipId: carolMember.id, role: 'admin' }), 'ROLE_REQUIRED')
     // With two owners present, one owner may step down; plain-member rows stay under admin authority.
     await store.changeRole(alice, { membershipId: aliceMember.id, role: 'admin' })
+  })
+
+  it('stores the granted invite role and joins with exactly that role', async () => {
+    const { store, projectId } = await foundProject(alice, 'GrantRole')
+    const bobMember = await joinWith(store, projectId, bob, 'bob-admin-invite')
+    await store.changeRole(alice, { membershipId: bobMember.id, role: 'admin' })
+
+    const adminInvite = await store.invite(alice, {
+      projectId, inviteeAccountId: carol, grantedRole: 'admin',
+    })
+    expect(adminInvite).toMatchObject({ state: 'pending', grantedRole: 'admin' })
+    expect(await store.pendingInvitationsFor(carol)).toMatchObject([{ grantedRole: 'admin' }])
+    const joinedAdmin = await store.acceptInvitation(carol, {
+      invitationId: adminInvite.id, link: { workspaceName: 'carol-admin' },
+    })
+    expect(joinedAdmin.role).toBe('admin')
+
+    const memberInvite = await store.invite(bob, {
+      projectId, inviteeAccountId: dave, grantedRole: 'member',
+    })
+    expect(memberInvite.grantedRole).toBe('member')
+    const joinedMember = await store.acceptInvitation(dave, {
+      invitationId: memberInvite.id, link: { workspaceName: 'dave-member' },
+    })
+    expect(joinedMember.role).toBe('member')
+  })
+
+  it('refuses forged or hidden invite roles inside the mutating invite operation', async () => {
+    const { store, projectId } = await foundProject(alice, 'GrantDenial')
+    const bobMember = await joinWith(store, projectId, bob, 'bob-admin')
+    await store.changeRole(alice, { membershipId: bobMember.id, role: 'admin' })
+    const denial = async (run: Promise<unknown>, code: string) => {
+      await expect(run).rejects.toMatchObject({ code })
+    }
+    await denial(store.invite(alice, { projectId, inviteeAccountId: carol, grantedRole: 'owner' }), 'ROLE_REQUIRED')
+    await denial(store.invite(bob, { projectId, inviteeAccountId: carol, grantedRole: 'admin' }), 'ROLE_REQUIRED')
+    await denial(store.invite(bob, { projectId, inviteeAccountId: carol, grantedRole: 'owner' }), 'ROLE_REQUIRED')
+    expect(await store.pendingInvitationsFor(carol)).toEqual([])
   })
 
   it('protects the final owner from demotion and removal', async () => {
@@ -214,7 +252,7 @@ describe('file-backed project membership', () => {
       remoteUrl: 'git@github.com:Org/joining.git',
     })
     const projectId = created.id
-    await store.invite(alice, { projectId, inviteeAccountId: bob })
+    await store.invite(alice, { projectId, inviteeAccountId: bob, grantedRole: 'member' })
     const invitation = (await store.pendingInvitationsFor(bob))[0]!.id
 
     // A blank workspace name rejects before any state moves.
@@ -242,7 +280,7 @@ describe('file-backed project membership', () => {
     expect(await reopened.pendingInvitationsFor(bob)).toEqual([])
 
     // A declined invitation produces no membership row anywhere.
-    await store.invite(alice, { projectId, inviteeAccountId: carol })
+    await store.invite(alice, { projectId, inviteeAccountId: carol, grantedRole: 'member' })
     const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
     await store.declineInvitation(carol, carolInvitation)
     const declinedRoster = await store.roster(alice, projectId)
@@ -256,7 +294,7 @@ describe('file-backed project membership', () => {
 
   it('keeps retraction issuer-or-owner scoped through the lifecycle', async () => {
     const { store, projectId } = await foundProject(alice, 'Scoping')
-    await store.invite(alice, { projectId, inviteeAccountId: bob })
+    await store.invite(alice, { projectId, inviteeAccountId: bob, grantedRole: 'member' })
     const invitation = (await store.pendingInvitationsFor(bob))[0]!.id
     await expect(store.retractInvitation(carol, invitation))
       .rejects.toMatchObject({ code: 'NOT_A_MEMBER' })
@@ -350,18 +388,18 @@ describe('failed durable writes commit nothing', () => {
     const storageFile = join(root, 'development', 'project-membership.json')
 
     await blockCommits(storageFile)
-    await expect(store.invite(alice, { projectId: created.id, inviteeAccountId: bob })).rejects.toThrow()
+    await expect(store.invite(alice, { projectId: created.id, inviteeAccountId: bob, grantedRole: 'member' })).rejects.toThrow()
     // The caller saw the rejection; reads behave as if the call never happened.
     expect(await store.pendingInvitationsFor(bob)).toEqual([])
     expect((await store.roster(alice, created.id)).members.map(row => row.accountId)).toEqual([alice])
 
     // Recovery: the retry is a fresh invitation, not a DUPLICATE_INVITEE ghost verdict.
     await rmdir(storageFile)
-    await expect(store.invite(alice, { projectId: created.id, inviteeAccountId: bob }))
-      .resolves.toMatchObject({ inviteeAccountId: bob })
+    await expect(store.invite(alice, { projectId: created.id, inviteeAccountId: bob, grantedRole: 'member' }))
+      .resolves.toMatchObject({ inviteeAccountId: bob, grantedRole: 'member' })
 
     // A later successful commit publishes exactly its own rows — no ghost invitation.
-    await store.invite(alice, { projectId: created.id, inviteeAccountId: carol })
+    await store.invite(alice, { projectId: created.id, inviteeAccountId: carol, grantedRole: 'member' })
     const document = parse(await readFile(storageFile, 'utf8'))
     expect(document.invitations.map(row => row.inviteeAccountId).sort()).toEqual([bob, carol].sort())
     expect(document.memberships.map(row => row.accountId)).toEqual([alice])
@@ -395,9 +433,9 @@ describe('failed durable writes commit nothing', () => {
     const store = makeStoreAt(root, 'development')
     const created = await store.createProject(alice, { name: 'Rollback', remoteUrl: 'https://org.example/rollback' })
     const projectId = created.id
-    await store.invite(alice, { projectId, inviteeAccountId: bob })
+    await store.invite(alice, { projectId, inviteeAccountId: bob, grantedRole: 'member' })
     const bobInvitation = (await store.pendingInvitationsFor(bob))[0]!.id
-    await store.invite(alice, { projectId, inviteeAccountId: carol })
+    await store.invite(alice, { projectId, inviteeAccountId: carol, grantedRole: 'member' })
     const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
     const bobMember = await store.acceptInvitation(bob, {
       invitationId: bobInvitation,
@@ -484,13 +522,13 @@ describe('load, construction, and disposal gates', () => {
     const shared = freshRoot()
     const store = makeStoreAt(shared, 'development')
     const created = await store.createProject(alice, { name: 'Restore', remoteUrl: 'https://org.example/restore' })
-    const invitation = await store.invite(alice, { projectId: created.id, inviteeAccountId: bob })
+    const invitation = await store.invite(alice, { projectId: created.id, inviteeAccountId: bob, grantedRole: 'member' })
     const bobMember = await store.acceptInvitation(bob, {
       invitationId: invitation.id,
       link: { workspaceName: 'bob-restore', normalizedRemoteUrl: 'https://github.com/bob/restore.GIT' },
     })
     await store.setMemberTags(alice, { membershipId: bobMember.id, tags: ['on-call', 'db'] as FunctionTag[] })
-    await store.invite(alice, { projectId: created.id, inviteeAccountId: carol })
+    await store.invite(alice, { projectId: created.id, inviteeAccountId: carol, grantedRole: 'member' })
     const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
     await store.retractInvitation(alice, carolInvitation)
 
@@ -530,8 +568,8 @@ describe('authority scoping across projects', () => {
     }), 'INVALID_TAGS')
 
     // Pending invitations order oldest-first across projects; both owned projects answer remote lookups.
-    await store.invite(alice, { projectId: alpha.id, inviteeAccountId: dave })
-    await store.invite(alice, { projectId: beta.id, inviteeAccountId: dave })
+    await store.invite(alice, { projectId: alpha.id, inviteeAccountId: dave, grantedRole: 'member' })
+    await store.invite(alice, { projectId: beta.id, inviteeAccountId: dave, grantedRole: 'member' })
     const pending = await store.pendingInvitationsFor(dave)
     expect(pending.map(row => row.projectId)).toEqual([alpha.id, beta.id])
     await expect(store.projectByRemote(alice, 'https://org.example/beta')).resolves.toMatchObject({ id: beta.id })
@@ -540,7 +578,7 @@ describe('authority scoping across projects', () => {
   it('keeps retraction authority away from a member who is neither inviter nor owner', async () => {
     const { store, projectId } = await foundProject(alice, 'Retract')
     await joinWith(store, projectId, bob, 'bob-retract')
-    await store.invite(alice, { projectId, inviteeAccountId: carol })
+    await store.invite(alice, { projectId, inviteeAccountId: carol, grantedRole: 'member' })
     const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
     await expect(store.retractInvitation(bob, carolInvitation))
       .rejects.toMatchObject({ code: 'ROLE_REQUIRED' })

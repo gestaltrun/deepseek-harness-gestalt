@@ -2,7 +2,7 @@
 
 English | [中文](project-membership.zh.md)
 
-[`ctx.projectMembership`](../../packages/platform/project-membership/README.md) is the collaboration plane above a workspace: cloud projects bind one normalized git remote as a validated property, memberships carry exactly the roles `owner|admin|member` plus project-defined function tags that never bear permission, and invitations settle `pending → accepted | declined | retracted`. Acceptance is atomic with linking exactly one local workspace; duplicate invitations to an account already holding a membership or pending invitation are rejected atomically under concurrency.
+[`ctx.projectMembership`](../../packages/platform/project-membership/README.md) is the collaboration plane above a workspace: cloud projects bind one normalized git remote as a validated property, memberships carry exactly the roles `owner|admin|member` plus project-defined function tags that never bear permission, and invitations settle `pending → accepted | declined | retracted` while carrying the role granted at accept-with-workspace-link. Owners may invite as `admin` or `member`; admins may invite as `member` only. Acceptance is atomic with linking exactly one local workspace; duplicate invitations to an account already holding a membership or pending invitation are rejected atomically under concurrency.
 
 Every mutation executes its role gate inside the operation: admins invite but cannot touch owner rows or remove owners, only owners grant the owner role, and the final owner cannot be demoted or removed (`LAST_OWNER`). Reads are gated too — `roster` requires an active membership, so removed accounts lose enumeration immediately. Each roster-affecting commit publishes a [`project-membership/roster-invalidated`](#cordis-surface) event strictly after durability, advancing a per-project projection version that cache consumers key on.
 
@@ -39,10 +39,11 @@ abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Pro
 /**
  * Issue one invitation to a platform account.
  * @param actor - authenticated account holding admin or owner on the project.
- * @param input - target project and invitee account.
- * @returns the invitation in `pending` state.
- * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin, `DUPLICATE_INVITEE` when the account already holds
- *   membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.
+ * @param input - target project, invitee account, and the role granted at accept time.
+ * @returns the invitation in `pending` state, carrying that granted role.
+ * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin or when the actor cannot grant the requested role,
+ *   `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER`
+ *   when the actor holds no membership.
  */
 abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>
 
@@ -200,10 +201,10 @@ closePresence(): Promise<void>
 
 /**
  * Invite one uniquely resolved public GitHub login.
- * @param input - Project and public GitHub login.
- * @returns created pending invitation.
+ * @param input - Project, public GitHub login, and the role granted at accept time.
+ * @returns created pending invitation carrying that granted role.
  */
-invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>
+invite(input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole }): Promise<InvitationView>
 
 /**
  * Decline, or accept atomically with a local Workspace link.

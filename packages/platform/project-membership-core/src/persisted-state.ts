@@ -8,10 +8,10 @@
  * @module @deepseek-ai/dsh-project-membership-core/persisted-state
  */
 
-import type { InvitationState, ProjectRole } from '@deepseek-ai/dsh-project-membership'
+import type { GrantableInviteRole, InvitationState, ProjectRole } from '@deepseek-ai/dsh-project-membership'
 
 /** Current durable format; bumped only by structural format changes. */
-export const PROJECT_MEMBERSHIP_FORMAT_VERSION = 0
+export const PROJECT_MEMBERSHIP_FORMAT_VERSION = 1
 
 /** One stored cloud-project row. */
 export interface PersistedProject {
@@ -41,6 +41,8 @@ export interface PersistedInvitation {
   readonly inviterAccountId: string
   readonly inviteeAccountId: string
   readonly state: InvitationState
+  /** Role conferred when the invitee completes accept-with-workspace-link. */
+  readonly grantedRole: GrantableInviteRole
   readonly invitedAt: number
   readonly settledAt?: number
 }
@@ -224,6 +226,13 @@ function parseInvitationState(value: unknown): InvitationState {
   return value
 }
 
+function parseGrantedRole(value: unknown): GrantableInviteRole {
+  if (value !== 'admin' && value !== 'member') {
+    throw new Error(`project-membership: durable state grantedRole ${JSON.stringify(value)} is outside admin|member`)
+  }
+  return value
+}
+
 function parseInvitation(record: Record<string, unknown>): PersistedInvitation {
   const settledAtRaw = record.settledAt
   if (settledAtRaw !== undefined && (typeof settledAtRaw !== 'number' || !Number.isSafeInteger(settledAtRaw))) {
@@ -235,6 +244,7 @@ function parseInvitation(record: Record<string, unknown>): PersistedInvitation {
     inviterAccountId: requiredString(record, 'inviterAccountId'),
     inviteeAccountId: requiredString(record, 'inviteeAccountId'),
     state: parseInvitationState(record.state),
+    grantedRole: parseGrantedRole(record.grantedRole),
     invitedAt: epoch(record, 'invitedAt'),
     ...(settledAtRaw === undefined ? {} : { settledAt: settledAtRaw }),
   }

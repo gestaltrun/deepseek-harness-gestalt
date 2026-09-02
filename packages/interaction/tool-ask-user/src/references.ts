@@ -131,7 +131,9 @@ export async function validateRoutedReferences(
         continue
       }
       documents.push({ path: reference.path, bytes: new Uint8Array(bytes) })
-    } catch {
+    } catch (error: unknown) {
+      /* ENOENT/EACCES/EISDIR: the path failed workspace-file reads after validatePath. */
+      void error
       failures.push(
         `references[${String(index)}]: path ${JSON.stringify(reference.path)} is unreadable or does not exist inside the session workspace`,
       )

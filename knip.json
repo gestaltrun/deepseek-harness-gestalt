@@ -737,7 +737,8 @@
         "tests/**/*.spec.ts",
         "tests/member-question-e2e/wdio.conf.ts",
         "tests/member-question-e2e/electron.e2e.ts",
-        "tests/member-question-e2e/host-plugin.ts"
+        "tests/member-question-e2e/host-plugin.ts",
+        "tests/member-question-e2e/*.snapshot.ts"
       ],
       "project": [
         "src/**/*.ts",

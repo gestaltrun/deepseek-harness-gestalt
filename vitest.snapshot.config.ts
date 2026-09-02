@@ -50,7 +50,7 @@ export default defineConfig({
       // mode remains the zero-build path, while lib mode requires a prior build.
       ...(process.env.DSH_EXAMPLE_MODE === 'lib' ? ['apps/web/tests/**/*.snapshot.ts'] : []),
       'apps/cli/tests/**/*.snapshot.ts',
-      'apps/desktop/tests/member-question-e2e/assembled-project-members.spec.ts',
+      'apps/desktop/tests/member-question-e2e/*.snapshot.ts',
       'apps/mobile/tests/**/*.snapshot.ts',
       'apps/mobile/tests/relay-bundle-purity.spec.ts',
       'examples/*/tests/**/*.snapshot.ts',

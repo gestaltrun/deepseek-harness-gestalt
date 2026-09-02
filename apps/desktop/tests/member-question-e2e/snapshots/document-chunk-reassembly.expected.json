@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "questionId": "mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "documentTransfers": [
+    {
+      "path": "decision.md",
+      "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+      "derivedTransferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+      "chunks": [
+        {
+          "index": 0,
+          "total": 1,
+          "questionId": "mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_0",
+          "byteLength": 18
+        }
+      ]
+    },
+    {
+      "path": "payload.bin",
+      "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_1",
+      "derivedTransferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_1",
+      "chunks": [
+        {
+          "index": 0,
+          "total": 2,
+          "questionId": "mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_1",
+          "byteLength": 32768
+        },
+        {
+          "index": 1,
+          "total": 2,
+          "questionId": "mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_1",
+          "byteLength": 19
+        }
+      ]
+    },
+    {
+      "path": "empty.dat",
+      "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2",
+      "derivedTransferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2",
+      "chunks": [
+        {
+          "index": 0,
+          "total": 1,
+          "questionId": "mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "transferId": "mqdoc_mqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2",
+          "byteLength": 0
+        }
+      ]
+    }
+  ],
+  "reassembled": [
+    {
+      "path": "decision.md",
+      "byteLength": 18,
+      "sha256": "f2b981cdf0245a86d599fac90f4571abc77659658e77896d56139f8ebcd69f53"
+    },
+    {
+      "path": "payload.bin",
+      "byteLength": 32787,
+      "sha256": "9eddc7d026079ddb63b420e805b8a2229c4bc3940eb289c6d008a1e9ab781737"
+    },
+    {
+      "path": "empty.dat",
+      "byteLength": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ]
+}

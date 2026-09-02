@@ -6,7 +6,7 @@
 
 每次变更的角色门都在操作内部执行:管理员可邀请但不能触碰 owner 行、不能移除 owner;只有 owner 能授予 owner 角色;最后一名 owner 不可降级或移除(`LAST_OWNER`)。读取同样有门——`roster` 要求有效成员身份,被移除账户即刻丧失枚举能力。每次影响 roster 的提交都会在落盘之后发布一条 [`project-membership/roster-invalidated`](#cordis-surface) 事件,使项目级投影版本前进,供缓存消费方作键。
 
-[`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.zh.md) 是文件持久化 Provider:状态按环境命名空间(`development`/`production`)存放于所配置存储路径之下,每次变更经单一写链串行化并整体原子重命名发布。角色只治理本协作层面,与 Git 平台权限双向无关。成员提问路由保持 fail-closed,仍受[放置决策 Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.zh.md) 记录的常设加密评审约束。
+[`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.zh.md) 是文件持久化 Provider:状态按环境命名空间(`development`/`production`)存放于所配置存储路径之下,每次变更经单一写链串行化并整体原子重命名发布。角色只治理本协作层面,与 Git 平台权限双向无关。Presence 是 Desktop Installation 的实时连接:关闭最后一个窗口会立即发布 Offline,TTL 过期仍是崩溃与分区路径,对离线成员的路由提问以 `MEMBER_OFFLINE` 快速失败且不写入任何队列。成员提问路由保持 fail-closed,仍受[放置决策 Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.zh.md) 记录的常设加密评审约束。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -182,6 +182,19 @@ projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView |
  * @returns Project and complete decorated roster.
  */
 roster(projectId: ProjectId): Promise<RosterReadView>
+
+/**
+ * Refresh this Desktop Installation's live presence heartbeat.
+ * @returns fulfillment after Platform records the beat.
+ */
+heartbeat(): Promise<void>
+
+/**
+ * Clear this Desktop Installation immediately so roster readers see Offline
+ * without waiting for presence TTL.
+ * @returns fulfillment after Platform drops this installation.
+ */
+closePresence(): Promise<void>
 
 /**
  * Invite one uniquely resolved public GitHub login.

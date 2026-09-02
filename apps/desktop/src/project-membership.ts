@@ -18,6 +18,35 @@ interface DesktopProjectMembershipOptions {
   readonly fetch: typeof globalThis.fetch
 }
 
+/** Default Desktop liveness cadence, below the Platform's 90-second presence TTL. */
+const DESKTOP_PROJECT_PRESENCE_HEARTBEAT_MS = 60_000
+
+/** Desktop-owned presence lifecycle controlled by Account sign-in and last-window close. */
+export interface DesktopProjectMembershipPresence {
+  /**
+   * Start or stop heartbeats from the current Account snapshot.
+   * @param signedIn - whether the current Account snapshot is signed in.
+   */
+  setSignedIn(signedIn: boolean): void
+  /**
+   * Drop this Installation immediately and stop heartbeats.
+   * @returns fulfillment after Platform records the close, or after a contained close failure.
+   */
+  closeWindow(): Promise<void>
+  /**
+   * Stop heartbeats without a close POST after last-window close has already run.
+   * @returns fulfillment after in-flight heartbeats drain.
+   */
+  dispose(): Promise<void>
+}
+
+export interface DesktopProjectMembershipPresenceOptions extends DesktopProjectMembershipOptions {
+  readonly intervalMs?: number
+  readonly schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  readonly cancel?: (handle: ReturnType<typeof setTimeout>) => void
+  readonly onError?: (error: unknown) => void
+}
+
 /**
  * Bind every Platform request to a fresh current-Installation proof retained only in Electron main.
  * @param options - live Account owner, selected Platform environment, and system-network fetch.
@@ -46,6 +75,8 @@ export function createDesktopProjectMembershipClient(
     projectByRemote: normalizedRemoteUrl => authorized(headers =>
       transport.projectByRemote(headers, normalizedRemoteUrl)),
     roster: projectId => authorized(headers => transport.roster(headers, projectId)),
+    heartbeat: () => authorized(headers => transport.heartbeat(headers)),
+    closePresence: () => authorized(headers => transport.closePresence(headers)),
     invite: input => authorized(headers => transport.invite(headers, input)),
     decideInvitation: (invitationId, input) => authorized(headers =>
       transport.decideInvitation(headers, invitationId, input)),
@@ -57,6 +88,114 @@ export function createDesktopProjectMembershipClient(
     setMemberTags: (membershipId, tags) => authorized(headers =>
       transport.setMemberTags(headers, membershipId, tags)),
     removeMember: membershipId => authorized(headers => transport.removeMember(headers, membershipId)),
+  }
+}
+
+/**
+ * Heartbeat the signed-in Desktop Installation and close it immediately when
+ * the last window leaves, without exposing Account credentials to renderer
+ * code.
+ * @param options - live Account owner, Platform transport, cadence, timers, and contained error reporter.
+ * @returns lifecycle toggled by Account snapshots and last-window close.
+ */
+export function createDesktopProjectMembershipPresence(
+  options: DesktopProjectMembershipPresenceOptions,
+): DesktopProjectMembershipPresence {
+  const intervalMs = options.intervalMs ?? DESKTOP_PROJECT_PRESENCE_HEARTBEAT_MS
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
+    throw new TypeError('Desktop Project Membership presence interval must be a positive safe integer')
+  }
+  const schedule = options.schedule ?? setTimeout
+  const cancel = options.cancel ?? clearTimeout
+  const onError = options.onError ?? ((error: unknown) => {
+    console.error('[desktop-project-membership] presence heartbeat failed:', error)
+  })
+  const transport = new ProjectMembershipHttpTransport({
+    origin: options.environment.origin,
+    fetch: options.fetch,
+  })
+  let signedIn = false
+  let disposed = false
+  let generation = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let active: { controller: AbortController; promise: Promise<void> } | undefined
+  const authorize = async (): Promise<Record<string, string>> => {
+    const authorization = await options.account().authorizeCurrentInstallation()
+    return {
+      Authorization: `Bearer ${authorization.accessToken}`,
+      'X-Gestalt-Proof-Jti': authorization.proof.jti,
+      'X-Gestalt-Proof-Issued-At': String(authorization.proof.issuedAt),
+      'X-Gestalt-Proof-Signature': authorization.proof.signature,
+    }
+  }
+  const beat = async (ownedGeneration: number): Promise<void> => {
+    if (!signedIn || disposed || generation !== ownedGeneration) return
+    const owned = {
+      controller: new AbortController(),
+      promise: Promise.resolve(),
+    }
+    active = owned
+    owned.promise = (async () => {
+      try {
+        const headers = await authorize()
+        if (!signedIn || disposed || generation !== ownedGeneration) return
+        await transport.heartbeat(headers)
+      } catch (error) {
+        if (signedIn && !disposed && generation === ownedGeneration) onError(error)
+      } finally {
+        if (active === owned) active = undefined
+        if (signedIn && !disposed && generation === ownedGeneration) {
+          timer = schedule(() => { void beat(ownedGeneration) }, intervalMs)
+          timer.unref()
+        }
+      }
+    })()
+    await owned.promise
+  }
+  const abortActive = (): Promise<void> => {
+    const owned = active
+    if (owned === undefined) return Promise.resolve()
+    owned.controller.abort()
+    return owned.promise
+  }
+  const stopBeating = (): Promise<void> => {
+    generation += 1
+    if (timer !== undefined) {
+      cancel(timer)
+      timer = undefined
+    }
+    return abortActive()
+  }
+  return {
+    setSignedIn(next) {
+      if (disposed || signedIn === next) return
+      signedIn = next
+      const settled = stopBeating()
+      if (next) {
+        const ownedGeneration = generation
+        void settled.then(() => beat(ownedGeneration))
+      }
+    },
+    async closeWindow() {
+      if (disposed || !signedIn) {
+        signedIn = false
+        await stopBeating()
+        return
+      }
+      signedIn = false
+      await stopBeating()
+      try {
+        await transport.closePresence(await authorize())
+      } catch (error) {
+        onError(error)
+      }
+    },
+    async dispose() {
+      if (disposed) return
+      disposed = true
+      signedIn = false
+      await stopBeating()
+    },
   }
 }
 

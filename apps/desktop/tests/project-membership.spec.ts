@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import {
   createDesktopProjectMembershipClient,
+  createDesktopProjectMembershipPresence,
   parseInvitationDecision,
   parseMembershipRole,
   parseMembershipTags,
@@ -81,5 +82,96 @@ describe('Desktop Project Membership bridge', () => {
       .toThrow('owner, admin, or member')
     expect(() => parseMembershipTags({ membershipId: 'membership-1', tags: 'triage' }))
       .toThrow('must be an array')
+  })
+
+  it('heartbeats while signed in and closes presence immediately on last-window close', async () => {
+    const authorizeCurrentInstallation = vi.fn().mockResolvedValue({
+      accessToken: 'presence-access',
+      proof: { jti: 'presence-proof', issuedAt: 3, signature: 'presence-signature' },
+    })
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(undefined, { status: 204 }))
+    const tasks: Array<() => void> = []
+    const handles: Array<ReturnType<typeof setTimeout>> = []
+    const cancelled: Array<ReturnType<typeof setTimeout>> = []
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation } as never),
+      environment,
+      fetch,
+      intervalMs: 25,
+      schedule: (task) => {
+        tasks.push(task)
+        const handle = { unref: vi.fn() } as unknown as ReturnType<typeof setTimeout>
+        handles.push(handle)
+        return handle
+      },
+      cancel: (handle) => { cancelled.push(handle) },
+    })
+
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledTimes(1) })
+    expect(fetch.mock.calls[0]?.[0]).toBe('https://platform.example.test/v1/projects/presence/heartbeat')
+    expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get('authorization')).toBe('Bearer presence-access')
+    await presence.closeWindow()
+    expect(cancelled).toEqual([handles.at(-1)])
+    expect(fetch.mock.calls[1]?.[0]).toBe('https://platform.example.test/v1/projects/presence/close')
+    tasks.shift()?.()
+    await Promise.resolve()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    await presence.dispose()
+  })
+
+  it('does not close presence when the last window leaves an unsigned-in Installation', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation: vi.fn() } as never),
+      environment,
+      fetch,
+    })
+    await presence.closeWindow()
+    expect(fetch).not.toHaveBeenCalled()
+    await presence.dispose()
+  })
+
+  it('validates and contains the presence lifecycle boundary', async () => {
+    expect(() => createDesktopProjectMembershipPresence({
+      account: () => ({}) as never,
+      environment,
+      fetch: vi.fn(),
+      intervalMs: 0,
+    })).toThrow('positive safe integer')
+    const onError = vi.fn()
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation: () => Promise.reject(new Error('signed out')) } as never),
+      environment,
+      fetch: vi.fn(),
+      onError,
+      schedule: () => ({ unref() {} }) as ReturnType<typeof setTimeout>,
+    })
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(onError).toHaveBeenCalledOnce() })
+    await presence.dispose()
+  })
+
+  it('contains a last-window close failure without hanging', async () => {
+    const authorizeCurrentInstallation = vi.fn().mockResolvedValue({
+      accessToken: 'presence-access',
+      proof: { jti: 'presence-proof', issuedAt: 3, signature: 'presence-signature' },
+    })
+    const onError = vi.fn()
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(new Response(undefined, { status: 204 }))
+      .mockRejectedValueOnce(new Error('close failed'))
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation } as never),
+      environment,
+      fetch,
+      onError,
+      schedule: () => ({ unref() {} }) as ReturnType<typeof setTimeout>,
+    })
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledOnce() })
+    await presence.closeWindow()
+    expect(onError).toHaveBeenCalledOnce()
+    await presence.dispose()
   })
 })

@@ -90,6 +90,7 @@ import { connectDesktopRelayNodeHelper } from './relay-node-helper.ts'
 import { createDesktopSystemNodeFetch } from './system-node-fetch-helper.ts'
 import {
   createDesktopProjectMembershipClient,
+  createDesktopProjectMembershipPresence,
   parseInvitationDecision,
   parseInvitationId,
   parseMembershipId,
@@ -140,6 +141,7 @@ const companionProduct = new DesktopCompanionProductOwner({
 let uninstallCompanionHost: (() => void) | undefined
 let companionHostReady = false
 let companionHostGeneration = 0
+let projectMembershipPresence: import('./project-membership.ts').DesktopProjectMembershipPresence | undefined
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -199,6 +201,11 @@ async function boot(): Promise<void> {
     timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
   })
   account = createDesktopAccount(accountEnvironment)
+  projectMembershipPresence = createDesktopProjectMembershipPresence({
+    account: () => account,
+    environment: accountEnvironment,
+    fetch: systemFetch,
+  })
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
@@ -251,6 +258,7 @@ async function boot(): Promise<void> {
   if (accountReady) smokeLog('account ready')
   pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
   accountSignedIn = account.getSnapshot().status === 'signed-in'
+  projectMembershipPresence.setSignedIn(accountSignedIn)
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   installIntegrationsOnce()
@@ -408,7 +416,10 @@ function createWindow(): BrowserWindow {
     if (shuttingDown || closing) return
     event.preventDefault()
     closing = true
-    void pairing.deactivate('window-close').then(
+    void Promise.all([
+      pairing.deactivate('window-close'),
+      projectMembershipPresence?.closeWindow() ?? Promise.resolve(),
+    ]).then(
       () => {
         smokeLog(`relay window-close ${JSON.stringify(pairing.getRelayState())}`)
         target.destroy()
@@ -695,6 +706,11 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   stopAccountEvents = undefined
   stopPairingEvents?.()
   stopPairingEvents = undefined
+  const presence = projectMembershipPresence
+  projectMembershipPresence = undefined
+  const presenceDisposal = presence === undefined
+    ? Promise.resolve()
+    : presence.closeWindow().then(async () => { await presence.dispose() })
   const ownerDisposal = disposeDesktopOwners(account, pairing)
   hostStartController.abort()
   const starting = pendingHost
@@ -703,7 +719,7 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   host = undefined
   void (async () => {
     try {
-      await ownerDisposal
+      await Promise.all([ownerDisposal, presenceDisposal])
       smokeLog(`relay quit ${JSON.stringify(pairing.getRelayState())}`)
       const started = await starting?.catch(() => undefined)
       if (started !== running) await started?.stop()
@@ -931,6 +947,7 @@ function pushAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnap
 function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
   pushAccountSnapshot(snapshot)
   const signedIn = snapshot.status === 'signed-in'
+  projectMembershipPresence?.setSignedIn(signedIn)
   if (signedIn && !accountSignedIn) {
     accountSignedIn = true
     void startPairingForCurrentDesktop()

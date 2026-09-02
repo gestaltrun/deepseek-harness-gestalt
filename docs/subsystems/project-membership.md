@@ -6,7 +6,7 @@ English | [中文](project-membership.zh.md)
 
 Every mutation executes its role gate inside the operation: admins invite but cannot touch owner rows or remove owners, only owners grant the owner role, and the final owner cannot be demoted or removed (`LAST_OWNER`). Reads are gated too — `roster` requires an active membership, so removed accounts lose enumeration immediately. Each roster-affecting commit publishes a [`project-membership/roster-invalidated`](#cordis-surface) event strictly after durability, advancing a per-project projection version that cache consumers key on.
 
-[`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.md) is the file-backed provider: state lives per environment namespace (`development`/`production`) below the configured storage path, every mutation serializes through one write chain and republishes the whole document through an atomic rename. Roles govern only this collaboration plane and stay disjoint from Git-provider permissions in both directions. Routed member questions remain fail-closed behind the standing encryption review recorded in [the placement Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.md).
+[`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.md) is the file-backed provider: state lives per environment namespace (`development`/`production`) below the configured storage path, every mutation serializes through one write chain and republishes the whole document through an atomic rename. Roles govern only this collaboration plane and stay disjoint from Git-provider permissions in both directions. Presence is live Desktop Installation connection: last-window close publishes Offline immediately, TTL expiry remains the crash and partition path, and a routed ask of an offline member fails fast with `MEMBER_OFFLINE` and writes nothing to a queue. Routed member questions remain fail-closed behind the standing encryption review recorded in [the placement Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.md).
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -182,6 +182,19 @@ projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView |
  * @returns Project and complete decorated roster.
  */
 roster(projectId: ProjectId): Promise<RosterReadView>
+
+/**
+ * Refresh this Desktop Installation's live presence heartbeat.
+ * @returns fulfillment after Platform records the beat.
+ */
+heartbeat(): Promise<void>
+
+/**
+ * Clear this Desktop Installation immediately so roster readers see Offline
+ * without waiting for presence TTL.
+ * @returns fulfillment after Platform drops this installation.
+ */
+closePresence(): Promise<void>
 
 /**
  * Invite one uniquely resolved public GitHub login.

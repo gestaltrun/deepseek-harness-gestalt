@@ -70,6 +70,8 @@ describe('ProjectMembershipHttpTransport', () => {
           members: [{ ...member(), presence: 'online', displayName: 'mona', avatarRef: 'https://a/m' }],
         },
       },
+      'POST /v1/projects/presence/heartbeat': { status: 204 },
+      'POST /v1/projects/presence/close': { status: 204 },
       'POST /v1/projects/invitations': { status: 201, body: invitation() },
       'POST /v1/projects/invitations/invitation-1/decision': { status: 200, body: member() },
       'POST /v1/projects/invitations/invitation-1/retraction': { status: 204 },
@@ -97,6 +99,8 @@ describe('ProjectMembershipHttpTransport', () => {
     expect(await transport.roster(AUTH, 'project-1' as ProjectId)).toMatchObject({
       members: [{ presence: 'online', displayName: 'mona', role: 'member' }],
     })
+    await transport.heartbeat(AUTH)
+    await transport.closePresence(AUTH)
     expect(await transport.invite(AUTH, { projectId: 'project-1' as ProjectId, githubLogin: 'mona' }))
       .toMatchObject({ id: 'invitation-1', state: 'pending' })
     expect(await transport.decideInvitation(AUTH, 'invitation-1' as never, {
@@ -118,6 +122,8 @@ describe('ProjectMembershipHttpTransport', () => {
       'POST /v1/projects',
       'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fr',
       'GET /v1/projects/project-1/members',
+      'POST /v1/projects/presence/heartbeat',
+      'POST /v1/projects/presence/close',
       'POST /v1/projects/invitations',
       'POST /v1/projects/invitations/invitation-1/decision',
       'POST /v1/projects/invitations/invitation-1/retraction',
@@ -128,12 +134,12 @@ describe('ProjectMembershipHttpTransport', () => {
       'DELETE /v1/projects/memberships/membership-2',
     ])
     expect(calls[0]).toMatchObject({ body: { name: 'Assembled', remoteUrl: 'https://github.com/o/r' } })
-    expect(calls[3]).toMatchObject({ body: { projectId: 'project-1', githubLogin: 'mona' } })
-    expect(calls[4]).toMatchObject({
+    expect(calls[5]).toMatchObject({ body: { projectId: 'project-1', githubLogin: 'mona' } })
+    expect(calls[6]).toMatchObject({
       body: { decision: 'accept-with-link', link: { workspaceName: 'mona-local' } },
     })
-    expect(calls[8]).toMatchObject({ body: { role: 'admin' } })
-    expect(calls[9]).toMatchObject({ body: { tags: ['triage'] } })
+    expect(calls[10]).toMatchObject({ body: { role: 'admin' } })
+    expect(calls[11]).toMatchObject({ body: { tags: ['triage'] } })
     // Every call carries the caller-supplied account session presentation.
     expect(calls.every(call => call.headers.authorization === 'Bearer token-1')).toBe(true)
   })

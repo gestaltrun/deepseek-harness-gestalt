@@ -230,6 +230,27 @@ describe('real Project Membership HTTP composition', () => {
     ])
   })
 
+  it('publishes Offline from an explicit close without waiting for TTL', { timeout: 60_000 }, async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-project-membership-http-close-'))
+    roots.push(storagePath)
+    const loaded = await loadComposition({
+      storagePath,
+      backend: new MemoryAccountBackend(ENVIRONMENT.databaseIdentity),
+      invalidation: new MemoryAccountInvalidationBus(),
+      github: sequentialGithub(),
+      config: { origins: [ENVIRONMENT.origin], presenceHeartbeatIntervalMs: 10_000, presenceTtlMs: 90_000 },
+    })
+    const octocat = await signIn(loaded.context.platformAccount, 'close-octocat')
+    const created = await post(loaded.origin, '/v1/projects', {
+      name: 'Close', remoteUrl: 'https://github.com/octocat/repo',
+    }, authHeaders(octocat))
+    const project = await created.json() as { id: string }
+    expect(await statusOf(heartbeat(loaded.origin, octocat))).toBe(204)
+    expect(await presenceOf(loaded.origin, project.id, octocat)).toBe('online')
+    expect(await statusOf(closePresence(loaded.origin, octocat))).toBe(204)
+    expect(await presenceOf(loaded.origin, project.id, octocat)).toBe('offline')
+  })
+
   it('expires presence after the configured TTL', { timeout: 60_000 }, async () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'dsh-project-membership-http-ttl-'))
     roots.push(storagePath)
@@ -451,6 +472,12 @@ function authHeaders(session: Session, issuedAt = Date.now()): Record<string, st
 
 function heartbeat(origin: string, session: Session): Promise<Response> {
   return fetch(`${origin}/v1/projects/presence/heartbeat`, {
+    method: 'POST', headers: { origin: ENVIRONMENT.origin, ...authHeaders(session) },
+  })
+}
+
+function closePresence(origin: string, session: Session): Promise<Response> {
+  return fetch(`${origin}/v1/projects/presence/close`, {
     method: 'POST', headers: { origin: ENVIRONMENT.origin, ...authHeaders(session) },
   })
 }

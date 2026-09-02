@@ -9,7 +9,7 @@ export const name = 'project-membership-desktop-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
-/** The token-protected HTTP boundary validates every response before publishing it. */
+/** No runtime invariant: the token-protected HTTP boundary validates every response before publishing it. */
 const install: InvariantInstaller = () => {}
 
 /** Register the provider package ownership. */

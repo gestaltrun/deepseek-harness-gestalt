@@ -31,8 +31,7 @@
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-platform-account": "workspace:^",
     "@deepseek-ai/dsh-project-membership": "workspace:^",
-    "@deepseek-ai/dsh-invariants": "workspace:^",
-    "@deepseek-ai/schemastery": "workspace:^"
+    "@deepseek-ai/dsh-invariants": "workspace:^"
   },
   "dependencies": { "@deepseek-ai/schemastery": "workspace:^" }
 }

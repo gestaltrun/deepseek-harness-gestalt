@@ -252,8 +252,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 async function resolveProjectId(
   args: { projectId?: string },
   config: Config,
-  agent?: Agent,
-  signal?: AbortSignal,
+  agent: Agent | undefined,
+  signal: AbortSignal,
 ): Promise<Branded<'ProjectId'>> {
   if (args.projectId !== undefined) return args.projectId as Branded<'ProjectId'>
   try {
@@ -276,7 +276,7 @@ async function resolveProjectId(
  * @returns the branded account id for the roster read.
  * @throws {ProjectMembersToolError} `ACCOUNT_UNAVAILABLE` when no account resolves.
  */
-async function resolveActor(config: Config, agent?: Agent, signal?: AbortSignal): Promise<AccountRef> {
+async function resolveActor(config: Config, agent: Agent | undefined, signal: AbortSignal): Promise<AccountRef> {
   try {
     const account = await config.currentAccountResolver?.({
       ...agent === undefined ? {} : { agent },

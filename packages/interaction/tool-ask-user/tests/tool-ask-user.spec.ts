@@ -711,11 +711,12 @@ describe('ask_user_question tool', () => {
     await ctx.plugin(UserQuestionService)
     await ctx.plugin(toolAskUser, {
       boundProjectResolver: ({ signal } = {}) => new Promise((_resolve, reject) => {
+        const rejectAbort = (): void => { reject(new Error(String(signal?.reason ?? 'aborted'))) }
         if (signal?.aborted === true) {
-          reject(signal.reason)
+          rejectAbort()
           return
         }
-        signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+        signal?.addEventListener('abort', rejectAbort, { once: true })
       }),
     })
     const controller = new AbortController()
@@ -735,11 +736,12 @@ describe('ask_user_question tool', () => {
     await ctx.plugin(CompanionMemberQuestionSender, { delivery })
     await ctx.plugin(toolAskUser, {
       routeResolver: ({ signal }) => new Promise((_resolve, reject) => {
+        const rejectAbort = (): void => { reject(new Error(String(signal.reason ?? 'aborted'))) }
         if (signal.aborted) {
-          reject(signal.reason)
+          rejectAbort()
           return
         }
-        signal.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+        signal.addEventListener('abort', rejectAbort, { once: true })
       }),
       boundProjectResolver: () => Promise.resolve('project-atlas'),
     })

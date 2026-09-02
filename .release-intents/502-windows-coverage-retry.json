@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "502-windows-coverage-retry",
+  "summary": {
+    "en": "Retry isolated Windows coverage worker exits after concurrent partitions settle.",
+    "zh": "在并发分区结束后重试孤立的 Windows 覆盖率 worker 退出。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "The change affects only CI coverage scheduling and does not change Desktop source, packaging, or runtime behavior."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "The change affects only CI coverage scheduling and does not change Mobile source, packaging, or runtime behavior."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The change affects only CI coverage scheduling and does not change Platform source, deployment, or runtime behavior."
+    }
+  ]
+}

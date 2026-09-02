@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "sequence": 2,
+  "intentIds": [
+    "448-desktop-artifact-assembly",
+    "453-mobile-proof-clock-skew"
+  ],
+  "summaries": [
+    {
+      "en": "Assemble the signed Desktop candidate from exactly its three required pack artifacts.",
+      "zh": "仅使用桌面端所需的三个打包产物组装签名候选。"
+    },
+    {
+      "en": "Accept bounded mobile clock skew without releasing single-use Installation proof replay protection early.",
+      "zh": "容忍有限的移动端时钟偏移，同时避免提前释放单次安装证明的重放保护。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": true,
+      "previousVersion": "0.1.10",
+      "version": "0.1.11",
+      "tag": "gestalt-v0.1.11",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Assemble the signed Desktop candidate from exactly its three required pack artifacts.",
+          "zh": "仅使用桌面端所需的三个打包产物组装签名候选。"
+        }
+      ]
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.1"
+    },
+    "platform": {
+      "selected": true,
+      "previousVersion": "0.1.0",
+      "version": "0.1.1",
+      "tag": "platform-v0.1.1",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Accept bounded mobile clock skew without releasing single-use Installation proof replay protection early.",
+          "zh": "容忍有限的移动端时钟偏移，同时避免提前释放单次安装证明的重放保护。"
+        }
+      ]
+    }
+  }
+}

@@ -27,5 +27,6 @@ function renderMobileStartupFailure(message: string): void {
   const recovery = document.createElement('small')
   recovery.textContent = '请重新启动应用；若问题持续，请保留此消息。 / Restart the app; keep this message if the problem continues.'
   section.append(heading, detail, recovery)
-  root.replaceChildren(section)
+  root.textContent = ''
+  root.append(section)
 }

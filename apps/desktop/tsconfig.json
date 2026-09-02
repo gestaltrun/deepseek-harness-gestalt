@@ -20,6 +20,7 @@
     { "path": "../../packages/platform/platform-account-client" },
     { "path": "../../packages/platform/platform-account-core" },
     { "path": "../../packages/platform/project-membership-client" },
+    { "path": "../../packages/util/native-command" },
     { "path": "../../packages/platform/platform-account-http" },
     { "path": "../../packages/platform/remote-access" },
     { "path": "../../packages/platform/remote-access-client" },

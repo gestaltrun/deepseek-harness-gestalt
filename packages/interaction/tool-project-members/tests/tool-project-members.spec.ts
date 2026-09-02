@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { CallId } from '@deepseek-ai/dsh-llm'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import {
@@ -164,13 +164,26 @@ async function setup(config: Config = {}): Promise<Context> {
   return ctx
 }
 
+function stubAgent(id: string): Agent {
+  return {
+    id,
+    session: { id, header: { cwd: '/workspace/alpha' }, deriveMessages: () => [] },
+  } as unknown as Agent
+}
+
 /** Execute one `project_members` call and return the registry-normalized result. */
-async function execute(ctx: Context, callId: string, arguments_: Record<string, unknown> = {}) {
+async function execute(
+  ctx: Context,
+  callId: string,
+  arguments_: Record<string, unknown> = {},
+  agent?: Agent,
+) {
   return ctx.tools.execute({
     signal: testToolSignal,
     callId: CallId(callId),
     name: 'project_members',
     arguments: arguments_,
+    ...agent === undefined ? {} : { agent },
   })
 }
 
@@ -184,13 +197,13 @@ describe('project_members tool', () => {
     // A default export would make Loader unwrap only apply and drop `inject`.
     expect('default' in toolProjectMembers).toBe(false)
     expect(toolProjectMembers.name).toBe('tool-project-members')
-    expect(toolProjectMembers.inject).toEqual(['tools', 'projectMembership'])
+    expect(toolProjectMembers.inject).toEqual(['tools'])
 
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(toolProjectMembers) as Record<string, unknown>
     expect(unwrapped).toBe(toolProjectMembers)
     expect(unwrapped.name).toBe('tool-project-members')
-    expect(unwrapped.inject).toEqual(['tools', 'projectMembership'])
+    expect(unwrapped.inject).toEqual(['tools'])
     expect(typeof unwrapped.apply).toBe('function')
     expect(unwrapped.Config).toBeDefined()
   })
@@ -231,18 +244,25 @@ describe('project_members tool', () => {
 
   it('resolves the workspace-bound project when projectId is omitted', async () => {
     let bindingCalls = 0
+    let seenAgent: Agent | undefined
+    const agent = stubAgent('session-alpha')
     const ctx = await setup({
-      currentAccountResolver: resolveActorAccount,
-      boundProjectResolver: async () => {
+      currentAccountResolver: async ({ agent: resolvedAgent } = {}) => {
+        seenAgent = resolvedAgent
+        return account('acc-owner')
+      },
+      boundProjectResolver: async ({ agent: resolvedAgent } = {}) => {
+        expect(resolvedAgent).toBe(agent)
         bindingCalls += 1
         return projectId('proj-alpha')
       },
     })
 
-    const result = await execute(ctx, 'pm-bound')
+    const result = await execute(ctx, 'pm-bound', {}, agent)
 
     expect(result.isError).toBe(false)
     expect(bindingCalls).toBe(1)
+    expect(seenAgent).toBe(agent)
     expect(resultValue(result)).toHaveLength(2)
   })
 
@@ -399,5 +419,85 @@ describe('project_members tool', () => {
     expect(() => {
       toolProjectMembers.apply(new Context(), broken)
     }).toThrow('tool-project-members: config.currentAccountResolver must be a resolver function')
+  })
+
+  it('fails closed when no roster provider is composed', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(toolProjectMembers, {
+      currentAccountResolver: resolveActorAccount,
+    })
+    const result = await execute(ctx, 'pm-no-provider', { projectId: 'proj-alpha' })
+    expect(result.isError).toBe(true)
+    expect(JSON.stringify(result)).toMatch(/no project-membership roster provider is composed/)
+  })
+
+  it('reads the roster through an injected bridge without requiring ctx.projectMembership', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(toolProjectMembers, {
+      currentAccountResolver: async ({ signal } = {}) => {
+        expect(signal).toBe(testToolSignal)
+        return account('acc-owner')
+      },
+      rosterResolver: async (actor, requestedProjectId, { signal } = {}) => {
+        expect(actor).toBe('acc-owner')
+        expect(requestedProjectId).toBe('proj-alpha')
+        expect(signal).toBe(testToolSignal)
+        return {
+          project: PROJECT,
+          members: [{
+            id: 'mem-owner' as MembershipId,
+            accountId: account('acc-owner'),
+            role: 'owner',
+            tags: ['founding'] as FunctionTag[],
+            joinedAt: 1_000,
+          }],
+        }
+      },
+    })
+    const result = await execute(ctx, 'pm-bridge', { projectId: 'proj-alpha' })
+    expect(result.isError).toBe(false)
+    expect(resultValue(result)).toEqual([
+      { accountId: 'acc-owner', role: 'owner', tags: ['founding'], presence: 'offline' },
+    ])
+    const withAgent = await execute(ctx, 'pm-bridge-agent', { projectId: 'proj-alpha' }, stubAgent('session-bridge'))
+    expect(withAgent.isError).toBe(false)
+  })
+
+  it('cancels a pending current-account read through the tool signal', async () => {
+    let started: (() => void) | undefined
+    const waiting = new Promise<void>((resolve) => { started = resolve })
+    const ctx = await setup({
+      currentAccountResolver: async ({ signal } = {}) => {
+        started?.()
+        return new Promise((_resolve, reject) => {
+          const rejectAbort = (): void => { reject(new Error(String(signal?.reason ?? 'aborted'))) }
+          if (signal?.aborted === true) {
+            rejectAbort()
+            return
+          }
+          signal?.addEventListener('abort', rejectAbort, { once: true })
+        })
+      },
+    })
+    const controller = new AbortController()
+    const executing = ctx.tools.execute({
+      signal: controller.signal,
+      callId: CallId('pm-account-cancelled'),
+      name: 'project_members',
+      arguments: { projectId: 'proj-alpha' },
+    })
+    await waiting
+    controller.abort(new Error('account cancelled'))
+    const result = await executing
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ProjectMembersToolError', code: 'ACCOUNT_UNAVAILABLE' } },
+    })
   })
 })

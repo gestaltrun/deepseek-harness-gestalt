@@ -18,5 +18,6 @@ Platform packages own installation-independent identity and session behavior use
 | [`remote-protocol/`](remote-protocol/README.md) | `@deepseek-ai/dsh-remote-protocol` | Relay and encrypted Companion codecs, negotiation, errors, and limits | Pure protocol module |
 | [`remote-attachments/`](remote-attachments/README.md) | `@deepseek-ai/dsh-remote-attachments` | Pairing-scoped encrypted attachment blob store and HTTPS Consumer | `ctx.remoteAttachments` |
 | [`project-membership-http/`](project-membership-http/README.md) | `@deepseek-ai/dsh-project-membership-http` | Project registry, roster, invitation, and member-administration HTTP routes | Consumer |
+| [`project-membership-desktop/`](project-membership-desktop/README.md) | `@deepseek-ai/dsh-project-membership-desktop` | Desktop-authenticated read provider for agent presets | `ctx.desktopProjectMembership` |
 
 Deployment persistence, shared invalidation transport, secrets, and observability adapters belong to the Platform composition root. The packages here define and exercise their required interfaces without embedding deployment credentials.

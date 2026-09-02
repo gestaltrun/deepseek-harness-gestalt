@@ -6,6 +6,13 @@
     - id: ui-desktop
       name: '@deepseek-ai/dsh-client-ui-desktop'
 
+    - id: project-membership-desktop
+      name: '@deepseek-ai/dsh-project-membership-desktop'
+      disabled: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN == null && process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE == null
+      config:
+        baseUrl: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN
+        tokenFile: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE
+
 # DeepSeek Gestalt owns authoritative Companion search and therefore activates
 # the derived full-text index in its Desktop-only layer. Browser `dsh web`
 # retains the base opt-in stance.

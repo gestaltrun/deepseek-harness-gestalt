@@ -272,6 +272,7 @@ flowchart TD
     pkg_project_membership["project-membership"]
     pkg_project_membership_client["project-membership-client"]
     pkg_project_membership_core["project-membership-core"]
+    pkg_project_membership_desktop["project-membership-desktop"]
     pkg_project_membership_http["project-membership-http"]
     pkg_remote_access["remote-access"]
     pkg_remote_access_client["remote-access-client"]
@@ -651,6 +652,10 @@ flowchart TD
   pkg_noise_channel --> pkg_invariants
   pkg_noise_channel --> pkg_remote_access
   pkg_noise_channel --> pkg_remote_protocol
+  pkg_project_membership_desktop --> pkg_agent
+  pkg_project_membership_desktop --> pkg_invariants
+  pkg_project_membership_desktop --> pkg_platform_account
+  pkg_project_membership_desktop --> pkg_project_membership
   pkg_remote_access_client --> pkg_invariants
   pkg_remote_access_client --> pkg_platform_account
   pkg_remote_access_client --> pkg_remote_access
@@ -1018,6 +1023,7 @@ flowchart TD
   pkg_tool_ask_user --> pkg_system_prompt
   pkg_tool_ask_user --> pkg_tools
   pkg_tool_ask_user --> pkg_user_questions
+  pkg_tool_project_members --> pkg_agent
   pkg_tool_project_members --> pkg_brand
   pkg_tool_project_members --> pkg_invariants
   pkg_tool_project_members --> pkg_llm
@@ -1773,6 +1779,7 @@ flowchart TD
 | [`user-questions`](../packages/interaction/user-questions) | `interaction` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`jobs`](../packages/jobs/jobs) | `jobs` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`session`](../packages/core/session) |
 | [`noise-channel`](../packages/platform/noise-channel) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
+| [`project-membership-desktop`](../packages/platform/project-membership-desktop) | `platform` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`project-membership`](../packages/platform/project-membership) |
 | [`remote-access-client`](../packages/platform/remote-access-client) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-http`](../packages/platform/remote-access-http) | `platform` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-redis`](../packages/platform/remote-access-redis) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
@@ -1841,7 +1848,7 @@ flowchart TD
 | [`repeat-tool-reminder`](../packages/guard/repeat-tool-reminder) | `guard` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`tools`](../packages/core/tools) |
 | [`tool-call-timeout-policy`](../packages/guard/timeout-policy) | `guard` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
 | [`tool-ask-user`](../packages/interaction/tool-ask-user) | `interaction` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`member-question-sender`](../packages/interaction/member-question-sender), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools), [`user-questions`](../packages/interaction/user-questions) |
-| [`tool-project-members`](../packages/interaction/tool-project-members) | `interaction` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`project-membership`](../packages/platform/project-membership), [`tools`](../packages/core/tools) |
+| [`tool-project-members`](../packages/interaction/tool-project-members) | `interaction` | [`agent`](../packages/core/agent), [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`project-membership`](../packages/platform/project-membership), [`tools`](../packages/core/tools) |
 | [`tool-jobs`](../packages/jobs/tool-jobs) | `jobs` | [`agent`](../packages/core/agent), [`invariants`](../packages/runtime-diagnostics/invariants), [`jobs`](../packages/jobs/jobs), [`llm`](../packages/llm/llm), [`output-retention`](../packages/util/output-retention), [`system-prompt`](../packages/core/system-prompt), [`tools`](../packages/core/tools) |
 | [`tool-lsp`](../packages/lsp/tool-lsp) | `lsp` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`lsp`](../packages/lsp/lsp), [`system-prompt`](../packages/core/system-prompt), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |
 | [`mcp-client`](../packages/mcp/mcp-client) | `mcp` | [`attachment`](../packages/attachment/attachment), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout), [`tools`](../packages/core/tools) |

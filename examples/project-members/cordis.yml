@@ -9,6 +9,12 @@
 - id: project-members-mock-llm
   name: './mock-llm.ts'
 
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+
+- id: member-question-sender
+  name: './memory-member-question.ts'
+
 # The tool resolves the account first and the workspace binding second; the
 # presenter decorates stored rows by join order, so stored authority stays
 # authoritative and only presence/display identity are presentation choices.
@@ -17,7 +23,13 @@
   config:
     currentAccountResolver: !!js "async () => 'acc-demo-owner'"
     boundProjectResolver: !!js "async () => 'proj-demo'"
-    rosterPresenter: !!js "async view => view.members.map((member, index) => ({ presence: index === 0 ? 'online' : 'offline', displayName: index === 0 ? 'Demo Owner' : 'Demo Member' }))"
+    rosterPresenter: !!js "async view => view.members.map((member, index) => ({ presence: index === 0 ? 'online' : 'offline', displayName: index === 0 ? 'Demo Owner' : 'grace' }))"
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+  config:
+    boundProjectResolver: !!js "async () => 'proj-demo'"
+    routeResolver: !!js "async ({ toProjectMember }) => toProjectMember.toLowerCase() === 'grace' ? ({ projectId: 'proj-demo', toProjectMember: 'acc-demo-dev', origin: { projectName: 'demo', originSessionTitle: 'Project member decision', askerAccountId: 'acc-demo-owner', askerRole: 'owner', askerDisplayName: 'Demo Owner', askerAvatarUrl: 'https://avatars.example/demo-owner.png' } }) : undefined"
 
 - id: agent-spine
   name: '@deepseek-ai/dsh-agent-spine-demo'

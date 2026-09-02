@@ -16,6 +16,8 @@ interface DesktopProjectMembershipOptions {
   readonly account: () => DesktopAccountActions
   readonly environment: SelectedPlatformEnvironment
   readonly fetch: typeof globalThis.fetch
+  readonly expectedAccountId?: string
+  readonly signal?: AbortSignal
 }
 
 /** Default Desktop liveness cadence, below the Platform's 90-second presence TTL. */
@@ -57,12 +59,18 @@ export function createDesktopProjectMembershipClient(
 ): ProjectMembershipClient {
   const transport = new ProjectMembershipHttpTransport({
     origin: options.environment.origin,
-    fetch: options.fetch,
+    fetch: (input, init) => {
+      const signal = requestSignal(init?.signal, options.signal)
+      return options.fetch(input, { ...init, ...(signal === undefined ? {} : { signal }) })
+    },
   })
   const authorized = async <T>(
     run: (headers: Record<string, string>) => Promise<T>,
   ): Promise<T> => {
-    const authorization = await options.account().authorizeCurrentInstallation()
+    const owner = options.account()
+    assertExpectedAccount(owner, options.expectedAccountId)
+    const authorization = await owner.authorizeCurrentInstallation()
+    assertExpectedAccount(owner, options.expectedAccountId)
     return run({
       Authorization: `Bearer ${authorization.accessToken}`,
       'X-Gestalt-Proof-Jti': authorization.proof.jti,
@@ -91,6 +99,21 @@ export function createDesktopProjectMembershipClient(
   }
 }
 
+function assertExpectedAccount(owner: DesktopAccountActions, expectedAccountId: string | undefined): void {
+  if (expectedAccountId !== undefined && owner.getSnapshot().account?.id !== expectedAccountId) {
+    throw new Error('Desktop Project Membership account changed before authorization completed')
+  }
+}
+
+function requestSignal(
+  first: AbortSignal | null | undefined,
+  second: AbortSignal | undefined,
+): AbortSignal | undefined {
+  if (first === null || first === undefined) return second
+  if (second === undefined) return first
+  return AbortSignal.any([first, second])
+}
+
 /**
  * Heartbeat the signed-in Desktop Installation and close it immediately when
  * the last window leaves, without exposing Account credentials to renderer
@@ -112,7 +135,10 @@ export function createDesktopProjectMembershipPresence(
   })
   const transport = new ProjectMembershipHttpTransport({
     origin: options.environment.origin,
-    fetch: options.fetch,
+    fetch: (input, init) => {
+      const signal = requestSignal(init?.signal, options.signal)
+      return options.fetch(input, { ...init, ...(signal === undefined ? {} : { signal }) })
+    },
   })
   let signedIn = false
   let disposed = false
@@ -120,7 +146,10 @@ export function createDesktopProjectMembershipPresence(
   let timer: ReturnType<typeof setTimeout> | undefined
   let active: { controller: AbortController; promise: Promise<void> } | undefined
   const authorize = async (): Promise<Record<string, string>> => {
-    const authorization = await options.account().authorizeCurrentInstallation()
+    const owner = options.account()
+    assertExpectedAccount(owner, options.expectedAccountId)
+    const authorization = await owner.authorizeCurrentInstallation()
+    assertExpectedAccount(owner, options.expectedAccountId)
     return {
       Authorization: `Bearer ${authorization.accessToken}`,
       'X-Gestalt-Proof-Jti': authorization.proof.jti,

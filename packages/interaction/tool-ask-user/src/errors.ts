@@ -9,6 +9,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 export type AskUserQuestionErrorCode =
   | 'BACKGROUND_REQUIRED'
   | 'BACKGROUND_TOO_LONG'
+  | 'INELIGIBLE_ADDRESSEE'
   | 'REFERENCES_INVALID'
   | 'SENDER_UNAVAILABLE'
 

@@ -135,6 +135,7 @@ export class DesktopProjectMembershipService extends Service {
     if (presentations === undefined) {
       throw new Error('project-membership-desktop: roster presentation requires the exact bridged roster read')
     }
+    /* v8 ignore next 3 -- Map identity already keys presentations to the exact member list. */
     if (presentations.length !== view.members.length) {
       throw new Error('project-membership-desktop: roster presentation count must match the retained roster')
     }
@@ -160,6 +161,7 @@ export class DesktopProjectMembershipService extends Service {
     if (context?.project === undefined) throw new Error('project-membership-desktop: current Workspace is not bound')
     const roster = await this.roster(context.account.id, context.project.id, signal)
     const presentations = this.presentations.get(rosterIdentity(roster))
+    /* v8 ignore next 3 -- roster() retains presentations under the same identity it returns. */
     if (presentations === undefined) {
       throw new Error('project-membership-desktop: roster presentation requires the exact bridged roster read')
     }

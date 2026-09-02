@@ -112,11 +112,11 @@ describe('two Platform instances over one membership document', () => {
     const project = await created.json() as { id: string; boundRemoteUrl: string }
     expect(project.boundRemoteUrl).toBe('https://github.com/octocat/Shared')
     const invited = await post(a.origin, '/v1/projects/invitations', {
-      projectId: project.id, githubLogin: mona.githubLogin,
+      projectId: project.id, githubLogin: mona.githubLogin, grantedRole: 'member',
     }, authHeaders(octocat))
     expect(invited.status).toBe(201)
-    const invitation = await invited.json() as { id: string; state: string; inviteeAccountId: string }
-    expect(invitation).toMatchObject({ state: 'pending', inviteeAccountId: mona.accountId })
+    const invitation = await invited.json() as { id: string; state: string; inviteeAccountId: string; grantedRole: string }
+    expect(invitation).toMatchObject({ state: 'pending', inviteeAccountId: mona.accountId, grantedRole: 'member' })
 
     // A's own heartbeat registers in A's process, and A's gates are the
     // envelopes instance B must reproduce.
@@ -148,13 +148,13 @@ describe('two Platform instances over one membership document', () => {
     // acceptance immediately gates further invites: Mona now holds membership
     // but not admin, and re-inviting her hits the duplicate gate.
     expect(await errorOf(post(b.origin, '/v1/projects/invitations', {
-      projectId: project.id, githubLogin: newman.githubLogin,
+      projectId: project.id, githubLogin: newman.githubLogin, grantedRole: 'member',
     }, authHeaders(mona)))).toEqual([403, 'ROLE_REQUIRED'])
     expect(await errorOf(fetch(`${b.origin}/v1/projects/${project.id}/members`, {
       headers: { origin: ENVIRONMENT.origin, ...authHeaders(newman) },
     }))).toEqual([403, 'NOT_A_MEMBER'])
     expect(await errorOf(post(b.origin, '/v1/projects/invitations', {
-      projectId: project.id, githubLogin: mona.githubLogin,
+      projectId: project.id, githubLogin: mona.githubLogin, grantedRole: 'member',
     }, authHeaders(octocat)))).toEqual([409, 'DUPLICATE_INVITEE'])
 
     const joined = await rosterOf(b.origin, project.id, octocat)

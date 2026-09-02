@@ -38,6 +38,8 @@ export interface WorkspaceProjectView {
   id: string
   name: string
   boundRemoteUrl: string
+  /** Authenticated Account whose membership authorized create or remote recovery. */
+  receivingAccountId?: string
 }
 
 /** Permission role inside one cloud project. */
@@ -59,6 +61,8 @@ export interface WorkspaceIssuedInvitation {
   invitationId: string
   /** Invitee shown to the inviter (GitHub login as entered). */
   inviteeName: string
+  /** Role the invitee receives at accept-with-workspace-link. */
+  grantedRole: WorkspaceProjectRole
 }
 
 /** One pending invitation addressed to the local account (poll source of the wizard). */
@@ -70,6 +74,8 @@ export interface WorkspacePendingInvitation {
   inviterName: string
   /** Normalized remote of the invited project, for same-origin link advice. */
   remoteUrl: string
+  /** Role this invitation confers when the invitee completes the link step. */
+  grantedRole: WorkspaceProjectRole
 }
 
 /**
@@ -83,7 +89,7 @@ export interface ProjectMembershipGateway {
   /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
   projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
   roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
-  invite(input: { projectId: string; githubLogin: string }): Promise<WorkspaceIssuedInvitation>
+  invite(input: { projectId: string; githubLogin: string; grantedRole: WorkspaceProjectRole }): Promise<WorkspaceIssuedInvitation>
   issuedInvitations(projectId: string): Promise<readonly WorkspaceIssuedInvitation[]>
   retractInvitation(invitationId: string): Promise<void>
   decideInvitation(

@@ -14,6 +14,7 @@
   "exports": {
     ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
     "./invariant": { "types": "./lib/types/invariant.d.ts", "default": "./lib/invariant.js" },
+    "./invite-role": { "types": "./lib/types/invite-role.d.ts", "default": "./lib/types/invite-role.js" },
     "./remote-url": { "types": "./lib/types/remote-url.d.ts", "default": "./lib/types/remote-url.js" },
     "./src/*": "./src/*",
     "./package.json": "./package.json"

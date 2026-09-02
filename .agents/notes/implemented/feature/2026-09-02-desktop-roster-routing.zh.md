@@ -24,8 +24,8 @@ Status: implemented
 
 ## Consequences
 
-绑定 Desktop 会话在存在 `to_project_member` 时不再回退到本地提问工具。未绑定会话隐藏路由参数。任意非名册收件人失败关闭。loopback 投影只读；Project 变更仍由 renderer 经 Desktop IPC 执行。
+绑定 Desktop 会话在存在 `to_project_member` 时不再回退到本地提问工具。Web Host 挂载 `ctx.memberQuestionSender` 但不配置生产投递端口，因此构造出的路由提问在审阅过的 T4 registry transport 组合完成前以 `DELIVERY_UNAVAILABLE` 失败关闭。未绑定会话隐藏路由参数。任意非名册收件人失败关闭。loopback 投影只读；Project 变更仍由 renderer 经 Desktop IPC 执行。
 
 ## Testing
 
-`packages/interaction/tool-ask-user/tests/tool-ask-user.spec.ts` 固定公开登录名路由、投递前的 `INELIGIBLE_ADDRESSEE`，以及经 `routeResolver` 与 `boundProjectResolver` 的取消。`packages/platform/project-membership-desktop/tests/desktop-provider.spec.ts` 固定大小写不敏感的登录名匹配，以及待处理 loopback 读取的中止。`apps/desktop/tests/project-membership-agent-runtime.spec.ts` 固定 Installation 取样身份、actor 不匹配、账号切换拒绝与静止处置。`examples/project-members` 的 keyless snapshot 回放钉住先 `project_members` 再 `ask_user_question`，且 `to_project_member` 是实时公开登录名而非 Account id。
+`packages/interaction/tool-ask-user/tests/tool-ask-user.spec.ts` 固定公开登录名路由、投递前的 `INELIGIBLE_ADDRESSEE`，以及经 `routeResolver` 与 `boundProjectResolver` 的取消。`packages/platform/project-membership-desktop/tests/desktop-provider.spec.ts` 固定大小写不敏感的登录名匹配，以及待处理 loopback 读取的中止。`apps/desktop/tests/project-membership-agent-runtime.spec.ts` 固定 Installation 取样身份、actor 不匹配、账号切换拒绝与静止处置。`apps/desktop/tests/overlay-isolation.spec.ts` 固定 Web Host 与 Desktop overlay dump 中的 `ctx.memberQuestionSender`。`examples/project-members` 的 keyless snapshot 回放钉住先 `project_members` 再 `ask_user_question`，且 `to_project_member` 是实时公开登录名而非 Account id。

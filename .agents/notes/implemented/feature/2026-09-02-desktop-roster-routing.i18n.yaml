@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-desktop-roster-routing.md
-2026-09-02-desktop-roster-routing.md: f5743c421d590704c26605b1ae4ca85311527c66
-2026-09-02-desktop-roster-routing.zh.md: d59622912ba8fc6f44ac561b7d678f822abf1763
+2026-09-02-desktop-roster-routing.md: 1946164e6ae39914d75b503ceafb97e2d1935a85
+2026-09-02-desktop-roster-routing.zh.md: f4d9e181039f255c4b2a1b1e6728e2381f9312fc

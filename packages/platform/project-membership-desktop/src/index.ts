@@ -77,7 +77,7 @@ export const Config: z<Config> = z.object({
 export class DesktopProjectMembershipService extends Service {
   static Config = Config
   private readonly baseUrl: string
-  private readonly presentations = new WeakMap<RosterView, readonly DesktopMemberPresentation[]>()
+  private readonly presentations = new Map<string, readonly DesktopMemberPresentation[]>()
 
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'desktopProjectMembership')
@@ -120,7 +120,7 @@ export class DesktopProjectMembershipService extends Service {
       await this.request('/v1/roster', { actorAccountId: actor, projectId }, signal),
       projectId,
     )
-    this.presentations.set(parsed.view, parsed.presentations)
+    this.presentations.set(rosterIdentity(parsed.view), parsed.presentations)
     return parsed.view
   }
 
@@ -131,9 +131,12 @@ export class DesktopProjectMembershipService extends Service {
    * @throws when `view` was not returned by this service instance.
    */
   present(view: RosterView): Promise<readonly DesktopMemberPresentation[]> {
-    const presentations = this.presentations.get(view)
+    const presentations = this.presentations.get(rosterIdentity(view))
     if (presentations === undefined) {
       throw new Error('project-membership-desktop: roster presentation requires the exact bridged roster read')
+    }
+    if (presentations.length !== view.members.length) {
+      throw new Error('project-membership-desktop: roster presentation count must match the retained roster')
     }
     return Promise.resolve(presentations)
   }
@@ -156,7 +159,7 @@ export class DesktopProjectMembershipService extends Service {
     const context = await this.context(agent, signal)
     if (context?.project === undefined) throw new Error('project-membership-desktop: current Workspace is not bound')
     const roster = await this.roster(context.account.id, context.project.id, signal)
-    const presentations = this.presentations.get(roster)
+    const presentations = this.presentations.get(rosterIdentity(roster))
     if (presentations === undefined) {
       throw new Error('project-membership-desktop: roster presentation requires the exact bridged roster read')
     }
@@ -194,6 +197,10 @@ export class DesktopProjectMembershipService extends Service {
 }
 
 export default DesktopProjectMembershipService
+
+function rosterIdentity(view: RosterView): string {
+  return `${view.project.id}\0${view.members.map(member => member.accountId).join('\0')}`
+}
 
 function matchPublicLogin(
   roster: RosterView,

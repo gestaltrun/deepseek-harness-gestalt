@@ -241,6 +241,9 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:^
         version: link:../../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-member-question-sender':
+        specifier: workspace:^
+        version: link:../../packages/interaction/member-question-sender
       '@deepseek-ai/dsh-output-retention':
         specifier: workspace:^
         version: link:../../packages/util/output-retention
@@ -2113,6 +2116,9 @@ importers:
       '@deepseek-ai/dsh-member-question-receiver':
         specifier: workspace:^
         version: link:../../interaction/member-question-receiver
+      '@deepseek-ai/dsh-member-question-sender':
+        specifier: workspace:^
+        version: link:../../interaction/member-question-sender
       '@deepseek-ai/dsh-message-feedback':
         specifier: workspace:^
         version: link:../../feedback/message-feedback
@@ -10515,6 +10521,9 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:^
         version: link:../../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-member-question-sender':
+        specifier: workspace:^
+        version: link:../../packages/interaction/member-question-sender
       '@deepseek-ai/dsh-output-retention':
         specifier: workspace:^
         version: link:../../packages/util/output-retention
@@ -10536,6 +10545,12 @@ importers:
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:^
         version: link:../../packages/shell/pwsh-local
+      '@deepseek-ai/dsh-remote-access':
+        specifier: workspace:^
+        version: link:../../packages/platform/remote-access
+      '@deepseek-ai/dsh-remote-protocol':
+        specifier: workspace:^
+        version: link:../../packages/platform/remote-protocol
       '@deepseek-ai/dsh-repeat-tool-reminder':
         specifier: workspace:^
         version: link:../../packages/guard/repeat-tool-reminder

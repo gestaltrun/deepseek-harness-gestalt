@@ -254,6 +254,36 @@ describe('workspace settings and invite wizard (M4)', () => {
     }
   })
 
+  it('offers only member when the current actor is an admin', async () => {
+    const membership = gateway({
+      projectForWorkspace: vi.fn(async () => ({
+        id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-admin',
+      })),
+      roster: vi.fn(async () => ({
+        project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
+        members: [{
+          membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
+          role: 'owner' as const, tags: [], presence: 'online' as const,
+        }, {
+          membershipId: 'membership-admin', accountId: 'account-admin', displayName: 'mona',
+          role: 'admin' as const, tags: [], presence: 'online' as const,
+        }],
+      })),
+    })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+    await flush()
+    const inviteRole = screen.getByLabelText(t('members.inviteRole')) as HTMLSelectElement
+    expect(Array.from(inviteRole.querySelectorAll('option')).map(option => option.value)).toEqual(['member'])
+    fireEvent.change(screen.getByLabelText(t('members.inviteLogin')), { target: { value: 'ada' } })
+    fireEvent.click(screen.getByRole('button', { name: t('members.invite') }))
+    await flush()
+    expect(membership.invite).toHaveBeenCalledWith({
+      projectId: 'project-1', githubLogin: 'ada', grantedRole: 'member',
+    })
+  })
+
   it('runs the invite wizard: accept, mandatory link with same-remote advice, close returns undecided', async () => {
     const membership = gateway({
       pendingInvitations: vi.fn(async () => [{

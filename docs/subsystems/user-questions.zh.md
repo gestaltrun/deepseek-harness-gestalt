@@ -200,6 +200,8 @@ interface MemberQuestionSendPayload {
   readonly questions: readonly MemberQuestionItem[]
   /** Workspace-validated references; an empty list is admitted. */
   readonly references: readonly MemberQuestionReference[]
+  /** File bytes aligned 1:1 with references; omission is valid only when references is empty. */
+  readonly documents?: readonly MemberQuestionDocument[]
   /** Public identity fields rendered on the receiver's Decision Brief. */
   readonly origin: MemberQuestionOrigin
   /** Originating session identity used as one half of the supersede route key. */

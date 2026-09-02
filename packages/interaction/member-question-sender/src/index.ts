@@ -824,14 +824,6 @@ function routeKeyOf(originSessionId: string, toProjectMember: string): string {
 }
 
 /**
- * Encode one member-question payload through the T4 Companion codec.
- * @param protocol - negotiated Companion major 4 protocol.
- * @param payload - Decision Brief origin, background, questions, and references.
- * @param expiresAt - absolute question expiry in Unix epoch milliseconds.
- * @returns the branded question id, Companion message, and encoded bytes.
- * @throws {MemberQuestionSenderError} `ENCODE_FAILED` when the codec rejects the payload.
- */
-/**
  * Encode arbitrary reference bytes into bounded Companion document frames.
  * @param protocol - negotiated Companion major 4 protocol.
  * @param questionId - member question owning every document.
@@ -891,6 +883,14 @@ export function encodeMemberQuestionDocuments(
   })
 }
 
+/**
+ * Encode one member-question payload through the T4 Companion codec.
+ * @param protocol - negotiated Companion major 4 protocol.
+ * @param payload - Decision Brief origin, background, questions, and references.
+ * @param expiresAt - absolute question expiry in Unix epoch milliseconds.
+ * @returns the branded question id, Companion message, and encoded bytes.
+ * @throws {MemberQuestionSenderError} `ENCODE_FAILED` when the codec rejects the payload.
+ */
 export function encodeMemberQuestion(
   protocol: NegotiatedCompanionProtocol,
   payload: MemberQuestionSendPayload,

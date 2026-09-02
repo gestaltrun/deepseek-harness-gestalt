@@ -18,7 +18,7 @@ book 只应用 revision 更高的完整 Host snapshot。断连会保留已有行
 
 `SessionRuntime` 把每个可寻址 id 绑定到对外 `SessionFace`，并可选持有具体 Host `Session`。只有 materialized face 会绑定 Agent scope dispatch point，打开或翻页历史，执行重同步，刷新 subagent，并参与 scope prune 的实例拆卸。materialization 之前，选中接收 Session 与重连会跳过 subagent 刷新，model／command／skill routing 返回不可用，prompt 只调用 member-question admission RPC。snapshot 携带权威 `hostSessionId` 时，现有 face 会绑定到 Host-backed Session，不替换 row、pending wait 或 terminal record。
 
-接收行没有 Host Workspace 成员资格，因此位于浏览器的 Ungrouped 记账中。Workspace 浏览器按到达边沿观察 pending Ungrouped 身份，并为每个新 pending 身份打开该记账一次，而不更改当前 Session。人类随后可以折叠它；同一 pending 身份的普通更新不会再次打开。
+已有 Host Workspace 成员资格的接收行出现在该 Workspace 下。Workspace 浏览器按到达边沿观察 pending 身份，并为每个新 pending 身份打开绑定 Workspace（若 Host 列表尚未关联 Session 则打开 Ungrouped）一次，而不更改当前 Session。人类随后可以折叠它；同一 pending 身份的普通更新不会再次打开。
 
 跨插件值导入使用供应方的动态模块表行。`dsh-client-ui-user-questions/client` 导出 `QuestionPresentation`；`dsh-client-ui-member-questions` 导入该行，并在 `dsh.client.external` 中声明。runtime 将 `dsh-user-questions` 类型依赖声明为 peer 与开发输入，而 `ui-member-questions` 的静态 `ui-slots` 编译输入仅留在开发依赖中。
 
@@ -40,4 +40,4 @@ book 只应用 revision 更高的完整 Host snapshot。断连会保留已有行
 
 ## 测试
 
-`packages/client/runtime/tests/receiving.client.spec.ts` 使用 `FakeApiClient` 驱动真实 `SessionRuntime` 实例，选中 Host-id 行，并观察 `currentProvideInfo.hooks.session.getSnapshot()`。测试固定 Host revision 顺序、answer 与 decline RPC、断连保留、terminal projection、双 Installation answered-elsewhere 派生、产品 composer admission、reserved `rpcId` 恢复，以及 renderer `session.create` 与 prompt 调用均为零。`packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx` 固定到达边沿展开与到达后的人类折叠。`apps/web/tests/member-question-receiving.e2e.ts` 驱动认证 ingress，经过随发行版交付的 Host receiver、API Proxy、WebSocket Host stream、Client Runtime、动态模块表、叠加式 Decision Brief dock、产品 composer、共享问题呈现、durable terminal band、restart 与 reload；它断言恢复完全相同的 pending／terminal record，且不增加 Host Session，也不调用 `session.create` 或 renderer prompt。`pnpm run build:lib:client` 与 `pnpm run verify-client-packages` 覆盖 client 模块行与 package 声明。
+`packages/client/runtime/tests/receiving.client.spec.ts` 使用 `FakeApiClient` 驱动真实 `SessionRuntime` 实例，选中 Host-id 行，并观察 `currentProvideInfo.hooks.session.getSnapshot()`。测试固定 Host revision 顺序、answer 与 decline RPC、断连保留、terminal projection、双 Installation answered-elsewhere 派生、产品 composer admission、reserved `rpcId` 恢复，以及 renderer `session.create` 调用为零。`packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx` 固定到达边沿展开与到达后的人类折叠。`apps/web/tests/member-question-receiving.e2e.ts` 驱动认证 ingress，经过随发行版交付的 Host receiver、API Proxy、WebSocket Host stream、Client Runtime、动态模块表、叠加式 Decision Brief dock、产品 composer、共享问题呈现、exceptional terminal band、restart 与 reload；它断言恢复完全相同的 pending／terminal record，绑定 Workspace 中有一个 Host Session，且到达不产生模型请求。`pnpm run build:lib:client` 与 `pnpm run verify-client-packages` 覆盖 client 模块行与 package 声明。

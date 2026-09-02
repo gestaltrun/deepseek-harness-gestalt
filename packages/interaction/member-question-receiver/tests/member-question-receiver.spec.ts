@@ -139,6 +139,7 @@ describe('FileMemberQuestionReceiver', () => {
       }],
       terminal: [],
     })
+    expect((await first.snapshot()).pending[0]?.hostSessionId).toBeUndefined()
 
     await contexts.pop()!.fiber.dispose()
     const reopened = await createReceiver(storagePath, { clock: () => 1_000 })
@@ -305,6 +306,129 @@ describe('FileMemberQuestionReceiver', () => {
       'declined',
       'answered',
     ])
+  })
+
+  it('materializes one Host Session on authenticated arrival without admitting a human turn', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const contextsSeen: Parameters<MemberQuestionHumanTurnAdmitter>[1][] = []
+    const materializer = vi.fn(async (_request: unknown, context: Parameters<MemberQuestionHumanTurnAdmitter>[1]) => {
+      contextsSeen.push(context)
+      return { accepted: true as const }
+    })
+    const admitter = vi.fn(async () => ({ accepted: true as const }))
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      materializer,
+      admitter,
+    })
+    await bindReceiverWorkspace(receiver)
+    const arrived = await receiver.ingest(envelopeWith('question-materialize', 3_000))
+    const replayed = await receiver.ingest(envelopeWith('question-materialize', 3_000))
+    expect(replayed).toEqual(arrived)
+    expect(materializer).toHaveBeenCalledTimes(1)
+    expect(admitter).not.toHaveBeenCalled()
+    expect((await receiver.snapshot()).pending[0]).toMatchObject({
+      questionId: 'question-materialize',
+      receivingSessionId: arrived.receivingSessionId,
+      hostSessionId: arrived.receivingSessionId,
+    })
+    expect(contextsSeen[0]?.workspaceId).toBe('workspace-receiver')
+    expect(contextsSeen[0]?.questions[0]).toMatchObject({
+      questionId: 'question-materialize',
+      receivingSessionId: arrived.receivingSessionId,
+    })
+    expect('terminal' in (contextsSeen[0]?.questions[0] ?? {})).toBe(false)
+
+    await contexts.pop()!.fiber.dispose()
+    const resumed = vi.fn(async () => ({ accepted: true as const }))
+    const reopened = await createReceiver(storagePath, {
+      clock: () => 1_100,
+      materializer: resumed,
+    })
+    await reopened.resumeReservedSessionMaterializations()
+    expect(resumed).not.toHaveBeenCalled()
+    expect((await reopened.snapshot()).pending[0]?.hostSessionId).toBe(arrived.receivingSessionId)
+  })
+
+  it('retries an interrupted arrival materialization on replay and Host resume', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    let attempts = 0
+    const first = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      materializer: async () => {
+        attempts += 1
+        throw new Error('materialization interrupted')
+      },
+    })
+    await bindReceiverWorkspace(first)
+    await expect(first.ingest(envelopeWith('question-resume', 3_000)))
+      .rejects.toThrow('materialization interrupted')
+    expect(attempts).toBe(1)
+    expect((await first.snapshot()).pending[0]?.hostSessionId).toBeUndefined()
+    await contexts.pop()!.fiber.dispose()
+
+    const resumed = vi.fn(async () => ({ accepted: true as const }))
+    const reopened = await createReceiver(storagePath, {
+      clock: () => 1_100,
+      materializer: resumed,
+    })
+    await reopened.resumeReservedSessionMaterializations()
+    expect(resumed).toHaveBeenCalledTimes(1)
+    expect((await reopened.snapshot()).pending[0]).toMatchObject({
+      questionId: 'question-resume',
+      hostSessionId: (await reopened.snapshot()).pending[0]?.receivingSessionId,
+    })
+  })
+
+  it('registers one Host Session materializer and continues the same route Session', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      terminalAuthority: new MemoryTerminalAuthority(),
+    })
+    const materializer = vi.fn(async () => ({ accepted: true as const }))
+    const unregister = receiver.registerSessionMaterializer(materializer)
+    expect(() => receiver.registerSessionMaterializer(materializer)).toThrow('already registered')
+    await bindReceiverWorkspace(receiver)
+    const first = await receiver.ingest(envelopeWith('question-first', 3_000))
+    expect(materializer).toHaveBeenCalledTimes(1)
+    const second = await receiver.ingest(envelopeWith('question-second', 3_000))
+    expect(second.receivingSessionId).toBe(first.receivingSessionId)
+    expect(materializer).toHaveBeenCalledTimes(2)
+    expect((await receiver.snapshot()).pending[0]?.hostSessionId).toBe(first.receivingSessionId)
+    unregister()
+    unregister()
+    expect(() => receiver.registerSessionMaterializer(materializer)).not.toThrow()
+  })
+
+  it('materializes a second independent route without rewriting the first Host Session', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const materializer = vi.fn(async () => ({ accepted: true as const }))
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      materializer,
+    })
+    await bindReceiverWorkspace(receiver)
+    await receiver.bind(
+      'account:other' as never,
+      envelope.operation.projectId,
+      'workspace-receiver' as never,
+    )
+    const first = await receiver.ingest(envelopeWith('route-a', 3_000))
+    const second = await receiver.ingest({
+      ...envelopeWith('route-b', 3_000),
+      authority: { accountId: 'account:other' as PlatformAccountId },
+    })
+    const snapshot = await receiver.snapshot()
+    expect(first.receivingSessionId).not.toBe(second.receivingSessionId)
+    expect(snapshot.pending.map(row => row.hostSessionId).sort()).toEqual(
+      [first.receivingSessionId, second.receivingSessionId].sort(),
+    )
+    expect(materializer).toHaveBeenCalledTimes(2)
   })
 
   it('reserves one human turn durably, retries the high-level admission, and commits it exactly once by rpcId', async () => {

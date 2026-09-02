@@ -41,7 +41,7 @@ export interface PendingMemberQuestionView {
   readonly arrivedAt: number
   /** Bounded authenticated member-question operation. */
   readonly operation: CompanionMemberQuestionOperation
-  /** Ordinary Host Session identity after the first explicit human admission. */
+  /** Ordinary Host Session identity after authenticated arrival materializes the Session. */
   readonly hostSessionId?: HostSessionId
   /** Durable retry identity while a human-turn admission remains reserved. */
   readonly reservedAdmission?: {
@@ -151,7 +151,7 @@ export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | Me
 
 /** One explicit human turn addressed to a receiving Session. */
 export interface AdmitMemberQuestionHumanTurnInput {
-  /** Host-owned receiving thread to materialize or continue. */
+  /** Host-owned receiving thread that already exists after arrival. */
   readonly receivingSessionId: ReceivingSessionId
   /** Exact receiving-thread revision the human observed. */
   readonly revision: number
@@ -171,13 +171,13 @@ export interface AdmitMemberQuestionHumanTurnResult {
   readonly rpcId: MemberQuestionReceiverRpcId
 }
 
-/** Successful high-level Host adapter admission. */
+/** Successful high-level Host adapter receipt. */
 interface MemberQuestionHumanTurnAdmissionReceipt {
-  /** The adapter materialized and admitted the human turn. */
+  /** The adapter completed without starting a second Session. */
   readonly accepted: true
 }
 
-/** Durable receiver facts needed by one Host materialize-and-admit operation. */
+/** Durable receiver facts needed by Host Session materialization or a later human turn. */
 export interface MemberQuestionHumanTurnAdmissionContext {
   /** Account whose local workspace receives the Host Session. */
   readonly receivingAccountId: PlatformAccountId
@@ -229,11 +229,31 @@ export interface MemberQuestionWorkspaceBinding {
 }
 
 /**
- * High-level Host adapter that materializes the receiving Session if needed
- * and admits the human turn atomically under `rpcId` idempotency.
+ * High-level Host adapter that admits one explicit human turn under `rpcId`
+ * idempotency after the receiving Session already exists.
  */
 export type MemberQuestionHumanTurnAdmitter = (
   input: AdmitMemberQuestionHumanTurnInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/** One authenticated arrival that must materialize or continue a Host Session. */
+export interface MaterializeMemberQuestionSessionInput {
+  /** Host-owned receiving thread to create or continue. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Durable receiver revision that published this arrival. */
+  readonly revision: number
+  /** Authenticated question identity being recorded. */
+  readonly questionId: MemberQuestionId
+}
+
+/**
+ * High-level Host adapter that creates the receiving Session, attaches the
+ * invitation-bound Workspace, and injects bounded Decision Brief context
+ * without starting a model turn.
+ */
+export type MemberQuestionSessionMaterializer = (
+  input: MaterializeMemberQuestionSessionInput,
   context: MemberQuestionHumanTurnAdmissionContext,
 ) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
 

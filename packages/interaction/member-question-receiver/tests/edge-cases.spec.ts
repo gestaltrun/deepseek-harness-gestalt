@@ -319,6 +319,7 @@ describe('member-question receiver edge contracts', () => {
       { ...base, terminalAuthorityMode: 'local' },
       { ...base, environment: 'production', terminalAuthorityMode: 'development-local' },
       { ...base, clock: true },
+      { ...base, materializer: true },
       { ...base, admitter: true },
       { ...base, timer: {} },
       { ...base, timer: { set() {} } },

@@ -97,7 +97,7 @@ function face(runtime: SessionRuntime): SessionFace {
 }
 
 describe('Host-authoritative receiving projection', () => {
-  it('uses the Host receiving identity and creates no Host Session or model activity', async () => {
+  it('uses the Host receiving identity and routes a pre-materialization prompt through admission', async () => {
     const { api, runtime } = bench()
     runtime.handleHostEnvelope(envelope(snapshot(1, 'pending')))
     await Promise.resolve()
@@ -125,6 +125,32 @@ describe('Host-authoritative receiving projection', () => {
     expect(api.callsOf('session.history')).toEqual([])
     expect(api.callsOf('session.prompt')).toEqual([])
     expect(runtime.modelRoute(receivingId)).toBeUndefined()
+  })
+
+  it('keeps a Host-listed receiving Session visible under its origin title', async () => {
+    const { runtime } = bench()
+    runtime.handleHostEnvelope({
+      rpcId: 'host-added' as never,
+      payload: {
+        type: 'host/session-added',
+        sessionId: 'receiving-host-1' as never,
+        blank: true,
+      },
+    })
+    runtime.handleHostEnvelope(envelope({
+      revision: 1,
+      pending: [{
+        ...snapshot(1, 'pending').pending[0]!,
+        hostSessionId: 'receiving-host-1' as never,
+      }],
+      terminal: [],
+    }))
+    await Promise.resolve()
+    expect(runtime.list.getSnapshot().byId['receiving-host-1' as SessionId]).toMatchObject({
+      title: 'Atlas — Release decision',
+      blank: false,
+      pendingInteraction: 'question',
+    })
   })
 
   it('restores a reserved admission rpcId from the Host snapshot after Client restart', async () => {
@@ -224,9 +250,7 @@ describe('Host-authoritative receiving projection', () => {
     second.handleHostEnvelope(envelope(snapshot(2, 'answered', 'installation-a'), 'installation-b'))
     first.open('receiving-host-1' as SessionId)
     second.open('receiving-host-1' as SessionId)
-    expect(face(first).getSnapshot().memberQuestionRecords).toMatchObject([{
-      state: 'answered', settledByDeviceName: 'Desk A', terminalAt: 500,
-    }])
+    expect(face(first).getSnapshot().memberQuestionRecords).toEqual([])
     expect(face(second).getSnapshot().memberQuestionRecords).toMatchObject([{
       state: 'answered-elsewhere', settledByDeviceName: 'Desk A', terminalAt: 500,
     }])

@@ -56,6 +56,8 @@ Do NOT include specific file paths or code snippets. They may end up being outda
 
 Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
 
+For a UI change, link the frozen high-fidelity draft (assets-branch PNG/GIF and the throwaway prototype branch) from Solution or Further Notes. Do not restyle that draft as ASCII layout in the spec. Do not publish the spec until that draft exists.
+
 ## Testing Decisions
 
 A list of testing decisions that were made. Include:

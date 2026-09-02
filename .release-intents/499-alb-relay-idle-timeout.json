@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "499-alb-relay-idle-timeout",
+  "summary": {
+    "en": "Reject production ALB listeners whose idle timeout is shorter than the authenticated Relay liveness window.",
+    "zh": "拒绝空闲超时短于已鉴别 Relay 存活窗口的生产 ALB listener。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "patch"
+  },
+  "compatibilityExceptions": []
+}

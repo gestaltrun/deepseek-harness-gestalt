@@ -54,6 +54,7 @@ export const PLATFORM_DEPLOY_REQUIRED_ENV = [
   'PLATFORM_ALIYUN_DEPLOY_ROLE_ARN',
   'PLATFORM_ECS_INSTANCE_IDS',
   'PLATFORM_ALB_SERVER_GROUP_ID',
+  'PLATFORM_ALB_LISTENER_ID',
   'PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT',
   'PLATFORM_DEPLOY_OSS_OBJECT_PREFIX',
 ] as const
@@ -175,6 +176,21 @@ export function validatePlatformEcsInstanceIds(
     throw new TypeError('PLATFORM_ECS_INSTANCE_IDS must contain exactly two distinct ECS instance ids')
   }
   return Object.freeze([first, second])
+}
+
+/**
+ * Validates the operated ALB HTTPS listener used by public Relay traffic.
+ * @param env - Process environment to inspect
+ * @returns Listener id used by deployment preflight
+ */
+export function validatePlatformAlbListenerId(
+  env: NodeJS.Dict<string> = process.env,
+): string {
+  const listenerId = requiredPlatformEnv('PLATFORM_ALB_LISTENER_ID', env)
+  if (!/^lsn-[a-z0-9]+$/.test(listenerId)) {
+    throw new TypeError('PLATFORM_ALB_LISTENER_ID must be an ALB listener id')
+  }
+  return listenerId
 }
 
 /**
@@ -368,6 +384,7 @@ export function runPlatformProductionEnvCli(env: NodeJS.Dict<string> = process.e
   try {
     loadOperatedPlatformConfig(env)
     validatePlatformEcsInstanceIds(env)
+    validatePlatformAlbListenerId(env)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(message)

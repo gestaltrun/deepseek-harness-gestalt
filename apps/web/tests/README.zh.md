@@ -7,7 +7,7 @@
 [`scaffold.ts`](scaffold.ts) 和
 [浏览器 e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.zh.md)中。
 
-`member-question-receiving.e2e.ts` 只用 mock remote Agent 作为发送方身份，随后运行 shipped Host receiver、API Proxy、WebSocket mux、Client Runtime、动态模块表、接收侧边栏行、成员提问组合卡、共享问题呈现与 Host settlement RPC。提问到达会在邀请绑定的 Workspace 中物化一个 Host Session，并注入 Decision Brief，但不启动模型 turn；本地回答不会留下永久 answered 条带。参考材料芯片通过 Better Sidebar Files 打开 receiver 所有的隐藏 Workspace 副本，并保持同名 Workspace 文件不被改写。
+`member-question-receiving.e2e.ts` 只用 mock remote Agent 作为发送方身份，随后运行 shipped Host receiver、API Proxy、WebSocket mux、Client Runtime、动态模块表、接收侧边栏行、成员提问组合卡、共享问题呈现与 Host settlement RPC。提问到达会在邀请绑定的 Workspace 中物化一个 Host Session，并注入 Decision Brief，但不启动模型 turn；本地回答不会留下永久 answered 条带。参考材料芯片通过 Better Sidebar Files 打开 receiver 所有的隐藏 Workspace 副本，断言 Files payload path 位于 `.dsh/member-questions/<questionId>/`，并保持同名 Workspace 文件不被改写。
 
 ## 这些是 Host 面的测试
 

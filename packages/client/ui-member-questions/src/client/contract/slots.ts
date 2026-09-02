@@ -210,8 +210,10 @@ export type MemberQuestionComposerProps =
      */
     focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
     /**
-     * Open a referenced document through the registered Files viewer, or the
-     * Host system opener when no Files viewer is registered.
+     * Open the receiver-owned cached copy through the registered Files viewer,
+     * or the Host system opener when no Files viewer is registered. Callers
+     * pass only `cachedPath`; a missing cache is a no-op so a same-named
+     * Workspace file is never opened.
      */
     openReference: (sessionId: SessionId, path: string, title?: string) => void
   }

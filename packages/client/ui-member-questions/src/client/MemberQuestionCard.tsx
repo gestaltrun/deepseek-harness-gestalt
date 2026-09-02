@@ -211,11 +211,8 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
                       className={css.chip}
                       key={`${chip.filename}-${chip.reason}`}
                       onClick={() => {
-                        props.openReference(
-                          props.sessionId,
-                          chip.cachedPath ?? chip.path,
-                          chip.filename,
-                        )
+                        if (chip.cachedPath === undefined) return
+                        props.openReference(props.sessionId, chip.cachedPath, chip.filename)
                       }}
                     >
                       <span className={css.chipFilename}>{chip.filename}</span>

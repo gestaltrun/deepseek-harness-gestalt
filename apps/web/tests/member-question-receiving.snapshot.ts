@@ -68,6 +68,14 @@ describe('member-question receiving keyless assembled snapshot', () => {
       })
       const sessionAfterArrival = scaffold.ctx.sessions.get(arrived.receivingSessionId as never)
       if (sessionAfterArrival === undefined) throw new Error('member-question snapshot: Host Session was not materialized on arrival')
+      const receivedOnArrival = sessionAfterArrival.events.find(event => event.type === 'member-question/received')
+      if (receivedOnArrival?.type !== 'member-question/received') {
+        throw new Error('member-question snapshot: received event missing on arrival')
+      }
+      const filesOpenTarget = receivedOnArrival.data.cachedReferences?.[0]?.cachedPath
+      if (filesOpenTarget === undefined) throw new Error('member-question snapshot: cachedPath missing after materialization')
+      const filesOpenPath = join(workspacePath, ...filesOpenTarget.split('/'))
+      const localTwinPath = join(workspacePath, 'docs', 'receiver-decision.md')
       const arrival = {
         sessionCount: scaffold.ctx.sessions.list().length,
         requestCount: sessionAfterArrival.events.filter(event => event.type === 'request/header').length,
@@ -76,11 +84,13 @@ describe('member-question receiving keyless assembled snapshot', () => {
         treeParent: workspace.sessionIds.includes(arrived.receivingSessionId as never)
           ? workspace.title
           : 'Ungrouped',
-        cachedPath: '.dsh/member-questions/question-snapshot/receiver-decision.md',
-        cachedBytes: await readFile(join(
-          workspacePath, '.dsh', 'member-questions', 'question-snapshot', 'receiver-decision.md',
-        ), 'utf8'),
-        localBytes: await readFile(join(workspacePath, 'docs', 'receiver-decision.md'), 'utf8'),
+        cachedPath: filesOpenTarget,
+        cachedBytes: await readFile(filesOpenPath, 'utf8'),
+        localBytes: await readFile(localTwinPath, 'utf8'),
+        filesOpenPath: filesOpenTarget,
+        filesOpenTarget,
+        filesDidNotOpenLocalTwin: filesOpenPath !== localTwinPath
+          && !filesOpenTarget.startsWith('docs/'),
       }
 
       const firstTurn = scaffold.whenTurnSettled()

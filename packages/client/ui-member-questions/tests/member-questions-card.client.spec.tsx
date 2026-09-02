@@ -449,7 +449,7 @@ describe('MemberQuestionCard', () => {
     }
   })
 
-  it('opens a chip without a cached path through the asking Session path', () => {
+  it('does not open a chip without a receiver-owned cached path', () => {
     const openReference = vi.fn()
     const { carrier } = memberWait({
       origin: projection().origin,
@@ -457,7 +457,7 @@ describe('MemberQuestionCard', () => {
     })
     renderCard(carrier, undefined, openReference)
     fireEvent.click(screen.getByRole('button', { name: /roster\.md/ }))
-    expect(openReference).toHaveBeenCalledWith(SID, 'docs/roster.md', 'roster.md')
+    expect(openReference).not.toHaveBeenCalled()
   })
 
   it('snapshots the full banner and the shared presentation (light)', () => {

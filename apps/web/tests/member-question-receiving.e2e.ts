@@ -159,8 +159,25 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
         .toBe('LOCAL WORKSPACE COPY\n')
       await expect.poll(async () => (await receiver.snapshot()).pending[0]?.cachedReferences?.[0]?.cachedPath)
         .toBe('.dsh/member-questions/mq-web-host-1/receiver-decision.md')
+      const filesReads: string[] = []
+      page.on('request', (request) => {
+        if (!request.url().includes('/sidebar/api/fs.read')) return
+        try {
+          const payload = JSON.parse(request.postData() ?? '{}') as { path?: string }
+          if (typeof payload.path === 'string') filesReads.push(payload.path)
+        } catch {
+          /* Swallow non-JSON sidebar posts; only fs.read JSON bodies name the opened path. */
+        }
+      })
       await card.getByRole('button', { name: /receiver-decision\.md/ }).click()
-      await expect.poll(() => page.locator('[title="receiver-decision.md"]').count()).toBeGreaterThan(0)
+      await expect.poll(() => filesReads.find(path => path.includes('.dsh/member-questions/mq-web-host-1/receiver-decision.md')))
+        .toBeDefined()
+      expect(filesReads.some(path => path.endsWith('/docs/receiver-decision.md') || path.endsWith('\\docs\\receiver-decision.md')))
+        .toBe(false)
+      await expect.poll(() => page.locator('input[title*=".dsh/member-questions/mq-web-host-1/receiver-decision.md"]').count())
+        .toBeGreaterThan(0)
+      expect(await page.locator('input[title*="/docs/receiver-decision.md"], input[title*="\\docs\\receiver-decision.md"]').count())
+        .toBe(0)
       expect(await readFile(join(workspaceRoot, 'docs', 'receiver-decision.md'), 'utf8'))
         .toBe('LOCAL WORKSPACE COPY\n')
       const agentComposer = page.locator('[data-composer-card]')

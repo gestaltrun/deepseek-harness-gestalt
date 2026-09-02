@@ -7,7 +7,10 @@
     "treeParent": "Atlas Bound Workspace",
     "cachedPath": ".dsh/member-questions/question-snapshot/receiver-decision.md",
     "cachedBytes": "# transferred receiver brief\n",
-    "localBytes": "LOCAL WORKSPACE COPY\n"
+    "localBytes": "LOCAL WORKSPACE COPY\n",
+    "filesOpenPath": ".dsh/member-questions/question-snapshot/receiver-decision.md",
+    "filesOpenTarget": ".dsh/member-questions/question-snapshot/receiver-decision.md",
+    "filesDidNotOpenLocalTwin": true
   },
   "conversation": {
     "eventTypes": [

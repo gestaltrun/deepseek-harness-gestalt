@@ -145,6 +145,38 @@ describe('Desktop Project Membership bridge', () => {
     await presence.dispose()
   })
 
+  it('does not heartbeat after last-window close aborts an in-flight authorization', async () => {
+    const authorization = {
+      accessToken: 'presence-access',
+      proof: { jti: 'presence-proof', issuedAt: 3, signature: 'presence-signature' },
+    }
+    let releaseBeatAuthorize: ((value: typeof authorization) => void) | undefined
+    const authorizeCurrentInstallation = vi.fn()
+      .mockImplementationOnce(() => new Promise<typeof authorization>((resolve) => {
+        releaseBeatAuthorize = resolve
+      }))
+      .mockResolvedValue(authorization)
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(undefined, { status: 204 }))
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation } as never),
+      environment,
+      fetch,
+      intervalMs: 25,
+      schedule: () => ({ unref: vi.fn() }) as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => {},
+    })
+
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(releaseBeatAuthorize).toBeDefined() })
+    const closed = presence.closeWindow()
+    releaseBeatAuthorize?.(authorization)
+    await closed
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      'https://platform.example.test/v1/projects/presence/close',
+    ])
+    await presence.dispose()
+  })
+
   it('does not close presence when the last window leaves an unsigned-in Installation', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>()
     const presence = createDesktopProjectMembershipPresence({

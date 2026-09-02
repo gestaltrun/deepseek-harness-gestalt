@@ -138,13 +138,13 @@ export function createDesktopProjectMembershipPresence(
     owned.promise = (async () => {
       try {
         const headers = await authorize()
-        if (!signedIn || disposed || generation !== ownedGeneration) return
+        if (owned.controller.signal.aborted) return
         await transport.heartbeat(headers)
       } catch (error) {
-        if (signedIn && !disposed && generation === ownedGeneration) onError(error)
+        if (!owned.controller.signal.aborted) onError(error)
       } finally {
         if (active === owned) active = undefined
-        if (signedIn && !disposed && generation === ownedGeneration) {
+        if (!owned.controller.signal.aborted) {
           timer = schedule(() => { void beat(ownedGeneration) }, intervalMs)
           timer.unref()
         }

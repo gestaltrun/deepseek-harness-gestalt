@@ -1,7 +1,7 @@
 before: format=H264 renderer=canvas
 - button "切换设备：Android Real": Android Real
 - text: H264 30 fps
-- application "Android Real 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+- application "Android Real 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本":
   - img "Android Real 实时画面"
   - text: 代理中
 - button "返回"
@@ -9,11 +9,11 @@ before: format=H264 renderer=canvas
 - button "最近任务"
 - button "截图" [disabled]
 - button "刷新流"
-- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+- text: 点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。
 after: format=MJPEG renderer=img
 - button "切换设备：Android Real": Android Real
 - text: MJPEG
-- application "Android Real 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+- application "Android Real 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本":
   - img "Android Real 实时画面"
   - text: 代理中
 - button "返回"
@@ -21,11 +21,11 @@ after: format=MJPEG renderer=img
 - button "最近任务"
 - button "截图" [disabled]
 - button "刷新流"
-- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+- text: 点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。
 simulator: format=MJPEG renderer=img
 - button "切换设备：iOS Simulator": iOS Simulator
 - text: MJPEG
-- application "iOS Simulator 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+- application "iOS Simulator 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本":
   - img "iOS Simulator 实时画面"
   - text: 代理中
 - button "返回"
@@ -33,7 +33,7 @@ simulator: format=MJPEG renderer=img
 - button "最近任务"
 - button "截图" [disabled]
 - button "刷新流"
-- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+- text: 点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。
 restricted:
 - button "切换设备：Android Restricted": Android Restricted
 - text: H264 30 fps
@@ -47,4 +47,4 @@ restricted:
 - button "最近任务"
 - button "截图" [disabled]
 - button "刷新流"
-- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+- text: 点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。

@@ -1,12 +1,13 @@
 /**
  * Browser client for Project Membership: one transport over the membership
  * HTTP consumer's `/v1/projects` routes (project creation, roster reads,
- * invitation issue with granted role, decision/retraction/poll, and member role, tag, and
- * removal). Authorization rides the caller-supplied Account session
- * presentation headers (bearer token plus installation proof); this client
- * never touches the signing key. Error answers keep the domain envelope:
- * non-OK responses reject with the stable code and HTTP status, so a 403
- * role gate surfaces as `ROLE_REQUIRED`/403 rather than a generic failure.
+ * invitation issue with granted role, decision/retraction/poll, presence
+ * heartbeat and close, and member role, tag, and removal). Authorization
+ * rides the caller-supplied Account session presentation headers (bearer
+ * token plus installation proof); this client never touches the signing key.
+ * Error answers keep the domain envelope: non-OK responses reject with the
+ * stable code and HTTP status, so a 403 role gate surfaces as
+ * `ROLE_REQUIRED`/403 rather than a generic failure.
  * @module @deepseek-ai/dsh-project-membership-client
  */
 
@@ -107,6 +108,8 @@ export interface ProjectMembershipTransport {
     normalizedRemoteUrl: string,
   ): Promise<AuthenticatedProjectView | undefined>
   roster(authorization: MembershipAuthorization, projectId: ProjectId): Promise<RosterReadView>
+  heartbeat(authorization: MembershipAuthorization): Promise<void>
+  closePresence(authorization: MembershipAuthorization): Promise<void>
   invite(
     authorization: MembershipAuthorization,
     input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole },
@@ -147,6 +150,17 @@ export interface ProjectMembershipClient {
    * @returns Project and complete decorated roster.
    */
   roster(projectId: ProjectId): Promise<RosterReadView>
+  /**
+   * Refresh this Desktop Installation's live presence heartbeat.
+   * @returns fulfillment after Platform records the beat.
+   */
+  heartbeat(): Promise<void>
+  /**
+   * Clear this Desktop Installation immediately so roster readers see Offline
+   * without waiting for presence TTL.
+   * @returns fulfillment after Platform drops this installation.
+   */
+  closePresence(): Promise<void>
   /**
    * Invite one uniquely resolved public GitHub login.
    * @param input - Project, public GitHub login, and the role granted at accept time.
@@ -237,6 +251,14 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
     return this.json(`/v1/projects/${encodeURIComponent(projectId)}/members`, {
       method: 'GET', headers: authorization,
     }, parseRosterReadView)
+  }
+
+  async heartbeat(authorization: MembershipAuthorization): Promise<void> {
+    await this.request('/v1/projects/presence/heartbeat', { method: 'POST', headers: authorization })
+  }
+
+  async closePresence(authorization: MembershipAuthorization): Promise<void> {
+    await this.request('/v1/projects/presence/close', { method: 'POST', headers: authorization })
   }
 
   invite(

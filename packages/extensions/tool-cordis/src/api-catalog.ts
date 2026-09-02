@@ -1646,6 +1646,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Project and complete decorated roster.',
       },
       {
+        signature: 'heartbeat(): Promise<void>',
+        description: 'Refresh this Desktop Installation\'s live presence heartbeat.',
+        parameters: [],
+        returns: 'fulfillment after Platform records the beat.',
+      },
+      {
+        signature: 'closePresence(): Promise<void>',
+        description: 'Clear this Desktop Installation immediately so roster readers see Offline without waiting for presence TTL.',
+        parameters: [],
+        returns: 'fulfillment after Platform drops this installation.',
+      },
+      {
         signature: 'invite(input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole }): Promise<InvitationView>',
         description: 'Invite one uniquely resolved public GitHub login.',
         parameters: [{ name: 'input', description: 'Project, public GitHub login, and the role granted at accept time.' }],

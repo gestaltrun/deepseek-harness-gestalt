@@ -10,13 +10,13 @@ Status: implemented
 
 ## Decision
 
-`project-membership-http` 拥有一个心跳注册表。`POST /v1/projects/presence/heartbeat` 经既有账号会话证明完成鉴权，并经 `currentInstallation` 解析安装身份，然后记录 `(accountId, installationId)` 及其新过期时间。Desktop 按 `presenceHeartbeatIntervalMs` 节奏（Config 默认 60 秒）调用；每次心跳在 `presenceTtlMs`（Config 默认 90 秒）内保持有效，TTL 不大于间隔时组合加载即失败出声。花名册读取按账户合并存活条目，为每个成员附上 `presence: 'online' | 'offline'`；过期是离线的唯一途径——没有手动状态，没有空闲推断，也没有 TTL 之外的宽限窗口。每条路由读取的会话表示——bearer 访问令牌加 `x-gestalt-proof-*` 安装证明头——统一来自 Account HTTP 消费者导出的 `accountSessionPresentation`，让 Account-over-HTTP 会话格式在其各消费者间只保留一份实现。
+`project-membership-http` 拥有一个心跳注册表。`POST /v1/projects/presence/heartbeat` 经既有账号会话证明完成鉴权，并经 `currentInstallation` 解析安装身份，然后记录 `(accountId, installationId)` 及其新过期时间。Desktop 按 `presenceHeartbeatIntervalMs` 节奏（Config 默认 60 秒）调用；每次心跳在 `presenceTtlMs`（Config 默认 90 秒）内保持有效，TTL 不大于间隔时组合加载即失败出声。`POST /v1/projects/presence/close` 会立即清除该安装，使最后窗口关闭不必等待 TTL；TTL 过期仍是崩溃与分区路径。花名册读取按账户合并存活条目，为每个成员附上 `presence: 'online' | 'offline'`——没有手动状态，没有空闲推断，也没有 TTL 之外的宽限窗口。每条路由读取的会话表示——bearer 访问令牌加 `x-gestalt-proof-*` 安装证明头——统一来自 Account HTTP 消费者导出的 `accountSessionPresentation`，让 Account-over-HTTP 会话格式在其各消费者间只保留一份实现。
 
-存储是 `PresenceStore` 预留接口（`record`、`onlineAccountIds`）背后的进程内 TTL 映射。运行多个 Platform 实例的部署以共享 TTL 存储实现该适配接口；注册表、路由与花名册投影均不改变。
+存储是 `PresenceStore` 预留接口（`record`、`clear`、`onlineAccountIds`）背后的进程内 TTL 映射。运行多个 Platform 实例的部署以共享 TTL 存储实现该适配接口；注册表、路由与花名册投影均不改变。
 
 ## Supersession check
 
-[项目成员权威 Agent Note](2026-08-27-project-membership-core.zh.md)未被取代：本 Note 记录的是其既有语义之下的聚合机制。有一个时间性事实由本机制界定——心跳是周期性的，离线发生在最后一次心跳的 TTL 过期时刻，而非安装停止通信的瞬间；旧 Note 的只看活性判定、其被拒绝的空闲推断备选，以及无队列投递立场全部继续成立。
+[项目成员权威 Agent Note](2026-08-27-project-membership-core.zh.md)未被取代：本 Note 记录的是其既有语义之下的聚合机制。最后窗口 Offline 是同一心跳条目的显式关闭，记录于[最后窗口 Offline Agent Note](2026-09-02-member-presence-last-window-offline.zh.md)；TTL 过期仍是崩溃与分区路径。旧 Note 的只看活性判定、其被拒绝的空闲推断备选，以及无队列投递立场全部继续成立。
 
 ## Alternatives considered
 
@@ -30,4 +30,4 @@ Status: implemented
 
 ## Consequences
 
-在共享 `PresenceStore` 落地前，presence 是实例内的；README 已知限制承载该部署条件。停止心跳的成员会在一个间隔加一个 TTL 内显示离线——网络分区与休眠的笔记本呈现为离线，这正是"我现在能否把一个决定交给这个人"的诚实答案。注册表测试直接驱动假时钟，HTTP 过期测试以短 TTL 跑在真实 TCP 上，因此没有任何测试对着 90 秒默认值睡眠。
+在共享 `PresenceStore` 落地前，presence 是实例内的；README 已知限制承载该部署条件。最后窗口关闭会立即发布 Offline；崩溃或分区的安装仍在 TTL 过期时显示离线。注册表测试直接驱动假时钟，HTTP 过期测试以短 TTL 跑在真实 TCP 上，最后窗口关闭测试在不推进时钟的情况下断言 Offline。

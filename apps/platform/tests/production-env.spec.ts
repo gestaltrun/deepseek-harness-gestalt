@@ -16,6 +16,7 @@ import {
   readPlatformSigningKey,
   requiredPlatformEnv,
   runPlatformProductionEnvCli,
+  validatePlatformAlbListenerId,
   validatePlatformEcsInstanceIds,
 } from '../src/production-env.ts'
 
@@ -92,6 +93,7 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_ALIYUN_DEPLOY_ROLE_ARN: 'acs:ram::123456789:role/gestalt-platform-deploy',
     PLATFORM_ECS_INSTANCE_IDS: 'i-first123,i-second456',
     PLATFORM_ALB_SERVER_GROUP_ID: 'sgp-production123',
+    PLATFORM_ALB_LISTENER_ID: 'lsn-production123',
     PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: 'oss-cn-hangzhou.aliyuncs.com',
     PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: 'deploy-artifacts/platform',
   }
@@ -478,6 +480,7 @@ describe('production and deploy names', () => {
         'PLATFORM_ALIYUN_DEPLOY_ROLE_ARN',
         'PLATFORM_ECS_INSTANCE_IDS',
         'PLATFORM_ALB_SERVER_GROUP_ID',
+        'PLATFORM_ALB_LISTENER_ID',
         'PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT',
         'PLATFORM_DEPLOY_OSS_OBJECT_PREFIX',
       ])
@@ -594,6 +597,7 @@ describe('production and deploy names', () => {
       'PLATFORM_ALIYUN_DEPLOY_ROLE_ARN',
       'PLATFORM_ECS_INSTANCE_IDS',
       'PLATFORM_ALB_SERVER_GROUP_ID',
+      'PLATFORM_ALB_LISTENER_ID',
       'PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT',
       'PLATFORM_DEPLOY_OSS_OBJECT_PREFIX',
     ])
@@ -603,6 +607,12 @@ describe('production and deploy names', () => {
       Uint8Array.from(Buffer.from(HEX, 'hex')),
     )
     expect(validatePlatformEcsInstanceIds(completeDeployEnv())).toEqual(['i-first123', 'i-second456'])
+    expect(validatePlatformAlbListenerId(completeDeployEnv())).toBe('lsn-production123')
+    for (const listenerId of ['listener-production123', 'lsn-', 'lsn-PRODUCTION']) {
+      expect(() => validatePlatformAlbListenerId({
+        ...completeDeployEnv(), PLATFORM_ALB_LISTENER_ID: listenerId,
+      })).toThrow('PLATFORM_ALB_LISTENER_ID must be an ALB listener id')
+    }
     for (const instanceIds of ['i-first123', 'i-first123,', 'i-first123,i-first123', 'a,b', 'i-a,i-b,i-c']) {
       expect(() => validatePlatformEcsInstanceIds({
         ...completeDeployEnv(), PLATFORM_ECS_INSTANCE_IDS: instanceIds,
@@ -839,6 +849,9 @@ describe('Platform release workflows', () => {
     expect(applySource).toContain('failed to determine whether an unresolved deployment exists')
     expect(String(targetCheck?.run)).toContain('aliyun ecs DescribeCloudAssistantStatus --region "$PLATFORM_ALIYUN_REGION"')
     expect(String(targetCheck?.run)).toContain('aliyun alb ListServerGroupServers --region "$PLATFORM_ALIYUN_REGION"')
+    expect(String(targetCheck?.run)).toContain('aliyun alb GetListenerAttribute --region "$PLATFORM_ALIYUN_REGION"')
+    expect(String(targetCheck?.run)).toContain('.ListenerProtocol == "HTTPS"')
+    expect(String(targetCheck?.run)).toContain('.IdleTimeout * 1000 >= $heartbeatTimeoutMs')
     expect(hostDeploySource.indexOf('wait_for_ready 80 || rollback_failed=1'))
       .toBeLessThan(hostDeploySource.indexOf('exit "$rollback_failed"'))
     expect(applySource.indexOf('platform_public_readiness 30'))

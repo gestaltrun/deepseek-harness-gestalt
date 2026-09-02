@@ -151,7 +151,7 @@ export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | Me
 
 /** One explicit human turn addressed to a receiving Session. */
 export interface AdmitMemberQuestionHumanTurnInput {
-  /** Host-owned receiving thread to materialize or continue. */
+  /** Host-owned receiving thread that already exists after arrival. */
   readonly receivingSessionId: ReceivingSessionId
   /** Exact receiving-thread revision the human observed. */
   readonly revision: number
@@ -171,13 +171,13 @@ export interface AdmitMemberQuestionHumanTurnResult {
   readonly rpcId: MemberQuestionReceiverRpcId
 }
 
-/** Successful high-level Host adapter admission. */
+/** Successful high-level Host adapter receipt. */
 interface MemberQuestionHumanTurnAdmissionReceipt {
-  /** The adapter materialized and admitted the human turn. */
+  /** The adapter completed without starting a second Session. */
   readonly accepted: true
 }
 
-/** Durable receiver facts needed by one Host materialize-and-admit operation. */
+/** Durable receiver facts needed by Host Session materialization or a later human turn. */
 export interface MemberQuestionHumanTurnAdmissionContext {
   /** Account whose local workspace receives the Host Session. */
   readonly receivingAccountId: PlatformAccountId

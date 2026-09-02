@@ -1,0 +1,34 @@
+{
+  "version": "0.1.12",
+  "tag": "gestalt-v0.1.12",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "3c08248412c7683be16723e33ebf0559942e04be"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.12 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "产品变更",
+          "items": [
+            "原子保存 Desktop 账号及其他文件型状态时，重试 Windows 瞬时访问错误。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.12 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Product changes",
+          "items": [
+            "Retry transient Windows access errors while atomically saving Desktop account and other file-backed state."
+          ]
+        }
+      ]
+    }
+  }
+}

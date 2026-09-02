@@ -32,6 +32,8 @@
     { "path": "../../packages/storage/storage" },
     { "path": "../../packages/storage/storage-domain" },
     { "path": "../../packages/storage/storage-sqlite" },
+    { "path": "../../packages/core/agent" },
+    { "path": "../../packages/core/tools" },
     { "path": "../../packages/core/system-prompt" },
     { "path": "../../packages/interaction/member-question-receiver" },
     { "path": "../../packages/interaction/member-question-sender" },

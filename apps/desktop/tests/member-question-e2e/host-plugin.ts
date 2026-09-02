@@ -4,9 +4,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import CompanionMemberQuestionSender, { MemberQuestionSenderError } from '@deepseek-ai/dsh-member-question-sender'
 import { AskUserQuestionError } from '@deepseek-ai/dsh-tool-ask-user'
+import type { ToolExecutionInput, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { decodeProtocolBase64Url } from '@deepseek-ai/dsh-remote-protocol'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
@@ -145,8 +147,7 @@ async function handleControl(
       const abort = new AbortController()
       const ask: ControlAsk = { abort, status: { state: 'pending' } }
       asks.set(token, ask)
-      const cwd = required('DSH_PROJECT_MEMBERS_WORKSPACE')
-      void ctx.tools.execute({
+      const input: ToolExecutionInput = {
         callId: CallId(`member-question-e2e-${token}`),
         name: 'ask_user_question',
         arguments: {
@@ -163,11 +164,12 @@ async function handleControl(
             { path: 'notes.txt', reason: 'Plain notes' },
           ],
         },
-        agent: { session: { id: requiredField(body, 'originSessionId'), header: { cwd } } } as never,
+        agent: routedAskAgent(requiredField(body, 'originSessionId'), required('DSH_PROJECT_MEMBERS_WORKSPACE')),
         signal: abort.signal,
-      }).then(
-        (result) => {
-          ask.status = result.isError === true
+      }
+      void ctx.tools.execute(input).then(
+        (result: ToolExecutionResult) => {
+          ask.status = result.isError
             ? { state: 'failed', code: failureCode(result) }
             : { state: 'settled', outcome: 'answered' }
         },
@@ -232,11 +234,20 @@ function respond(response: ServerResponse, status: number, body: unknown): void 
   response.end(JSON.stringify(body))
 }
 
+function routedAskAgent(originSessionId: string, cwd: string): Agent {
+  return {
+    session: {
+      id: originSessionId,
+      header: { cwd },
+    },
+  } as Agent
+}
+
 function failureCode(error: unknown): string {
   if (error instanceof MemberQuestionSenderError || error instanceof AskUserQuestionError) return error.code
   if (typeof error === 'object' && error !== null && 'isError' in error) {
-    const content = (error as { content?: Array<{ text?: string }> }).content
-    const text = content?.find(block => typeof block.text === 'string')?.text ?? ''
+    const result = error as ToolExecutionResult
+    const text = result.content.find(block => block.type === 'text')?.text ?? ''
     const match = text.match(/\b([A-Z][A-Z0-9_]{2,})\b/)
     if (match?.[1] !== undefined) return match[1]
   }

@@ -11,7 +11,6 @@ import {
   deriveMemberQuestionDocumentTransferId,
   parseMemberQuestionId,
   REMOTE_PROTOCOL_LIMITS,
-  type CompanionDocumentChunkOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
 
 const expected = fileURLToPath(new URL('./snapshots/document-chunk-reassembly.expected.json', import.meta.url))
@@ -50,13 +49,12 @@ describe('assembled member-question document-chunk transcript', () => {
           if (message.type !== 'operation' || message.operation.type !== 'document-chunk') {
             throw new Error('expected a document-chunk operation')
           }
-          const chunk = message.operation as CompanionDocumentChunkOperation
           return {
-            index: chunk.index,
-            total: chunk.total,
-            questionId: chunk.questionId,
-            transferId: chunk.transferId,
-            byteLength: Buffer.from(chunk.bytes, 'base64url').byteLength,
+            index: message.operation.index,
+            total: message.operation.total,
+            questionId: message.operation.questionId,
+            transferId: message.operation.transferId,
+            byteLength: Buffer.from(message.operation.bytes, 'base64url').byteLength,
           }
         }),
       })),

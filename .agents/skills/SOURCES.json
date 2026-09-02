@@ -16,6 +16,15 @@
       ]
     },
     {
+      "name": "implement-spec",
+      "path": ".agents/skills/implement-spec",
+      "source": "https://github.com/mattpocock/skills",
+      "sourcePath": "skills/in-progress/implement-spec",
+      "revision": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "license": "MIT",
+      "localChanges": []
+    },
+    {
       "name": "retro",
       "path": ".agents/skills/retro",
       "source": "https://github.com/mattpocock/skills",
@@ -23,7 +32,7 @@
       "revision": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
       "license": "MIT",
       "localChanges": [
-        "use the Codex skill invocation policy and DeepSeek Harness standards sources"
+        "point Files and review steps at AGENTS.md, docs/, and dsh-code-review"
       ]
     },
     {

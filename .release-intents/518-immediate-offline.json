@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "518-immediate-offline",
+  "summary": {
+    "en": "Closing the last Desktop window marks the member Offline immediately instead of waiting for presence TTL.",
+    "zh": "关闭最后一个 Desktop 窗口会立即将成员标为 Offline，而不再等待 presence TTL。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Mobile does not own Desktop last-window close, the presence heartbeat client, or the Desktop Host presence close POST."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Platform HTTP already exposes presence close as a live-connection adapter; this delivery only makes Desktop call it on last-window close."
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-# Agent Note: 把手机 swipe 编成 WDA 位移时长手势
+# Agent Note: 把手机 swipe 编成 WDA 终点位移手势
 
 Status: implemented
 
@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`。该子路径对浏览器安全，并由 client bundle 内联；Host 包根再导出同一函数。列表是 `pointerMove(start)`、`pointerDown`、`pointerMove(end)`、pause 150、`pointerUp`。`pointerDown` 之后的 pause 就是「朗读所选内容」这条 bug。终点 move 之后的 pause 是位移时长。按下前的 `pointerMove` 保存接触点，按下后的 `pointerMove` 才是拖动，`pause` 延长上一动作的 duration。中间采样轨迹点不转发；swipe 由起点与松开界定。滚轮突发合并 50 ms 后，沿纵轴发送同一条 swipe。触控映射仍使用 H264 解码显示尺寸或 MJPEG `naturalWidth`/`naturalHeight`，不用 CSS 布局尺寸。
+GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`。该子路径对浏览器安全，并由 client bundle 内联；Host 包根再导出同一函数。列表是定位 `pointerMove`、不带坐标的 `pointerDown`、终点 `pointerMove`、150 ms `pause`、`pointerUp`。`pointerDown` 之后的 pause 会延长按下，变成 iOS 长按 / 「朗读所选内容」。devicekit 把 `pause` 接到上一转换动作，因此位移时长应放在终点 move 之后。中间采样轨迹点不转发；swipe 由起点与松开界定。滚轮突发合并 50 ms 后，沿纵轴发送同一条 swipe。触控映射仍使用 H264 解码显示尺寸或 MJPEG `naturalWidth`/`naturalHeight`，不用 CSS 布局尺寸。
 
 ## Alternatives considered
 
@@ -20,10 +20,10 @@ GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phon
 
 **改调上游 `device.io.swipe`，不再使用 `device.io.gesture`。** 拒绝：Host io 词表已经向 GUI 与工具暴露 `gesture`；再加一条动词只会拆开编码，并不改变 iOS 转换路径。
 
-**把 WebSocket 发送成功当成滚动成功。** 拒绝：用户验收要求设备 UI 位置发生变化。fixture 只对五步位移时长列表记录滚动偏移变化；点按形态列表，或「朗读所选内容」长按（`pointerDown` 之后、终点 move 之前的 pause），保持偏移不变。
+**把 WebSocket 发送成功当成滚动成功。** 拒绝：用户验收要求设备 UI 位置发生变化。fixture 对终点位移列表记录滚动偏移变化；点按形态列表，或按下后 pause 的长按（包括「朗读所选内容」），保持偏移不变。
 
 **在 GUI controller 再写一份 WDA 列表。** 拒绝：两份副本会漂移；单一编码器才能从构造上保证 GUI、滚轮与 `device_act` 一致。
 
 ## 后果
 
-Android 与 iOS 消费同一份 WDA 形态列表。一次 swipe 现在会在终点 move 之后编码 150 ms pause。滚轮输入是纵向两点 swipe，不是逐像素路径。测试固定编码后的动作列表以及 fixture 滚动偏移变化；fixture 证据不是用户验收。
+Android 与 iOS 消费同一份 WDA 形态列表。一次 swipe 现在会在终点 move 之后编码 150 ms 位移 pause。滚轮输入是纵向两点 swipe，不是逐像素路径。测试固定编码后的动作列表以及 fixture 滚动偏移变化；fixture 证据不是用户验收。

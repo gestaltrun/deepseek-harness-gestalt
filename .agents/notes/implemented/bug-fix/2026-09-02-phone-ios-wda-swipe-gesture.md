@@ -1,4 +1,4 @@
-# Agent Note: Encode phone swipes as WDA move-duration gestures
+# Agent Note: Encode phone swipes as WDA destination-move gestures
 
 Status: implemented
 
@@ -10,7 +10,7 @@ A live iOS Simulator accepted `device.io.gesture` from the Phone tab while the o
 
 ## Decision
 
-GUI drag, trackpad wheel, and `device_act` swipe share `phoneSwipeActions` from `@deepseek-ai/dsh-phone-runtime/swipe`. That subpath is browser-safe and inlined by the client bundle; the Host root re-exports the same function. The list is `pointerMove(start)`, `pointerDown`, `pointerMove(end)`, pause 150, `pointerUp`. Pause after `pointerDown` is the Speak Selection bug. The pause after the destination move is travel duration. A pre-press `pointerMove` stores the contact point; a post-press `pointerMove` is the drag; `pause` extends the previous action's duration. Intermediate sampled trail points are not forwarded; origin and release bound the swipe. Wheel bursts coalesce for 50 ms, then emit the same vertical swipe. Touch mapping stays on decoded H264 display size or MJPEG `naturalWidth`/`naturalHeight`, never CSS layout size.
+GUI drag, trackpad wheel, and `device_act` swipe share `phoneSwipeActions` from `@deepseek-ai/dsh-phone-runtime/swipe`. That subpath is browser-safe and inlined by the client bundle; the Host root re-exports the same function. The list is positioning `pointerMove`, `pointerDown` without coordinates, destination `pointerMove`, a 150 ms `pause`, and `pointerUp`. Pause after `pointerDown` extends press and becomes an iOS long-press / Speak Selection. devicekit attaches `pause` to the previous converted action, so travel duration belongs after the destination move. Intermediate sampled trail points are not forwarded; origin and release bound the swipe. Wheel bursts coalesce for 50 ms, then emit the same vertical swipe. Touch mapping stays on decoded H264 display size or MJPEG `naturalWidth`/`naturalHeight`, never CSS layout size.
 
 ## Alternatives considered
 
@@ -20,10 +20,10 @@ GUI drag, trackpad wheel, and `device_act` swipe share `phoneSwipeActions` from 
 
 **Call upstream `device.io.swipe` instead of `device.io.gesture`.** Rejected: the Host io vocabulary already exposes `gesture` to GUI and tools; adding a second verb would split encoding without changing the iOS converter path.
 
-**Treat a successful WebSocket send as scrolling.** Rejected: user acceptance requires the on-device UI position to change. Fixture evidence records a scroll-offset delta only for the five-action move-duration list; a tap-shaped list, or a Speak Selection long-press (pause after `pointerDown` before destination move), leaves offset unchanged.
+**Treat a successful WebSocket send as scrolling.** Rejected: user acceptance requires the on-device UI position to change. Fixture evidence records a scroll-offset delta for the destination-move list; a tap-shaped list or a pause-after-down long-press, including Speak Selection, leaves offset unchanged.
 
 **Duplicate the WDA list in the GUI controller.** Rejected: two copies can drift; one encoder is the construction that keeps GUI, wheel, and `device_act` identical.
 
 ## Consequences
 
-Android and iOS consume the same WDA-shaped list. A swipe now pays 150 ms of encoded pause after the destination move. Wheel input is a vertical two-point swipe, not a pixel-accurate path. Tests pin the encoded action list and a fixture scroll-offset change; fixture evidence is not user acceptance.
+Android and iOS consume the same WDA-shaped list. A swipe now pays 150 ms of encoded travel pause after the destination move. Wheel input is a vertical two-point swipe, not a pixel-accurate path. Tests pin the encoded action list and a fixture scroll-offset change; fixture evidence is not user acceptance.

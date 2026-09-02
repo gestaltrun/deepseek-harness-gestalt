@@ -1,8 +1,15 @@
 {
   "version": 1,
-  "nextSequence": 2,
+  "nextSequence": 8,
   "consumedIntentIds": [
     "414-desktop-recovery-version",
-    "414-release-orchestration"
+    "414-release-orchestration",
+    "448-desktop-artifact-assembly",
+    "453-mobile-proof-clock-skew",
+    "459-release-plan-pipefail",
+    "475-mobile-webview-compatibility",
+    "499-alb-relay-idle-timeout",
+    "502-windows-coverage-retry",
+    "507-windows-atomic-replace"
   ]
 }

@@ -218,18 +218,10 @@ export class CoveragePartitionCoordinator {
           const command = commands[index]
           if (command === undefined) throw new Error(`coverage partition ${String(index + 1)} is missing.`)
           console.log(`coverage-partitions: start ${command.label}`)
-          let result = await this.runCommand(command)
-          if (isIsolatedVitestWorkerExit(result)) {
-            console.warn(`coverage-partitions: retry ${command.label} after an unexpected Vitest worker exit`)
-            if (command.blobPath !== undefined) await removeOwnedFile(command.blobPath)
-            result = await this.runCommand(command)
-          }
+          const result = await this.runCommand(command)
           results[index] = result
-          if (commandFailed(result)) {
-            console.error(`coverage-partitions: FAIL ${command.label} (${commandFailureReason(result)})`)
-            if (result.outputTail !== undefined && result.outputTail !== '') {
-              console.error(`coverage-partitions: output tail for ${command.label}:\n${result.outputTail}`)
-            }
+          if (commandFailed(result) && !isIsolatedVitestWorkerExit(result)) {
+            reportCommandFailure(command, result)
           }
         }
       }
@@ -237,6 +229,16 @@ export class CoveragePartitionCoordinator {
         { length: Math.min(this.maxConcurrency, commands.length) },
         worker,
       ))
+      for (const [index, command] of commands.entries()) {
+        let result = results[index]
+        if (result === undefined) throw new Error(`coverage partition ${String(index + 1)} did not report a result.`)
+        if (!isIsolatedVitestWorkerExit(result)) continue
+        console.warn(`coverage-partitions: retry ${command.label} after concurrent partitions complete`)
+        if (command.blobPath !== undefined) await removeOwnedFile(command.blobPath)
+        result = await this.runCommand(command)
+        results[index] = result
+        if (commandFailed(result)) reportCommandFailure(command, result)
+      }
       const exclusiveCommands = this.partitionIndexes.includes(1)
         ? [
           this.exclusiveCommand(
@@ -256,12 +258,7 @@ export class CoveragePartitionCoordinator {
         const result = await this.runCommand(exclusiveCommand)
         results.push(result)
         commands.push(exclusiveCommand)
-        if (commandFailed(result)) {
-          console.error(`coverage-partitions: FAIL ${exclusiveCommand.label} (${commandFailureReason(result)})`)
-          if (result.outputTail !== undefined && result.outputTail !== '') {
-            console.error(`coverage-partitions: output tail for ${exclusiveCommand.label}:\n${result.outputTail}`)
-          }
-        }
+        if (commandFailed(result)) reportCommandFailure(exclusiveCommand, result)
       }
       await this.assertCompleteBlobSet(commands)
 
@@ -434,6 +431,13 @@ function commandFailureReason(result: CoverageCommandResult): string {
     result.signalCode === null ? undefined : `signal ${result.signalCode}`,
   ].filter((fact): fact is string => fact !== undefined)
   return facts.join(', ') || 'no exit code or signal'
+}
+
+function reportCommandFailure(command: CoverageCommand, result: CoverageCommandResult): void {
+  console.error(`coverage-partitions: FAIL ${command.label} (${commandFailureReason(result)})`)
+  if (result.outputTail !== undefined && result.outputTail !== '') {
+    console.error(`coverage-partitions: output tail for ${command.label}:\n${result.outputTail}`)
+  }
 }
 
 function isIsolatedVitestWorkerExit(result: CoverageCommandResult): boolean {

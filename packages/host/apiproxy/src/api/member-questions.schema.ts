@@ -38,6 +38,11 @@ const memberQuestionOperationSchema = z.strictObject({
   questions: z.array(memberQuestionItemSchema).min(1),
   references: z.array(z.strictObject({ path: z.string(), reason: z.string() })),
 })
+const cachedReferenceSchema = z.strictObject({
+  path: z.string(),
+  reason: z.string(),
+  cachedPath: z.string().min(1),
+})
 const answerSchema = z.strictObject({
   id: z.string(),
   selected: z.array(z.string()),
@@ -68,6 +73,7 @@ const pendingSchema = z.strictObject({
   arrivedAt: safeEpochSchema,
   operation: memberQuestionOperationSchema,
   hostSessionId: idSchema.optional(),
+  cachedReferences: z.array(cachedReferenceSchema).optional(),
   reservedAdmission: z.strictObject({
     rpcId: idSchema,
     mode: z.union([z.literal('queue'), z.literal('steer')]),
@@ -82,6 +88,7 @@ const terminalViewSchema = z.strictObject({
   terminal: terminalSchema,
   brief: memberQuestionOperationSchema,
   hostSessionId: idSchema.optional(),
+  cachedReferences: z.array(cachedReferenceSchema).optional(),
 })
 
 /** Account and Project whose exact local Workspace association is requested. */

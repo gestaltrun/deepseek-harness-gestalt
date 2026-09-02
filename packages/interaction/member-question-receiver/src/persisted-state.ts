@@ -5,6 +5,7 @@ import type {
 import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { createHash } from 'node:crypto'
 import type { MemberQuestionHumanTurnContent } from './types.ts'
+import type { MemberQuestionCachedReference } from './document-cache.ts'
 import {
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
@@ -49,6 +50,7 @@ export interface PersistedReceivingQuestion {
   readonly arrivedAt: number
   readonly operation: CompanionMemberQuestionOperation
   readonly terminal?: CompanionMemberQuestionSettledResult
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
 }
 
 /** Exact local Workspace selected by one member for one Cloud Project. */
@@ -124,6 +126,7 @@ export function parseReceiverState(text: string): PersistedReceiverState {
       ...(terminal === undefined ? {} : {
         terminal,
       }),
+      ...parseCachedReferences(entry.cachedReferences),
     }
   })
   if (new Set(questions.map(question => question.questionId)).size !== questions.length) {
@@ -352,4 +355,21 @@ function optionalSafeInteger(value: unknown, name: string): number | undefined {
 function boolean(value: unknown, name: string): boolean {
   if (typeof value !== 'boolean') throw new Error(`member-question-receiver: durable ${name} must be boolean`)
   return value
+}
+
+function parseCachedReferences(value: unknown): { cachedReferences?: readonly MemberQuestionCachedReference[] } {
+  if (value === undefined) return {}
+  if (!Array.isArray(value)) {
+    throw new Error('member-question-receiver: durable cachedReferences must be an array')
+  }
+  return {
+    cachedReferences: value.map((entry) => {
+      if (!isRecord(entry)) throw new Error('member-question-receiver: durable cached reference must be an object')
+      return {
+        path: nonEmpty(entry.path, 'cached reference path'),
+        reason: stringValue(entry.reason, 'cached reference reason'),
+        cachedPath: nonEmpty(entry.cachedPath, 'cached reference cachedPath'),
+      }
+    }),
+  }
 }

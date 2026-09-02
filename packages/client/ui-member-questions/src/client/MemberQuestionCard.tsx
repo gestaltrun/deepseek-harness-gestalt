@@ -211,12 +211,11 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
                       className={css.chip}
                       key={`${chip.filename}-${chip.reason}`}
                       onClick={() => {
-                        props.focusDocument(props.sessionId, {
-                          path: chip.path,
-                          filename: chip.filename,
-                          from: askerName,
-                          ...(chip.content === undefined ? {} : { content: chip.content }),
-                        })
+                        props.openReference(
+                          props.sessionId,
+                          chip.cachedPath ?? chip.path,
+                          chip.filename,
+                        )
                       }}
                     >
                       <span className={css.chipFilename}>{chip.filename}</span>

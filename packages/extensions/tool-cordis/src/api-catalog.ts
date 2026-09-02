@@ -3885,7 +3885,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AskUserQuestionIntent',
-    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n} | {\n    kind: \'member-question\';\n    questionId: string;\n    originSessionId: string;\n    toProjectMember: string;\n    origin: {\n        projectName: string;\n        originSessionTitle: string;\n        askerAccountId: string;\n        askerRole: \'owner\' | \'admin\' | \'member\';\n        askerDisplayName: string;\n        askerAvatarUrl: string;\n    };\n    background: string;\n    references: readonly {\n        path: string;\n        reason: string;\n        content?: string;\n    }[];\n    expiresAt: number;\n};',
+    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n} | {\n    kind: \'member-question\';\n    questionId: string;\n    originSessionId: string;\n    toProjectMember: string;\n    origin: {\n        projectName: string;\n        originSessionTitle: string;\n        askerAccountId: string;\n        askerRole: \'owner\' | \'admin\' | \'member\';\n        askerDisplayName: string;\n        askerAvatarUrl: string;\n    };\n    background: string;\n    references: readonly {\n        path: string;\n        reason: string;\n        cachedPath?: string;\n        content?: string;\n    }[];\n    expiresAt: number;\n};',
   },
   {
     name: 'AskUserQuestionItem',
@@ -3945,7 +3945,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AuthenticatedMemberQuestionEnvelope',
-    declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n}',
+    declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly documents?: readonly MemberQuestionTransferredDocument[];\n}',
   },
   {
     name: 'AuthenticatedProjectView',
@@ -4996,12 +4996,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MemberQuestionAnsweredResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'answered\';\n    readonly answers: readonly MemberQuestionAnswer[];\n}',
   },
   {
+    name: 'MemberQuestionCachedReference',
+    declaration: 'export interface MemberQuestionCachedReference {\n    readonly path: string;\n    readonly reason: string;\n    readonly cachedPath: string;\n}',
+  },
+  {
     name: 'MemberQuestionDeclinedResult',
     declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
   },
   {
     name: 'MemberQuestionHumanTurnAdmissionContext',
-    declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly workspaceId: Branded<\'WorkspaceId\'>;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n}',
+    declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly workspaceId: Branded<\'WorkspaceId\'>;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n    readonly documents: readonly MemberQuestionTransferredDocument[];\n}',
   },
   {
     name: 'MemberQuestionHumanTurnAdmitter',
@@ -5070,6 +5074,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'MemberQuestionSettlement',
     declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n};',
+  },
+  {
+    name: 'MemberQuestionTransferredDocument',
+    declaration: 'export interface MemberQuestionTransferredDocument {\n    readonly path: string;\n    readonly bytes: Uint8Array;\n}',
   },
   {
     name: 'MembershipId',
@@ -5249,7 +5257,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PendingMemberQuestionView',
-    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
+    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly cachedReferences?: readonly MemberQuestionCachedReference[];\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
   },
   {
     name: 'PendingPairingId',

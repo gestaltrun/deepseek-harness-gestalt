@@ -14,7 +14,7 @@ Status: implemented
 
 幂等重放与 Host 重启通过 `resumeReservedSessionMaterializations()` 恢复未物化行，不会创建第二个 Session。human turn 仍走独立的 reserved `admitHumanTurn` 路径。一旦存在 `hostSessionId`，receiving face 绑定普通 Host Session，并把后续 prompt 路由到 `session.prompt`；本地回答仍经 `memberQuestion.settle` 结算。Client 会把本地 `answered` 终态从对话页脚投影掉，并保留 exceptional 或跨安装终态作为 record band。侧边栏把 Host 已关联的 Session 列在绑定 Workspace 下；浏览器在新 pending 身份到达时展开该 Workspace 一次，且不更改当前 Session。
 
-[Host receiver ledger](2026-08-31-host-owned-member-question-receiver-ledger.zh.md) 仍拥有 persistence、first claim、expiry 与 human-turn reservation。[identity-stable receiving face](../feature/2026-08-30-web-receiving-experience-assembly-fixes.zh.md) 仍拥有 pending wait 与 Host snapshot 投影。
+[Host receiver ledger](2026-08-31-host-owned-member-question-receiver-ledger.zh.md) 仍拥有 persistence、first claim、expiry 与 human-turn reservation。[identity-stable receiving face](../feature/2026-08-30-web-receiving-experience-assembly-fixes.zh.md) 仍拥有 pending wait 与 Host snapshot 投影。[Files 侧栏打开记录](2026-09-03-member-question-files-sidebar.zh.md) 拥有传输文档 cache path 与 Better Sidebar Files 打开。
 
 ## Supersession check
 

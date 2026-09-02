@@ -6,7 +6,7 @@
 
 本包在产品 composer 上方注册一个叠加式 `conversation.input.dock` 入口。当待处理请求的整批问题都声明 `member-question` 呈现意图时，Decision Brief 在此渲染；`plan-review` 与普通请求仍使用共享问题接管面。观察到共享呈现自身的最小化开关时，整卡折叠为一条「远端 · 发起人」窄条并标记为已收起；呈现保持挂载，因此其草稿得以保留。
 
-材料芯片是聚焦按钮：点击一枚芯片会通过可选的 `detailsFocus` 服务把该文档写入会话的详情面板，`conversation.details.document` 席位按扩展名分发——markdown 正文走 MarkdownText，html 正文走沙箱化受限预览，其余一律作为纯文件标签。详情面板打开时卡片先折叠；点击窄条可在不关闭面板的情况下恢复卡片，让文档与决策并排显示。
+材料芯片通过 Better Sidebar Files 打开 receiver 所有的缓存副本。Host 把传输 bytes 写到 `.dsh/member-questions/<questionId>/`，因此同名 Workspace 文件不会被覆盖或误打开。点击芯片会用 receiving Session id 与缓存 path 调用 `ctx.betterSidebar.openFile`；markdown、沙箱 HTML 与不受支持的类型复用普通 Files viewer。Files editor 标签未注册时，芯片回退到 `ctx.workspaces.openPath` 与 Host 系统打开器。不存在成员提问专用文档 dock。
 
 `ReceivingQuestionBook` 只依据 Host receiver snapshot 与 change feed 构建卡片。倒计时仅用于展示；expiry、supersession、withdrawal 与全部 terminal 状态均来自 Host。回答和拒绝动作经共享呈现调用 Host settlement RPC。
 
@@ -23,5 +23,5 @@ pending 卡片消失后，answered、declined、expired、withdrawn 与 supersed
 ## Known Limitations and Deferred Work
 
 - **Dock 路由以整批为单位** —— 仅当待处理请求中的每个问题都声明 `member-question` 意图时本卡才渲染；只要混入一个普通或 `plan-review` 问题，整批就交给共享问题 composer，不存在按问题拆分。
-- **材料芯片依赖组合层的 `detailsFocus` 服务** —— 缺少该可选服务时芯片仍然渲染，但不会向详情面板写入任何文档，被引用材料只能以列表形式查看。
+- **材料芯片需要 Files viewer 或 Host 系统打开器** —— 已注册的 Files editor 标签会在 receiving Session 中打开 receiver 所有的缓存 path；否则使用 Host 系统打开器。不存在第二个产品内文档 dock。
 - **Admission 失败会保留在 receiving card** —— 共享 input state 保留 draft 并暴露 Host diagnostic。只有 Host materialization 成功后，普通 model、command 与 skill route 才会开放。

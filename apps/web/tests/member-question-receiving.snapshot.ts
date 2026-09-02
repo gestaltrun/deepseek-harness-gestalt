@@ -24,6 +24,8 @@ describe('member-question receiving keyless assembled snapshot', () => {
       await mkdir(workspacePath, { recursive: true })
       const workspace = await scaffold.ctx.workspaceRegistry.create(workspacePath)
       await workspace.setTitle('Atlas Bound Workspace')
+      await mkdir(join(workspacePath, 'docs'), { recursive: true })
+      await writeFile(join(workspacePath, 'docs', 'receiver-decision.md'), 'LOCAL WORKSPACE COPY\n')
       await receiver.bind(
         'account:receiver' as PlatformAccountId,
         'project-snapshot' as never,
@@ -32,6 +34,10 @@ describe('member-question receiving keyless assembled snapshot', () => {
       const ingress = createAuthenticatedMemberQuestionIngress(receiver)
       const arrived = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: [{
+          path: 'docs/receiver-decision.md',
+          bytes: Buffer.from('# transferred receiver brief\n'),
+        }],
         operation: {
           type: 'member-question',
           operationId: 'operation-snapshot' as never,
@@ -70,6 +76,11 @@ describe('member-question receiving keyless assembled snapshot', () => {
         treeParent: workspace.sessionIds.includes(arrived.receivingSessionId as never)
           ? workspace.title
           : 'Ungrouped',
+        cachedPath: '.dsh/member-questions/question-snapshot/receiver-decision.md',
+        cachedBytes: await readFile(join(
+          workspacePath, '.dsh', 'member-questions', 'question-snapshot', 'receiver-decision.md',
+        ), 'utf8'),
+        localBytes: await readFile(join(workspacePath, 'docs', 'receiver-decision.md'), 'utf8'),
       }
 
       const firstTurn = scaffold.whenTurnSettled()
@@ -132,6 +143,7 @@ describe('member-question receiving keyless assembled snapshot', () => {
             background: received.data.background,
             questions: received.data.questions,
             references: received.data.references,
+            cachedReferences: received.data.cachedReferences,
           },
           messages: session.deriveMessages()
             .filter(message => message.source.kind === 'user'

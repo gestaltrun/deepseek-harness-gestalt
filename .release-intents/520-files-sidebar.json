@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "520-files-sidebar",
+  "summary": {
+    "en": "Open Member Question references through Better Sidebar Files from a receiver-owned hidden Workspace copy.",
+    "zh": "通过 Better Sidebar Files 打开成员提问参考材料，并使用接收方自有的隐藏 Workspace 副本。"
+  },
+  "releases": {
+    "desktop": "minor",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The planner follows shared Client Runtime packages, but Mobile does not compose the Web member-question plugin or Better Sidebar Files path."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The planner follows shared lockfile and aggregate build inputs; receiver-owned document cache and Files opening are Host Web/Desktop-only and no Platform image or deployment input changes."
+    }
+  ]
+}

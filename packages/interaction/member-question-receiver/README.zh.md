@@ -8,7 +8,7 @@ Host 所有的成员提问接收状态 Service Definition、文件 Provider 与�
 
 ### Public API
 
-- `ingest(envelope)` 只在认证 endpoint 已建立的接收 Account authority 旁接收解码后的 `member-question` operation。同一提问重放幂等；authority 或内容冲突会失败。Host 为 `(originSessionId, receiver Account)` 创建并持久化 opaque `ReceivingSessionId`，随后调用注入的 Session materializer，使该 identity 成为邀请绑定 Workspace 中的普通 Host Session。它绝不从 `mq-recv` 派生 id，也不信任明文中的收件人。
+- `ingest(envelope)` 只在认证 endpoint 已建立的接收 Account authority 旁接收解码后的 `member-question` operation。可选 `documents` 按 reference path 关联传输 bytes。同一提问重放幂等；authority 或内容冲突会失败。Host 为 `(originSessionId, receiver Account)` 创建并持久化 opaque `ReceivingSessionId`，随后调用注入的 Session materializer，使该 identity 成为邀请绑定 Workspace 中的普通 Host Session。materializer 把传输 bytes 写到 `.dsh/member-questions/<questionId>/` 并返回 `{ path, reason, cachedPath }` 元数据；同名 Workspace 文件永不被替换。它绝不从 `mq-recv` 派生 id，也不信任明文中的收件人。
 - `snapshot()` 返回含 pending 提问与 terminal 记录的完整已提交 revision。`changes(listener)` 只在原子持久替换后发布同一权威投影；一个抛错 listener 不会阻塞其他 listener。
 - `settle(questionId, settlement)` 通过已配置的 first-claim authority 提议显式 `answered` 或 `declined` 终态，或者应用 transport 提供的权威 claim。保留的终态始终 canonical，包括本地 claim 失败的情况；human terminal 保留类型化 Installation id、设备名、时间与 answered value，`expired`、`withdrawn`、`superseded` 仍是 system terminal。
 - `admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` 先持久保留稳定 `rpcId`、规范化 content、mode 与 digest，并投影该 reservation 的 id 与 mode 供 Client 重启恢复，再把解析出的精确绑定 Workspace id 放入 admission context，调用一次注入的高层 human-turn adapter，成功后提交。adapter 不会在 receiver transaction 活跃时回查 receiver service。adapter 失败或 admission 后文件提交失败都会保留可精确重试的 action；同一 `rpcId` 下的不同 content 会被拒绝。adapter 必须按 `rpcId` 幂等；调用方永远看不到 Session-create 与 prompt 两个独立操作。
@@ -17,7 +17,7 @@ Host 所有的成员提问接收状态 Service Definition、文件 Provider 与�
 
 ## Persistence and ordering
 
-Provider 通过随机同目录临时文件原子替换，把一个仅所有者可读写的 JSON 文档写到 `<storagePath>/<environment>/member-question-receiver.json`。预发布格式版本 `1` 存有界 origin、background、question/options、reference path/reason 元数据、路线 identity、terminal 元数据、精确 Account／Project Workspace binding，以及由 text 与持久 attachment reference 组成、受 SHA-256 request digest 保护的 reserved human action。参考文档正文与浏览器原始图片 bytes 不进入该 ledger。
+Provider 通过随机同目录临时文件原子替换，把一个仅所有者可读写的 JSON 文档写到 `<storagePath>/<environment>/member-question-receiver.json`。预发布格式版本 `1` 存有界 origin、background、question/options、reference path/reason 元数据、receiver 所有的 `cachedPath`、路线 identity、terminal 元数据、精确 Account／Project Workspace binding，以及由 text 与持久 attachment reference 组成、受 SHA-256 request digest 保护的 reserved human action。参考文档正文与浏览器原始图片 bytes 不进入该 ledger；传输副本位于绑定 Workspace 的 `.dsh/member-questions/<questionId>/`。
 
 一个串行 transaction owner 对 load、arrival、terminal publication、file commit、admission reservation、materialization 与 admission commit 排序。同路线新提问只有在旧 pending 提问的 canonical `superseded` 或已到期 `expired` terminal 提交后才会成为 pending。唯一 earliest-deadline scheduler claim 并持久化到期；publication 失败会在 `terminalRetryMs` 后重试。启动会在 read 可用前结算逾期行，因此重启不会复活已过期卡片。dispose 会清理 timer 与 listener、等待 transaction tail，并保留 ledger。
 

@@ -81,8 +81,17 @@ const projection = () => ({
     askerRole: 'admin' as const,
   },
   references: [
-    { path: 'docs/roster.md', reason: '当前成员名单与角色', content: '# 成员名单' },
-    { path: 'reports/activity.csv', reason: '近 30 天活跃度' },
+    {
+      path: 'docs/roster.md',
+      reason: '当前成员名单与角色',
+      cachedPath: '.dsh/member-questions/question-1/roster.md',
+      content: '# 成员名单',
+    },
+    {
+      path: 'reports/activity.csv',
+      reason: '近 30 天活跃度',
+      cachedPath: '.dsh/member-questions/question-1/activity.csv',
+    },
   ],
   expiresAt: NOW + 125 * 1000,
 })
@@ -114,6 +123,7 @@ function genericWait(intent: undefined | { kind: 'plan-review'; approve: string 
 function renderCard(
   carrier: PendingWait<'question'>,
   focusDocument: MemberQuestionComposerProps['focusDocument'] = () => {},
+  openReference: MemberQuestionComposerProps['openReference'] = () => {},
 ) {
   return render(
     <MemberQuestionCard
@@ -123,6 +133,7 @@ function renderCard(
       t={seat('member-question')}
       questionT={seat('question')}
       focusDocument={focusDocument}
+      openReference={openReference}
     />,
   )
 }
@@ -155,6 +166,7 @@ describe('member-question routing', () => {
       t: seat('member-question'),
       questionT: seat('question'),
       focusDocument: () => {},
+      openReference: () => {},
     }
     const pending = render(MemberQuestionDock(props as never))
     expect(pending.container.querySelector('[data-member-presentation]')).not.toBeNull()
@@ -237,8 +249,19 @@ describe('clampBackground and memberBriefOf', () => {
     const brief = memberBriefOf(carrier)
     expect(brief.origin).toEqual(projection().origin)
     expect(brief.references).toEqual([
-      { filename: 'roster.md', reason: '当前成员名单与角色', path: 'docs/roster.md', content: '# 成员名单' },
-      { filename: 'activity.csv', reason: '近 30 天活跃度', path: 'reports/activity.csv' },
+      {
+        filename: 'roster.md',
+        reason: '当前成员名单与角色',
+        path: 'docs/roster.md',
+        cachedPath: '.dsh/member-questions/question-1/roster.md',
+        content: '# 成员名单',
+      },
+      {
+        filename: 'activity.csv',
+        reason: '近 30 天活跃度',
+        path: 'reports/activity.csv',
+        cachedPath: '.dsh/member-questions/question-1/activity.csv',
+      },
     ])
     expect(brief.expiresAt).toBe(NOW + 3_600_000)
     // The carrier's detail is the background, byte-for-byte under the budget.
@@ -380,21 +403,19 @@ describe('MemberQuestionCard', () => {
     expect(screen.getByRole('button', { name: '收起问题卡片' })).toBeTruthy()
   })
 
-  it('focuses a referenced document and restores the decision beside the open details panel', async () => {
-    const focusDocument = vi.fn()
+  it('opens a referenced document through Files and restores the decision beside the open details panel', async () => {
+    const openReference = vi.fn()
     const { carrier } = memberWait()
-    const { container } = renderCard(carrier, focusDocument)
+    const { container } = renderCard(carrier, undefined, openReference)
 
-    // Chip click focuses that document: identity, provenance, and the inline
-    // body for the renderable kind.
     fireEvent.click(screen.getByRole('button', { name: /roster\.md/ }))
-    expect(focusDocument).toHaveBeenCalledWith(SID, {
-      path: 'docs/roster.md', filename: 'roster.md', from: '王小明', content: '# 成员名单',
-    })
+    expect(openReference).toHaveBeenCalledWith(
+      SID, '.dsh/member-questions/question-1/roster.md', 'roster.md',
+    )
     fireEvent.click(screen.getByRole('button', { name: /activity\.csv/u }))
-    expect(focusDocument).toHaveBeenLastCalledWith(SID, {
-      path: 'reports/activity.csv', filename: 'activity.csv', from: '王小明',
-    })
+    expect(openReference).toHaveBeenLastCalledWith(
+      SID, '.dsh/member-questions/question-1/activity.csv', 'activity.csv',
+    )
 
     // Panel opens → the card folds to its strip; panel closes → restored.
     // The linkage rides the persistent details column's aria-expanded. The
@@ -426,6 +447,17 @@ describe('MemberQuestionCard', () => {
     } finally {
       panel.remove()
     }
+  })
+
+  it('opens a chip without a cached path through the asking Session path', () => {
+    const openReference = vi.fn()
+    const { carrier } = memberWait({
+      origin: projection().origin,
+      references: [{ path: 'docs/roster.md', reason: '当前成员名单与角色' }],
+    })
+    renderCard(carrier, undefined, openReference)
+    fireEvent.click(screen.getByRole('button', { name: /roster\.md/ }))
+    expect(openReference).toHaveBeenCalledWith(SID, 'docs/roster.md', 'roster.md')
   })
 
   it('snapshots the full banner and the shared presentation (light)', () => {
@@ -520,6 +552,7 @@ describe('MemberQuestionCard', () => {
           t={seatEn('member-question')}
           questionT={seatEn('question')}
           focusDocument={() => {}}
+          openReference={() => {}}
         />,
       )
       expect(screen.getByText('Remote')).toBeTruthy()

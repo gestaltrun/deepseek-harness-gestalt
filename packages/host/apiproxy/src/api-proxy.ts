@@ -94,6 +94,7 @@ import type {
   MemberQuestionHumanTurnContent,
   TerminalMemberQuestionView,
 } from '@deepseek-ai/dsh-member-question-receiver'
+import { writeMemberQuestionDocumentCache } from '@deepseek-ai/dsh-member-question-receiver'
 import type {} from '@deepseek-ai/dsh-project-membership'
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
@@ -1852,7 +1853,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   async function materializeReceivingSession(
     sessionId: SessionId,
     admission: MemberQuestionHumanTurnAdmissionContext,
-  ): Promise<Agent> {
+  ): Promise<{
+    agent: Agent
+    cachedReferences: MemberQuestionHumanTurnAdmissionContext['questions'][number]['cachedReferences']
+  }> {
     const workspace = workspaceFromId(admission.workspaceId)
     const agent = await ensureSession(sessionId, workspace.path, true)
     await workspace.attachSession(sessionId)
@@ -1863,8 +1867,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     if (titles !== undefined && origin !== undefined && titles.get(agent.session) === undefined) {
       titles.rename(agent.session, `${origin.projectName} — ${origin.originSessionTitle}`)
     }
+    const cachedByQuestion = new Map<string, NonNullable<typeof admission.questions[number]['cachedReferences']>>()
+    for (const question of admission.questions) {
+      if (question.cachedReferences !== undefined) {
+        cachedByQuestion.set(String(question.questionId), question.cachedReferences)
+      }
+    }
+    const currentQuestion = admission.questions.find((question): question is Extract<
+      typeof admission.questions[number],
+      { operation: unknown }
+    > => !('terminal' in question) && question.cachedReferences === undefined)
+    if (currentQuestion !== undefined) {
+      cachedByQuestion.set(String(currentQuestion.questionId), await writeMemberQuestionDocumentCache({
+        workspacePath: workspace.path,
+        questionId: currentQuestion.questionId,
+        references: currentQuestion.operation.references,
+        documents: admission.documents,
+      }))
+    }
     for (const question of admission.questions) {
       const operation = 'operation' in question ? question.operation : question.brief
+      const cachedReferences = cachedByQuestion.get(String(operation.questionId))
       if (!agent.session.events.some(event => event.type === 'member-question/received'
         && event.data.questionId === operation.questionId)) {
         agent.session.append('member-question/received', {
@@ -1877,6 +1900,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           background: operation.background,
           questions: operation.questions,
           references: operation.references,
+          ...(cachedReferences === undefined ? {} : { cachedReferences }),
         }, { ignorable: true })
       }
       if ('terminal' in question && !agent.session.events.some(event =>
@@ -1895,16 +1919,28 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
     }
     await ctx.sessions.flush(agent.session)
-    return agent
+    return {
+      agent,
+      cachedReferences: currentQuestion === undefined
+        ? undefined
+        : cachedByQuestion.get(String(currentQuestion.questionId)),
+    }
   }
 
   if (memberQuestionReceiver !== undefined) {
     ctx.effect(() => memberQuestionReceiver.registerSessionMaterializer(async (input, admission) => {
-      await materializeReceivingSession(input.receivingSessionId as unknown as SessionId, admission)
-      return { accepted: true }
+      const materialized = await materializeReceivingSession(
+        input.receivingSessionId as unknown as SessionId, admission,
+      )
+      return {
+        accepted: true as const,
+        ...(materialized.cachedReferences === undefined ? {} : { cachedReferences: materialized.cachedReferences }),
+      }
     }), 'api-proxy: member-question Session materialization')
     ctx.effect(() => memberQuestionReceiver.registerHumanTurnAdmitter(async (input, admission) => {
-      const agent = await materializeReceivingSession(input.receivingSessionId as unknown as SessionId, admission)
+      const { agent } = await materializeReceivingSession(
+        input.receivingSessionId as unknown as SessionId, admission,
+      )
       const humanId = MessageId(`member-question-human:${input.rpcId}`)
       if (!hasMessage(agent.session, humanId)) {
         const message = freezeMessage({

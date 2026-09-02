@@ -15,7 +15,7 @@ import { en as questionEn, zh as questionZh } from '@deepseek-ai/dsh-client-ui-u
 
 describe('ui-member-questions browser apply', () => {
   it('declares every service it binds', () => {
-    expect(inject).toEqual(['slots', 'locale'])
+    expect(inject).toEqual(['slots', 'locale', 'workspaces', 'sessions'])
   })
 
   it('node-half apply is an intentional no-op', () => {
@@ -67,10 +67,12 @@ describe('ui-member-questions browser apply', () => {
     const entry = runtime.slots.entries('conversation.input.dock')[0]!
     const injected = (entry.inject as unknown as () => {
       focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
+      openReference: (sessionId: SessionId, path: string, title?: string) => void
     })()
     const sessionId = 'receiving-session' as SessionId
     const document = { path: 'brief.html', filename: 'brief.html', from: 'Alice' }
     const focus = vi.fn()
+    const openFile = vi.fn()
     try {
       // The optional provider may arrive after this plugin's fiber.
       expect(() => { injected.focusDocument(sessionId, document) }).not.toThrow()
@@ -81,6 +83,45 @@ describe('ui-member-questions browser apply', () => {
       await disposeProvider()
       injected.focusDocument(sessionId, document)
       expect(focus).toHaveBeenCalledTimes(1)
+
+      await runtime.sessions.add({
+        id: sessionId,
+        summary: { displayTitle: 'Receiver', cwd: '/bound-workspace' },
+      })
+      const disposeSidebar = runtime.ctx.reflect.provide('betterSidebar', {
+        openFile, getTab: () => ({ id: 'editor' }),
+      })
+      injected.openReference(sessionId, '.dsh/member-questions/question-1/brief.html', 'brief.html')
+      expect(openFile).toHaveBeenCalledWith(
+        { sessionId, cwd: '/bound-workspace' },
+        '/bound-workspace/.dsh/member-questions/question-1/brief.html',
+        'brief.html',
+      )
+      expect(runtime.workspaces.calls.some(call => call.method === 'openPath')).toBe(false)
+
+      await disposeSidebar()
+      injected.openReference(sessionId, '.dsh/member-questions/question-1/brief.html', 'brief.html')
+      expect(runtime.workspaces.calls).toContainEqual({
+        method: 'openPath',
+        args: ['/bound-workspace/.dsh/member-questions/question-1/brief.html'],
+      })
+      expect(openFile).toHaveBeenCalledTimes(1)
+
+      const unscopedId = 'receiving-session-unscoped' as SessionId
+      await runtime.sessions.add({
+        id: unscopedId,
+        summary: { displayTitle: 'Unscoped receiver' },
+      }, { current: false })
+      const disposeSidebarWithoutCwd = runtime.ctx.reflect.provide('betterSidebar', {
+        openFile, getTab: () => ({ id: 'editor' }),
+      })
+      injected.openReference(unscopedId, '.dsh/member-questions/question-1/brief.html', 'brief.html')
+      expect(openFile).toHaveBeenLastCalledWith(
+        { sessionId: unscopedId },
+        '.dsh/member-questions/question-1/brief.html',
+        'brief.html',
+      )
+      await disposeSidebarWithoutCwd()
     } finally {
       await feature.dispose()
       await runtime.dispose()

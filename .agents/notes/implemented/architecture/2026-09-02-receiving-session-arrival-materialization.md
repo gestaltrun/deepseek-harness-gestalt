@@ -14,7 +14,7 @@ Authenticated arrival materializes exactly one Host Session for the `(originSess
 
 Idempotent replay and Host restart resume an unmaterialized row through `resumeReservedSessionMaterializations()` without creating a second Session. Human turns remain a separate reserved `admitHumanTurn` path. Once `hostSessionId` is present, the receiving face binds the ordinary Host Session and routes later prompts through `session.prompt`; a local answer still settles through `memberQuestion.settle`. The Client projects local `answered` terminals out of the conversation footer and keeps exceptional or cross-install terminals as record bands. The sidebar lists the Host-attached Session under the bound Workspace; the browser expands that Workspace once on a newly pending identity without changing the current Session.
 
-The [Host receiver ledger](2026-08-31-host-owned-member-question-receiver-ledger.md) still owns persistence, first claim, expiry, and human-turn reservation. The [identity-stable receiving face](../feature/2026-08-30-web-receiving-experience-assembly-fixes.md) still owns pending waits and Host-snapshot projection.
+The [Host receiver ledger](2026-08-31-host-owned-member-question-receiver-ledger.md) still owns persistence, first claim, expiry, and human-turn reservation. The [identity-stable receiving face](../feature/2026-08-30-web-receiving-experience-assembly-fixes.md) still owns pending waits and Host-snapshot projection. The [Files-sidebar opening note](2026-09-03-member-question-files-sidebar.md) owns transferred document cache paths and Better Sidebar Files opening.
 
 ## Supersession check
 

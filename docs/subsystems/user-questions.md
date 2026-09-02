@@ -79,12 +79,11 @@ type AskUserQuestionIntent =
   background: string
   /**
    * Workspace-relative referenced documents with their rendering reasons.
-   * `content` carries the inline document body for the renderable kinds
-   * (`.md`/`.html`) so the receiver's document-focus panel can render the
-   * referenced material without reading the asking workspace's filesystem;
-   * it stays absent for kinds the panel renders as a bare file tab.
+   * `cachedPath` is the receiver-owned hidden Workspace copy the Files
+   * viewer opens. `content` is optional inline body for tests and older
+   * payloads; the product Files viewer reads the cache path instead.
    */
-  references: readonly { path: string; reason: string; content?: string }[]
+  references: readonly { path: string; reason: string; cachedPath?: string; content?: string }[]
   /** Epoch milliseconds after which the routed ask expires on both endpoints. */
   expiresAt: number
 }

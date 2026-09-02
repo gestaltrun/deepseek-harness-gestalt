@@ -10,7 +10,7 @@ A routed Member Question can carry referenced documents. T6 opened those chips i
 
 ## Decision
 
-The Host Session materializer writes transferred document bytes under a receiver-owned hidden Workspace directory: `.dsh/member-questions/<questionId>/<basename>`. Colliding basenames inside one question receive a numeric suffix. The same-named Workspace file is never replaced. The receiver ledger stores only `{ path, reason, cachedPath }` metadata; document bodies stay outside the JSON document.
+The Host Session materializer writes transferred document bytes under a receiver-owned hidden Workspace directory: `.dsh/member-questions/<questionId>/<basename>`. Colliding basenames inside one question receive a numeric suffix. Cache writes unlink a planted symlink first, then exclusive-create an owner-only regular file (`wx`, `0o600`) so the write cannot follow into a same-named Workspace file. The receiver ledger stores only `{ path, reason, cachedPath }` metadata; document bodies stay outside the JSON document.
 
 Clicking a material chip opens only that cached path through `ctx.betterSidebar.openFile` with the receiving Session id. A chip without `cachedPath` is a no-op: the asking Session path and a same-named Workspace file are never opened. Markdown, sandboxed HTML, and unsupported types reuse the ordinary Files viewers. When the Files editor tab is unregistered, the chip falls through to `ctx.workspaces.openPath` and the Host system opener. The details-panel document seat is no longer the product open path.
 
@@ -32,4 +32,4 @@ A receiver reads the transferred copy through the ordinary Files viewer of the r
 
 ## Testing
 
-Focused cache tests pin hidden-directory writes and same-name isolation. Receiver ingest tests pin transferred bytes on the materializer without ledger bodies. Client plugin tests pin Files `openFile` with the receiving Session id, system-opener fallback, and a no-op when `cachedPath` is absent. Keyless Web assembled coverage and the owning snapshot prove Files opened `.dsh/member-questions/<questionId>/` rather than the Workspace twin.
+Focused cache tests pin hidden-directory writes, same-name isolation, and planted-symlink refusal. Receiver ingest tests pin transferred bytes on the materializer without ledger bodies. Client plugin tests pin Files `openFile` with the receiving Session id, system-opener fallback, and a no-op when `cachedPath` is absent. Keyless Web assembled coverage and the owning snapshot prove Files opened `.dsh/member-questions/<questionId>/` rather than the Workspace twin.

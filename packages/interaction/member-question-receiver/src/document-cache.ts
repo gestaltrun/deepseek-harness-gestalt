@@ -3,7 +3,7 @@
   * documents. Bytes land under `.dsh/member-questions/<questionId>/` so a
   * same-named Workspace file is never replaced or opened by mistake.
   */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 /** Workspace-relative root of every receiver-owned transferred document. */
@@ -51,7 +51,7 @@ export async function writeMemberQuestionDocumentCache(input: {
     const cachedPath = `${MEMBER_QUESTION_DOCUMENT_CACHE_ROOT}/${questionSegment}/${uniqueName}`
     const bytes = bytesByPath.get(reference.path)
     if (bytes !== undefined) {
-      await writeFile(join(input.workspacePath, cachedPath), Buffer.from(bytes), { mode: 0o600 })
+      await writeExclusiveOwnerFile(join(input.workspacePath, cachedPath), Buffer.from(bytes))
     }
     cached.push({ path: reference.path, reason: reference.reason, cachedPath })
   }
@@ -73,4 +73,25 @@ function sanitizeSegment(value: string): string {
   const trimmed = value.trim()
   const safe = trimmed.replace(/[^A-Za-z0-9._-]+/g, '_')
   return safe === '' || safe === '.' || safe === '..' ? '_' : safe
+}
+
+/**
+ * Write transferred bytes without following a planted symlink. `lstat` +
+ * `unlink` remove a link-shaped or leftover cache path first, then `wx`
+ * exclusive-creates an owner-only regular file so the write cannot land on
+ * a referent.
+ * @param path - absolute cache file path under the receiver-owned directory.
+ * @param bytes - transferred document body.
+ */
+async function writeExclusiveOwnerFile(path: string, bytes: Buffer): Promise<void> {
+  try {
+    const info = await lstat(path)
+    if (info.isDirectory()) {
+      throw new Error(`member-question-receiver: cache path ${path} is a directory`)
+    }
+    await unlink(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  await writeFile(path, bytes, { mode: 0o600, flag: 'wx' })
 }

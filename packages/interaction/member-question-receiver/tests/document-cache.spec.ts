@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -98,5 +98,45 @@ describe('writeMemberQuestionDocumentCache', () => {
     })
     expect(cached[0]?.cachedPath).toBe('.dsh/member-questions/_/readme')
     expect(await readFile(join(workspace, cached[0]!.cachedPath), 'utf8')).toBe('ok')
+  })
+
+  it('replaces a planted cache symlink without writing through to the Workspace twin', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'dsh-member-question-cache-link-'))
+    roots.push(workspace)
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    await mkdir(join(workspace, '.dsh', 'member-questions', 'question-link'), { recursive: true, mode: 0o700 })
+    const twin = join(workspace, 'docs', 'architecture.md')
+    await writeFile(twin, 'LOCAL WORKSPACE COPY\n')
+    const planted = join(workspace, '.dsh', 'member-questions', 'question-link', 'architecture.md')
+    await symlink(twin, planted)
+
+    const cached = await writeMemberQuestionDocumentCache({
+      workspacePath: workspace,
+      questionId: 'question-link',
+      references: [{ path: 'docs/architecture.md', reason: 'Current ownership map' }],
+      documents: [{ path: 'docs/architecture.md', bytes: Buffer.from('# transferred brief\n') }],
+    })
+
+    expect(cached[0]?.cachedPath).toBe('.dsh/member-questions/question-link/architecture.md')
+    expect((await lstat(planted)).isSymbolicLink()).toBe(false)
+    expect(await readFile(planted, 'utf8')).toBe('# transferred brief\n')
+    expect(await readFile(twin, 'utf8')).toBe('LOCAL WORKSPACE COPY\n')
+  })
+
+  it('replaces a leftover cache file with an exclusive owner-only create', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'dsh-member-question-cache-exist-'))
+    roots.push(workspace)
+    await mkdir(join(workspace, '.dsh', 'member-questions', 'question-exist'), { recursive: true, mode: 0o700 })
+    const leftover = join(workspace, '.dsh', 'member-questions', 'question-exist', 'architecture.md')
+    await writeFile(leftover, 'stale')
+
+    const cached = await writeMemberQuestionDocumentCache({
+      workspacePath: workspace,
+      questionId: 'question-exist',
+      references: [{ path: 'docs/architecture.md', reason: 'Current ownership map' }],
+      documents: [{ path: 'docs/architecture.md', bytes: Buffer.from('# transferred brief\n') }],
+    })
+    expect(cached[0]?.cachedPath).toBe('.dsh/member-questions/question-exist/architecture.md')
+    expect(await readFile(leftover, 'utf8')).toBe('# transferred brief\n')
   })
 })

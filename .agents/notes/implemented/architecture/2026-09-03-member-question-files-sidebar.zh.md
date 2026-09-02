@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-Host Session materializer 把传输文档 bytes 写到 receiver 所有的隐藏 Workspace 目录：`.dsh/member-questions/<questionId>/<basename>`。同一提问内冲突的 basename 会加上数字后缀。同名 Workspace 文件永不被替换。receiver ledger 只存 `{ path, reason, cachedPath }` 元数据；文档正文不进入该 JSON 文档。
+Host Session materializer 把传输文档 bytes 写到 receiver 所有的隐藏 Workspace 目录：`.dsh/member-questions/<questionId>/<basename>`。同一提问内冲突的 basename 会加上数字后缀。cache 写入会先 unlink 预埋的符号链接，再以 `wx`、`0o600` 独占创建仅所有者可访问的普通文件，因此写入不会跟随进入同名 Workspace 文件。receiver ledger 只存 `{ path, reason, cachedPath }` 元数据；文档正文不进入该 JSON 文档。
 
 点击材料芯片只会用 receiving Session id 通过 `ctx.betterSidebar.openFile` 打开该缓存 path。没有 `cachedPath` 的芯片是 no-op：提问 Session path 与同名 Workspace 文件都不会被打开。markdown、沙箱 HTML 与不受支持的类型复用普通 Files viewer。Files editor 标签未注册时，芯片回退到 `ctx.workspaces.openPath` 与 Host 系统打开器。详情面板文档席位不再是产品打开路径。
 
@@ -32,4 +32,4 @@ Host Session materializer 把传输文档 bytes 写到 receiver 所有的隐藏 
 
 ## Testing
 
-聚焦 cache 测试钉死隐藏目录写入与同名隔离。receiver ingest 测试钉死 materializer 上的传输 bytes，且 ledger 不含正文。Client 插件测试钉死带 receiving Session id 的 Files `openFile`、系统打开器回退，以及缺少 `cachedPath` 时的 no-op。keyless Web assembled coverage 与所属 snapshot 证明 Files 打开的是 `.dsh/member-questions/<questionId>/`，而不是 Workspace 同名文件。
+聚焦 cache 测试钉死隐藏目录写入、同名隔离，以及拒绝预埋符号链接。receiver ingest 测试钉死 materializer 上的传输 bytes，且 ledger 不含正文。Client 插件测试钉死带 receiving Session id 的 Files `openFile`、系统打开器回退，以及缺少 `cachedPath` 时的 no-op。keyless Web assembled coverage 与所属 snapshot 证明 Files 打开的是 `.dsh/member-questions/<questionId>/`，而不是 Workspace 同名文件。

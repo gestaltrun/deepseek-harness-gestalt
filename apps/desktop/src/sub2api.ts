@@ -36,8 +36,8 @@ const PROBE_INTERVAL_MS = 2_000
 /** probe budget: first boots run PostgreSQL initdb plus migrations (the sidecar's own budget is 120s). */
 const PROBE_TIMEOUT_MS = 180_000
 
-/** Web Host startup budget when enablement starts PostgreSQL and the sidecar. */
-const ENABLE_HOST_START_TIMEOUT_MS = 180_000
+/** Web Host startup budget for a controller-owned component replacement. */
+const COMPONENT_HOST_START_TIMEOUT_MS = 180_000
 
 /**
  * Give ordinary Desktop boot the component startup budget only when the
@@ -49,7 +49,7 @@ export function sub2ApiBootHostStartTimeout(
   snapshot: DesktopSub2ApiSnapshot,
 ): number | undefined {
   return snapshot.state === 'installed' && snapshot.enabled
-    ? ENABLE_HOST_START_TIMEOUT_MS
+    ? COMPONENT_HOST_START_TIMEOUT_MS
     : undefined
 }
 
@@ -204,7 +204,7 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
       const version = await installedBundleVersion(this.options.profileDir)
       if (this.options.host.origin() !== undefined) {
         this.set({ state: 'starting', enabled: false, version })
-        await this.options.host.restart()
+        await this.options.host.restart(COMPONENT_HOST_START_TIMEOUT_MS)
       }
       // The Web Host now boots with the row disabled: no processes run, so
       // there is nothing to probe — `installed` is the resting disabled state.
@@ -231,7 +231,7 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
       if (removed && this.options.host.origin() !== undefined) {
         try {
           this.set({ state: 'starting', enabled: true })
-          await this.options.host.restart()
+          await this.options.host.restart(COMPONENT_HOST_START_TIMEOUT_MS)
         } catch (error) {
           // Put the row back: the profile must not lose a working install
           // because one restart failed.
@@ -305,7 +305,7 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
       ...(this.snapshot.version === undefined ? {} : { version: this.snapshot.version }),
     })
     try {
-      const origin = await this.options.host.restart(ENABLE_HOST_START_TIMEOUT_MS)
+      const origin = await this.options.host.restart(COMPONENT_HOST_START_TIMEOUT_MS)
       await this.probeUntilRunning(origin)
     } catch (error) {
       if (!this.justInstalled) throw error
@@ -313,7 +313,7 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
       await removeBundlePackage(this.options.profileDir)
       await rm(this.options.runtimeDir, { recursive: true, force: true })
       try {
-        await this.options.host.restart()
+        await this.options.host.restart(COMPONENT_HOST_START_TIMEOUT_MS)
       } catch {
         // The second failure is the Web Host's own; its error page owns the
         // surface. Keep the actionable rollback message here.

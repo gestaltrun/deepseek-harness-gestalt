@@ -173,7 +173,7 @@ function MemberManagement({ gateway, project, t }: {
   const inviteBlocked = inviting || trimmedLogin === '' || selectedGrantedRole === undefined
   const submitInvite = () => {
     /* v8 ignore next -- the invite button uses the same inviteBlocked predicate. */
-    if (inviteBlocked || selectedGrantedRole === undefined) return
+    if (inviteBlocked) return
     setInviting(true)
     setActionError(null)
     gateway.invite({

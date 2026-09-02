@@ -42,6 +42,7 @@ jobs:
       - name: Apply unconsumed release intent
         id: plan
         run: |
+          set -o pipefail
           branch=automation/product-release
           git switch -c "$branch"
           pnpm product-release:prepare --write | tee "$RUNNER_TEMP/product-release-plan.json"

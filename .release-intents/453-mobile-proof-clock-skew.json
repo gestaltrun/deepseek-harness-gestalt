@@ -1,0 +1,20 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "453-mobile-proof-clock-skew",
+  "summary": {
+    "en": "Accept bounded mobile clock skew without releasing single-use Installation proof replay protection early.",
+    "zh": "容忍有限的移动端时钟偏移，同时避免提前释放单次安装证明的重放保护。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "patch"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "Desktop references the provider core only as a development-test dependency; the packaged Desktop is an Installation proof producer and does not run this Platform verifier."
+    }
+  ]
+}

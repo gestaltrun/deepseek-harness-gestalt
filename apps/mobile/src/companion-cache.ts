@@ -337,7 +337,28 @@ function parseCompanionMutationResult(value: unknown): CompanionMutationResult {
     return { type: 'interaction-receipt', operationId, accepted: false, reason: record.reason }
   }
   if (record.type === 'operation-failed' && typeof record.failure === 'object' && record.failure !== null) {
-    return structuredClone(record) as unknown as CompanionMutationResult
+    const failure = durableRecord(record.failure, 'Companion Host failure')
+    if (failure.kind === 'http' && failure.code === 'HOST_HTTP_STATUS'
+      && typeof failure.message === 'string' && typeof failure.status === 'number') {
+      return { type: 'operation-failed', operationId, failure: {
+        kind: 'http', code: 'HOST_HTTP_STATUS', message: failure.message, status: failure.status,
+      } }
+    }
+    if (failure.kind === 'wire' && failure.code === 'HOST_WIRE_INVALID' && typeof failure.message === 'string') {
+      return { type: 'operation-failed', operationId, failure: {
+        kind: 'wire', code: 'HOST_WIRE_INVALID', message: failure.message,
+      } }
+    }
+    if (failure.kind === 'business' && typeof failure.code === 'string' && typeof failure.message === 'string') {
+      return { type: 'operation-failed', operationId, failure: {
+        kind: 'business', code: failure.code, message: failure.message,
+      } }
+    }
+    if (failure.kind === 'timeout' && failure.code === 'HOST_TIMEOUT' && typeof failure.message === 'string') {
+      return { type: 'operation-failed', operationId, failure: {
+        kind: 'timeout', code: 'HOST_TIMEOUT', message: failure.message,
+      } }
+    }
   }
   throw new TypeError('Companion terminal mutation result is unsupported')
 }

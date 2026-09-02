@@ -393,7 +393,7 @@ describe('coverage partition coordinator', () => {
     ])
   })
 
-  it('retries one partition once after an isolated Vitest worker exit', async () => {
+  it('retries one partition after every first attempt completes', async () => {
     const root = await temporaryRoot()
     const reported = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     let firstPartitionRuns = 0
@@ -421,12 +421,48 @@ describe('coverage partition coordinator', () => {
 
     await expect(coordinator.run()).resolves.toBe(0)
     expect(reported).toHaveBeenCalledWith(
-      'coverage-partitions: retry partition 1/2 after an unexpected Vitest worker exit',
+      'coverage-partitions: retry partition 1/2 after concurrent partitions complete',
     )
     expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
       'partition 1/2',
+      'partition 2/2',
+      'partition 1/2',
+      'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
+      'merged coverage report',
+    ])
+  })
+
+  it('fails after a deferred worker-exit retry also exits unexpectedly', async () => {
+    const root = await temporaryRoot()
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const workerExit = {
+      exitCode: 1,
+      signalCode: null,
+      outputTail: [
+        'Error: [vitest-pool]: Worker forks emitted error.',
+        'Caused by: Error: Worker exited unexpectedly',
+      ].join('\n'),
+    }
+    const runCommand = vi.fn(async (command: CoverageCommand) => {
+      await writeBlob(command)
+      return command.label === 'partition 1/2' ? workerExit : passed
+    })
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 2,
+      maxConcurrency: 1,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand,
+    })
+
+    await expect(coordinator.run()).resolves.toBe(1)
+    expect(reported).toHaveBeenCalledWith('coverage-partitions: FAIL partition 1/2 (exit 1)')
+    expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
       'partition 1/2',
       'partition 2/2',
+      'partition 1/2',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
       'merged coverage report',

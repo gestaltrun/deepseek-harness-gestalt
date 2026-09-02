@@ -10,14 +10,15 @@
 
 - `projectId` — 要查询的云项目。省略时，工具向组合注入的工作区绑定解析当前工作区归属的项目；显式传入的 id 优先。
 
-调用先解析会话绑定账号，再解析项目绑定，最后通过 `ctx.projectMembership.roster()` 读取存储的名册。规范结果为按加入顺序排列的成员数组 `[{ accountId, displayName?, avatarRef?, role, tags, presence }]`；要么返回全部存储成员，要么调用失败——不存在部分名册。
+调用先解析会话绑定账号，再解析项目绑定，然后通过注入的 resolver 或 `ctx.projectMembership.roster()` 读取存储的名册。规范结果为按加入顺序排列的成员数组 `[{ accountId, displayName?, avatarRef?, role, tags, presence }]`；要么返回全部存储成员，要么调用失败——不存在部分名册。
 
 ## 注入的提供方接口
 
-本包只依赖成员关系 Service Definition——从不依赖平台包。组合注入三个可选的 Config 函数，平台提供方一侧将它们接到 Account Service Definition、工作区 remote 与在线状态注册表：
+本包只导入成员关系 Service Definition——从不依赖平台提供方包。组合注入四个可选的 Config 函数；账号、项目与名册解析器接收当前 Agent 与工具取消信号，使 Host 适配器能在不依赖模型提供身份的情况下推导 Workspace 上下文并中止待处理读取：
 
 - `currentAccountResolver` — 解析当前会话绑定的账号。缺失、抛错或解析为 `undefined` 时，返回稳定的 `ACCOUNT_UNAVAILABLE` 错误。
 - `boundProjectResolver` — 为省略 `projectId` 的调用解析工作区绑定的项目。无法解析时返回稳定的 `PROJECT_UNBOUND` 错误。
+- `rosterResolver` — 经组合自有已鉴权桥读取权威名册。缺失时，工具使用 `ctx.projectMembership.roster()`，两者皆缺则失败。
 - `rosterPresenter` — 为一次读取附加在线状态与公开展示身份。缺失时，所有成员读作 `presence: "offline"` 且不带身份字段——与已组合但无任何活跃心跳的在线状态注册表给出的结论一致。
 
 ## 渲染

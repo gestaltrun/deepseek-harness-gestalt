@@ -115,6 +115,13 @@
         terminalRetryMs: 1000
         terminalAuthorityMode: deferred
 
+    # Routed ask_user_question requires this Host service. Production omits a
+    # delivery port, so send() fail-closes as DELIVERY_UNAVAILABLE until the
+    # reviewed T4 registry transport is composed. Bound Desktop sessions can
+    # still construct a routed ask after live-roster login matching.
+    - id: member-question-sender
+      name: '@deepseek-ai/dsh-member-question-sender'
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway

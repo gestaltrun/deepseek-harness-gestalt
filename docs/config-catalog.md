@@ -2246,6 +2246,22 @@ export interface Config {
 
 Source: [`packages/platform/project-membership-core/src/index.ts:50`](../packages/platform/project-membership-core/src/index.ts)
 
+<a id="deepseek-aidsh-project-membership-desktop"></a>
+
+## `@deepseek-ai/dsh-project-membership-desktop`
+
+```ts config-catalog
+/** Desktop bridge location injected by the Desktop-only Web Host patch. */
+export interface Config {
+  /** Absolute loopback HTTP origin published by Desktop Host. */
+  readonly baseUrl: string
+  /** Owner-only bearer-token file read immediately before each request. */
+  readonly tokenFile: string
+}
+```
+
+Source: [`packages/platform/project-membership-desktop/src/index.ts:64`](../packages/platform/project-membership-desktop/src/index.ts)
+
 <a id="deepseek-aidsh-project-membership-http"></a>
 
 ## `@deepseek-ai/dsh-project-membership-http`
@@ -3283,51 +3299,59 @@ Requires: `tools` · `userQuestions`
 /** Injected faces for routed asks. Local asks ignore every field. */
 export interface Config {
   /**
-   * Resolves Decision Brief origin fields for a routed ask. Absent, the tool
-   * answers `SENDER_UNAVAILABLE` rather than inventing identity.
+   * Resolves the current Project and authenticated Decision Brief origin only
+   * when its current roster contains the addressee. Absent, the tool answers
+   * `SENDER_UNAVAILABLE`; resolving no value answers `INELIGIBLE_ADDRESSEE`.
    */
-  originResolver?: OriginResolver
+  routeResolver?: RouteResolver
   /**
    * Resolves the workspace-bound cloud project for a routed ask and for
    * runtime eligibility of `to_project_member`. Absent or resolving to
    * undefined hides the parameter from assembled prompts; a present id
-   * surfaces it. Execute still forwards the addressee as the project id
-   * when this resolver is absent so schema-level routing can be tested
-   * without a membership face.
+   * surfaces it. It never authorizes execution.
    */
   boundProjectResolver?: BoundProjectResolver
 }
 
-/**
- * Resolves the Decision Brief origin of one routed ask. The composition
- * supplies project name and asker identity; the tool forwards the resolved
- * origin to the sender.
- * @param input - addressee and optional calling agent.
- * @returns the origin fields the sender encodes onto the Companion operation.
- */
-export type OriginResolver = (input: OriginResolverInput) => Promise<MemberQuestionOrigin>
+/** Resolve one authenticated route, or no value when the addressee is absent from the current Project roster. */
+export type RouteResolver = (input: OriginResolverInput) => Promise<MemberQuestionRoute | undefined>
 
 /**
- * Resolves the cloud project whose peer grant addresses the member. Absent,
- * the tool forwards `to_project_member` as the project id so schema-level
- * routing can be tested without a membership face. The same resolver drives
- * runtime eligibility: an unbound (undefined) result hides `to_project_member`
- * from assembled prompts.
+ * Resolves the current Workspace's cloud project for runtime eligibility. An
+ * unbound (undefined) result hides `to_project_member` from assembled prompts;
+ * execution uses {@link RouteResolver} as the addressee authority.
  */
-export type BoundProjectResolver = () => Promise<string | undefined>
+export type BoundProjectResolver = (input?: {
+  /** Agent whose immutable Session cwd selects the Workspace. */
+  readonly agent?: Agent
+  /** Prompt-assembly or tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<string | undefined>
 
-/** Inputs for resolving the Decision Brief origin of one routed ask. */
+/** Inputs for resolving one authenticated member-question route. */
 export interface OriginResolverInput {
   /** Single project-member addressee from `to_project_member`. */
   toProjectMember: string
   /** Calling agent, when the tool ran from a live session. */
   agent?: Agent
+  /** Tool cancellation signal for every route-authority read. */
+  signal: AbortSignal
+}
+
+/** Authenticated Project, Decision Brief origin, and live-roster Account for one eligible addressee. */
+export interface MemberQuestionRoute {
+  /** Cloud Project whose current roster contains the addressee. */
+  readonly projectId: string
+  /** Authenticated Decision Brief origin from the same roster read. */
+  readonly origin: MemberQuestionOrigin
+  /** Durable Account id matched from the live roster, never the model-supplied login. */
+  readonly toProjectMember: string
 }
 ```
 
 Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
 
-Source: [`packages/interaction/tool-ask-user/src/index.ts:76`](../packages/interaction/tool-ask-user/src/index.ts)
+Source: [`packages/interaction/tool-ask-user/src/index.ts:85`](../packages/interaction/tool-ask-user/src/index.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -3514,7 +3538,7 @@ Source: [`packages/lsp/tool-lsp/src/index.ts:58`](../packages/lsp/tool-lsp/src/i
 
 ## `@deepseek-ai/dsh-tool-project-members`
 
-Requires: `tools` · `projectMembership`
+Requires: `tools`
 
 ```ts config-catalog
 /**
@@ -3543,13 +3567,28 @@ export interface Config {
    * verdict a composed presence registry with no live heartbeats produces.
    */
   rosterPresenter?: RosterPresenter
+  /**
+   * Reads the canonical roster through a composition-owned authenticated bridge.
+   * Absent, the tool uses `ctx.projectMembership.roster()` as before.
+   */
+  rosterResolver?: RosterResolver
 }
 
 /** Resolves the session-bound platform account that reads the roster. */
-export type CurrentAccountResolver = () => Promise<AccountRef | undefined>
+export type CurrentAccountResolver = (input?: {
+  /** Agent making the tool call, when one is live. */
+  readonly agent?: Agent
+  /** Tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<AccountRef | undefined>
 
 /** Resolves the workspace-bound cloud project for calls that omit `projectId`. */
-export type BoundProjectResolver = () => Promise<Branded<'ProjectId'> | undefined>
+export type BoundProjectResolver = (input?: {
+  /** Agent whose immutable Session cwd selects the Workspace. */
+  readonly agent?: Agent
+  /** Tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<Branded<'ProjectId'> | undefined>
 
 /**
  * Attaches presence and public display identity to one stored roster read.
@@ -3557,6 +3596,18 @@ export type BoundProjectResolver = () => Promise<Branded<'ProjectId'> | undefine
  * same order; the tool owns every stored roster field.
  */
 export type RosterPresenter = (view: RosterView) => Promise<readonly MemberPresentation[]>
+
+/** Provider face for compositions whose authoritative roster is behind another process boundary. */
+export type RosterResolver = (
+  actor: AccountRef,
+  projectId: Branded<'ProjectId'>,
+  input?: {
+    /** Agent making the tool call, when one is live. */
+    readonly agent?: Agent
+    /** Tool cancellation signal for provider I/O. */
+    readonly signal?: AbortSignal
+  },
+) => Promise<RosterView>
 
 /**
  * Durable platform account reference, resolvable only by the provider face.
@@ -3580,9 +3631,9 @@ export interface MemberPresentation {
 export type MemberPresence = 'online' | 'offline'
 ```
 
-Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`RosterView`](subsystems/project-membership.md)
+Depends on: [`Agent`](subsystems/core.md) · [`Branded`](../packages/util/brand/src/index.ts) · [`RosterView`](subsystems/project-membership.md)
 
-Source: [`packages/interaction/tool-project-members/src/index.ts:99`](../packages/interaction/tool-project-members/src/index.ts)
+Source: [`packages/interaction/tool-project-members/src/index.ts:122`](../packages/interaction/tool-project-members/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

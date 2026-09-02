@@ -84,6 +84,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/platform/project-membership-core': { kind: 'none', reason: 'Platform collaboration store; membership state never enters a model request.' },
   'packages/platform/project-membership-http': { kind: 'none', reason: 'The registry HTTP Consumer adapts membership operations onto routes; roster rows never enter a model request.' },
   'packages/platform/project-membership-client': { kind: 'none', reason: 'Browser membership transport; roster rows never enter a model request.' },
+  'packages/platform/project-membership-desktop': { kind: 'indirect', reason: 'The Desktop read provider delegates model rendering to dsh-tool-project-members and dsh-tool-ask-user.' },
   'packages/platform/noise-channel': { kind: 'none', reason: 'Pairing and encrypted Companion transport state never enter a model request.' },
   'packages/platform/remote-protocol': { kind: 'none', reason: 'Remote transport metadata and device origin never enter a model request.' },
   'packages/platform/remote-access': { kind: 'none', reason: 'Pairing metadata and Device Principal origin never enter a model request.' },

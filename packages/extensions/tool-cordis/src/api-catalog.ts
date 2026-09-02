@@ -853,6 +853,47 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'desktopProjectMembership',
+    summary: 'Client-side Service Provider over the Desktop Host\'s token-protected loopback projection.',
+    description: 'Client-side Service Provider over the Desktop Host\'s token-protected loopback projection.',
+    methods: [
+      {
+        signature: 'async context(agent?: Agent, signal?: AbortSignal): Promise<DesktopProjectMembershipContext | undefined>',
+        description: 'Resolve the signed-in Account and the current session Workspace\'s optional Cloud Project.',
+        parameters: [{ name: 'agent', description: 'live Agent whose immutable session cwd selects the Workspace.' }, { name: 'signal', description: 'optional cancellation for the loopback read.' }],
+        returns: 'current Desktop context, or no value for diagnostics without a cwd.',
+      },
+      {
+        signature: 'async currentAccount(signal?: AbortSignal): Promise<DesktopProjectMembershipContext[\'account\']>',
+        description: 'Read the current signed-in Desktop Account independently of any Workspace.',
+        parameters: [{ name: 'signal', description: 'optional cancellation for the loopback read.' }],
+        returns: 'current public Account identity.',
+        throws: ['when Desktop has no signed-in Account or the bridge response is invalid.'],
+      },
+      {
+        signature: 'async roster(actor: PlatformAccountId, projectId: ProjectId, signal?: AbortSignal): Promise<RosterView>',
+        description: 'Read one complete authoritative roster and retain its identity/presence decorations for the presenter.',
+        parameters: [{ name: 'actor', description: 'current Desktop Account id.' }, { name: 'projectId', description: 'Cloud Project to read.' }, { name: 'signal', description: 'optional cancellation for the loopback read.' }],
+        returns: 'canonical stored roster fields.',
+        throws: ['when the actor differs from Desktop Account or the roster response is invalid.'],
+      },
+      {
+        signature: 'present(view: RosterView): Promise<readonly DesktopMemberPresentation[]>',
+        description: 'Project the decorations retained by the exact roster read.',
+        parameters: [{ name: 'view', description: 'roster returned by {@link roster}.' }],
+        returns: 'one presentation per member in stored order.',
+        throws: ['when `view` was not returned by this service instance.'],
+      },
+      {
+        signature: 'async questionRoute( agent: Agent | undefined, addresseeLogin: string, originSessionTitle: string, signal?: AbortSignal, ): Promise<DesktopMemberQuestionRoute | undefined>',
+        description: 'Resolve one member-question route from the current bound-Project roster.',
+        parameters: [{ name: 'agent', description: 'live asking Agent.' }, { name: 'addresseeLogin', description: 'public GitHub login from `to_project_member`.' }, { name: 'originSessionTitle', description: 'latest public Session title, or the product fallback.' }, { name: 'signal', description: 'optional cancellation for both route-authority reads.' }],
+        returns: 'authenticated Project, matched Account, and origin, or no value when the login is not a current member.',
+        throws: ['when the Workspace is unbound or the current Account is absent from the roster.'],
+      },
+    ],
+  },
+  {
     key: 'directoryPicker',
     summary: 'Abstract directory-picking service.',
     description: 'Abstract directory-picking service. Subclass, implement `capability()`, and load the subclass as a plugin — it registers as `ctx.directoryPicker` (one implementation per context; loading a second throws, cordis\' standard duplicate-service behavior). The capability object must be stable for the service lifetime: consumers may capture it across calls.',
@@ -4418,6 +4459,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DesktopInstallationPresentation',
     declaration: 'export interface DesktopInstallationPresentation {\n    name: string;\n    platform: \'macos\' | \'windows\' | \'linux\';\n}',
+  },
+  {
+    name: 'DesktopMemberPresentation',
+    declaration: 'export interface DesktopMemberPresentation {\n    readonly presence: \'online\' | \'offline\';\n    readonly displayName: string;\n    readonly avatarRef: string;\n}',
+  },
+  {
+    name: 'DesktopMemberQuestionOrigin',
+    declaration: 'export interface DesktopMemberQuestionOrigin {\n    readonly projectName: string;\n    readonly originSessionTitle: string;\n    readonly askerAccountId: string;\n    readonly askerRole: \'owner\' | \'admin\' | \'member\';\n    readonly askerDisplayName: string;\n    readonly askerAvatarUrl: string;\n}',
+  },
+  {
+    name: 'DesktopMemberQuestionRoute',
+    declaration: 'export interface DesktopMemberQuestionRoute {\n    readonly projectId: ProjectId;\n    readonly toProjectMember: string;\n    readonly origin: DesktopMemberQuestionOrigin;\n}',
+  },
+  {
+    name: 'DesktopProjectMembershipContext',
+    declaration: 'export interface DesktopProjectMembershipContext {\n    readonly account: {\n        readonly id: PlatformAccountId;\n        readonly githubLogin: string;\n        readonly avatarUrl: string;\n    };\n    readonly project?: RosterView[\'project\'];\n}',
   },
   {
     name: 'DevicePrincipalId',

@@ -59,6 +59,7 @@
     "@deepseek-ai/dsh-member-question-sender": "workspace:*",
     "@deepseek-ai/dsh-platform-account": "workspace:*",
     "@deepseek-ai/dsh-platform-account-core": "workspace:*",
+    "@deepseek-ai/dsh-member-question-sender": "workspace:*",
     "@deepseek-ai/dsh-project-membership": "workspace:*",
     "@deepseek-ai/dsh-project-membership-client": "workspace:*",
     "@deepseek-ai/dsh-project-membership-core": "workspace:*",

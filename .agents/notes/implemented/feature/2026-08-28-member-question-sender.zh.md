@@ -22,11 +22,11 @@ Status: implemented
 
 当 `send()` 被给予提问会话时，它会追加仅写入日志的 `member-question/asked` 与 `member-question/outcome` 事件。这些记录已经作为工具调用与工具结果对模型可见，因此它们不是 surface 事件，也不会重新进入派生历史；它们保持 required-on-read，使较旧的 harness 拒绝包含它们的日志。
 
-origin 身份（项目名、提问者账号、角色、显示名、头像）不由工具编造。路由提问需要注入的 `originResolver`；缺少发送器或该解析器时，工具返回 `SENDER_UNAVAILABLE`。本地提问忽略这些接口，因此现有组合继续工作。
+Project 与 origin 身份不由工具编造。路由提问需要注入的 `routeResolver`，仅当当前权威 Project 名册包含 `to_project_member` 时才返回这些事实以及匹配到的 Account id。公开登录名匹配大小写不敏感。成员缺失时在投递前返回稳定的 `INELIGIBLE_ADDRESSEE`；缺少发送器或 resolver 时返回 `SENDER_UNAVAILABLE`。工具取消信号会传递到这次权威读取。本地提问忽略这些接口，因此现有组合继续工作。该 resolver 的 Desktop 装配记录在[Desktop 名册路由 note](2026-09-02-desktop-roster-routing.zh.md)。
 
 ## Supersession check
 
-两篇 2026-08-28 协作笔记均未被取代。[名册工具 note](2026-08-28-project-members-roster-tool.zh.md) 仍拥有经 `project_members` 及其注入的账号、绑定与 presenter 接口的面向模型成员查询；本发送器消费已知收件人，不枚举名册。[项目对等授权 note](2026-08-28-project-peer-relay-grants.zh.md) 仍拥有按对端密封的 Relay 凭证，以及投递止于密封信封的已记录 T4 缺环；本发送器在 B 侧查找该授权并注入投递，而不签发、打开或传输信封。[项目成员关系权威 note](2026-08-27-project-membership-core.zh.md) 仍拥有名册权威与不排队的离线立场；[presence 心跳 note](2026-08-28-member-presence-heartbeats.zh.md) 仍拥有存活心跳如何成为 `online`/`offline`。本 note 只拥有参数扩展后的 `ask_user_question` 到 T4 codec 的路由，包括运行期 schema 过滤、单待答占用、生命周期错误与持久提问记录。
+两篇 2026-08-28 协作笔记均未被取代。[名册工具 note](2026-08-28-project-members-roster-tool.zh.md) 仍拥有经 `project_members` 及其注入的账号、绑定、名册与 presenter 接口的面向模型成员枚举；本发送器对模型选定的收件人另做一次当前名册资格读取，不把该名册作为模型输出。[Desktop 名册路由 note](2026-09-02-desktop-roster-routing.zh.md) 拥有真实 Desktop 组合上的 Installation 取样身份与公开登录名匹配。[项目对等授权 note](2026-08-28-project-peer-relay-grants.zh.md) 仍拥有按对端密封的 Relay 凭证，以及投递止于密封信封的已记录 T4 缺环；本发送器在 B 侧查找该授权并注入投递，而不签发、打开或传输信封。[项目成员关系权威 note](2026-08-27-project-membership-core.zh.md) 仍拥有名册权威与不排队的离线立场；[presence 心跳 note](2026-08-28-member-presence-heartbeats.zh.md) 仍拥有存活心跳如何成为 `online`/`offline`。本 note 只拥有参数扩展后的 `ask_user_question` 到 T4 codec 的路由，包括运行期 schema 过滤、单待答占用、生命周期错误与持久提问记录。
 
 ## Alternatives considered
 
@@ -44,8 +44,8 @@ origin 身份（项目名、提问者账号、角色、显示名、头像）不�
 
 ## Consequences
 
-本地 `ask_user_question` 行为不变，只是接受并校验 `references`。路由提问需要已组合的发送器、origin 解析器和投递 port；在注册表传输落地之前，真实部署以 `DELIVERY_UNAVAILABLE` 或 `SENDER_UNAVAILABLE` 失败关闭，而不是排队。内存投递 stub 证明 codec 复用、首个 claim 保留与重放，但不构成生产投递证据。非绑定工作区在组装后的提示中看不到 `to_project_member`；随后的绑定会在下一次组装时重新检查。
+本地 `ask_user_question` 行为不变，只是接受并校验 `references`。路由提问需要已组合的发送器、权威 route resolver 和投递 port；模型不能把当前名册未收录的任意或过期 Account id 当作收件人。在注册表传输落地之前，没有投递适配器的组合以 `DELIVERY_UNAVAILABLE` 或 `SENDER_UNAVAILABLE` 失败关闭，而不是排队。内存投递 stub 证明 codec 复用、首个 claim 保留与重放，但不构成生产投递证据。非绑定工作区在组装后的提示中看不到 `to_project_member`；随后的绑定会在下一次组装时重新检查。
 
 ## Testing
 
-`packages/interaction/tool-ask-user/tests/tool-ask-user.spec.ts` 固定 schema 矩阵（`background` 缺失／超限、`references` 越出工作区、路由提问必须有 `background`），本地提问仍到达 user-questions 提供方，以及组装后的提示按绑定项目解析器包含或省略 `to_project_member`。`packages/interaction/member-question-sender/tests/member-question-sender.spec.ts` 固定经 T4 解码器的 codec 往返、内存 port 投递、每条终态发布路径、重放、后到的本地回答消费外部已保留到期结果、每个稳定生命周期错误，以及同路由键 supersede 竞态。
+`packages/interaction/tool-ask-user/tests/tool-ask-user.spec.ts` 固定 schema 矩阵（`background` 缺失／超限、`references` 越出工作区、路由提问必须有 `background`）、投递前的 `INELIGIBLE_ADDRESSEE`，本地提问仍到达 user-questions 提供方，以及组装后的提示按绑定项目解析器包含或省略 `to_project_member`。`packages/interaction/member-question-sender/tests/member-question-sender.spec.ts` 固定经 T4 解码器的 codec 往返、内存 port 投递、每条终态发布路径、重放、后到的本地回答消费外部已保留到期结果、每个稳定生命周期错误，以及同路由键 supersede 竞态。

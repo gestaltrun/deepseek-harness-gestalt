@@ -237,6 +237,21 @@
 
 - id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
+  config:
+    routeResolver: !!js "async ({ agent, toProjectMember, signal } = {}) => { const membership = ctx.get('desktopProjectMembership'); if (membership == null) throw new Error('Desktop Project Membership is unavailable'); const title = agent == null ? 'Desktop session' : (ctx.get('sessionTitle')?.get(agent.session)?.title ?? 'Desktop session'); return await membership.questionRoute(agent, toProjectMember, title, signal) }"
+    boundProjectResolver: !!js "async ({ agent, signal } = {}) => (await ctx.get('desktopProjectMembership')?.context(agent, signal))?.project?.id"
+
+# Desktop keeps Account proof material outside the Web Host. Its loopback
+# provider projects only current-context and roster reads; browser-only `dsh
+# web` has no bridge and therefore keeps this tool absent.
+- id: tool-project-members
+  name: '@deepseek-ai/dsh-tool-project-members'
+  disabled: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN == null && process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE == null
+  config:
+    currentAccountResolver: !!js "async ({ signal } = {}) => (await ctx.get('desktopProjectMembership')?.currentAccount(signal))?.id"
+    boundProjectResolver: !!js "async ({ agent, signal } = {}) => (await ctx.get('desktopProjectMembership')?.context(agent, signal))?.project?.id"
+    rosterResolver: !!js "async (actor, projectId, { signal } = {}) => { const membership = ctx.get('desktopProjectMembership'); if (membership == null) throw new Error('Desktop Project Membership is unavailable'); return await membership.roster(actor, projectId, signal) }"
+    rosterPresenter: !!js "async view => { const membership = ctx.get('desktopProjectMembership'); if (membership == null) throw new Error('Desktop Project Membership is unavailable'); return await membership.present(view) }"
 
 - id: tool-todo
   name: '@deepseek-ai/dsh-tool-todo'

@@ -114,6 +114,7 @@ describe('Project Members three-installation Electron journey', () => {
     await assertReceiverRoster('Online')
 
     await startA1SessionAndAsk()
+    await assertSingleA1ComposerCard()
     const title = 'Atlas — Electron A1 acceptance'
     await Promise.all([
       openReceivingQuestion('b1', title),
@@ -550,6 +551,14 @@ async function assertA1SessionLog(): Promise<void> {
   expect(combined).toContain('member-question/outcome')
   expect(combined).toContain('answered')
   expect(combined).toContain('approve')
+}
+
+async function assertSingleA1ComposerCard(): Promise<void> {
+  const instance = getInstance('a1')
+  const composerCards = await instance.$$('[data-composer-card]')
+  const memberComposer = await instance.$('textarea[aria-label="Answer this member question"]')
+  expect(composerCards).toHaveLength(1)
+  expect(await memberComposer.isExisting()).toBe(false)
 }
 
 async function assertNoLocalComposerCard(name: 'b1' | 'b2'): Promise<void> {

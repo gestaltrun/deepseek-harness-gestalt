@@ -14,7 +14,7 @@ Assembled #345 evidence is a locally runnable SHA-256-free AES-256-GCM developme
 
 Visible Desktop coverage is `pnpm run test:e2e-project-members-electron`. It rebuilds current source, starts three isolated Electron processes against that same local Platform, and requires a visible `DISPLAY` on Linux. `--dsh-e2e-profile` is accepted only by an explicit unpackaged `DSH_DESKTOP_E2E=1` run. Production sealing remains behind the standing independent encryption review.
 
-The sender encodes aligned document bytes as Companion `document-chunk` frames through `deriveMemberQuestionDocumentTransferId`. The receiver's `MemberQuestionDocumentAssembler` reconstructs those frames before Host ingest writes receiver-owned cache files under `.dsh/member-questions/<questionId>/`. `apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts` records that encode/wire/reassembly transcript against `snapshots/document-chunk-reassembly.expected.json`. The assembled walk itself records `snapshots/assembled-project-members.expected.json` for invite, last-window presence, chunked cache bytes, first-claim, later terminals, and the wire floor.
+The sender encodes aligned document bytes as Companion `document-chunk` frames through `deriveMemberQuestionDocumentTransferId`. The receiver's `MemberQuestionDocumentAssembler` reconstructs those frames before Host ingest writes receiver-owned cache files under `.dsh/member-questions/<questionId>/`. `apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts` records that encode/wire/reassembly transcript against `snapshots/document-chunk-reassembly.expected.json`. `apps/desktop/tests/member-question-e2e/assembled-project-members.snapshot.ts` records the assembled walk as JSONL against `snapshots/assembled-project-members.expected.jsonl`.
 
 ## Alternatives considered
 
@@ -32,7 +32,7 @@ The sender encodes aligned document bytes as Companion `document-chunk` frames t
 
 ## Testing
 
-- `pnpm exec vitest run --config vitest.snapshot.config.ts apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts`
+- `pnpm exec vitest run --config vitest.snapshot.config.ts apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts apps/desktop/tests/member-question-e2e/assembled-project-members.snapshot.ts`
 - `pnpm exec vitest run apps/desktop/tests/member-question-e2e/assembled-project-members.spec.ts apps/desktop/tests/member-question-e2e/keyless-transport.spec.ts apps/desktop/tests/e2e-profile.spec.ts`
 - `pnpm exec vitest run packages/interaction/member-question-sender/tests/document-transfer.spec.ts packages/interaction/member-question-receiver/tests/document-transfer.spec.ts packages/platform/remote-protocol/tests/companion-document-transfer.spec.ts`
 - `pnpm run test:e2e-project-members-electron` on a host with a visible display

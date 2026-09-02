@@ -1,0 +1,6 @@
+{"type":"invite","incompletePending":1,"acceptedPending":0}
+{"type":"presence","afterHeartbeats":["online","online"],"afterLastWindowClose":["online","offline"]}
+{"type":"documents","paths":["decision.md","preview.html","payload.bin"],"payloadChunks":2,"payloadByteLength":32787,"payloadSha256":"9eddc7d026079ddb63b420e805b8a2229c4bc3940eb289c6d008a1e9ab781737","cacheRoot":".dsh/member-questions"}
+{"type":"first-claim","outcome":"answered","loserMatchesWinner":true,"noComposerCard":true}
+{"type":"later-terminals","outcomes":["expired","withdrawn","superseded","MEMBER_OFFLINE"]}
+{"type":"wire-floor","retained":"ciphertext-only"}

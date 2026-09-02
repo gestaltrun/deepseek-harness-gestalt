@@ -1326,6 +1326,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'disposer for this exact registration.',
       },
       {
+        signature: 'abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void',
+        description: 'Install the single first-claim terminal authority used by this Host.',
+        parameters: [{ name: 'authority', description: 'transport-backed first-claim adapter.' }],
+        returns: 'disposer for this exact registration.',
+      },
+      {
         signature: 'abstract bind( accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<void>',
         description: 'Persist or replace one exact Account/Project to local Workspace association.',
         parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project being joined.' }, { name: 'workspaceId', description: 'exact local Workspace selected or cloned.' }],
@@ -1366,6 +1372,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>',
         description: 'Apply one answered or declined settlement to a pending question. Unknown or already-settled question ids are ignored (idempotent).',
         parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }, { name: 'settlement', description: 'answered answers or a declined verdict with the settling Installation metadata and epoch.' }],
+        returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>',
+        description: 'Apply one authoritative first-claim terminal published by transport. Unknown or already-settled question ids are ignored.',
+        parameters: [{ name: 'terminal', description: 'Companion member-question settled result.' }],
         returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
       },
       {
@@ -5061,6 +5073,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
   },
   {
+    name: 'MemberQuestionDocument',
+    declaration: 'export interface MemberQuestionDocument {\n    readonly path: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
     name: 'MemberQuestionHumanTurnAdmissionContext',
     declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly workspaceId: Branded<\'WorkspaceId\'>;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n    readonly documents: readonly MemberQuestionTransferredDocument[];\n}',
   },
@@ -5118,7 +5134,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'MemberQuestionSendPayload',
-    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: ProjectId;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: CompanionSessionId;\n}',
+    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: ProjectId;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly documents?: readonly MemberQuestionDocument[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: CompanionSessionId;\n}',
   },
   {
     name: 'MemberQuestionSendResult',
@@ -5131,6 +5147,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'MemberQuestionSettlement',
     declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n};',
+  },
+  {
+    name: 'MemberQuestionTerminalAuthority',
+    declaration: 'export interface MemberQuestionTerminalAuthority {\n    claim(candidate: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>;\n}',
   },
   {
     name: 'MemberQuestionTransferredDocument',

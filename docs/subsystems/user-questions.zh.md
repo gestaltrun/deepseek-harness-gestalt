@@ -339,6 +339,13 @@ abstract registerSessionMaterializer(materializer: MemberQuestionSessionMaterial
 abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
 
 /**
+ * Install the single first-claim terminal authority used by this Host.
+ * @param authority - transport-backed first-claim adapter.
+ * @returns disposer for this exact registration.
+ */
+abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void
+
+/**
  * Persist or replace one exact Account/Project to local Workspace association.
  * @param accountId - authenticated receiving Account.
  * @param projectId - Cloud Project being joined.
@@ -408,6 +415,14 @@ abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendO
  * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
  */
 abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
+
+/**
+ * Apply one authoritative first-claim terminal published by transport.
+ * Unknown or already-settled question ids are ignored.
+ * @param terminal - Companion member-question settled result.
+ * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
+ */
+abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>
 
 /**
  * Withdraw one pending question as initiator cancellation.

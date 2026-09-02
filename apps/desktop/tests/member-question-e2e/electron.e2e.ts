@@ -126,6 +126,7 @@ describe('Project Members three-installation Electron journey', () => {
       await waitForBodyText(instance, 'decision.md')
       await waitForBodyText(instance, 'preview.html')
       await waitForBodyText(instance, 'notes.txt')
+      await assertNoLocalComposerCard(name)
       await instance.saveScreenshot(join(
         required('DSH_PROJECT_MEMBERS_ELECTRON_ARTIFACT_DIR'), name, 'question-pending.png',
       ))
@@ -134,6 +135,7 @@ describe('Project Members three-installation Electron journey', () => {
     await assertTransferredDocuments('b1')
     await focusTransferredDocument('b1', 'decision.md', 'A1 authoritative guarded rollout')
     await focusTransferredDocument('b1', 'preview.html', 'A1 authoritative guarded preview')
+    await focusTransferredDocument('b1', 'notes.txt', 'A1 authoritative plain-text acceptance material.')
 
     const b1 = getInstance('b1')
     const b2 = getInstance('b2')
@@ -545,6 +547,14 @@ async function assertA1SessionLog(): Promise<void> {
   expect(combined).toContain('member-question/outcome')
   expect(combined).toContain('answered')
   expect(combined).toContain('approve')
+}
+
+async function assertNoLocalComposerCard(name: 'b1' | 'b2'): Promise<void> {
+  const instance = getInstance(name)
+  const productComposer = await instance.$('textarea[placeholder="Describe what you want to build"]')
+  const memberComposer = await instance.$('textarea[aria-label="Answer this member question"]')
+  expect(await productComposer.isExisting()).toBe(false)
+  expect(await memberComposer.isExisting()).toBe(false)
 }
 
 async function assertNoReceiverModelOutput(name: 'b1' | 'b2'): Promise<void> {

@@ -1,13 +1,21 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import FileMemberQuestionReceiver from '@deepseek-ai/dsh-member-question-receiver'
+import FileMemberQuestionReceiver, {
+  MEMBER_QUESTION_DOCUMENT_CACHE_ROOT,
+  writeMemberQuestionDocumentCache,
+  type MemberQuestionHumanTurnAdmissionContext,
+} from '@deepseek-ai/dsh-member-question-receiver'
 import CompanionMemberQuestionSender from '@deepseek-ai/dsh-member-question-sender'
 import { parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { parseCompanionSessionId, parseMemberQuestionProjectId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionSessionId,
+  parseMemberQuestionProjectId,
+  REMOTE_PROTOCOL_LIMITS,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
 import { startLocalKeylessPlatform, type KeylessPlatformSession } from './local-platform.ts'
@@ -70,8 +78,12 @@ describe('assembled keyless Project Members acceptance', () => {
       expect(await pendingCount(platform, b1)).toBe(1)
 
       const a = endpoints[0]!
-      const receiverB1 = await receiver(b1Ctx, endpoints[1]!, roots)
-      const receiverB2 = await receiver(b2Ctx, endpoints[2]!, roots)
+      const workspaceB1 = await mkdtemp(join(tmpdir(), 'dsh-assembled-workspace-b1-'))
+      const workspaceB2 = await mkdtemp(join(tmpdir(), 'dsh-assembled-workspace-b2-'))
+      roots.push(workspaceB1, workspaceB2)
+      const openedFiles: string[] = []
+      const receiverB1 = await receiver(b1Ctx, endpoints[1]!, roots, workspaceB1, openedFiles)
+      const receiverB2 = await receiver(b2Ctx, endpoints[2]!, roots, workspaceB2, openedFiles)
       const projectId = parseMemberQuestionProjectId(project.id)
       await receiverB1.bind(b1.accountId, projectId, WorkspaceId('workspace-b1'))
       await receiverB2.bind(b2.accountId, projectId, WorkspaceId('workspace-b2'))
@@ -97,6 +109,22 @@ describe('assembled keyless Project Members acceptance', () => {
         [String(a1.accountId), 'online'],
         [String(b1.accountId), 'online'],
       ])
+      expect((await platform.closePresence(b2)).status).toBe(204)
+      expect(await rosterPresence(platform, project.id, a1)).toEqual([
+        [String(a1.accountId), 'online'],
+        [String(b1.accountId), 'online'],
+      ])
+      expect((await platform.closePresence(b1)).status).toBe(204)
+      expect(await rosterPresence(platform, project.id, a1)).toEqual([
+        [String(a1.accountId), 'online'],
+        [String(b1.accountId), 'offline'],
+      ])
+      expect((await platform.heartbeat(b1)).status).toBe(204)
+      expect((await platform.heartbeat(b2)).status).toBe(204)
+      expect(await rosterPresence(platform, project.id, a1)).toEqual([
+        [String(a1.accountId), 'online'],
+        [String(b1.accountId), 'online'],
+      ])
 
       const membershipPlatform = platform
       await aCtx.plugin(CompanionMemberQuestionSender, {
@@ -116,6 +144,12 @@ describe('assembled keyless Project Members acceptance', () => {
       await endpoints[2]!.start({ receiver: receiverB2 })
       startedEndpoints.push(endpoints[2]!)
 
+      const markdown = new TextEncoder().encode('# Guarded rollout\n')
+      const html = new TextEncoder().encode('<p>Use the guarded path.</p>')
+      const binary = Uint8Array.from(
+        { length: REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes + 19 },
+        (_, index) => index % 251,
+      )
       const send = aCtx.memberQuestionSender.send({
         toProjectMember: String(b1.accountId),
         projectId: parseMemberQuestionProjectId(project.id),
@@ -125,8 +159,16 @@ describe('assembled keyless Project Members acceptance', () => {
           question: 'Approve guarded rollout?',
           options: [{ label: 'approve' }, { label: 'revise' }],
         }],
-        references: [{ path: 'decision.md', reason: 'Current decision' }],
-        documents: [{ path: 'decision.md', bytes: new TextEncoder().encode('# Guarded rollout\n') }],
+        references: [
+          { path: 'decision.md', reason: 'Current decision' },
+          { path: 'preview.html', reason: 'Restricted preview' },
+          { path: 'payload.bin', reason: 'Arbitrary chunked bytes' },
+        ],
+        documents: [
+          { path: 'decision.md', bytes: markdown },
+          { path: 'preview.html', bytes: html },
+          { path: 'payload.bin', bytes: binary },
+        ],
         origin: {
           projectName: 'Atlas', originSessionTitle: 'Guarded rollout', askerAccountId: String(a1.accountId),
           askerRole: 'owner', askerDisplayName: 'ada', askerAvatarUrl: 'https://avatars.example/ada.png',
@@ -137,6 +179,36 @@ describe('assembled keyless Project Members acceptance', () => {
       await expect.poll(async () => (await receiverB2.snapshot()).pending.length).toBe(1)
       const questionB1 = (await receiverB1.snapshot()).pending[0]
       const questionB2 = (await receiverB2.snapshot()).pending[0]
+      const cached = questionB1?.cachedReferences ?? []
+      expect(cached.map(reference => reference.path)).toEqual([
+        'decision.md', 'preview.html', 'payload.bin',
+      ])
+      expect(cached.every(reference => reference.cachedPath.startsWith(
+        `${MEMBER_QUESTION_DOCUMENT_CACHE_ROOT}/${questionB1?.questionId}/`,
+      ))).toBe(true)
+      const cachedDecision = cached.find(reference => reference.path === 'decision.md')?.cachedPath
+      const cachedHtml = cached.find(reference => reference.path === 'preview.html')?.cachedPath
+      const cachedBinary = cached.find(reference => reference.path === 'payload.bin')?.cachedPath
+      if (cachedDecision === undefined || cachedHtml === undefined || cachedBinary === undefined) {
+        throw new Error('assembled receiver did not cache every transferred document')
+      }
+      expect(await readFile(join(workspaceB1, cachedDecision), 'utf8')).toBe('# Guarded rollout\n')
+      expect(await readFile(join(workspaceB1, cachedHtml), 'utf8')).toBe('<p>Use the guarded path.</p>')
+      expect(await readFile(join(workspaceB1, cachedBinary))).toEqual(Buffer.from(binary))
+      expect(await readFile(join(workspaceB2, cachedDecision), 'utf8')).toBe('# Guarded rollout\n')
+      expect(await readFile(join(workspaceB2, cachedHtml), 'utf8')).toBe('<p>Use the guarded path.</p>')
+      expect(await readFile(join(workspaceB2, cachedBinary))).toEqual(Buffer.from(binary))
+      expect([...openedFiles].sort()).toEqual([
+        join(workspaceB1, cachedDecision),
+        join(workspaceB1, cachedHtml),
+        join(workspaceB1, cachedBinary),
+        join(workspaceB2, cachedDecision),
+        join(workspaceB2, cachedHtml),
+        join(workspaceB2, cachedBinary),
+      ].sort())
+      expect(openedFiles.every(path => path.includes(`/${MEMBER_QUESTION_DOCUMENT_CACHE_ROOT}/`))).toBe(true)
+      expect(questionB1).not.toHaveProperty('composer')
+      expect(questionB2).not.toHaveProperty('composer')
       const settledAt = Date.now()
       const [canonicalB1, canonicalB2] = await Promise.all([
         receiverB1.settle(questionB1!.questionId, {
@@ -173,8 +245,14 @@ describe('assembled keyless Project Members acceptance', () => {
         expect.poll(async () => (await receiverB1.snapshot()).terminal.length).toBe(1),
         expect.poll(async () => (await receiverB2.snapshot()).terminal.length).toBe(1),
       ])
-      expect((await receiverB1.snapshot()).terminal[0]?.terminal).toEqual(canonicalB1)
-      expect((await receiverB2.snapshot()).terminal[0]?.terminal).toEqual(canonicalB1)
+      const terminalB1 = (await receiverB1.snapshot()).terminal[0]
+      const terminalB2 = (await receiverB2.snapshot()).terminal[0]
+      expect(terminalB1?.terminal).toEqual(canonicalB1)
+      expect(terminalB2?.terminal).toEqual(canonicalB1)
+      const loser = canonicalB1.settledByInstallationId === 'installation-b1' ? terminalB2 : terminalB1
+      expect(loser?.terminal.settledByInstallationId).toBe(canonicalB1.settledByInstallationId)
+      expect(loser?.terminal.settledByDeviceName).toBe(canonicalB1.settledByDeviceName)
+      expect(loser).not.toHaveProperty('composer')
 
       const terminalPayload = (originSessionId: string, background: string) => ({
         toProjectMember: String(b1.accountId),
@@ -266,7 +344,8 @@ describe('assembled keyless Project Members acceptance', () => {
       })).rejects.toMatchObject({ code: 'MEMBER_OFFLINE' })
       expect(broker.audit.filter(entry => entry.operation === 'deliver')).toHaveLength(deliveries)
       const forbiddenPlaintext = [
-        'Review the linked project materials', '# Guarded rollout', 'Approve guarded rollout?', 'approve',
+        'Review the linked project materials', '# Guarded rollout', '<p>Use the guarded path.</p>',
+        'Approve guarded rollout?', 'approve',
       ]
       for (const retained of [JSON.stringify(broker.audit), await platform.retainedState()]) {
         for (const marker of forbiddenPlaintext) expect(retained).not.toContain(marker)
@@ -295,12 +374,28 @@ async function receiver(
   context: Context,
   endpoint: KeylessMemberQuestionEndpoint,
   roots: string[],
+  workspacePath: string,
+  openedFiles: string[],
 ): Promise<FileMemberQuestionReceiver> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-assembled-project-members-receiver-'))
   roots.push(root)
+  await mkdir(join(workspacePath, '.dsh'), { recursive: true, mode: 0o700 })
+  await writeFile(join(workspacePath, 'local-twin.md'), '# same-named local file\n')
   await context.plugin(FileMemberQuestionReceiver, {
     storagePath: root, environment: 'development', maxRecords: 16, terminalRetryMs: 10,
     terminalAuthority: endpoint.terminalAuthority,
+    materializer: async (_request, admission: MemberQuestionHumanTurnAdmissionContext) => {
+      const question = admission.questions.find(row => 'operation' in row)
+      if (question === undefined || !('operation' in question)) return { accepted: true }
+      const cached = await writeMemberQuestionDocumentCache({
+        workspacePath,
+        questionId: question.questionId,
+        references: question.operation.references,
+        documents: admission.documents,
+      })
+      for (const reference of cached) openedFiles.push(join(workspacePath, reference.cachedPath))
+      return { accepted: true, cachedReferences: cached }
+    },
   })
   return context.memberQuestionReceiver as FileMemberQuestionReceiver
 }

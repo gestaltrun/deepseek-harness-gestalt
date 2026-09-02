@@ -64,6 +64,7 @@ export interface LocalKeylessPlatform {
   post(path: string, body: unknown, session: KeylessPlatformSession): Promise<Response>
   get(path: string, session: KeylessPlatformSession): Promise<Response>
   heartbeat(session: KeylessPlatformSession): Promise<Response>
+  closePresence(session: KeylessPlatformSession): Promise<Response>
   retainedState(): Promise<string>
   close(): Promise<void>
 }
@@ -140,6 +141,9 @@ export async function startLocalKeylessPlatform(
       }),
       get: (path, session) => fetch(`${origin}${path}`, { headers: requestHeaders(session, false, environment) }),
       heartbeat: session => fetch(`${origin}/v1/projects/presence/heartbeat`, {
+        method: 'POST', headers: requestHeaders(session, false, environment),
+      }),
+      closePresence: session => fetch(`${origin}/v1/projects/presence/close`, {
         method: 'POST', headers: requestHeaders(session, false, environment),
       }),
       retainedState: async () => await readFile(

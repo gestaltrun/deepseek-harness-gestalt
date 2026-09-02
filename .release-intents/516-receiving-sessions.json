@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "516-receiving-sessions",
+  "summary": {
+    "en": "Open routed member questions as ordinary Host Sessions in the invitation-bound Workspace, with Decision Briefs injected before any model turn.",
+    "zh": "将定向成员提问作为普通 Host Session 打开到邀请绑定的 Workspace，并在任何模型 turn 之前注入决策简报。"
+  },
+  "releases": {
+    "desktop": "minor",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The planner follows shared Client Runtime packages, but Mobile does not compose the Web member-question plugin or receiving-session Host path."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The planner follows shared lockfile and aggregate build inputs; the receiving Session materializer is Host Web/Desktop-only and no Platform image or deployment input changes."
+    }
+  ]
+}

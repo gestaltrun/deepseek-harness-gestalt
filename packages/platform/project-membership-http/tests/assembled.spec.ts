@@ -259,7 +259,7 @@ describe('real Project Membership HTTP composition', () => {
       backend: new MemoryAccountBackend(ENVIRONMENT.databaseIdentity),
       invalidation: new MemoryAccountInvalidationBus(),
       github: sequentialGithub(),
-      config: { origins: [ENVIRONMENT.origin], presenceHeartbeatIntervalMs: 10, presenceTtlMs: 25 },
+      config: { origins: [ENVIRONMENT.origin], presenceHeartbeatIntervalMs: 200, presenceTtlMs: 1_500 },
     })
     const octocat = await signIn(loaded.context.platformAccount, 'ttl-octocat')
     const created = await post(loaded.origin, '/v1/projects', {
@@ -268,7 +268,7 @@ describe('real Project Membership HTTP composition', () => {
     const project = await created.json() as { id: string }
     expect(await statusOf(heartbeat(loaded.origin, octocat))).toBe(204)
     expect(await presenceOf(loaded.origin, project.id, octocat)).toBe('online')
-    await new Promise((resolve) => { setTimeout(resolve, 45) })
+    await new Promise((resolve) => { setTimeout(resolve, 2_000) })
     expect(await presenceOf(loaded.origin, project.id, octocat)).toBe('offline')
   })
 

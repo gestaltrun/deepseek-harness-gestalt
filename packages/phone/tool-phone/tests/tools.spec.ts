@@ -305,9 +305,8 @@ describe('deferred phone device Consumer', () => {
         actions: [
           { type: 'pointerMove', x: 1, y: 2 },
           { type: 'pointerDown' },
-          { type: 'pause', duration: 500 },
           { type: 'pointerMove', x: 3, y: 4 },
-          { type: 'pause', duration: 200 },
+          { type: 'pause', duration: 150 },
           { type: 'pointerUp' },
         ],
       },

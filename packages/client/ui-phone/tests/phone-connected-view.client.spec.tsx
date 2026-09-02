@@ -375,7 +375,7 @@ describe('PhoneConnectedView touch and keys', () => {
     })
   })
 
-  it('captures the pointer and sends the WDA press-hold swipe from origin to release', async () => {
+  it('captures the pointer and sends the WDA move-duration swipe from origin to release', async () => {
     const { gateway } = await withSurface()
     const target = frame()
     const setPointerCapture = vi.fn()
@@ -399,9 +399,8 @@ describe('PhoneConnectedView touch and keys', () => {
         actions: [
           { type: 'pointerMove', x: 39, y: 42 },
           { type: 'pointerDown' },
-          { type: 'pause', duration: 500 },
           { type: 'pointerMove', x: 254, y: 485 },
-          { type: 'pause', duration: 200 },
+          { type: 'pause', duration: 150 },
           { type: 'pointerUp' },
         ],
       },
@@ -419,9 +418,8 @@ describe('PhoneConnectedView touch and keys', () => {
         actions: [
           { type: 'pointerMove', x: 39, y: 42 },
           { type: 'pointerDown' },
-          { type: 'pause', duration: 500 },
           { type: 'pointerMove', x: 59, y: 63 },
-          { type: 'pause', duration: 200 },
+          { type: 'pause', duration: 150 },
           { type: 'pointerUp' },
         ],
       },
@@ -472,16 +470,23 @@ describe('PhoneConnectedView touch and keys', () => {
       fireEvent.wheel(frame(), { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE })
       expect(gateway.lastSocket!.sent).toEqual([])
       await act(async () => { vi.advanceTimersByTime(50) })
-      expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      const sent = parseSentFrame(gateway.lastSocket!.sent[0]!) as {
+        readonly params: { readonly actions: ReadonlyArray<{ readonly y?: number }> }
+      }
+      const originY = sent.params.actions[0]?.y
+      const destinationY = sent.params.actions[2]?.y
+      expect(originY).toEqual(expect.any(Number))
+      expect(destinationY).toEqual(expect.any(Number))
+      expect(originY).not.toBe(destinationY)
+      expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
         jsonrpc: '2.0', id: 1, method: 'gesture',
         params: {
           deviceId: 'emulator-5554',
           actions: [
-            { type: 'pointerMove', x: 195 },
+            { type: 'pointerMove', x: 195, y: originY },
             { type: 'pointerDown' },
-            { type: 'pause', duration: 500 },
-            { type: 'pointerMove', x: 195 },
-            { type: 'pause', duration: 200 },
+            { type: 'pointerMove', x: 195, y: destinationY },
+            { type: 'pause', duration: 150 },
             { type: 'pointerUp' },
           ],
         },

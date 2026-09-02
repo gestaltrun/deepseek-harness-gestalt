@@ -12,6 +12,44 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
+/**
+ * Vertical page-offset delta for one gesture list. A tap-shaped list, or a
+ * Speak Selection long-press (pause after pointerDown before destination move),
+ * keeps offset 0.
+ */
+function phoneSwipeScrollDelta(actions) {
+  let origin
+  let destination
+  let pressed = false
+  let longPress = false
+  for (const action of actions ?? []) {
+    if (action?.type === 'pointerMove' && typeof action.x === 'number' && typeof action.y === 'number') {
+      if (!pressed) origin = { x: action.x, y: action.y }
+      else destination = { x: action.x, y: action.y }
+      continue
+    }
+    if (action?.type === 'pointerDown') {
+      pressed = true
+      if (typeof action.x === 'number' && typeof action.y === 'number' && origin === undefined) {
+        origin = { x: action.x, y: action.y }
+      }
+      continue
+    }
+    if (action?.type === 'pause' && pressed && destination === undefined
+      && typeof action.duration === 'number' && action.duration >= 300) {
+      longPress = true
+    }
+  }
+  if (longPress || origin === undefined || destination === undefined) return 0
+  return origin.y - destination.y
+}
+
+function applyGestureScroll(deviceId, params) {
+  const delta = phoneSwipeScrollDelta(params?.actions)
+  const current = state.scroll[deviceId] ?? 0
+  state.scroll[deviceId] = current + delta
+}
+
 const args = process.argv.slice(2)
 if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('mobilecli version 1.0.5\n')
@@ -62,6 +100,7 @@ const state = {
   infoCount: 0,
   io: [],
   captures: [],
+  scroll: {},
 }
 let requests = 0
 
@@ -292,6 +331,7 @@ async function handleRpc(req, res) {
         return
       }
       state.io.push({ method, params })
+      if (method === 'device.io.gesture') applyGestureScroll(String(deviceId), params)
       reply(res, id, { result: { status: 'ok' } })
       return
     }
@@ -363,6 +403,7 @@ const server = http.createServer((req, res) => {
           infoCount: state.infoCount,
           io: state.io,
           captures: state.captures,
+          scroll: state.scroll,
         })
         return
       }

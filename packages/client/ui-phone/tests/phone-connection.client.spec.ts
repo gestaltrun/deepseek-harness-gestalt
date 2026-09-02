@@ -657,7 +657,7 @@ describe('PhoneConnectionController io', () => {
     })
   })
 
-  it('maps a drag onto the WDA positioning, press-hold, move, and release-settle list', async () => {
+  it('maps a drag onto the WDA positioning, destination move, and travel pause list', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
@@ -670,9 +670,8 @@ describe('PhoneConnectionController io', () => {
         actions: [
           { type: 'pointerMove', x: 0, y: 0 },
           { type: 'pointerDown' },
-          { type: 'pause', duration: 500 },
           { type: 'pointerMove', x: 360, y: 720 },
-          { type: 'pause', duration: 200 },
+          { type: 'pause', duration: 150 },
           { type: 'pointerUp' },
         ],
       },

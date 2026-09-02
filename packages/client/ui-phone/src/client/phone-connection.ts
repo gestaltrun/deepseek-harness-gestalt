@@ -9,6 +9,7 @@
  * without a browser.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
+import { phoneSwipeActions } from '@deepseek-ai/dsh-phone-runtime/swipe'
 import {
   encodePhoneIoFrame, isUnauthorizedMessage, parsePhoneIoReply, PhoneStreamHttpError,
   type PhoneAgentStatusView, type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
@@ -130,10 +131,6 @@ export interface PhoneSurfaceSize {
 const RETRY_LIMIT = 3
 /** Linear backoff base; attempt n waits `n × retryBaseDelayMs`. */
 const RETRY_BASE_DELAY_MS = 1000
-/** Contact hold after press so iOS treats the path as a drag rather than a tap. */
-const SWIPE_PRESS_HOLD_MS = 500
-/** Settle on the last move so devicekit can attach duration before release. */
-const SWIPE_RELEASE_SETTLE_MS = 200
 
 /** Default wall-clock scheduler. */
 const defaultSchedule = (delayMs: number, fn: () => void): (() => void) => {
@@ -371,14 +368,7 @@ export class PhoneConnectionController {
     const end = devicePointOf(release, surface)
     return this.send({
       method: 'gesture',
-      actions: [
-        { type: 'pointerMove', x: start.x, y: start.y },
-        { type: 'pointerDown' },
-        { type: 'pause', duration: SWIPE_PRESS_HOLD_MS },
-        { type: 'pointerMove', x: end.x, y: end.y },
-        { type: 'pause', duration: SWIPE_RELEASE_SETTLE_MS },
-        { type: 'pointerUp' },
-      ],
+      actions: phoneSwipeActions([start, end]),
     })
   }
 

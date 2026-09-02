@@ -1,37 +1,16 @@
 /**
- * Input coordinate normalization for mobilecli device-control calls.
+ * Input coordinate normalization for mobilecli device-control calls, plus
+ * re-export of the browser-safe WDA swipe encoder.
  * @module @deepseek-ai/dsh-phone-runtime/io
  */
 
 import { PhoneDevicesError } from './errors.ts'
 import type { PhoneIoRequest } from './types.ts'
 
-/** Contact hold after press so iOS treats the path as a drag rather than a tap. */
-const PHONE_SWIPE_PRESS_HOLD_MS = 500
-/** Settle on the last move so devicekit can attach duration before release. */
-const PHONE_SWIPE_RELEASE_SETTLE_MS = 200
-
-/**
- * Encode a swipe path as the WDA action list mobilecli's iOS converter consumes.
- * Positioning `pointerMove` precedes `pointerDown`; pauses supply drag duration.
- * @param points - capture-pixel path; the first and last points bound the swipe.
- * @returns OpenRPC `device.io.gesture` actions, or empty when `points` is empty.
- */
-export function phoneSwipeActions(
-  points: readonly Readonly<{ x: number; y: number }>[],
-): Array<Record<string, unknown>> {
-  const start = points[0]
-  const end = points[points.length - 1]
-  if (start === undefined || end === undefined) return []
-  return [
-    { type: 'pointerMove', x: start.x, y: start.y },
-    { type: 'pointerDown' },
-    { type: 'pause', duration: PHONE_SWIPE_PRESS_HOLD_MS },
-    { type: 'pointerMove', x: end.x, y: end.y },
-    { type: 'pause', duration: PHONE_SWIPE_RELEASE_SETTLE_MS },
-    { type: 'pointerUp' },
-  ]
-}
+export {
+  PHONE_SWIPE_MOVE_DURATION_MS,
+  phoneSwipeActions,
+} from './swipe.ts'
 
 /**
  * Parse the logical-point scale from mobilecli 1.0.5's `device.info` result.

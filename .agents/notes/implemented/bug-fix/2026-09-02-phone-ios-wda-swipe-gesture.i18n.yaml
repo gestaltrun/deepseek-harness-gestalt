@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-02-phone-ios-wda-swipe-gesture.md
-2026-09-02-phone-ios-wda-swipe-gesture.md: b87edf25d6b82d5af3143af6c6624a416e29df3d
-2026-09-02-phone-ios-wda-swipe-gesture.zh.md: 85cfad2627e046da9531783bbd3a55092c501aa5
+2026-09-02-phone-ios-wda-swipe-gesture.md: 7b791793ee064dc3c7d3d399f7820a711861d848
+2026-09-02-phone-ios-wda-swipe-gesture.zh.md: d4c3a03395a1774d907d555b737577d59e8a96ef

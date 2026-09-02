@@ -3,8 +3,8 @@
   "version": 1,
   "id": "514-phone-ios-wda-swipe",
   "summary": {
-    "en": "Encode Desktop phone-tab swipes as WDA press-hold gestures so iOS Simulator UI scrolls.",
-    "zh": "把桌面端手机 tab 的 swipe 编成 WDA 按住手势，使 iOS Simulator 界面可以滚动。"
+    "en": "Encode Desktop phone-tab swipes as WDA destination-move travel pauses so iOS Simulator UI scrolls.",
+    "zh": "把桌面端手机 tab 的 swipe 编成 WDA 终点位移时长手势，使 iOS Simulator 界面可以滚动。"
   },
   "releases": {
     "desktop": "patch",

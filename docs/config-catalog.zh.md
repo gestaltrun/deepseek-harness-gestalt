@@ -3200,7 +3200,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/tool-phone/src/index.ts:23`](../packages/phone/tool-phone/src/index.ts)
+来源：[`packages/phone/tool-phone/src/index.ts:24`](../packages/phone/tool-phone/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

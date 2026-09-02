@@ -3403,6 +3403,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../../phone/phone-runtime
       '@deepseek-ai/dsh-settings':
         specifier: workspace:^
         version: link:../../settings/settings

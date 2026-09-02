@@ -111,9 +111,13 @@ const FAILURE_COPY: Record<PhoneStreamFailureKind, {
 
 /** Pointer travel (px) below which a press still counts as a tap. */
 const DRAG_THRESHOLD_PX = 6
+/** Idle gap after which a trackpad wheel burst becomes one vertical swipe. */
 const WHEEL_BURST_IDLE_MS = 50
+/** Pixel travel of one `DOM_DELTA_LINE` wheel unit on the live frame. */
 const WHEEL_LINE_PX = 16
+/** Minimum normalized vertical travel of a coalesced wheel swipe. */
 const WHEEL_MIN_TRAVEL = 0.08
+/** Maximum normalized vertical travel of a coalesced wheel swipe. */
 const WHEEL_MAX_TRAVEL = 0.4
 
 /** The toolbar icon glyphs, drawn inline to stay on the primitives idiom. */

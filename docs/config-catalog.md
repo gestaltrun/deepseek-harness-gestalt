@@ -3198,7 +3198,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/tool-phone/src/index.ts:23`](../packages/phone/tool-phone/src/index.ts)
+Source: [`packages/phone/tool-phone/src/index.ts:24`](../packages/phone/tool-phone/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

@@ -18,6 +18,9 @@
       "path": "../../runtime-diagnostics/invariants"
     },
     {
+      "path": "../../phone/phone-runtime"
+    },
+    {
       "path": "../../settings/settings"
     },
     {

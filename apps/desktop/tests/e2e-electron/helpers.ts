@@ -7,13 +7,20 @@ import { readOwnedFakeProcess } from '../../scripts/e2e-electron-runner-support.
 
 interface FakeIoRecord {
   readonly method?: string
-  readonly params?: { readonly deviceId?: string; readonly x?: number; readonly y?: number; readonly button?: string }
+  readonly params?: {
+    readonly deviceId?: string
+    readonly x?: number
+    readonly y?: number
+    readonly button?: string
+    readonly actions?: ReadonlyArray<Readonly<Record<string, unknown>>>
+  }
 }
 
 export interface FakeCounters {
   readonly requests: number
   readonly io: readonly FakeIoRecord[]
   readonly captures: ReadonlyArray<{ readonly deviceId: string; readonly format: string }>
+  readonly scroll: Readonly<Record<string, number>>
 }
 
 interface StartupEvidence {
@@ -180,15 +187,16 @@ export async function fakeCounters(): Promise<FakeCounters> {
   const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/counters`)
   const record = await response.json() as Partial<FakeCounters>
   if (typeof record.requests !== 'number' || !Number.isSafeInteger(record.requests)
-    || !Array.isArray(record.io) || !Array.isArray(record.captures)) {
+    || !Array.isArray(record.io) || !Array.isArray(record.captures)
+    || record.scroll === undefined || typeof record.scroll !== 'object') {
     throw new Error(`invalid fakemobilecli counters: ${JSON.stringify(record)}`)
   }
-  return { requests: record.requests, io: record.io, captures: record.captures }
+  return { requests: record.requests, io: record.io, captures: record.captures, scroll: record.scroll }
 }
 
 /** Wait until the external fake records the requested state. */
 export async function waitForFakeIo(match: (counters: FakeCounters) => boolean): Promise<FakeCounters> {
-  let last: FakeCounters = { requests: 0, io: [], captures: [] }
+  let last: FakeCounters = { requests: 0, io: [], captures: [], scroll: {} }
   await browser.waitUntil(async () => {
     last = await fakeCounters()
     return match(last)

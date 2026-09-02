@@ -43,7 +43,7 @@ export async function apply(ctx: Context): Promise<void> {
   if (created.status !== 201) throw new Error(`create project failed: ${String(created.status)}`)
   const project = await created.json() as { id: string }
   const invited = await post(origin, '/v1/projects/invitations', {
-    projectId: project.id, githubLogin: mona.githubLogin,
+    projectId: project.id, githubLogin: mona.githubLogin, grantedRole: 'member',
   }, authHeaders(octocat))
   if (invited.status !== 201) throw new Error(`invite failed: ${String(invited.status)}`)
   const invitation = await invited.json() as { id: string }

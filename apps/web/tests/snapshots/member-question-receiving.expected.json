@@ -5,7 +5,7 @@
     "receivedCount": 1,
     "attached": true
   },
-  "firstHumanTurn": {
+  "conversation": {
     "eventTypes": [
       "member-question/received",
       "agent/inbox/spliced",
@@ -16,7 +16,12 @@
       "user/message",
       "user/message",
       "user/message",
-      "request/header"
+      "request/header",
+      "member-question/settled",
+      "agent/inbox/spliced",
+      "turn/start",
+      "agent/inbox/spliced",
+      "user/message"
     ],
     "received": {
       "questionId": "question-snapshot",
@@ -83,8 +88,22 @@
           "kind": "user",
           "rpcId": "rpc-snapshot"
         }
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Record the chosen channel in the rollout notes."
+          }
+        ],
+        "source": {
+          "kind": "user",
+          "rpcId": "rpc-snapshot-after-answer"
+        }
       }
     ],
-    "requestCount": 1
+    "requestCount": 1,
+    "settledOutcome": "answered"
   }
 }

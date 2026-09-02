@@ -8,7 +8,7 @@ import {
   createAuthenticatedMemberQuestionIngress,
   type MemberQuestionReceiverService,
 } from '@deepseek-ai/dsh-member-question-receiver'
-import type { Browser, Page, Request } from 'playwright'
+import type { Browser, Locator, Page, Request } from 'playwright'
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -69,6 +69,10 @@ function sessionRow(page: Page, title: string) {
   return page.getByText(title, { exact: true }).locator('xpath=ancestor::*[@role="treeitem"][1]')
 }
 
+function sessionGroupHeader(row: Locator) {
+  return row.locator('xpath=ancestor::div[contains(@class,"groupSection")][1]').getByRole('treeitem').first()
+}
+
 describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receiving session', () => {
   let scaffold: WebScaffold
   let browser: Browser
@@ -125,6 +129,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const title = 'Project Atlas — Receiver launch decision'
       const row = sessionRow(page, title)
       await row.waitFor({ timeout: 30_000 })
+      await expect.poll(() => sessionGroupHeader(row).textContent()).toContain('workspace')
+      expect(await sessionGroupHeader(row).textContent()).not.toMatch(/Ungrouped/)
+      expect(await page.getByText('Ungrouped', { exact: true }).count()).toBe(0)
       await row.click()
       await expect.poll(() => row.getAttribute('aria-selected')).toBe('true')
       const card = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })

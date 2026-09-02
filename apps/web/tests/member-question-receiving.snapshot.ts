@@ -1,4 +1,4 @@
-/** Keyless assembled snapshot for lazy receiver materialization and its first model transcript. */
+/** Keyless assembled snapshot for arrival Session materialization, first prompt, and post-answer conversation. */
 
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
@@ -14,7 +14,7 @@ const expectedPath = new URL('./snapshots/member-question-receiving.expected.jso
 const refreshing = process.env.DSH_SNAPSHOT === 'refresh'
 
 describe('member-question receiving keyless assembled snapshot', () => {
-  it('keeps arrival model-free and logs the brief before the first human prompt', async () => {
+  it('keeps arrival model-free and continues the Host Session after a local answer', async () => {
     const harnessHome = await mkdtemp(join(tmpdir(), 'dsh-member-question-snapshot-'))
     const scaffold = await launchWebScaffold({ harnessHome })
     try {
@@ -68,6 +68,7 @@ describe('member-question receiving keyless assembled snapshot', () => {
         attached: workspace.sessionIds.includes(arrived.receivingSessionId as never),
       }
 
+      const firstTurn = scaffold.whenTurnSettled()
       await receiver.admitHumanTurn({
         receivingSessionId: arrived.receivingSessionId,
         revision: arrived.revision,
@@ -75,15 +76,39 @@ describe('member-question receiving keyless assembled snapshot', () => {
         content: [{ type: 'text', text: 'Help me evaluate the rollout tradeoffs before I answer.' }],
         mode: 'queue',
       })
+      await firstTurn
       await expect.poll(() => scaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events
         .filter(event => event.type === 'request/header').length).toBe(1)
+      await receiver.settle(arrived.questionId, {
+        kind: 'answered',
+        answers: [{ id: 'release-channel', selected: ['Canary (Recommended)'] }],
+        settledByInstallationId: 'receiver-installation' as never,
+        settledByDeviceName: 'Receiver Desktop',
+        settledAt: Date.parse('2030-01-01T00:00:00.000Z'),
+      })
+      await expect.poll(() => scaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'member-question/settled' && event.data.outcome === 'answered').length).toBe(1)
+      const afterAnswer = await scaffold.ctx.apiProxy.sessions.prompt({
+        rpcId: 'rpc-snapshot-after-answer' as never,
+        payload: {
+          sessionId: arrived.receivingSessionId as never,
+          mode: 'queue',
+          content: [{ type: 'text', text: 'Record the chosen channel in the rollout notes.' }],
+        },
+      })
+      if (!afterAnswer.result.ok) {
+        throw new Error(`member-question snapshot: post-answer prompt failed: ${afterAnswer.result.error.message}`)
+      }
+      await expect.poll(() => scaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'user/message' && event.data.content.some(block =>
+          block.type === 'text' && block.text === 'Record the chosen channel in the rollout notes.')).length).toBe(1)
       const session = scaffold.ctx.sessions.get(arrived.receivingSessionId as never)
       if (session === undefined) throw new Error('member-question snapshot: Host Session was not materialized')
       const received = session.events.find(event => event.type === 'member-question/received')
       if (received?.type !== 'member-question/received') throw new Error('member-question snapshot: received event missing')
       const snapshot = {
         arrival,
-        firstHumanTurn: {
+        conversation: {
           eventTypes: session.events
             .filter(event => [
               'member-question/received',
@@ -91,6 +116,7 @@ describe('member-question receiving keyless assembled snapshot', () => {
               'turn/start',
               'user/message',
               'request/header',
+              'member-question/settled',
             ].includes(event.type))
             .map(event => event.type),
           received: {
@@ -112,6 +138,7 @@ describe('member-question receiving keyless assembled snapshot', () => {
               source: message.source,
             })),
           requestCount: session.events.filter(event => event.type === 'request/header').length,
+          settledOutcome: session.events.find(event => event.type === 'member-question/settled')?.data.outcome,
         },
       }
       const output = `${JSON.stringify(snapshot, null, 2)}\n`

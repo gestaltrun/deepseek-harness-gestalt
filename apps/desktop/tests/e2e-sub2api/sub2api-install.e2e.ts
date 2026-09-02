@@ -190,7 +190,16 @@ describe('Sub2API Desktop installation', () => {
     expect(consoleWindow.text).toMatch(/添加账号|Create Account/u)
     expect(consoleWindow.text).toMatch(/Composite 路由|Composite Routes/u)
     const workspaceUi = await overlayAccountWorkspaceUi()
-    expect(workspaceUi.text).not.toMatch(/全部分组|All Groups|更多操作|More Actions|批量更新|Batch Update/u)
+    expect(workspaceUi.text).not.toMatch(
+      /全部平台|All Platforms|全部类型|All Types|全部状态|All Status|全部Privacy|All Privacy/u,
+    )
+    expect(workspaceUi.text).not.toMatch(/全部分组|All Groups|自动刷新|Auto Refresh|更多操作|More Actions|批量更新|Batch Update/u)
+    expect(workspaceUi.filterSearchCount).toBe(0)
+    expect(workspaceUi.actionButtonCount).toBe(3)
+    expect(workspaceUi.actionRightGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1)
+    expect(workspaceUi.pageHeight ?? 0).toBeGreaterThanOrEqual(workspaceUi.viewportHeight ?? 1)
+    expect(workspaceUi.pageBackgroundColor).toMatch(/rgb\(36, 36, 36\)|rgb\(245, 245, 245\)/u)
+    expect(workspaceUi.tableBackgroundColor).toMatch(/rgb\(43, 43, 43\)|rgb\(255, 255, 255\)/u)
     expect([
       [
         '名称', '账号ID', '平台/类型', '容量', '状态', '调度', '今日统计', '用量窗口',

@@ -42,6 +42,13 @@ export interface AccountDialogSnapshot {
 export interface AccountWorkspaceUiSnapshot {
   readonly text: string
   readonly headers: readonly string[]
+  readonly actionButtonCount: number
+  readonly actionRightGap: number | undefined
+  readonly filterSearchCount: number
+  readonly pageBackgroundColor: string | undefined
+  readonly tableBackgroundColor: string | undefined
+  readonly pageHeight: number | undefined
+  readonly viewportHeight: number | undefined
 }
 
 export interface ProviderModelProfileSnapshot {
@@ -255,12 +262,35 @@ export async function overlayAccountWorkspaceUi(): Promise<AccountWorkspaceUiSna
   return await browser.execute(() => {
     const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
     const content = frame?.contentDocument
-    if (content === null || content === undefined) return { text: '', headers: [] }
+    if (content === null || content === undefined) {
+      return {
+        text: '', headers: [], actionButtonCount: 0, actionRightGap: undefined,
+        filterSearchCount: 0, pageBackgroundColor: undefined, tableBackgroundColor: undefined,
+        pageHeight: undefined, viewportHeight: undefined,
+      }
+    }
+    const buttons = [...content.querySelectorAll<HTMLButtonElement>('button')]
+    const createButton = buttons.find(button => /添加账号|Create Account/u.test(button.innerText))
+    const actionRow = createButton?.parentElement
+    const page = content.querySelector<HTMLElement>('.table-page-layout.page-scroll')
+    const table = content.querySelector<HTMLElement>('.table-scroll-container')
+    const viewportWidth = frame?.contentWindow?.innerWidth
     return {
       text: content.body?.innerText ?? '',
       headers: [...content.querySelectorAll<HTMLTableCellElement>('thead th')]
         .map(header => header.innerText.trim())
         .filter(header => header.length > 0),
+      actionButtonCount: actionRow?.querySelectorAll('button').length ?? 0,
+      actionRightGap: actionRow === null || actionRow === undefined || viewportWidth === undefined
+        ? undefined
+        : viewportWidth - actionRow.getBoundingClientRect().right,
+      filterSearchCount: content.querySelectorAll(
+        'input[placeholder*="搜索账号"], input[placeholder*="Search accounts"]',
+      ).length,
+      pageBackgroundColor: page === null ? undefined : getComputedStyle(page).backgroundColor,
+      tableBackgroundColor: table === null ? undefined : getComputedStyle(table).backgroundColor,
+      pageHeight: page?.getBoundingClientRect().height,
+      viewportHeight: frame?.contentWindow?.innerHeight,
     }
   })
 }

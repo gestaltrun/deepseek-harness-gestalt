@@ -274,8 +274,8 @@ describe('member-question receiver durable state', () => {
       ['not-an-array', 'must be an array'],
       [[null], 'must be an object'],
       [[{ path: '', reason: 'why', cachedPath: '.dsh/ok' }], 'cached reference path'],
-      [[{ path: 'docs/a.md', reason: 1, cachedPath: '.dsh/ok' }], 'cached reference reason'],
-      [[{ path: 'docs/a.md', reason: 'why', cachedPath: '' }], 'cached reference cachedPath'],
+      [[{ path: 'notes/a.md', reason: 1, cachedPath: '.dsh/ok' }], 'cached reference reason'],
+      [[{ path: 'notes/a.md', reason: 'why', cachedPath: '' }], 'cached reference cachedPath'],
     ]
     for (const [value, message] of cases) {
       const invalid = document()

@@ -25,7 +25,7 @@ export const config: WebdriverIO.Config = {
   framework: 'mocha',
   reporters: ['spec'],
   mochaOpts: { ui: 'bdd', timeout: 900_000 },
-  services: ['electron'],
+  services: [['electron', { cdpBridgeTimeout: 120_000 }]],
   capabilities: [{
     browserName: 'electron',
     'wdio:electronServiceOptions': {

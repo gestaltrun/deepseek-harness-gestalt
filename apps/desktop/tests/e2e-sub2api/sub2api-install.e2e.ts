@@ -226,8 +226,7 @@ describe('Sub2API Desktop installation', () => {
     expect((await overlayAccountConsoleSnapshot()).text).not.toMatch(
       /池模式|Pool Mode|账号计费倍率|Billing Rate Multiplier|自动探测上游声明倍率|Automatically probe upstream declared rate|配额控制|Quota Control/u,
     )
-    await clickAccountConsoleSelector('.select-trigger')
-    await clickAccountConsoleOption(['Anthropic'])
+    await clickTopAccountDialogButton(['Anthropic'])
     await clickAccountConsoleButton(['下一步', 'Next'])
     await browser.waitUntil(async () => /代理|Proxy/u.test((await overlayAccountConsoleSnapshot()).text), {
       timeout: 15_000,

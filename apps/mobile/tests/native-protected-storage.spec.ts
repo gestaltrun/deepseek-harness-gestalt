@@ -15,12 +15,36 @@ class MemoryProtectedStorage implements MobileProtectedStorage {
 describe('native Mobile protected storage', () => {
   it('preserves the Installation id across an application upgrade', async () => {
     const storage = new MemoryProtectedStorage()
-    vi.stubGlobal('crypto', { randomUUID: vi.fn(() => '12345678-1234-4234-8234-123456789abc') })
+    vi.stubGlobal('crypto', {
+      getRandomValues: vi.fn((bytes: Uint8Array) => {
+        bytes.set(Array.from({ length: 16 }, (_, index) => index))
+        return bytes
+      }),
+    })
     const first = await loadProtectedInstallationId(storage, 'production')
     const second = await loadProtectedInstallationId(storage, 'production')
-    expect(first).toBe('12345678-1234-4234-8234-123456789abc')
+    expect(first).toBe('00010203-0405-4607-8809-0a0b0c0d0e0f')
     expect(second).toBe(first)
     expect(storage.values.size).toBe(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('fails before persistence when system random bytes are unavailable', async () => {
+    const storage = new MemoryProtectedStorage()
+    vi.stubGlobal('crypto', {})
+    await expect(loadProtectedInstallationId(storage, 'production')).rejects.toThrow(/system cryptography/)
+    expect(storage.values.size).toBe(0)
+    vi.unstubAllGlobals()
+  })
+
+  it('fails before reading a retained Installation id when system random bytes are unavailable', async () => {
+    const storage = new MemoryProtectedStorage()
+    storage.values.set('installation:production', 'retained-installation')
+    const get = vi.spyOn(storage, 'get')
+    vi.stubGlobal('crypto', {})
+    await expect(loadProtectedInstallationId(storage, 'production')).rejects.toThrow(/system cryptography/)
+    expect(get).not.toHaveBeenCalled()
+    expect(storage.values.get('installation:production')).toBe('retained-installation')
     vi.unstubAllGlobals()
   })
 

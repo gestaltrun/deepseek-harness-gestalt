@@ -40,7 +40,7 @@ const ghostProject = {
 /** Valid shape, but its membership row names a project the document omits. */
 function stateWithDanglingMembership(): PersistedState {
   return {
-    formatVersion: 0,
+    formatVersion: 1,
     projects: [realProject],
     memberships: [{
       id: 'membership-owner',
@@ -57,7 +57,7 @@ function stateWithDanglingMembership(): PersistedState {
 /** Valid shape, but its invitation row names a project the document omits. */
 function stateWithDanglingInvitation(): PersistedState {
   return {
-    formatVersion: 0,
+    formatVersion: 1,
     projects: [realProject],
     memberships: [],
     invitations: [{
@@ -66,6 +66,7 @@ function stateWithDanglingInvitation(): PersistedState {
       inviterAccountId: alice,
       inviteeAccountId: 'dangling-bob',
       state: 'pending',
+      grantedRole: 'member',
       invitedAt: 1,
     }],
   }
@@ -114,7 +115,7 @@ describe('a store booting over a dangling document refuses every operation', () 
     ],
   ])('rejects duplicate project %s indexes while loading', async (_kind, duplicateProject, message) => {
     const root = await rootedState({
-      formatVersion: 0,
+      formatVersion: 1,
       projects: [realProject, duplicateProject],
       memberships: [],
       invitations: [],
@@ -149,7 +150,7 @@ describe('a store booting over a dangling document refuses every operation', () 
 
   it('refuses to accept an invitation whose invitee the same document already lists as a member', async () => {
     const state: PersistedState = {
-      formatVersion: 0,
+      formatVersion: 1,
       projects: [realProject],
       memberships: [{
         id: 'membership-dup',
@@ -165,6 +166,7 @@ describe('a store booting over a dangling document refuses every operation', () 
         inviterAccountId: alice,
         inviteeAccountId: 'dangling-bob',
         state: 'pending',
+        grantedRole: 'member',
         invitedAt: 2,
       }],
     }

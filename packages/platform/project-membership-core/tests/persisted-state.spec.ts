@@ -22,7 +22,7 @@ const bob = 'parse-bob' as PlatformAccountId
 
 function validState(): PersistedState {
   return {
-    formatVersion: 0,
+    formatVersion: 1,
     projects: [{ id: 'project-p1', name: 'P1', boundRemoteUrl: 'https://org.example/p1', createdAt: 1, rosterVersion: 0 }],
     memberships: [{
       id: 'membership-owner',
@@ -33,9 +33,9 @@ function validState(): PersistedState {
       joinedAt: 2,
     }],
     invitations: [
-      { id: 'invitation-accepted', projectId: 'project-p1', inviterAccountId: alice, inviteeAccountId: bob, state: 'accepted', invitedAt: 3, settledAt: 4 },
-      { id: 'invitation-declined', projectId: 'project-p1', inviterAccountId: alice, inviteeAccountId: bob, state: 'declined', invitedAt: 5, settledAt: 6 },
-      { id: 'invitation-retracted', projectId: 'project-p1', inviterAccountId: alice, inviteeAccountId: bob, state: 'retracted', invitedAt: 7 },
+      { id: 'invitation-accepted', projectId: 'project-p1', inviterAccountId: alice, inviteeAccountId: bob, state: 'accepted', grantedRole: 'admin', invitedAt: 3, settledAt: 4 },
+      { id: 'invitation-declined', projectId: 'project-p1', inviterAccountId: alice, inviteeAccountId: bob, state: 'declined', grantedRole: 'member', invitedAt: 5, settledAt: 6 },
+      { id: 'invitation-retracted', projectId: 'project-p1', inviterAccountId: alice, inviteeAccountId: bob, state: 'retracted', grantedRole: 'member', invitedAt: 7 },
     ],
   }
 }
@@ -60,6 +60,7 @@ describe('durable document validation', () => {
     const state = parse(serialize(validState()))
     expect(state.memberships[0]?.tags).toEqual(['on-call', 'db'])
     expect(state.invitations.map(row => row.state)).toEqual(['accepted', 'declined', 'retracted'])
+    expect(state.invitations.map(row => row.grantedRole)).toEqual(['admin', 'member', 'member'])
     expect(state.invitations[0]?.settledAt).toBe(4)
     expect(state.invitations[2]?.settledAt).toBeUndefined()
   })
@@ -100,6 +101,15 @@ describe('durable document validation', () => {
     expect(() => parse(serialize(state))).toThrow('durable state joinedAt must be a safe integer >= 0')
   })
 
+  it.each([
+    'owner',
+    'guest',
+    null,
+  ])('rejects an invitation grantedRole %j outside admin|member', (grantedRole) => {
+    const state = withInvitation({ grantedRole: grantedRole as never })
+    expect(() => parse(serialize(state))).toThrow('is outside admin|member')
+  })
+
   it('rejects an invitation state outside the recorded vocabulary', () => {
     const state = withInvitation({ state: 'expired' as never })
     expect(() => parse(serialize(state))).toThrow('invitation state "expired" is unknown')
@@ -113,8 +123,8 @@ describe('durable document validation', () => {
   it('rejects a foreign formatVersion', () => {
     // serialize() always stamps the current version, so the foreign one is written directly.
     const document = JSON.parse(serialize(validState())) as Record<string, unknown>
-    document.formatVersion = 1
-    expect(() => parse(JSON.stringify(document))).toThrow('formatVersion 1 is not supported')
+    document.formatVersion = 0
+    expect(() => parse(JSON.stringify(document))).toThrow('formatVersion 0 is not supported')
   })
 
   it('rejects a document that is not valid JSON', () => {

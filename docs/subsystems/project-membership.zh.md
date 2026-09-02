@@ -2,7 +2,7 @@
 
 [English](project-membership.md) | 中文
 
-[`ctx.projectMembership`](../../packages/platform/project-membership/README.zh.md) 是工作区之上的协作平面:云端项目将规范化后的 git remote 作为已验证属性绑定,成员只携带 `owner|admin|member` 三种角色与永不承载权限的项目自定义功能标签,邀请沿 `pending → accepted | declined | retracted` 流转。接受与链接唯一本地工作区原子提交;对已持有成员身份或待决邀请的账户重复邀请会在并发下被原子拒绝。
+[`ctx.projectMembership`](../../packages/platform/project-membership/README.zh.md) 是工作区之上的协作平面:云端项目将规范化后的 git remote 作为已验证属性绑定,成员只携带 `owner|admin|member` 三种角色与永不承载权限的项目自定义功能标签,邀请沿 `pending → accepted | declined | retracted` 流转,并携带接受并关联工作区时授予的角色。owner 可邀请为 `admin` 或 `member`;admin 只能邀请为 `member`。接受与链接唯一本地工作区原子提交;对已持有成员身份或待决邀请的账户重复邀请会在并发下被原子拒绝。
 
 每次变更的角色门都在操作内部执行:管理员可邀请但不能触碰 owner 行、不能移除 owner;只有 owner 能授予 owner 角色;最后一名 owner 不可降级或移除(`LAST_OWNER`)。读取同样有门——`roster` 要求有效成员身份,被移除账户即刻丧失枚举能力。每次影响 roster 的提交都会在落盘之后发布一条 [`project-membership/roster-invalidated`](#cordis-surface) 事件,使项目级投影版本前进,供缓存消费方作键。
 
@@ -37,10 +37,11 @@ abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Pro
 /**
  * Issue one invitation to a platform account.
  * @param actor - authenticated account holding admin or owner on the project.
- * @param input - target project and invitee account.
- * @returns the invitation in `pending` state.
- * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin, `DUPLICATE_INVITEE` when the account already holds
- *   membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.
+ * @param input - target project, invitee account, and the role granted at accept time.
+ * @returns the invitation in `pending` state, carrying that granted role.
+ * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin or when the actor cannot grant the requested role,
+ *   `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER`
+ *   when the actor holds no membership.
  */
 abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>
 
@@ -185,10 +186,10 @@ roster(projectId: ProjectId): Promise<RosterReadView>
 
 /**
  * Invite one uniquely resolved public GitHub login.
- * @param input - Project and public GitHub login.
- * @returns created pending invitation.
+ * @param input - Project, public GitHub login, and the role granted at accept time.
+ * @returns created pending invitation carrying that granted role.
  */
-invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>
+invite(input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole }): Promise<InvitationView>
 
 /**
  * Decline, or accept atomically with a local Workspace link.

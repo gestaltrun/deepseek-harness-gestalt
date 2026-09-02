@@ -93,7 +93,7 @@ describe('real Loader composition of project-membership definition + provider', 
       name: 'Assembled',
       remoteUrl: 'git@github.com:Org/assembled.git',
     })
-    await first.service.invite(alice, { projectId: created.id, inviteeAccountId: bob })
+    await first.service.invite(alice, { projectId: created.id, inviteeAccountId: bob, grantedRole: 'member' })
     const pending = await first.service.pendingInvitationsFor(bob)
     const joined = await first.service.acceptInvitation(bob, {
       invitationId: pending[0]!.id,
@@ -108,7 +108,7 @@ describe('real Loader composition of project-membership definition + provider', 
       memberships: Array<{ accountId: string; link?: { workspaceName: string } }>
       invitations: Array<{ state: string }>
     }
-    expect(document.formatVersion).toBe(0)
+    expect(document.formatVersion).toBe(1)
     expect(document.projects.map(row => row.boundRemoteUrl)).toEqual(['git@github.com:Org/assembled'])
     expect(document.memberships.map(row => row.accountId).sort()).toEqual([alice, bob].sort())
     expect(document.memberships.find(row => row.accountId === bob)?.link?.workspaceName).toBe('bob-assembled')

@@ -123,7 +123,7 @@ describe('ui-workspace apply', () => {
     const pendingInvitations = vi.fn(async () => [{
       invitationId: 'invitation-1', receivingAccountId: 'account-2',
       projectId: 'project-1', projectName: 'Atlas',
-      remoteUrl: 'https://github.com/o/r', inviterName: 'Mona', invitedAt: 1,
+      remoteUrl: 'https://github.com/o/r', inviterName: 'Mona', invitedAt: 1, grantedRole: 'admin' as const,
     }])
     const decideInvitation = vi.fn(async () => undefined)
     b.ctx.provide('projectMembershipClient', {
@@ -175,6 +175,7 @@ describe('ui-workspace apply', () => {
       name: 'Atlas', localWorkspaceId: 'ws' as never,
     })).resolves.toEqual({
       id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
+      receivingAccountId: 'account-1',
     })
     expect(createProject).toHaveBeenCalledWith({ name: 'Atlas', remoteUrl: 'https://github.com/o/r' })
     expect(b.bindWorkspace).toHaveBeenCalledWith({
@@ -210,7 +211,7 @@ describe('ui-workspace apply', () => {
     await expect(browser.projectMembership?.pendingInvitations()).resolves.toEqual([{
       invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
       projectName: 'Atlas', inviterName: 'Mona',
-      remoteUrl: 'https://github.com/o/r',
+      remoteUrl: 'https://github.com/o/r', grantedRole: 'admin',
     }])
     expect(pendingInvitations).toHaveBeenCalledOnce()
     await expect(browser.projectMembership?.localRemoteFor('ws' as never))

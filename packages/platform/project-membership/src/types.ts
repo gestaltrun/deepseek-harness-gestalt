@@ -22,6 +22,9 @@ export type FunctionTag = Branded<'FunctionTag'>
 /** Permission role vocabulary. Roles govern this collaboration plane only and never derive from or into Git-provider permissions. */
 export type ProjectRole = 'owner' | 'admin' | 'member'
 
+/** Roles an invitation may grant when the invitee accepts; the owner role is never granted at join. */
+export type GrantableInviteRole = Exclude<ProjectRole, 'owner'>
+
 /** Lifecycle of one invitation. Acceptance is atomic with workspace linking. */
 export type InvitationState = 'pending' | 'accepted' | 'declined' | 'retracted'
 
@@ -77,6 +80,8 @@ export interface InvitationView {
   readonly inviteeAccountId: PlatformAccountId
   /** Current lifecycle state. */
   readonly state: InvitationState
+  /** Role conferred when the invitee completes accept-with-workspace-link. */
+  readonly grantedRole: GrantableInviteRole
   /** Epoch milliseconds of issuance. */
   readonly invitedAt: number
   /** Epoch milliseconds of reaching a terminal state, once settled. */

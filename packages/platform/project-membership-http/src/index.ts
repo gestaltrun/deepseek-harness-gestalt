@@ -26,6 +26,7 @@ import {
   normalizeGitRemoteUrl,
   type FunctionTag,
   type InvitationId,
+  type InvitationView,
   type MemberView,
   type ProjectId,
   type ProjectMembershipErrorCode,
@@ -185,6 +186,7 @@ export function apply(ctx: Context, config: Config): void {
       writeJson(res, 201, await ctx.projectMembership.invite(actor, {
         projectId: requiredBrandedId<'ProjectId'>(body, 'projectId'),
         inviteeAccountId: invitee.id,
+        grantedRole: requiredRole(body.grantedRole),
       }))
       return
     }
@@ -254,6 +256,8 @@ export interface PendingInvitationPresentation {
   readonly projectName: string
   readonly remoteUrl: string
   readonly inviterName: string
+  /** Role conferred when the invitee completes accept-with-workspace-link. */
+  readonly grantedRole: InvitationView['grantedRole']
   readonly invitedAt: number
 }
 
@@ -261,6 +265,8 @@ export interface PendingInvitationPresentation {
 export interface IssuedInvitationPresentation {
   readonly invitationId: InvitationId
   readonly inviteeName: string
+  /** Role conferred when the invitee completes accept-with-workspace-link. */
+  readonly grantedRole: InvitationView['grantedRole']
   readonly invitedAt: number
 }
 
@@ -276,6 +282,7 @@ async function issuedInvitationPresentations(
   return invitations.map(invitation => ({
     invitationId: invitation.id,
     inviteeName: invitees.get(invitation.inviteeAccountId)?.githubLogin ?? '',
+    grantedRole: invitation.grantedRole,
     invitedAt: invitation.invitedAt,
   }))
 }
@@ -295,6 +302,7 @@ async function pendingInvitationPresentations(
     projectName: project.name,
     remoteUrl: project.boundRemoteUrl,
     inviterName: inviters.get(invitation.inviterAccountId)?.githubLogin ?? '',
+    grantedRole: invitation.grantedRole,
     invitedAt: invitation.invitedAt,
   }))
 }

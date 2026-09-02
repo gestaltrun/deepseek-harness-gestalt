@@ -2248,7 +2248,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/project-membership-core/src/index.ts:48`](../packages/platform/project-membership-core/src/index.ts)
+来源：[`packages/platform/project-membership-core/src/index.ts:50`](../packages/platform/project-membership-core/src/index.ts)
 
 <a id="deepseek-aidsh-project-membership-http"></a>
 
@@ -2268,7 +2268,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/project-membership-http/src/index.ts:55`](../packages/platform/project-membership-http/src/index.ts)
+来源：[`packages/platform/project-membership-http/src/index.ts:56`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

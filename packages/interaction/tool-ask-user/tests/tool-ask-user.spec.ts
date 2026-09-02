@@ -81,6 +81,7 @@ function stubAgent(id: string, delegationDepth = 0, cwd?: string, extras: Record
     session: {
       id: agentId,
       header: { delegationDepth, ...cwd !== undefined ? { cwd } : {} },
+      deriveMessages: () => [],
       ...extras,
     },
   } as unknown as Agent
@@ -682,7 +683,7 @@ describe('ask_user_question tool', () => {
 
   it('surfaces to_project_member in assembled prompts when the workspace is bound', async () => {
     const { ctx } = await setupRouted()
-    const assembly = await ctx.systemPrompt.assemble()
+    const assembly = await ctx.systemPrompt.assemble({ agent: stubAgent('session-atlas') })
     const schema = assembly.tools.find(tool => tool.name === 'ask_user_question')
     const parameters = schema?.parameters as { properties?: Record<string, unknown> } | undefined
     expect(parameters?.properties).toHaveProperty('to_project_member')

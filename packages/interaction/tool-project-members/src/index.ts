@@ -259,7 +259,7 @@ async function resolveProjectId(
   try {
     const bound = await config.boundProjectResolver?.({
       ...agent === undefined ? {} : { agent },
-      ...signal === undefined ? {} : { signal },
+      signal,
     })
     if (bound !== undefined) return bound
   } catch (cause: unknown) {
@@ -280,7 +280,7 @@ async function resolveActor(config: Config, agent?: Agent, signal?: AbortSignal)
   try {
     const account = await config.currentAccountResolver?.({
       ...agent === undefined ? {} : { agent },
-      ...signal === undefined ? {} : { signal },
+      signal,
     })
     if (account !== undefined) return account
   } catch (cause: unknown) {

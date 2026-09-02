@@ -968,6 +968,9 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:*
         version: link:../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-member-question-sender':
+        specifier: workspace:*
+        version: link:../packages/interaction/member-question-sender
       '@deepseek-ai/dsh-noise-channel':
         specifier: workspace:*
         version: link:../packages/platform/noise-channel
@@ -986,6 +989,15 @@ importers:
       '@deepseek-ai/dsh-project-membership':
         specifier: workspace:*
         version: link:../packages/platform/project-membership
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership-client
+      '@deepseek-ai/dsh-project-membership-core':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership-core
+      '@deepseek-ai/dsh-project-membership-http':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership-http
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:*
         version: link:../packages/shell/pwsh-local

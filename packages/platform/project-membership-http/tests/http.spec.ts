@@ -132,6 +132,17 @@ describe('Project Membership HTTP consumer', () => {
         },
       ],
     })
+    expect((await closePresence(server.origin, session)).status).toBe(204)
+    const closed = await fetch(`${server.origin}/v1/projects/project-1/members`, {
+      headers: { origin: ENVIRONMENT.origin, ...session },
+    })
+    expect(closed.status).toBe(200)
+    expect(await closed.json()).toMatchObject({
+      members: [
+        { accountId: 'account-1', presence: 'offline' },
+        { accountId: 'account-2', presence: 'offline' },
+      ],
+    })
 
     expect((await post(server.origin, '/v1/projects/memberships/membership-2/role', {
       role: 'admin',
@@ -237,6 +248,7 @@ describe('Project Membership HTTP consumer', () => {
     const server = await start(membershipService(), accountService())
     expect(await error(fetch(`${server.origin}/v1/projects`, { headers: { origin: ENVIRONMENT.origin } }))).toEqual([405, 'METHOD_NOT_ALLOWED'])
     expect(await error(fetch(`${server.origin}/v1/projects/presence/heartbeat`, { headers: { origin: ENVIRONMENT.origin } }))).toEqual([405, 'METHOD_NOT_ALLOWED'])
+    expect(await error(fetch(`${server.origin}/v1/projects/presence/close`, { headers: { origin: ENVIRONMENT.origin } }))).toEqual([405, 'METHOD_NOT_ALLOWED'])
   })
 
   it('accepts presence heartbeats from Desktop installations only', async () => {
@@ -244,9 +256,19 @@ describe('Project Membership HTTP consumer', () => {
     const account = accountService()
     account.currentInstallation.mockResolvedValueOnce(installation('mobile'))
     const server = await start(membership, account)
-    expect(await error(heartbeat(server.origin, authHeaders()))).toEqual([403, 'INSTALLATION_KIND_UNSUPPORTED'])
+    const heartbeatRefusal = await heartbeat(server.origin, authHeaders())
+    const heartbeatBody = await heartbeatRefusal.json() as { error: { code: string; message: string } }
+    expect([heartbeatRefusal.status, heartbeatBody.error.code]).toEqual([403, 'INSTALLATION_KIND_UNSUPPORTED'])
+    expect(heartbeatBody.error.message).toBe('presence heartbeat is accepted from Desktop installations only')
     account.currentInstallation.mockResolvedValueOnce(installation('desktop'))
     expect((await heartbeat(server.origin, authHeaders())).status).toBe(204)
+    account.currentInstallation.mockResolvedValueOnce(installation('mobile'))
+    const closeRefusal = await closePresence(server.origin, authHeaders())
+    const closeBody = await closeRefusal.json() as { error: { code: string; message: string } }
+    expect([closeRefusal.status, closeBody.error.code]).toEqual([403, 'INSTALLATION_KIND_UNSUPPORTED'])
+    expect(closeBody.error.message).toBe('presence close is accepted from Desktop installations only')
+    account.currentInstallation.mockResolvedValueOnce(installation('desktop'))
+    expect((await closePresence(server.origin, authHeaders())).status).toBe(204)
   })
 
   it('returns stable account, membership, and internal error envelopes', async () => {
@@ -453,6 +475,12 @@ function authHeaders(): Record<string, string> {
 
 function heartbeat(origin: string, headers: Record<string, string>): Promise<Response> {
   return fetch(`${origin}/v1/projects/presence/heartbeat`, {
+    method: 'POST', headers: { origin: ENVIRONMENT.origin, ...headers },
+  })
+}
+
+function closePresence(origin: string, headers: Record<string, string>): Promise<Response> {
+  return fetch(`${origin}/v1/projects/presence/close`, {
     method: 'POST', headers: { origin: ENVIRONMENT.origin, ...headers },
   })
 }

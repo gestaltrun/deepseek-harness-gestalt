@@ -2,7 +2,9 @@
  * Member presence aggregation for the Project Membership HTTP surface: a
  * registry of per-installation heartbeat entries behind a TTL storage
  * adapter. A member is online while any of their installations holds a live
- * heartbeat; there is no manual state and no idle inference.
+ * heartbeat; closing an installation clears that entry immediately, and TTL
+ * expiry remains the crash and partition path. There is no manual state and
+ * no idle inference.
  * @module
  */
 
@@ -27,6 +29,8 @@ export interface PresenceEntry {
 export interface PresenceStore {
   /** Record or refresh one heartbeat, replacing the installation's previous expiry. */
   record(entry: PresenceEntry): Promise<void>
+  /** Drop one installation immediately so a later roster read does not wait for TTL. */
+  clear(accountId: PlatformAccountId, installationId: InstallationId): Promise<void>
   /** Collect the candidate accounts holding at least one entry not expired at `now`. */
   onlineAccountIds(accountIds: readonly PlatformAccountId[], now: number): Promise<ReadonlySet<PlatformAccountId>>
 }
@@ -42,6 +46,14 @@ export class InProcessPresenceStore implements PresenceStore {
       this.installations.set(entry.accountId, installations)
     }
     installations.set(entry.installationId, entry.expiresAt)
+    return Promise.resolve()
+  }
+
+  clear(accountId: PlatformAccountId, installationId: InstallationId): Promise<void> {
+    const installations = this.installations.get(accountId)
+    if (installations === undefined) return Promise.resolve()
+    installations.delete(installationId)
+    if (installations.size === 0) this.installations.delete(accountId)
     return Promise.resolve()
   }
 
@@ -69,8 +81,9 @@ export class InProcessPresenceStore implements PresenceStore {
 
 /**
  * Aggregate installation heartbeats into per-account presence. Registration
- * needs only a proven session; expiry is the only way to leave the online
- * set, and any live installation keeps its account online.
+ * needs only a proven session; any live installation keeps its account
+ * online. Explicit close drops that installation immediately; TTL expiry is
+ * the crash and partition path.
  */
 export class PresenceRegistry {
   private readonly store: PresenceStore
@@ -95,9 +108,20 @@ export class PresenceRegistry {
    * Record one installation heartbeat, keeping it online for the configured TTL.
    * @param accountId - account whose installation beat.
    * @param installationId - installation that beat.
+   * @returns fulfillment after the beat is recorded.
    */
   async beat(accountId: PlatformAccountId, installationId: InstallationId): Promise<void> {
     await this.store.record({ accountId, installationId, expiresAt: this.now() + this.ttlMs })
+  }
+
+  /**
+   * Drop one installation immediately without waiting for TTL expiry.
+   * @param accountId - account whose installation closed.
+   * @param installationId - installation that closed its last live window.
+   * @returns fulfillment after the installation is dropped.
+   */
+  async close(accountId: PlatformAccountId, installationId: InstallationId): Promise<void> {
+    await this.store.clear(accountId, installationId)
   }
 
   /**

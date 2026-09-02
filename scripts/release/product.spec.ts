@@ -85,7 +85,7 @@ describe('product release intent', () => {
     expect(validateReleaseIntent(overReported, new Set(['desktop']))).toEqual([])
   })
 
-  it('requires one added, unique, unconsumed intent', async () => {
+  it('accepts an optional unique unconsumed intent when one is added', async () => {
     const root = await fixtureRepository()
     await mkdir(join(root, '.release-intents'), { recursive: true })
     await writeFile(join(root, '.release-intents/already-consumed.json'), `${JSON.stringify(intentValue('already-consumed'), null, 2)}\n`)
@@ -97,7 +97,7 @@ describe('product release intent', () => {
     await expect(validateReleaseIntentAdditions(root, ['.release-intents/already-consumed.json'], new Set(['desktop'])))
       .rejects.toThrow('already consumed')
     await expect(validateReleaseIntentAdditions(root, [], new Set(['desktop'])))
-      .rejects.toThrow('at least one added')
+      .resolves.toEqual([])
 
     await writeFile(join(root, '.release-intents/mobile-release.json'), `${JSON.stringify(intentValue('mobile-release', { desktop: 'none', mobile: 'patch', platform: 'none' }), null, 2)}\n`)
     await expect(validateReleaseIntentAdditions(root, [

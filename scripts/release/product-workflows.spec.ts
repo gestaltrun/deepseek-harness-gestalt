@@ -183,10 +183,9 @@ describe('product release workflows', () => {
     expect(platform).toContain('.releaseUnits.platform.summaries[]')
   })
 
-  it('runs release-intent validation in pull-request and merge-queue preflight', () => {
+  it('does not run release-intent validation in pull-request preflight', () => {
     const ci = text('.github/workflows/ci.yml')
-    expect(ci).toContain('pnpm product-release:validate --base "$BASE_SHA" --head "$HEAD_SHA"')
-    expect(ci).toContain("github.event_name == 'pull_request' || github.event_name == 'merge_group'")
+    expect(ci).not.toContain('pnpm product-release:validate --base "$BASE_SHA" --head "$HEAD_SHA"')
   })
 })
 

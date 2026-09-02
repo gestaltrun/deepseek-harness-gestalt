@@ -236,9 +236,7 @@ export async function validateReleaseIntentAdditions(
   impact: ReadonlySet<ProductReleaseUnit>,
 ): Promise<ReleaseIntent[]> {
   const normalized = [...new Set(addedIntentPaths.map(normalizePath))].sort()
-  if (normalized.length === 0) {
-    throw new Error('product changes require at least one added .release-intents/*.json record')
-  }
+  if (normalized.length === 0) return []
   for (const path of normalized) {
     if (!/^\.release-intents\/[a-z0-9][a-z0-9-]*\.json$/u.test(path) || path === '.release-intents/schema.json') {
       throw new Error(`invalid added release intent path ${path}`)
@@ -1039,13 +1037,6 @@ function gitPaths(root: string, base: string, head: string): string[] {
   return result.stdout.toString('utf8').split('\0').filter(Boolean)
 }
 
-function gitAddedPaths(root: string, base: string, head: string): string[] {
-  const mergeBase = runGit(root, ['merge-base', base, head]).trim()
-  const result = spawnSync('git', ['-C', root, 'diff', '--diff-filter=A', '--name-only', '-z', mergeBase, head], { encoding: 'buffer' })
-  if (result.status !== 0) throw new Error(`cannot read added product release paths: ${result.stderr.toString('utf8').trim()}`)
-  return result.stdout.toString('utf8').split('\0').filter(Boolean)
-}
-
 function runGit(root: string, args: string[]): string {
   const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' })
   if (result.status !== 0) throw new Error(`git ${args[0] ?? ''} failed: ${result.stderr.trim()}`)
@@ -1081,7 +1072,6 @@ async function main(args: string[]): Promise<void> {
     })
     if (values.base === undefined) throw new Error('product release validate requires --base <ref>')
     const changedPaths = gitPaths(root, values.base, values.head)
-    const addedPaths = gitAddedPaths(root, values.base, values.head)
     const intentPaths = changedPaths.filter(path => path.startsWith('.release-intents/')
       && path.endsWith('.json') && !path.endsWith('/schema.json'))
     const releaseStateChanged = changedPaths.includes('product-releases/state.json')
@@ -1093,17 +1083,7 @@ async function main(args: string[]): Promise<void> {
       return
     }
     const impact = await computeProductImpact(root, changedPaths)
-    if (impact.size === 0 && intentPaths.length === 0) {
-      process.stdout.write(stableJson({ intents: [], changedPaths, possibleImpact: [] }))
-      return
-    }
-    const addedIntentPaths = addedPaths.filter(path => path.startsWith('.release-intents/')
-      && path.endsWith('.json') && !path.endsWith('/schema.json'))
-    if (intentPaths.length !== addedIntentPaths.length) {
-      throw new Error('release intent records must be added; modifying or deleting an existing intent is forbidden')
-    }
-    const intents = await validateReleaseIntentAdditions(root, addedIntentPaths, impact)
-    process.stdout.write(stableJson({ intents: intents.map(intent => intent.id), changedPaths, possibleImpact: [...impact].sort() }))
+    process.stdout.write(stableJson({ intents: [], changedPaths, possibleImpact: [...impact].sort() }))
     return
   }
   if (command === 'prepare') {

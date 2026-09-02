@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[产品发布](../../docs/product-releases.zh.md)定义共用的 release intent、Product Release Plan、审批、持久资产与恢复流程；本页只拥有 Desktop 特定打包与更新行为。
+[产品发布](../../docs/product-releases.zh.md)定义共用的 Product Release Plan、审批、持久资产与恢复流程；本页只拥有 Desktop 特定打包与更新行为。
 
 DeepSeek Gestalt 的 Desktop Host。Electron 拥有窗口、菜单、GitHub 自动更新，以及进程内 Browser Runtime `webContents`。它启动捆绑的官方 Node 加上 `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0`，并打开该环回 URL。`--no-open` 阻止再唤起系统默认浏览器，因为 Desktop Host 已经拥有窗口。叠加层加入 Schedule、GESTALT 次标、拖拽带、Update Control，以及指向 Host loopback Browser origin 的 Tandem 形态 HTTP 客户端；只有更新可操作或发现版本后发生错误时，控件才会出现。浏览器 `dsh web` 不加载这层，并继续使用确定性 Browser Runtime。
 

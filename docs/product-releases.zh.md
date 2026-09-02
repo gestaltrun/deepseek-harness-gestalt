@@ -10,15 +10,9 @@ Desktop、Mobile 与 Platform 是相互独立的产品发布单元。`apps/deskt
 
 Desktop 使用 `gestalt-v<version>`，Mobile 使用 `mobile-v<version>`，Platform 使用 `platform-v<version>`。一份 Product Release Plan 可以选择任意子集；它不会强制共享版本或发布日期。
 
-## Pull request 意图与影响校验
-
-每个影响产品的 pull request 都会新增一条符合 `.release-intents/schema.json` 的 `.release-intents/<issue>-<slug>.json` 记录。每个发布单元分别请求 `major`、`minor`、`patch` 或 `none`；`summary.en` 与 `summary.zh` 提供面向用户的双语发布说明。非发布的产品变更会显式地为三个单元全部选择 `none`；只有文档或测试的变更不需要 intent。
-
-`pnpm product-release:validate --base <base> --head <head>` 会比较全部新增、唯一且未消费的 intent 与变更路径、每个 app 的生产/构建依赖闭包，以及显式的原生、打包、工作流、lockfile、部署与 wire-protocol 输入。Pull request 校验通常只看到一条新增记录；merge-group 校验会确定性汇总组内的全部新增记录。修改、删除、重复身份、复用已消费 intent 或少报都会使 CI 失败；保守多报有效。兼容例外会指定一个发布单元和非空的已评审理由；未知生产输入会保守地选中全部单元。
-
 ## Product Release PR
 
-Intent 到达 `master` 后，`Product Release Plan` 会运行 `pnpm product-release:prepare --write`，并创建或更新 Draft `automation/product-release` pull request。仓库变量 `DSH_RELEASE_APP_CLIENT_ID` 与 secret `DSH_RELEASE_APP_PRIVATE_KEY` 标识一个对仓库 Contents 和 Pull requests 具有写权限、对 Issues 具有读权限的 GitHub App 安装；与工作流 `GITHUB_TOKEN` 产生的变更不同，它的 commit 与 PR 事件会触发普通 CI。生成器只消费每条已合并 intent 一次，为各发布单元应用最高请求 bump，在选中 Mobile 时只递增一次构建号，按每条 intent 选中的端过滤双语摘要，并提交带序号的 `product-releases/NNNN.json` 计划与 `product-releases/state.json`。
+当 `master` 上仍有未消费的可选 `.release-intents/*.json` 记录时，`Product Release Plan` 会运行 `pnpm product-release:prepare --write`，并创建或更新 Draft `automation/product-release` pull request。普通产品 pull request 不再添加或校验这些记录。仓库变量 `DSH_RELEASE_APP_CLIENT_ID` 与 secret `DSH_RELEASE_APP_PRIVATE_KEY` 标识一个对仓库 Contents 和 Pull requests 具有写权限、对 Issues 具有读权限的 GitHub App 安装；与工作流 `GITHUB_TOKEN` 产生的变更不同，它的 commit 与 PR 事件会触发普通 CI。生成器只消费每条已合并 intent 一次，为各发布单元应用最高请求 bump，在选中 Mobile 时只递增一次构建号，按每条 intent 选中的端过滤双语摘要，并提交带序号的 `product-releases/NNNN.json` 计划与 `product-releases/state.json`。
 
 CI 会根据基线 ledger、基线版本、受跟踪的 Mobile build 和全部未消费 intent 重算生成的 Product Release PR。提交的 plan、选中端、bump、版本、tag、摘要、已消费 intent 状态、Mobile build 与 Desktop notes 必须与重算结果一致；手工修改生成事务不能漏掉或伪造发布。
 

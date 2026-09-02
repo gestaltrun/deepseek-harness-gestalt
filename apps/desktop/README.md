@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[Product releases](../../docs/product-releases.md) defines the shared release-intent, Product Release Plan, approval, durable-asset, and recovery flow; this page owns Desktop-specific packaging and updater behavior.
+[Product releases](../../docs/product-releases.md) defines the shared Product Release Plan, approval, durable-asset, and recovery flow; this page owns Desktop-specific packaging and updater behavior.
 
 DeepSeek Gestalt Desktop Host. Electron owns the window, menu, GitHub auto-update, and in-process Browser Runtime `webContents`. It starts bundled official Node plus `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0` and loads that loopback URL. `--no-open` keeps the OS default browser closed because Desktop Host already owns the window. The overlay adds Schedule, the GESTALT badge, drag strip, Update Control, and the Tandem-shaped HTTP client pointed at the Host's loopback Browser origin; the control remains absent until an update is actionable or an error follows version discovery. Browser `dsh web` does not load the overlay and keeps the deterministic Browser Runtime.
 

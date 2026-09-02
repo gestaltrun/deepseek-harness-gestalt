@@ -60,10 +60,9 @@ Require each ticket worker to:
 1. Fetch the recorded remote baseline, create the ticket branch from its exact SHA, and re-read the ticket and mapped domain sources from that checkout.
 2. Use the Matt `implement` workflow and TDD at an agreed seam where practical. Repository instructions and [DSH pre-push checks](../dsh-pre-push-checks/SKILL.md) override the Matt workflow's generic full-suite advice.
 3. Preserve unrelated worktree changes. Add the required documentation, Agent Note, and real runnable snapshot when their repository rules apply. For a GUI change, prove the flow with a non-recording smoke before review through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md) (headless until the user asks to look) and [ego-browser](../ego-browser/SKILL.md) (one DSH task space per goal); defer GIF recording until the reviewed head is frozen.
-4. For an ordinary product pull request, add one [release intent](../../../docs/product-releases.md#pull-request-intent-and-impact-validation) and resolve every planner-reported under-report before review.
-5. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote head.
-6. Open or update a pull request targeting the delivery baseline. Link the ticket with `Refs`, carry canonical labels, explain the behavior and evidence, and leave release work out of scope; the final baseline-to-master pull request owns closing keywords.
-7. Return the branch, commit, pull request, checks run, CI state, review blockers, and any changed dependency to the root task.
+4. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote head.
+5. Open or update a pull request targeting the delivery baseline. Link the ticket with `Refs`, carry canonical labels, explain the behavior and evidence, and leave release work out of scope; the final baseline-to-master pull request owns closing keywords.
+6. Return the branch, commit, pull request, checks run, CI state, review blockers, and any changed dependency to the root task.
 
 Complete a worker phase only when the remote pull request represents its full ticket diff and its reported evidence is reproducible.
 

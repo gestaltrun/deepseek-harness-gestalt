@@ -4,7 +4,7 @@
   * same-named Workspace file is never replaced or opened by mistake.
   */
 import { lstat, mkdir, unlink, writeFile } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 /** Workspace-relative root of every receiver-owned transferred document. */
 export const MEMBER_QUESTION_DOCUMENT_CACHE_ROOT = '.dsh/member-questions'
@@ -43,15 +43,20 @@ export async function writeMemberQuestionDocumentCache(input: {
   const bytesByPath = new Map(input.documents.map(document => [document.path, document.bytes]))
   const used = new Map<string, number>()
   const questionSegment = sanitizeSegment(input.questionId)
-  const cacheRoot = join(input.workspacePath, MEMBER_QUESTION_DOCUMENT_CACHE_ROOT, questionSegment)
-  await mkdir(cacheRoot, { recursive: true, mode: 0o700 })
+  const workspaceRoot = resolve(input.workspacePath)
+  const cacheRoot = join(workspaceRoot, MEMBER_QUESTION_DOCUMENT_CACHE_ROOT, questionSegment)
+  await mkdirOwnerOnlyTree([
+    join(workspaceRoot, '.dsh'),
+    join(workspaceRoot, MEMBER_QUESTION_DOCUMENT_CACHE_ROOT),
+    cacheRoot,
+  ])
   const cached: MemberQuestionCachedReference[] = []
   for (const reference of input.references) {
     const uniqueName = uniqueBasename(basename(reference.path.replaceAll('\\', '/')), used)
     const cachedPath = `${MEMBER_QUESTION_DOCUMENT_CACHE_ROOT}/${questionSegment}/${uniqueName}`
     const bytes = bytesByPath.get(reference.path)
     if (bytes !== undefined) {
-      await writeExclusiveOwnerFile(join(input.workspacePath, cachedPath), Buffer.from(bytes))
+      await writeExclusiveOwnerFile(join(workspaceRoot, cachedPath), Buffer.from(bytes))
     }
     cached.push({ path: reference.path, reason: reference.reason, cachedPath })
   }
@@ -76,6 +81,28 @@ function sanitizeSegment(value: string): string {
 }
 
 /**
+ * Create each cache parent as an owner-only real directory. A planted
+ * symlink at `.dsh`, `.dsh/member-questions`, or the question directory is
+ * unlinked first so `mkdir` cannot follow it into a Workspace twin.
+ * @param directories - cache parents from `.dsh` down to the question directory.
+ */
+async function mkdirOwnerOnlyTree(directories: readonly string[]): Promise<void> {
+  for (const directory of directories) {
+    await unlinkLinkShapedPath(directory)
+    try {
+      await mkdir(directory, { mode: 0o700 })
+    } catch (error) {
+      /* v8 ignore next -- mkdir fails for EEXIST or a TOCTOU/IO race on the parent. */
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const info = await lstat(directory)
+      if (!info.isDirectory()) {
+        throw new Error(`member-question-receiver: cache path ${directory} is not a directory`)
+      }
+    }
+  }
+}
+
+/**
  * Write transferred bytes without following a planted symlink. `lstat` +
  * `unlink` remove a link-shaped or leftover cache path first, then `wx`
  * exclusive-creates an owner-only regular file so the write cannot land on
@@ -84,6 +111,20 @@ function sanitizeSegment(value: string): string {
  * @param bytes - transferred document body.
  */
 async function writeExclusiveOwnerFile(path: string, bytes: Buffer): Promise<void> {
+  await replaceCacheFile(path)
+  await writeFile(path, bytes, { mode: 0o600, flag: 'wx' })
+}
+
+async function unlinkLinkShapedPath(path: string): Promise<void> {
+  try {
+    if ((await lstat(path)).isSymbolicLink()) await unlink(path)
+  } catch (error) {
+    /* v8 ignore next -- lstat fails for absence or a TOCTOU/IO race. */
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
+async function replaceCacheFile(path: string): Promise<void> {
   try {
     const info = await lstat(path)
     if (info.isDirectory()) {
@@ -93,5 +134,4 @@ async function writeExclusiveOwnerFile(path: string, bytes: Buffer): Promise<voi
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-  await writeFile(path, bytes, { mode: 0o600, flag: 'wx' })
 }

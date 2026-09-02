@@ -1,6 +1,17 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
+const SENSITIVE_ENVIRONMENT_NAME = /(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)/iu
+
+/**
+ * Remove inherited credential values and credential file references.
+ * @param {NodeJS.ProcessEnv} source - Ambient environment.
+ * @returns {NodeJS.ProcessEnv} Credential-free child environment.
+ */
+export function credentialSafeEnvironment(source) {
+  return Object.fromEntries(Object.entries(source).filter(([name]) => !SENSITIVE_ENVIRONMENT_NAME.test(name)))
+}
+
 /**
  * Return every non-empty string copied from a credential document.
  * @param {unknown} value - Parsed credential document.

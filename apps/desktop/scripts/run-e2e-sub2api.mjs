@@ -12,7 +12,9 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load } from 'js-yaml'
-import { assertArtifactSecretsAbsent, credentialValues } from './artifact-secret-safety.mjs'
+import {
+  assertArtifactSecretsAbsent, credentialSafeEnvironment, credentialValues,
+} from './artifact-secret-safety.mjs'
 import { withPrivateTempDirectory } from './private-temp-directory.mjs'
 import { newDetachedPostgresSegmentIds, parseDarwinSharedMemory } from './sysv-shared-memory.mjs'
 
@@ -108,9 +110,8 @@ function run(command, args, options = {}) {
 
 /** Remove runtime credential overrides that would shadow the isolated home. */
 function isolatedEnvironment(source) {
-  return Object.fromEntries(Object.entries(source).filter(([name]) => (
-    !/KEY|SECRET|TOKEN|PASSWORD/iu.test(name)
-    && !name.startsWith('DSH_PLATFORM_')
+  return Object.fromEntries(Object.entries(credentialSafeEnvironment(source)).filter(([name]) => (
+    !name.startsWith('DSH_PLATFORM_')
     && !name.startsWith('DSH_REMOTE_RELAY_')
   )))
 }

@@ -2,9 +2,22 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assertArtifactSecretsAbsent, credentialValues } from '../scripts/artifact-secret-safety.mjs'
+import {
+  assertArtifactSecretsAbsent, credentialSafeEnvironment, credentialValues,
+} from '../scripts/artifact-secret-safety.mjs'
 
 describe('Sub2API artifact secret safety', () => {
+  it('removes every inherited credential environment spelling', () => {
+    expect(credentialSafeEnvironment({
+      PATH: '/bin',
+      API_KEY: 'key',
+      CLIENT_SECRET: 'secret',
+      ACCESS_TOKEN: 'token',
+      DATABASE_PASSWORD: 'password',
+      GOOGLE_APPLICATION_CREDENTIALS: '/private/credentials.json',
+    })).toEqual({ PATH: '/bin' })
+  })
+
   it('collects every copied credential value', () => {
     expect(credentialValues({
       refs: { first: 'secret-one', second: 'secret-two' },

@@ -35,6 +35,6 @@ Sub2API sidecar（#346，bundle 源码在 sidecar 仓）需要一条 Desktop-onl
 
 ## Consequences
 
-浏览器 `dsh web` 没有入口（ui-desktop 只随 Desktop overlay 挂载），没有 `window.dshDesktop` 时卡片不渲染。基于 Release 的 Electron 门禁会强制构建精确 Gestalt 源码，把一份公开且校验和匹配的 sidecar Release 安装到私有的已初始化 profile，通过原生内嵌表单创建账号与 Composite 路由，要求实时网关与 Provider 设置公开完整的账号支持模型能力，并经所选路由发送一次真实模型请求。证据记录精确 Gestalt 与 sidecar 身份；产物含凭据、产品进程未自然退出、私有 runtime 根目录未删除或 CDP 端口未关闭时，门禁都会失败。
+浏览器 `dsh web` 没有入口（ui-desktop 只随 Desktop overlay 挂载），没有 `window.dshDesktop` 时卡片不渲染。基于 Release 的 Electron 门禁会强制构建精确 Gestalt 源码，移除继承环境中带凭据语义的条目，只把经批准的凭据文件复制进私有的已初始化 profile，再安装一份公开且校验和匹配的 sidecar Release。它通过原生内嵌表单创建账号与 Composite 路由，要求实时网关与 Provider 设置公开完整的账号支持模型能力，并经所选路由发送一次真实模型请求。证据记录精确 Gestalt 与 sidecar 身份；产物含凭据、产品进程未自然退出、私有 runtime 根目录未删除或 CDP 端口未关闭时，门禁都会失败。
 
 `web` profile 按名钉死：Desktop Web Host 是 `dsh web`（`--profile web` 的别名），安装器只改这一个 profile。挂载 bundle 后 Web Host 启动失败仍会显示无卡片的 Host 错误页；恢复手段是等一次可用启动后卸载，或手工移除 bundles 行。安装器回滚覆盖它所拥有的失败，fail-loud 的启动错误会点名插件。来源清单可以组合较新的 sidecar bundle Release 与较旧但未变化的 runtime-pack Release；每个资产仍与自己的校验和文档配对，E2E 会把 bundle 标签解析到精确 sidecar commit。

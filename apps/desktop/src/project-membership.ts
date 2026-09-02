@@ -40,6 +40,19 @@ export interface DesktopProjectMembershipPresence {
   dispose(): Promise<void>
 }
 
+/**
+ * Restore Online from the live Account snapshot after last-window close recreates
+ * a Desktop window in the same process.
+ * @param presence - Desktop presence lifecycle, absent when Account never started.
+ * @param signedIn - whether the current Account snapshot is signed in.
+ */
+export function restoreDesktopProjectMembershipPresence(
+  presence: DesktopProjectMembershipPresence | undefined,
+  signedIn: boolean,
+): void {
+  presence?.setSignedIn(signedIn)
+}
+
 export interface DesktopProjectMembershipPresenceOptions extends DesktopProjectMembershipOptions {
   readonly intervalMs?: number
   readonly schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>

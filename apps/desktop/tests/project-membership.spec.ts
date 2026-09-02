@@ -3,6 +3,7 @@ import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-acco
 import {
   createDesktopProjectMembershipClient,
   createDesktopProjectMembershipPresence,
+  restoreDesktopProjectMembershipPresence,
   parseInvitationDecision,
   parseMembershipRole,
   parseMembershipTags,
@@ -117,6 +118,57 @@ describe('Desktop Project Membership bridge', () => {
     tasks.shift()?.()
     await Promise.resolve()
     expect(fetch).toHaveBeenCalledTimes(2)
+    await presence.dispose()
+  })
+
+  it('restores Online through live-connection derivation after last-window close then setSignedIn(true)', async () => {
+    const authorizeCurrentInstallation = vi.fn().mockResolvedValue({
+      accessToken: 'presence-access',
+      proof: { jti: 'presence-proof', issuedAt: 3, signature: 'presence-signature' },
+    })
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(undefined, { status: 204 }))
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation } as never),
+      environment,
+      fetch,
+      intervalMs: 25,
+      schedule: () => ({ unref: vi.fn() }) as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => {},
+    })
+
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledTimes(1) })
+    await presence.closeWindow()
+    expect(fetch.mock.calls[1]?.[0]).toBe('https://platform.example.test/v1/projects/presence/close')
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledTimes(3) })
+    expect(fetch.mock.calls[2]?.[0]).toBe('https://platform.example.test/v1/projects/presence/heartbeat')
+    await presence.dispose()
+  })
+
+  it('restores presence from the live Account snapshot when last-window close recreates a window', async () => {
+    const authorizeCurrentInstallation = vi.fn().mockResolvedValue({
+      accessToken: 'presence-access',
+      proof: { jti: 'presence-proof', issuedAt: 3, signature: 'presence-signature' },
+    })
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(undefined, { status: 204 }))
+    const presence = createDesktopProjectMembershipPresence({
+      account: () => ({ authorizeCurrentInstallation } as never),
+      environment,
+      fetch,
+      intervalMs: 25,
+      schedule: () => ({ unref: vi.fn() }) as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => {},
+    })
+
+    presence.setSignedIn(true)
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledTimes(1) })
+    await presence.closeWindow()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    restoreDesktopProjectMembershipPresence(presence, true)
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledTimes(3) })
+    expect(fetch.mock.calls[2]?.[0]).toBe('https://platform.example.test/v1/projects/presence/heartbeat')
+    restoreDesktopProjectMembershipPresence(undefined, true)
     await presence.dispose()
   })
 

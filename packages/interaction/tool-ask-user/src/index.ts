@@ -25,7 +25,7 @@ import {
   AskUserQuestionError,
   BACKGROUND_MAX_CODE_POINTS,
 } from './errors.ts'
-import { countUnicodeCodePoints, validateReferences } from './references.ts'
+import { countUnicodeCodePoints, validateReferences, validateRoutedReferences } from './references.ts'
 
 export { AskUserQuestionError } from './errors.ts'
 export type { AskUserQuestionErrorCode } from './errors.ts'
@@ -34,8 +34,13 @@ export {
   REFERENCE_REASON_MAX_CODE_POINTS,
   REFERENCES_MAX_COUNT,
 } from './errors.ts'
-export { countUnicodeCodePoints, validateReferences } from './references.ts'
-export type { AskUserQuestionReference, ValidatedAskUserQuestionReference } from './references.ts'
+export { countUnicodeCodePoints, validateReferences, validateRoutedReferences } from './references.ts'
+export type {
+  AskUserQuestionReference,
+  AskUserQuestionReferenceDocument,
+  ValidatedAskUserQuestionReference,
+  ValidatedRoutedAskUserQuestionReferences,
+} from './references.ts'
 
 export const name = 'tool-ask-user'
 export const inject = ['tools', 'userQuestions']
@@ -235,7 +240,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
         background = args.background
       }
-      const references = await validateReferences(args.references, exec.agent?.session.header.cwd)
+      const workspaceRoot = exec.agent?.session.header.cwd
       const questions = args.questions.map(question => ({
         id: question.id,
         question: question.question,
@@ -244,6 +249,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ...question.multi_select !== undefined ? { multiSelect: question.multi_select } : {},
       }))
       if (addressee === undefined || background === undefined) {
+        await validateReferences(args.references, workspaceRoot)
         const result = await ctx.userQuestions.ask({
           questions,
           ...exec.agent !== undefined ? { agent: exec.agent } : {},
@@ -275,15 +281,17 @@ export function apply(ctx: Context, config: Config = {}): void {
           'INELIGIBLE_ADDRESSEE',
         )
       }
+      const routed = await validateRoutedReferences(args.references, workspaceRoot)
       const result = await sender.send({
         toProjectMember: route.toProjectMember,
         projectId: parseMemberQuestionProjectId(route.projectId),
         background,
         questions,
-        references: (references ?? []).map(reference => ({
+        references: (routed.references ?? []).map(reference => ({
           path: reference.path,
           reason: reference.reason ?? reference.path,
         })),
+        documents: routed.documents,
         origin: route.origin,
         originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
       }, {

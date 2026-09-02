@@ -3,6 +3,7 @@ import {
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
   decodeCompanionMessage,
+  deriveMemberQuestionDocumentTransferId,
   encodeCompanionMessage,
   encodeProtocolBase64Url,
   negotiateCompanionProtocol,
@@ -116,6 +117,21 @@ describe('Encrypted Companion Protocol document transfer frames', () => {
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
     )
     expect(() => decodeCompanionMessage(stale, wireState(() => {}, 3))).toThrow(
+      expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+    )
+  })
+
+  it('derives a stable transfer identity from the question and reference position', () => {
+    const questionId = parseMemberQuestionId('member-question-1')
+    expect(deriveMemberQuestionDocumentTransferId(questionId, 0)).toBe('mqdoc_member-question-1_0')
+    expect(deriveMemberQuestionDocumentTransferId(questionId, 7)).toBe('mqdoc_member-question-1_7')
+    expect(() => deriveMemberQuestionDocumentTransferId(questionId, -1)).toThrow(
+      expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+    )
+    expect(() => deriveMemberQuestionDocumentTransferId(
+      questionId,
+      REMOTE_PROTOCOL_LIMITS.memberQuestionReferences,
+    )).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
     )
   })

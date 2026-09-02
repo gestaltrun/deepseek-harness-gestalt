@@ -62,4 +62,4 @@
 - **`to_project_member` 保留在静态 schema 中**：提示组装会从组装后的工具列表中为非绑定工作区省略该参数；`ctx.tools.schemas()` 与生成的目录仍记录静态参数。
 - **本地参考材料聚焦被推迟**：本地提问会接受并校验 `references`，但将 details 面板打开到被引用文件由后续工单落地。
 - **路由投递依赖 T4 注册表传输缺环**：编码与发送器接口已经存在；在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。在该传输落地之前，没有投递适配器的组合以 `SENDER_UNAVAILABLE` 或 `DELIVERY_UNAVAILABLE` 失败关闭，而不是排队。
-- **被引用文件是 path 元数据，不是 `document-chunk` 帧**：T4 codec 拥有 document-chunk 传输，并将重组视为消费方职责；本工具校验工作区 path，并在 `member-question` 操作上转发 `{ path, reason }`，不编码或重组文档字节。
+- **路由提问会读取工作区字节以进行 `document-chunk` 传输**：本地提问仍只校验 path 元数据。路由提问会读取每个已接纳文件，并向发送器转发对齐的 `{ path, bytes }`；发送器编码 Companion `document-chunk` 帧，接收端重组仍是消费方职责。

@@ -9,6 +9,7 @@
     "types": ["node"]
   },
   "include": ["src", "tests", "scripts"],
+  "exclude": ["tests/member-question-e2e"],
   "references": [
     { "path": "../../packages/attachment/attachment" },
     { "path": "../../packages/attachment/attachment-local" },
@@ -32,8 +33,13 @@
     { "path": "../../packages/storage/storage-domain" },
     { "path": "../../packages/storage/storage-sqlite" },
     { "path": "../../packages/core/system-prompt" },
+    { "path": "../../packages/interaction/member-question-receiver" },
+    { "path": "../../packages/interaction/member-question-sender" },
     { "path": "../../packages/interaction/user-approval" },
     { "path": "../../packages/interaction/user-questions" },
+    { "path": "../../packages/platform/project-membership" },
+    { "path": "../../packages/platform/project-membership-core" },
+    { "path": "../../packages/platform/project-membership-http" },
     { "path": "../../packages/workspace/workspace" },
     { "path": "../../packages/test-support/loader-smoke" }
   ]

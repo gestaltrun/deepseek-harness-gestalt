@@ -51,6 +51,7 @@ export type {
   MemberQuestionCachedReference,
   MemberQuestionTransferredDocument,
 } from './document-cache.ts'
+export { MemberQuestionDocumentAssembler } from './document-transfer.ts'
 
 export type {
   AdmitMemberQuestionHumanTurnInput,
@@ -76,6 +77,7 @@ export type {
   MemberQuestionReceiverTimer,
   PendingMemberQuestionView,
   ReceivingSessionId,
+  ReassembledMemberQuestionDocument,
   TerminalMemberQuestionView,
 } from './types.ts'
 
@@ -198,6 +200,13 @@ export abstract class MemberQuestionReceiverService extends Service implements M
   abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
 
   /**
+   * Install the single first-claim terminal authority used by this Host.
+   * @param authority - transport-backed first-claim adapter.
+   * @returns disposer for this exact registration.
+   */
+  abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void
+
+  /**
    * Persist or replace one exact Account/Project to local Workspace association.
    * @param accountId - authenticated receiving Account.
    * @param projectId - Cloud Project being joined.
@@ -267,7 +276,8 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
   /** Absolute environment-namespaced ledger document path. */
   readonly storageFile: string
   private readonly maxRecords: number
-  private readonly terminalAuthority: MemberQuestionTerminalAuthority | undefined
+  private terminalAuthority: MemberQuestionTerminalAuthority | undefined
+  private runtimeTerminalAuthorityRevision = 0
   private readonly clock: () => number
   private readonly materializer: MemberQuestionSessionMaterializer | undefined
   private runtimeMaterializer: MemberQuestionSessionMaterializer | undefined
@@ -657,6 +667,19 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       if (this.runtimeAdmitterRevision !== revision) return
       this.runtimeAdmitter = undefined
       this.runtimeAdmitterRevision += 1
+    }
+  }
+
+  override registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void {
+    if (this.terminalAuthority !== undefined) {
+      throw new Error('member-question-receiver: a terminal authority is already registered')
+    }
+    this.terminalAuthority = authority
+    const revision = ++this.runtimeTerminalAuthorityRevision
+    return () => {
+      if (this.runtimeTerminalAuthorityRevision !== revision) return
+      this.terminalAuthority = undefined
+      this.runtimeTerminalAuthorityRevision += 1
     }
   }
 

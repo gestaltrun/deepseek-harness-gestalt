@@ -466,6 +466,18 @@ describe('FileMemberQuestionReceiver', () => {
     expect(() => receiver.registerSessionMaterializer(materializer)).not.toThrow()
   })
 
+  it('registers a runtime terminal authority exactly once', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, { clock: () => 1_000 })
+    const authority = new MemoryTerminalAuthority()
+    const unregister = receiver.registerTerminalAuthority(authority)
+    expect(() => receiver.registerTerminalAuthority(authority)).toThrow('already registered')
+    unregister()
+    unregister()
+    expect(() => receiver.registerTerminalAuthority(authority)).not.toThrow()
+  })
+
   it('materializes a second independent route without rewriting the first Host Session', async () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
     roots.push(storagePath)

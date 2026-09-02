@@ -78,3 +78,4 @@ The hoisted deploy includes workspace packages without pnpm's linked virtual dep
 - **Packaged extraResources Node + dsh snapshot is assembled by the release workflow** — `gestalt:dev` runs the workspace source tree.
 - **Windows Authenticode is absent** — SmartScreen warns; the updater still runs.
 - **Companion release evidence is repository-owned** — Node 22 and 24 plus iOS Simulator WKWebView and Android Emulator WebView execute the exact checked-in Snow JS/WASM package and its bounded attack cases. The assembled Desktop/Mobile product flow remains the acceptance surface; local Vite, test certificates, and `prototype-companion` are not product acceptance.
+- **Project Members three-installation Electron acceptance is source-only** — `pnpm run test:e2e-project-members-electron` rebuilds current source, boots A1/B1/B2 against one local keyless Platform, and requires a visible `DISPLAY` on Linux. Packaged Desktop never accepts `--dsh-e2e-profile`.

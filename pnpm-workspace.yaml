@@ -67,6 +67,10 @@ allowBuilds:
   electron-winstaller: false
   # core-js runtime modules are complete in the package; its postinstall only reports project metadata.
   core-js: false
+  # WDIO's Electron service optionally pulls these browser drivers; Project
+  # Members Electron acceptance uses the Electron service, not them.
+  edgedriver: false
+  geckodriver: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole

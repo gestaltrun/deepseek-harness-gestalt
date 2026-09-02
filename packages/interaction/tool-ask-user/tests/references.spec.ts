@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { REFERENCES_MAX_COUNT, validateReferences } from '@deepseek-ai/dsh-tool-ask-user'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
+import { REFERENCES_MAX_COUNT, validateReferences, validateRoutedReferences } from '@deepseek-ai/dsh-tool-ask-user'
 
 function workspaceFixture(): { workspace: string; inside: string } {
   const parent = mkdtempSync(join(tmpdir(), 'dsh-ask-user-validate-refs-'))
@@ -119,5 +120,38 @@ describe('validateReferences', () => {
       workspace,
       'REFERENCES_INVALID: references[0]: reason must contain 1-100 code points',
     )
+  })
+})
+
+describe('validateRoutedReferences', () => {
+  it('reads admitted file bytes for a routed ask', async () => {
+    const { workspace, inside } = workspaceFixture()
+    await expect(validateRoutedReferences([{ path: 'inside.md' }], workspace)).resolves.toEqual({
+      references: [{ path: 'inside.md' }],
+      documents: [{ path: 'inside.md', bytes: new Uint8Array(Buffer.from('ok\n')) }],
+    })
+    await expect(validateRoutedReferences([{ path: inside, reason: 'Rollout plan' }], workspace)).resolves.toEqual({
+      references: [{ path: inside, reason: 'Rollout plan' }],
+      documents: [{ path: inside, bytes: new Uint8Array(Buffer.from('ok\n')) }],
+    })
+  })
+
+  it('rejects an oversize or deleted routed file', async () => {
+    const { workspace, inside } = workspaceFixture()
+    const huge = join(workspace, 'huge.bin')
+    writeFileSync(huge, Buffer.alloc(
+      Math.min(
+        REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+        REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+      ) + 1,
+    ))
+    await expect(validateRoutedReferences([{ path: 'huge.bin' }], workspace)).rejects.toMatchObject({
+      code: 'REFERENCES_INVALID',
+    })
+    chmodSync(inside, 0)
+    await expect(validateRoutedReferences([{ path: 'inside.md' }], workspace)).rejects.toMatchObject({
+      code: 'REFERENCES_INVALID',
+    })
+    chmodSync(inside, 0o600)
   })
 })

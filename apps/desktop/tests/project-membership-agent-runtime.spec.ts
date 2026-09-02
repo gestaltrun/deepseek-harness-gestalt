@@ -22,11 +22,12 @@ afterEach(async () => {
 describe('Desktop Project Membership agent runtime', () => {
   it('projects only the signed-in Installation account, workspace context, and authenticated roster', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-desktop-project-members-agent-'))
+    const projectByRemote = vi.fn().mockResolvedValue({
+      id: 'project-atlas', name: 'Atlas', boundRemoteUrl: 'https://github.com/gestaltrun/atlas', createdAt: 1,
+      receivingAccountId: 'account-a',
+    })
     const membership = {
-      projectByRemote: vi.fn().mockResolvedValue({
-        id: 'project-atlas', name: 'Atlas', boundRemoteUrl: 'https://github.com/gestaltrun/atlas', createdAt: 1,
-        receivingAccountId: 'account-a',
-      }),
+      projectByRemote,
       roster: vi.fn().mockResolvedValue({
         project: { id: 'project-atlas', name: 'Atlas', boundRemoteUrl: 'https://github.com/gestaltrun/atlas', createdAt: 1 },
         members: [{
@@ -56,7 +57,7 @@ describe('Desktop Project Membership agent runtime', () => {
       .toMatchObject({ account: { id: 'account-a', githubLogin: 'ada' } })
     expect((await call(runtime.origin, token, '/v1/context', { cwd: '/workspace/atlas' })).body)
       .toMatchObject({ account: { id: 'account-a', githubLogin: 'ada' }, project: { id: 'project-atlas' } })
-    expect(membership.projectByRemote).toHaveBeenCalledWith('https://github.com/gestaltrun/atlas')
+    expect(projectByRemote).toHaveBeenCalledWith('https://github.com/gestaltrun/atlas')
     expect((await call(runtime.origin, token, '/v1/roster', {
       actorAccountId: 'account-a', projectId: 'project-atlas',
     })).body).toMatchObject({ members: [{ accountId: 'account-a', displayName: 'Ada', presence: 'online' }] })
@@ -71,11 +72,12 @@ describe('Desktop Project Membership agent runtime', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-desktop-project-members-agent-'))
     let finishRead: (() => void) | undefined
     const pendingRead = new Promise<void>((resolve) => { finishRead = resolve })
+    const projectByRemote = vi.fn(async () => {
+      await pendingRead
+      return undefined
+    })
     const membership = {
-      projectByRemote: vi.fn(async () => {
-        await pendingRead
-        return undefined
-      }),
+      projectByRemote,
     } as unknown as ProjectMembershipClient
     const account = {
       getSnapshot: () => ({
@@ -96,7 +98,7 @@ describe('Desktop Project Membership agent runtime', () => {
     })
     const token = (await readFile(runtime.tokenFile, 'utf8')).trim()
     const request = call(runtime.origin, token, '/v1/context', { cwd: '/workspace/atlas' }).catch(() => undefined)
-    await vi.waitFor(() => { expect(membership.projectByRemote).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(projectByRemote).toHaveBeenCalledOnce() })
     let disposed = false
     const disposal = runtime.dispose().then(() => { disposed = true })
     runtime = undefined
@@ -113,11 +115,12 @@ describe('Desktop Project Membership agent runtime', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-desktop-project-members-agent-'))
     let finishRead: (() => void) | undefined
     const pendingRead = new Promise<void>((resolve) => { finishRead = resolve })
+    const projectByRemote = vi.fn(async () => {
+      await pendingRead
+      return { id: 'project-atlas', name: 'Atlas', boundRemoteUrl: 'https://github.com/gestaltrun/atlas', createdAt: 1 }
+    })
     const membership = {
-      projectByRemote: vi.fn(async () => {
-        await pendingRead
-        return { id: 'project-atlas', name: 'Atlas', boundRemoteUrl: 'https://github.com/gestaltrun/atlas', createdAt: 1 }
-      }),
+      projectByRemote,
     } as unknown as ProjectMembershipClient
     let accountId = 'account-a'
     const account = {
@@ -135,7 +138,7 @@ describe('Desktop Project Membership agent runtime', () => {
     })
     const token = (await readFile(runtime.tokenFile, 'utf8')).trim()
     const requested = call(runtime.origin, token, '/v1/context', { cwd: '/workspace/atlas' })
-    await vi.waitFor(() => { expect(membership.projectByRemote).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(projectByRemote).toHaveBeenCalledOnce() })
     accountId = 'account-b'
     finishRead?.()
 

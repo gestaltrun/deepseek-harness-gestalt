@@ -108,7 +108,8 @@ describe('project_members keyless assembled transcript', () => {
     expect(memberText).toBe(MEMBER_ANSWER_TEXT)
     const askCall = events.find(event => event.type === 'tool/call'
       && (event.data as JsonObject).name === 'ask_user_question')
-    const askArguments = JSON.parse(String((askCall?.data as JsonObject | undefined)?.arguments ?? '{}')) as JsonObject
+    const askPayload = (askCall?.data as JsonObject | undefined)?.arguments
+    const askArguments = JSON.parse(typeof askPayload === 'string' ? askPayload : '{}') as JsonObject
     expect(askArguments.to_project_member).toBe('grace')
     expect(events.filter(event => event.type === 'member-question/asked')).toHaveLength(1)
     expect(events.filter(event => event.type === 'member-question/outcome')).toHaveLength(1)

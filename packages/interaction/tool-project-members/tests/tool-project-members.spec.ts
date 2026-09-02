@@ -441,11 +441,12 @@ describe('project_members tool', () => {
       currentAccountResolver: async ({ signal } = {}) => {
         started?.()
         return new Promise((_resolve, reject) => {
+          const rejectAbort = (): void => { reject(new Error(String(signal?.reason ?? 'aborted'))) }
           if (signal?.aborted === true) {
-            reject(signal.reason)
+            rejectAbort()
             return
           }
-          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+          signal?.addEventListener('abort', rejectAbort, { once: true })
         })
       },
     })

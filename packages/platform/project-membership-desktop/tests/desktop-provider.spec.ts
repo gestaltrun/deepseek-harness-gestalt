@@ -23,7 +23,8 @@ describe('Desktop Project Membership Web Host provider', () => {
     await writeFile(tokenFile, 'secret\n')
     const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(init?.headers).toMatchObject({ authorization: 'Bearer secret' })
-      if (String(input).endsWith('/v1/context') || String(input).endsWith('/v1/account')) {
+      const href = input instanceof Request ? input.url : String(input)
+      if (href.endsWith('/v1/context') || href.endsWith('/v1/account')) {
         return Response.json({
           account: { id: 'account-a', githubLogin: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
           project: { id: 'project-atlas', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/atlas', createdAt: 1 },
@@ -74,7 +75,9 @@ describe('Desktop Project Membership Web Host provider', () => {
     const tokenFile = join(root, 'token')
     await writeFile(tokenFile, 'secret\n')
     const fetch = vi.fn((_input: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => { reject(init.signal?.reason) }, { once: true })
+      const signal = init?.signal
+      const rejectAbort = (): void => { reject(new Error(String(signal?.reason ?? 'aborted'))) }
+      signal?.addEventListener('abort', rejectAbort, { once: true })
     }))
     vi.stubGlobal('fetch', fetch)
     ctx = new Context()

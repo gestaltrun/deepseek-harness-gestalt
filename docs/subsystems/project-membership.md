@@ -8,6 +8,8 @@ Every mutation executes its role gate inside the operation: admins invite but ca
 
 [`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.md) is the file-backed provider: state lives per environment namespace (`development`/`production`) below the configured storage path, every mutation serializes through one write chain and republishes the whole document through an atomic rename. Roles govern only this collaboration plane and stay disjoint from Git-provider permissions in both directions. Routed member questions remain fail-closed behind the standing encryption review recorded in [the placement Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.md).
 
+Presence is live Desktop Installation connection, owned by the [HTTP Consumer](../../packages/platform/project-membership-http/README.md) and [Desktop Host](../../apps/desktop/README.md): last-window close POSTs `/v1/projects/presence/close`, roster readers see Offline immediately, TTL expiry remains the crash and partition path, and a routed ask of an offline member fails fast with `MEMBER_OFFLINE` and writes nothing to a queue.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -240,6 +242,19 @@ projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView |
  * @returns Project and complete decorated roster.
  */
 roster(projectId: ProjectId): Promise<RosterReadView>
+
+/**
+ * Refresh this Desktop Installation's live presence heartbeat.
+ * @returns fulfillment after Platform records the beat.
+ */
+heartbeat(): Promise<void>
+
+/**
+ * Clear this Desktop Installation immediately so roster readers see Offline
+ * without waiting for presence TTL.
+ * @returns fulfillment after Platform drops this installation.
+ */
+closePresence(): Promise<void>
 
 /**
  * Invite one uniquely resolved public GitHub login.

@@ -2253,7 +2253,7 @@ export interface Config {
   origins: string[]
   /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
   presenceHeartbeatIntervalMs: number
-  /** Heartbeat liveness window in milliseconds (default: 90000); expiry is the only route to offline. */
+  /** Heartbeat liveness window in milliseconds (default: 90000); crash and partition expiry, not last-window close. */
   presenceTtlMs: number
 }
 ```

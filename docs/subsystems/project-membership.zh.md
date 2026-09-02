@@ -8,6 +8,8 @@
 
 [`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.zh.md) 是文件持久化 Provider:状态按环境命名空间(`development`/`production`)存放于所配置存储路径之下,每次变更经单一写链串行化并整体原子重命名发布。角色只治理本协作层面,与 Git 平台权限双向无关。成员提问路由保持 fail-closed,仍受[放置决策 Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.zh.md) 记录的常设加密评审约束。
 
+Presence 是 Desktop Installation 的实时连接，由 [HTTP Consumer](../../packages/platform/project-membership-http/README.zh.md) 与 [Desktop Host](../../apps/desktop/README.zh.md) 拥有：关闭最后一个窗口会 POST `/v1/projects/presence/close`，花名册读者立即看到 Offline，TTL 过期仍是崩溃与分区路径，对离线成员的路由提问以 `MEMBER_OFFLINE` 快速失败且不写入任何队列。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -240,6 +242,19 @@ projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView |
  * @returns Project and complete decorated roster.
  */
 roster(projectId: ProjectId): Promise<RosterReadView>
+
+/**
+ * Refresh this Desktop Installation's live presence heartbeat.
+ * @returns fulfillment after Platform records the beat.
+ */
+heartbeat(): Promise<void>
+
+/**
+ * Clear this Desktop Installation immediately so roster readers see Offline
+ * without waiting for presence TTL.
+ * @returns fulfillment after Platform drops this installation.
+ */
+closePresence(): Promise<void>
 
 /**
  * Invite one uniquely resolved public GitHub login.

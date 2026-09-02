@@ -104,6 +104,8 @@ describe('ui-desktop apply', () => {
         createProject: vi.fn(),
         projectByRemote: vi.fn(),
         roster: vi.fn(),
+        heartbeat: vi.fn(),
+        closePresence: vi.fn(),
         invite: vi.fn(),
         decideInvitation: vi.fn(),
         retractInvitation: vi.fn(),

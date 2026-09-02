@@ -1,12 +1,12 @@
 /**
  * HTTP Consumer for Project Membership. It owns the project-registry, roster,
- * invitation, member-administration, and presence-heartbeat routes, while the
- * membership service owns every role gate and roster relation. The acting
- * account is resolved from an existing Account session: bearer access token
- * plus the installation proof headers, verified by `ctx.platformAccount`.
- * Roster reads attach per-member presence aggregated from installation
- * heartbeat registrations and the member's public identity (GitHub login and
- * avatar URL) read in one batch from the Account service.
+ * invitation, member-administration, and presence heartbeat and close routes,
+ * while the membership service owns every role gate and roster relation. The
+ * acting account is resolved from an existing Account session: bearer access
+ * token plus the installation proof headers, verified by
+ * `ctx.platformAccount`. Roster reads attach per-member presence aggregated
+ * from installation heartbeat registrations and the member's public identity
+ * (GitHub login and avatar URL) read in one batch from the Account service.
  * @module @deepseek-ai/dsh-project-membership-http
  */
 
@@ -58,7 +58,7 @@ export interface Config {
   origins: string[]
   /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
   presenceHeartbeatIntervalMs: number
-  /** Heartbeat liveness window in milliseconds (default: 90000); expiry is the only route to offline. */
+  /** Heartbeat liveness window in milliseconds (default: 90000); crash and partition expiry, not last-window close. */
   presenceTtlMs: number
 }
 
@@ -157,13 +157,18 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   route('prefix', '/v1/projects/presence', async (req, res) => {
-    if (matchPath(requestPath(req), '/v1/projects/presence/heartbeat') === undefined) throw unknownRoute()
+    const pathname = requestPath(req)
+    const heartbeat = matchPath(pathname, '/v1/projects/presence/heartbeat')
+    const close = matchPath(pathname, '/v1/projects/presence/close')
+    if (heartbeat === undefined && close === undefined) throw unknownRoute()
     requireMethod(req, 'POST')
     const authenticated = await requireInstallation(ctx, req)
     if (authenticated.installation.kind !== 'desktop') {
-      throw new HttpError(403, 'INSTALLATION_KIND_UNSUPPORTED', 'presence heartbeats are accepted from Desktop installations only')
+      const operation = heartbeat !== undefined ? 'presence heartbeat' : 'presence close'
+      throw new HttpError(403, 'INSTALLATION_KIND_UNSUPPORTED', `${operation} is accepted from Desktop installations only`)
     }
-    await presence.beat(authenticated.account.id, authenticated.installation.id)
+    if (heartbeat !== undefined) await presence.beat(authenticated.account.id, authenticated.installation.id)
+    else await presence.close(authenticated.account.id, authenticated.installation.id)
     answerNoContent(res)
   })
 
@@ -352,7 +357,7 @@ export interface PresenceRosterView {
 
 /**
  * Attach per-member presence and public identity to one roster view.
- * @param presence - registry of live installation heartbeats.
+ * @param presence - registry of live installation heartbeats and explicit closes.
  * @param account - Account service resolving the members' public identities.
  * @param view - roster as the membership service stores it.
  * @returns the roster with each member's presence verdict and identity attached.

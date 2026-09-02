@@ -1001,6 +1001,15 @@ importers:
       '@deepseek-ai/dsh-project-membership':
         specifier: workspace:*
         version: link:../packages/platform/project-membership
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership-client
+      '@deepseek-ai/dsh-project-membership-core':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership-core
+      '@deepseek-ai/dsh-project-membership-http':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership-http
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:*
         version: link:../packages/shell/pwsh-local

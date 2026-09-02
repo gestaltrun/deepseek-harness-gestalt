@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "514-phone-ios-wda-swipe",
+  "summary": {
+    "en": "Encode Desktop phone-tab swipes as WDA press-hold gestures so iOS Simulator UI scrolls.",
+    "zh": "把桌面端手机 tab 的 swipe 编成 WDA 按住手势，使 iOS Simulator 界面可以滚动。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Phone-tab swipe encoding runs in the Desktop Host and Web client; it does not change Mobile source, build inputs, or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The local phone-tab gesture encoding does not change Platform services, deployment inputs, or wire formats."
+    }
+  ]
+}

@@ -1767,7 +1767,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-runtime/src/index.ts:109`](../packages/phone/phone-runtime/src/index.ts)
+来源：[`packages/phone/phone-runtime/src/index.ts:110`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 

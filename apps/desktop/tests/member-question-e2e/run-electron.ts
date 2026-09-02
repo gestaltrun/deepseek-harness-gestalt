@@ -107,6 +107,7 @@ try {
       DSH_PROJECT_MEMBERS_REMOTE_ACCOUNT_ID: 'account-b',
       DSH_PROJECT_MEMBERS_ASKER_NAME: 'Ada',
       DSH_PROJECT_MEMBERS_ASKER_ROLE: 'owner',
+      DSH_PROJECT_MEMBERS_WORKSPACE: workspace,
     }, undefined, 2) + '\n', { mode: 0o600 })
     return { name, root, dshHome, userData, workspace, smokeFile, profile, accountId }
   }))

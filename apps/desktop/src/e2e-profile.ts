@@ -18,6 +18,7 @@ const ALLOWED_ENVIRONMENT = new Set([
   'DSH_PROJECT_MEMBERS_REMOTE_ACCOUNT_ID',
   'DSH_PROJECT_MEMBERS_ASKER_NAME',
   'DSH_PROJECT_MEMBERS_ASKER_ROLE',
+  'DSH_PROJECT_MEMBERS_WORKSPACE',
 ])
 
 /** Apply one runner-authored profile before the Desktop boots its owners. */

@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import FileMemberQuestionReceiver, {
@@ -19,6 +21,8 @@ import {
 import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
 import { startLocalKeylessPlatform, type KeylessPlatformSession } from './local-platform.ts'
+
+const assembledExpected = fileURLToPath(new URL('./snapshots/assembled-project-members.expected.json', import.meta.url))
 
 describe('assembled keyless Project Members acceptance', () => {
   it('walks real Account, membership, presence, encrypted ask, and offline failure listeners', { timeout: 30_000 }, async () => {
@@ -350,6 +354,29 @@ describe('assembled keyless Project Members acceptance', () => {
       for (const retained of [JSON.stringify(broker.audit), await platform.retainedState()]) {
         for (const marker of forbiddenPlaintext) expect(retained).not.toContain(marker)
       }
+      const payloadBytes = await readFile(join(workspaceB1, cachedBinary))
+      await expect(JSON.stringify({
+        schemaVersion: 1,
+        invite: { incompletePending: 1, acceptedPending: 0 },
+        presence: {
+          afterHeartbeats: ['online', 'online'],
+          afterLastWindowClose: ['online', 'offline'],
+        },
+        documents: {
+          paths: ['decision.md', 'preview.html', 'payload.bin'],
+          payloadChunks: 2,
+          payloadByteLength: payloadBytes.byteLength,
+          payloadSha256: createHash('sha256').update(payloadBytes).digest('hex'),
+          cacheRoot: MEMBER_QUESTION_DOCUMENT_CACHE_ROOT,
+        },
+        firstClaim: {
+          outcome: canonicalB1.outcome,
+          loserMatchesWinner: loser?.terminal.settledByInstallationId === canonicalB1.settledByInstallationId,
+          noComposerCard: !('composer' in (questionB1 ?? {})) && !('composer' in (loser ?? {})),
+        },
+        laterTerminals: ['expired', 'withdrawn', 'superseded', 'MEMBER_OFFLINE'],
+        wireFloor: 'ciphertext-only',
+      }, null, 2) + '\n').toMatchFileSnapshot(assembledExpected)
     } finally {
       const cleanup = [
         ...await Promise.allSettled(startedEndpoints.toReversed().map(endpoint => endpoint.stop())),

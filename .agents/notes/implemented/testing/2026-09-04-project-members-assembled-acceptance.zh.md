@@ -14,7 +14,7 @@ Status: implemented
 
 可见 Desktop 覆盖是 `pnpm run test:e2e-project-members-electron`。它重建当前源码，对着同一本地 Platform 启动三个隔离 Electron 进程，并在 Linux 上要求可见 `DISPLAY`。`--dsh-e2e-profile` 只被显式的未打包 `DSH_DESKTOP_E2E=1` 运行接受。生产密封仍受常设独立加密评审约束。
 
-发送器通过 `deriveMemberQuestionDocumentTransferId` 将对齐的文档字节编码为 Companion `document-chunk` 帧。接收器的 `MemberQuestionDocumentAssembler` 在 Host ingest 把接收端所有的缓存文件写入 `.dsh/member-questions/<questionId>/` 之前重组这些帧。`apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts` 把该编码/线路/重组转录记录到 `snapshots/document-chunk-reassembly.expected.json`。
+发送器通过 `deriveMemberQuestionDocumentTransferId` 将对齐的文档字节编码为 Companion `document-chunk` 帧。接收器的 `MemberQuestionDocumentAssembler` 在 Host ingest 把接收端所有的缓存文件写入 `.dsh/member-questions/<questionId>/` 之前重组这些帧。`apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts` 把该编码/线路/重组转录记录到 `snapshots/document-chunk-reassembly.expected.json`。组装走查本身把邀请、最后窗口 presence、分块缓存字节、first-claim、后续终态与线路下限记录到 `snapshots/assembled-project-members.expected.json`。
 
 ## Alternatives considered
 

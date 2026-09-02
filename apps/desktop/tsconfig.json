@@ -35,6 +35,7 @@
     { "path": "../../packages/core/system-prompt" },
     { "path": "../../packages/interaction/member-question-receiver" },
     { "path": "../../packages/interaction/member-question-sender" },
+    { "path": "../../packages/interaction/tool-ask-user" },
     { "path": "../../packages/interaction/user-approval" },
     { "path": "../../packages/interaction/user-questions" },
     { "path": "../../packages/platform/project-membership" },

@@ -14,7 +14,7 @@ Assembled #345 evidence is a locally runnable SHA-256-free AES-256-GCM developme
 
 Visible Desktop coverage is `pnpm run test:e2e-project-members-electron`. It rebuilds current source, starts three isolated Electron processes against that same local Platform, and requires a visible `DISPLAY` on Linux. `--dsh-e2e-profile` is accepted only by an explicit unpackaged `DSH_DESKTOP_E2E=1` run. Production sealing remains behind the standing independent encryption review.
 
-The sender encodes aligned document bytes as Companion `document-chunk` frames through `deriveMemberQuestionDocumentTransferId`. The receiver's `MemberQuestionDocumentAssembler` reconstructs those frames before Host ingest writes receiver-owned cache files under `.dsh/member-questions/<questionId>/`. `apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts` records that encode/wire/reassembly transcript against `snapshots/document-chunk-reassembly.expected.json`.
+The sender encodes aligned document bytes as Companion `document-chunk` frames through `deriveMemberQuestionDocumentTransferId`. The receiver's `MemberQuestionDocumentAssembler` reconstructs those frames before Host ingest writes receiver-owned cache files under `.dsh/member-questions/<questionId>/`. `apps/desktop/tests/member-question-e2e/document-chunk-reassembly.snapshot.ts` records that encode/wire/reassembly transcript against `snapshots/document-chunk-reassembly.expected.json`. The assembled walk itself records `snapshots/assembled-project-members.expected.json` for invite, last-window presence, chunked cache bytes, first-claim, later terminals, and the wire floor.
 
 ## Alternatives considered
 

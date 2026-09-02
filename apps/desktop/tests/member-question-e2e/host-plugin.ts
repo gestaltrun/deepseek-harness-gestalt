@@ -4,17 +4,15 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { CallId } from '@deepseek-ai/dsh-llm'
 import CompanionMemberQuestionSender, { MemberQuestionSenderError } from '@deepseek-ai/dsh-member-question-sender'
+import { AskUserQuestionError } from '@deepseek-ai/dsh-tool-ask-user'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import {
-  decodeProtocolBase64Url,
-  parseCompanionSessionId,
-  parseMemberQuestionProjectId,
-} from '@deepseek-ai/dsh-remote-protocol'
+import { decodeProtocolBase64Url } from '@deepseek-ai/dsh-remote-protocol'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
 
 export const name = 'member-question-keyless-host'
-export const inject = ['memberQuestionReceiver']
+export const inject = ['memberQuestionReceiver', 'tools']
 
 type ControlAskStatus =
   | { readonly state: 'pending' }
@@ -50,7 +48,7 @@ export function apply(ctx: Context): void {
   const asks = new Map<string, ControlAsk>()
   const controlFile = join(required('DSH_HOME'), 'member-question-e2e-control.json')
   const control = createServer((request, response) => {
-    void handleControl(request, response, endpoint, sender, asks)
+    void handleControl(request, response, ctx, endpoint, asks)
   })
   ctx.effect(async () => {
     const unregisterAuthority = receiver.registerTerminalAuthority(endpoint.terminalAuthority)
@@ -113,8 +111,8 @@ async function closeControl(control: ReturnType<typeof createServer>): Promise<v
 async function handleControl(
   request: IncomingMessage,
   response: ServerResponse,
+  ctx: Context,
   endpoint: KeylessMemberQuestionEndpoint,
-  sender: CompanionMemberQuestionSender,
   asks: Map<string, ControlAsk>,
 ): Promise<void> {
   try {
@@ -147,33 +145,34 @@ async function handleControl(
       const abort = new AbortController()
       const ask: ControlAsk = { abort, status: { state: 'pending' } }
       asks.set(token, ask)
-      void sender.send({
-        toProjectMember: requiredField(body, 'toAccountId'),
-        projectId: parseMemberQuestionProjectId(requiredField(body, 'projectId')),
-        background: requiredField(body, 'background'),
-        questions: [{
-          id: 'decision',
-          question: requiredField(body, 'question'),
-          options: [{ label: 'continue' }, { label: 'stop' }],
-        }],
-        references: [],
-        documents: [],
-        origin: {
-          projectName: requiredField(body, 'projectName'),
-          originSessionTitle: requiredField(body, 'title'),
-          askerAccountId: requiredField(body, 'askerAccountId'),
-          askerRole: 'owner',
-          askerDisplayName: 'Ada',
-          askerAvatarUrl: 'https://avatars.example/ada.png',
+      const cwd = required('DSH_PROJECT_MEMBERS_WORKSPACE')
+      void ctx.tools.execute({
+        callId: CallId(`member-question-e2e-${token}`),
+        name: 'ask_user_question',
+        arguments: {
+          questions: [{
+            id: 'decision',
+            question: requiredField(body, 'question'),
+            options: [{ label: 'continue' }, { label: 'stop' }],
+          }],
+          to_project_member: requiredField(body, 'toAccountId'),
+          background: requiredField(body, 'background'),
+          references: [
+            { path: 'decision.md', reason: 'Current decision' },
+            { path: 'preview.html', reason: 'Restricted preview' },
+            { path: 'notes.txt', reason: 'Plain notes' },
+          ],
         },
-        originSessionId: parseCompanionSessionId(requiredField(body, 'originSessionId')),
-      }, { signal: abort.signal }).then(
-        (result) => { ask.status = { state: 'settled', outcome: result.outcome } },
+        agent: { session: { id: requiredField(body, 'originSessionId'), header: { cwd } } } as never,
+        signal: abort.signal,
+      }).then(
+        (result) => {
+          ask.status = result.isError === true
+            ? { state: 'failed', code: failureCode(result) }
+            : { state: 'settled', outcome: 'answered' }
+        },
         (error: unknown) => {
-          ask.status = {
-            state: 'failed',
-            code: error instanceof MemberQuestionSenderError ? error.code : 'UNEXPECTED_FAILURE',
-          }
+          ask.status = { state: 'failed', code: failureCode(error) }
         },
       )
       respond(response, 202, { token })
@@ -231,6 +230,17 @@ function requiredBoolean(body: Record<string, unknown>, field: string): boolean 
 function respond(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'content-type': 'application/json' })
   response.end(JSON.stringify(body))
+}
+
+function failureCode(error: unknown): string {
+  if (error instanceof MemberQuestionSenderError || error instanceof AskUserQuestionError) return error.code
+  if (typeof error === 'object' && error !== null && 'isError' in error) {
+    const content = (error as { content?: Array<{ text?: string }> }).content
+    const text = content?.find(block => typeof block.text === 'string')?.text ?? ''
+    const match = text.match(/\b([A-Z][A-Z0-9_]{2,})\b/)
+    if (match?.[1] !== undefined) return match[1]
+  }
+  return 'UNEXPECTED_FAILURE'
 }
 
 function required(name: string): string {

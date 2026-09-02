@@ -10,6 +10,7 @@ describe('Desktop E2E process profile', () => {
     writeFileSync(path, JSON.stringify({
       DSH_HOME: '/tmp/profile-home',
       DSH_MEMBER_QUESTION_ACCOUNT_ID: 'account-a',
+      DSH_PROJECT_MEMBERS_WORKSPACE: '/tmp/profile-workspace',
     }))
     const environment: NodeJS.ProcessEnv = { DSH_DESKTOP_E2E: '1' }
     expect(applyDesktopE2EProfile({
@@ -20,6 +21,7 @@ describe('Desktop E2E process profile', () => {
     expect(environment).toMatchObject({
       DSH_HOME: '/tmp/profile-home',
       DSH_MEMBER_QUESTION_ACCOUNT_ID: 'account-a',
+      DSH_PROJECT_MEMBERS_WORKSPACE: '/tmp/profile-workspace',
     })
   })
 

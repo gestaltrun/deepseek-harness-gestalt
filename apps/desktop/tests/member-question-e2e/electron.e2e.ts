@@ -181,6 +181,8 @@ describe('Project Members three-installation Electron journey', () => {
       openReceivingQuestion('b1', expiry.title, expiry.question),
       openReceivingQuestion('b2', expiry.title, expiry.question),
     ])
+    await assertNoLocalComposerCard('b1')
+    await assertNoLocalComposerCard('b2')
     await expectAskFailure(expiry.token, 'QUESTION_EXPIRED', 45_000)
     await Promise.all([
       waitForBodyText(getInstance('b1'), 'Expired', 45_000),
@@ -200,6 +202,7 @@ describe('Project Members three-installation Electron journey', () => {
       openReceivingQuestion('b1', withdrawn.title, withdrawn.question),
       openReceivingQuestion('b2', withdrawn.title, withdrawn.question),
     ])
+    await assertNoLocalComposerCard('b1')
     await postControl('a1', '/withdraw', { token: withdrawn.token })
     await expectAskFailure(withdrawn.token, 'QUESTION_WITHDRAWN')
     await Promise.all([
@@ -551,8 +554,10 @@ async function assertA1SessionLog(): Promise<void> {
 
 async function assertNoLocalComposerCard(name: 'b1' | 'b2'): Promise<void> {
   const instance = getInstance(name)
+  const composerCard = await instance.$('[data-composer-card]')
   const productComposer = await instance.$('textarea[placeholder="Describe what you want to build"]')
   const memberComposer = await instance.$('textarea[aria-label="Answer this member question"]')
+  expect(await composerCard.isExisting()).toBe(false)
   expect(await productComposer.isExisting()).toBe(false)
   expect(await memberComposer.isExisting()).toBe(false)
 }

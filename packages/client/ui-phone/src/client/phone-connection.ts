@@ -130,6 +130,10 @@ export interface PhoneSurfaceSize {
 const RETRY_LIMIT = 3
 /** Linear backoff base; attempt n waits `n × retryBaseDelayMs`. */
 const RETRY_BASE_DELAY_MS = 1000
+/** Contact hold after press so iOS treats the path as a drag rather than a tap. */
+const SWIPE_PRESS_HOLD_MS = 500
+/** Settle on the last move so devicekit can attach duration before release. */
+const SWIPE_RELEASE_SETTLE_MS = 200
 
 /** Default wall-clock scheduler. */
 const defaultSchedule = (delayMs: number, fn: () => void): (() => void) => {
@@ -353,20 +357,29 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Send a drag as a `pointerDown`/`pointerMove`…/`pointerUp` gesture.
+   * Send a drag as the WDA gesture mobilecli's iOS converter consumes.
+   * Positioning `pointerMove` precedes `pointerDown`; pauses supply drag duration.
    * @param points - the drag path in normalized screen points.
    * @returns false when the path is empty, the surface unknown, or not live.
    */
   swipe(points: readonly PhoneScreenPoint[]): boolean {
     const surface = this.surface
-    if (surface === undefined || points.length === 0) return false
-    const mapped = points.map(point => devicePointOf(point, surface))
-    const actions = mapped.map((point, index) => ({
-      type: index === 0 ? 'pointerDown' : index === mapped.length - 1 ? 'pointerUp' : 'pointerMove',
-      x: point.x,
-      y: point.y,
-    }))
-    return this.send({ method: 'gesture', actions })
+    const origin = points[0]
+    const release = points[points.length - 1]
+    if (surface === undefined || origin === undefined || release === undefined) return false
+    const start = devicePointOf(origin, surface)
+    const end = devicePointOf(release, surface)
+    return this.send({
+      method: 'gesture',
+      actions: [
+        { type: 'pointerMove', x: start.x, y: start.y },
+        { type: 'pointerDown' },
+        { type: 'pause', duration: SWIPE_PRESS_HOLD_MS },
+        { type: 'pointerMove', x: end.x, y: end.y },
+        { type: 'pause', duration: SWIPE_RELEASE_SETTLE_MS },
+        { type: 'pointerUp' },
+      ],
+    })
   }
 
   /**

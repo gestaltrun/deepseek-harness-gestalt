@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { PhoneDevicesError } from '../src/errors.ts'
-import { ioParams, iosScreenScale } from '../src/io.ts'
+import {
+  ioParams,
+  iosScreenScale,
+  phoneSwipeActions,
+} from '../src/io.ts'
 import { deviceId } from '../src/ids.ts'
 
 describe('iOS input coordinate normalization', () => {
@@ -42,6 +46,18 @@ describe('iOS input coordinate normalization', () => {
         { type: 'pointerUp', x: 'upstream-validates', y: null },
       ],
     })
+  })
+
+  it('encodes a swipe as WDA positioning, press hold, move, and release settle', () => {
+    expect(phoneSwipeActions([])).toEqual([])
+    expect(phoneSwipeActions([{ x: 10, y: 20 }, { x: 11, y: 21 }, { x: 30, y: 80 }])).toEqual([
+      { type: 'pointerMove', x: 10, y: 20 },
+      { type: 'pointerDown' },
+      { type: 'pause', duration: 500 },
+      { type: 'pointerMove', x: 30, y: 80 },
+      { type: 'pause', duration: 200 },
+      { type: 'pointerUp' },
+    ])
   })
 
   it('forwards text and button requests without coordinate fields', () => {

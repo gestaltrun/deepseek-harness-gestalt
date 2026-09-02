@@ -64,6 +64,7 @@ export type {
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
+export { phoneSwipeActions } from './io.ts'
 export { verifyAnnexBH264KeyAccessUnit } from './h264.ts'
 export type { H264KeyAccessUnitVerificationOptions } from './h264.ts'
 export { verifyMjpegJpegPicture } from './jpeg.ts'

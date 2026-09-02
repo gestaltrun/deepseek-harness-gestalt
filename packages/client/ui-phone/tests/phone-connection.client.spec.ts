@@ -657,7 +657,7 @@ describe('PhoneConnectionController io', () => {
     })
   })
 
-  it('maps a drag onto a pointerDown/move/up gesture action list', async () => {
+  it('maps a drag onto the WDA positioning, press-hold, move, and release-settle list', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
@@ -668,9 +668,12 @@ describe('PhoneConnectionController io', () => {
       params: {
         deviceId: 'emulator-5554',
         actions: [
-          { type: 'pointerDown', x: 0, y: 0 },
-          { type: 'pointerMove', x: 180, y: 360 },
-          { type: 'pointerUp', x: 360, y: 720 },
+          { type: 'pointerMove', x: 0, y: 0 },
+          { type: 'pointerDown' },
+          { type: 'pause', duration: 500 },
+          { type: 'pointerMove', x: 360, y: 720 },
+          { type: 'pause', duration: 200 },
+          { type: 'pointerUp' },
         ],
       },
     })

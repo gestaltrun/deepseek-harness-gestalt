@@ -14,7 +14,7 @@
 
 `device_act`、`device_open` 与 `device_close` 在先前监听器返回 `allow` 后，默认走 `tools/pre-execute` `ask`。先前的 deny 或 ask 保持不变。`allowed-once` 审批会执行一次设备群调用；拒绝则设备无副作用。
 
-已携带 `PhoneDevicesError` 代码（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）的设备群失败会以同一代码重抛为 `HarnessError`。`device_act` 把封闭的 tap、swipe、type 或按钮动作转发到 `phoneDevices.io`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 仍要求注入 PNG 方法；实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。
+已携带 `PhoneDevicesError` 代码（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）的设备群失败会以同一代码重抛为 `HarnessError`。`device_act` 把封闭的 tap、swipe、type 或按钮动作转发到 `phoneDevices.io`。swipe 使用 `phoneSwipeActions` 发布的 WDA gesture：定位 `pointerMove`、`pointerDown`、500 ms 按住、终点 `pointerMove`、200 ms 收尾、`pointerUp`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 仍要求注入 PNG 方法；实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。
 
 ## 模型体验
 

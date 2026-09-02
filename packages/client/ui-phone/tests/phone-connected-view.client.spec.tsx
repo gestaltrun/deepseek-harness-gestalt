@@ -28,6 +28,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -374,7 +375,7 @@ describe('PhoneConnectedView touch and keys', () => {
     })
   })
 
-  it('captures the pointer and sends the complete pointerDown/move/up drag path', async () => {
+  it('captures the pointer and sends the WDA press-hold swipe from origin to release', async () => {
     const { gateway } = await withSurface()
     const target = frame()
     const setPointerCapture = vi.fn()
@@ -396,11 +397,12 @@ describe('PhoneConnectedView touch and keys', () => {
       params: {
         deviceId: 'emulator-5554',
         actions: [
-          { type: 'pointerDown', x: 39, y: 42 },
-          { type: 'pointerMove', x: 43, y: 46 },
-          { type: 'pointerMove', x: 234, y: 464 },
-          { type: 'pointerMove', x: 244, y: 475 },
-          { type: 'pointerUp', x: 254, y: 485 },
+          { type: 'pointerMove', x: 39, y: 42 },
+          { type: 'pointerDown' },
+          { type: 'pause', duration: 500 },
+          { type: 'pointerMove', x: 254, y: 485 },
+          { type: 'pause', duration: 200 },
+          { type: 'pointerUp' },
         ],
       },
     })
@@ -415,8 +417,12 @@ describe('PhoneConnectedView touch and keys', () => {
       params: {
         deviceId: 'emulator-5554',
         actions: [
-          { type: 'pointerDown', x: 39, y: 42 },
-          { type: 'pointerUp', x: 59, y: 63 },
+          { type: 'pointerMove', x: 39, y: 42 },
+          { type: 'pointerDown' },
+          { type: 'pause', duration: 500 },
+          { type: 'pointerMove', x: 59, y: 63 },
+          { type: 'pause', duration: 200 },
+          { type: 'pointerUp' },
         ],
       },
     })
@@ -455,6 +461,47 @@ describe('PhoneConnectedView touch and keys', () => {
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: { deviceId: 'emulator-5554', x: 103, y: 114 },
     })
+  })
+
+  it('coalesces a trackpad wheel burst into one WDA swipe', async () => {
+    const { gateway } = await withSurface()
+    vi.useFakeTimers()
+    try {
+      fireEvent.wheel(frame(), { deltaY: 0, deltaMode: 0 })
+      fireEvent.wheel(frame(), { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_LINE })
+      fireEvent.wheel(frame(), { deltaY: 1, deltaMode: WheelEvent.DOM_DELTA_PAGE })
+      expect(gateway.lastSocket!.sent).toEqual([])
+      await act(async () => { vi.advanceTimersByTime(50) })
+      expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
+        jsonrpc: '2.0', id: 1, method: 'gesture',
+        params: {
+          deviceId: 'emulator-5554',
+          actions: [
+            { type: 'pointerMove', x: 195 },
+            { type: 'pointerDown' },
+            { type: 'pause', duration: 500 },
+            { type: 'pointerMove', x: 195 },
+            { type: 'pause', duration: 200 },
+            { type: 'pointerUp' },
+          ],
+        },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops an in-flight wheel burst when the connected view unmounts', async () => {
+    const { gateway } = await withSurface()
+    vi.useFakeTimers()
+    try {
+      fireEvent.wheel(frame(), { deltaY: 80, deltaMode: 0 })
+      cleanup()
+      await act(async () => { vi.advanceTimersByTime(50) })
+      expect(gateway.lastSocket!.sent).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('drops a captured press when the tab hides or switches to another device', async () => {

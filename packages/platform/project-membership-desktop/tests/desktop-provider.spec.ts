@@ -119,69 +119,70 @@ describe('Desktop Project Membership Web Host provider', () => {
       return Response.json(payload)
     })
     vi.stubGlobal('fetch', fetch)
-    ctx = new Context()
-    await expect(ctx.plugin(DesktopProjectMembership, {
+    const host = new Context()
+    ctx = host
+    await expect(host.plugin(DesktopProjectMembership, {
       baseUrl: 'https://example.test/', tokenFile,
     })).rejects.toThrow('baseUrl must be an absolute loopback HTTP origin')
-    await ctx.plugin(DesktopProjectMembership, { baseUrl: 'http://[::1]:4321', tokenFile })
+    await host.plugin(DesktopProjectMembership, { baseUrl: 'http://[::1]:4321', tokenFile })
     const agent = { id: 'session-a', session: { header: { cwd: '/workspace/atlas' } } } as never
 
     payload = { account: validAccount }
-    await expect(ctx.desktopProjectMembership.context(agent)).resolves.toMatchObject({
+    await expect(host.desktopProjectMembership.context(agent)).resolves.toMatchObject({
       account: { id: 'account-a' },
     })
-    await expect(ctx.desktopProjectMembership.context()).resolves.toBeUndefined()
+    await expect(host.desktopProjectMembership.context()).resolves.toBeUndefined()
     payload = { account: { id: 'account-a', githubLogin: 'ada', avatarUrl: 'http://avatars.example/ada.png' } }
-    await expect(ctx.desktopProjectMembership.currentAccount()).rejects.toThrow('must be an HTTPS URL')
+    await expect(host.desktopProjectMembership.currentAccount()).rejects.toThrow('must be an HTTPS URL')
     payload = { account: { id: 'account-a', githubLogin: ' ada', avatarUrl: 'https://avatars.example/ada.png' } }
-    await expect(ctx.desktopProjectMembership.currentAccount()).rejects.toThrow('must be a non-empty trimmed string')
+    await expect(host.desktopProjectMembership.currentAccount()).rejects.toThrow('must be a non-empty trimmed string')
     payload = { account: { id: 'account-a', githubLogin: 1, avatarUrl: 'https://avatars.example/ada.png' } }
-    await expect(ctx.desktopProjectMembership.currentAccount()).rejects.toThrow('must be a string')
+    await expect(host.desktopProjectMembership.currentAccount()).rejects.toThrow('must be a string')
     payload = { account: { id: 'account-a', githubLogin: 'ada', avatarUrl: 'https://avatars.example/ada.png' }, project: [] }
-    await expect(ctx.desktopProjectMembership.currentAccount()).rejects.toThrow('must be an object')
+    await expect(host.desktopProjectMembership.currentAccount()).rejects.toThrow('must be an object')
     payload = { account: { id: 'account-a', githubLogin: 'ada', avatarUrl: 'https://avatars.example/ada.png' }, project: { ...validProject, createdAt: 0 } }
-    await expect(ctx.desktopProjectMembership.context(agent)).rejects.toThrow('must be positive epoch milliseconds')
+    await expect(host.desktopProjectMembership.context(agent)).rejects.toThrow('must be positive epoch milliseconds')
 
     payload = { members: 'not-an-array', project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster members must be an array')
     payload = { members: [member({ role: 'superadmin' })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster member role is invalid')
     payload = { members: [member({ presence: 'away' })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster member presence is invalid')
     payload = { members: [member({ tags: 'release' })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster member tags must be an array')
     payload = { members: [member({ tags: Array.from({ length: 9 }, (_, index) => `tag${String(index)}`) })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('at most 8 values')
     payload = { members: [member({ tags: ['abcdefghijklmnopqrstuvwxyz0123456'] })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('at most 32 characters')
     payload = { members: [member({ tags: ['review', 'review'] })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster member tags must be distinct')
     payload = { members: [member({ link: { workspaceName: 'local' } })], project: validProject }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .resolves.toMatchObject({ members: [{ link: { workspaceName: 'local' } }] })
     payload = {
       members: [member({ link: { workspaceName: 'local', normalizedRemoteUrl: 'https://github.com/o/atlas' } })],
       project: validProject,
     }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .resolves.toMatchObject({
         members: [{ link: { workspaceName: 'local', normalizedRemoteUrl: 'https://github.com/o/atlas' } }],
       })
     payload = { members: [member()], project: { ...validProject, id: 'project-other' } }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster project id must match the requested project')
     payload = {
       members: [member(), member({ id: 'membership-dup', accountId: 'account-a', displayName: 'Ada2' })],
       project: validProject,
     }
-    await expect(ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
+    await expect(host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never))
       .rejects.toThrow('roster account ids must be distinct')
   })
 
@@ -215,15 +216,16 @@ describe('Desktop Project Membership Web Host provider', () => {
       return Response.json(payload, { status })
     })
     vi.stubGlobal('fetch', fetch)
-    ctx = new Context()
-    await ctx.plugin(DesktopProjectMembership, { baseUrl: 'http://127.0.0.1:4321', tokenFile })
-    await expect(ctx.desktopProjectMembership.currentAccount())
+    const host = new Context()
+    ctx = host
+    await host.plugin(DesktopProjectMembership, { baseUrl: 'http://127.0.0.1:4321', tokenFile })
+    await expect(host.desktopProjectMembership.currentAccount())
       .rejects.toThrow('Desktop bridge failed with HTTP 403')
 
     status = 200
     payload = { account: validAccount, project: validProject }
     const unbound = { id: 'session-unbound', session: { header: {} } } as never
-    await expect(ctx.desktopProjectMembership.questionRoute(unbound, 'grace', 'Acceptance session'))
+    await expect(host.desktopProjectMembership.questionRoute(unbound, 'grace', 'Acceptance session'))
       .rejects.toThrow('current Workspace is not bound')
     payload = {
       account: validAccount,
@@ -234,7 +236,7 @@ describe('Desktop Project Membership Web Host provider', () => {
       }],
     }
     const agent = { id: 'session-a', session: { header: { cwd: '/workspace/atlas' } } } as never
-    await expect(ctx.desktopProjectMembership.questionRoute(agent, 'grace', 'Acceptance session'))
+    await expect(host.desktopProjectMembership.questionRoute(agent, 'grace', 'Acceptance session'))
       .rejects.toThrow('current Account is absent from its bound Project roster')
     payload = {
       account: validAccount,
@@ -244,12 +246,12 @@ describe('Desktop Project Membership Web Host provider', () => {
         presence: 'online', displayName: 'Ada', avatarRef: 'https://avatars.example/ada.png',
       }],
     }
-    const roster = await ctx.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never)
-    expect(() => ctx.desktopProjectMembership.present({
+    const roster = await host.desktopProjectMembership.roster('account-a' as never, 'project-atlas' as never)
+    expect(() => host.desktopProjectMembership.present({
       project: roster.project,
       members: [],
     })).toThrow('roster presentation requires the exact bridged roster read')
-    await expect(ctx.desktopProjectMembership.questionRoute(agent, '   ', 'Acceptance session'))
+    await expect(host.desktopProjectMembership.questionRoute(agent, '   ', 'Acceptance session'))
       .resolves.toBeUndefined()
   })
 })

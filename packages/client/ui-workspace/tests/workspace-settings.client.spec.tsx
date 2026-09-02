@@ -53,17 +53,22 @@ const SAME_REMOTE = 'https://github.com/octocat/repo'
 function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
   return {
     createProject: vi.fn<ProjectMembershipGateway['createProject']>()
-      .mockResolvedValue({ id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE }),
+      .mockResolvedValue({
+        id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-owner',
+      }),
     projectForWorkspace: vi.fn<ProjectMembershipGateway['projectForWorkspace']>().mockResolvedValue(undefined),
     roster: vi.fn<ProjectMembershipGateway['roster']>().mockResolvedValue({
       project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
       members: [{
+        membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
+        role: 'owner', tags: [], presence: 'online',
+      }, {
         membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
         role: 'member', tags: ['triage'], presence: 'online',
       }],
     }),
     invite: vi.fn<ProjectMembershipGateway['invite']>()
-      .mockResolvedValue({ invitationId: 'invitation-9', inviteeName: 'mona' }),
+      .mockResolvedValue({ invitationId: 'invitation-9', inviteeName: 'mona', grantedRole: 'member' }),
     issuedInvitations: vi.fn<ProjectMembershipGateway['issuedInvitations']>().mockResolvedValue([]),
     retractInvitation: vi.fn<ProjectMembershipGateway['retractInvitation']>().mockResolvedValue(undefined),
     decideInvitation: vi.fn<ProjectMembershipGateway['decideInvitation']>().mockResolvedValue(undefined),
@@ -140,7 +145,9 @@ function deferred<T>() {
   return { promise, reject, resolve }
 }
 
-const projectView = { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE }
+const projectView = {
+  id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-owner',
+}
 const pendingInvitation = {
   invitationId: 'invitation-1',
   receivingAccountId: 'account-2',
@@ -148,6 +155,7 @@ const pendingInvitation = {
   projectName: 'Assembled',
   inviterName: 'mona',
   remoteUrl: SAME_REMOTE,
+  grantedRole: 'admin' as const,
 }
 
 describe('workspace settings and invite wizard (M4)', () => {
@@ -188,6 +196,9 @@ describe('workspace settings and invite wizard (M4)', () => {
       expect(membership.roster).toHaveBeenCalledWith('project-1')
       expect(screen.getByText('已绑定云项目：Assembled')).toBeTruthy()
       expect(screen.getByText('mona')).toBeTruthy()
+      const inviteRole = screen.getByLabelText('邀请角色')
+      expect(inviteRole).toBeTruthy()
+      expect(Array.from(inviteRole.querySelectorAll('option')).map(option => option.value)).toEqual(['admin', 'member'])
     } finally {
       vi.useRealTimers()
     }
@@ -212,11 +223,11 @@ describe('workspace settings and invite wizard (M4)', () => {
 
   it('restores an existing Cloud Project for the exact Workspace after reopening settings', async () => {
     const issuedInvitations = vi.fn<ProjectMembershipGateway['issuedInvitations']>()
-      .mockResolvedValueOnce([{ invitationId: 'invitation-issued', inviteeName: 'octocat' }])
+      .mockResolvedValueOnce([{ invitationId: 'invitation-issued', inviteeName: 'invitee-octocat', grantedRole: 'admin' }])
       .mockResolvedValueOnce([])
     const membership = gateway({
       projectForWorkspace: vi.fn(async () => ({
-        id: 'project-1', name: 'Restored', boundRemoteUrl: SAME_REMOTE,
+        id: 'project-1', name: 'Restored', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-owner',
       })),
       issuedInvitations,
     })
@@ -230,23 +241,54 @@ describe('workspace settings and invite wizard (M4)', () => {
       expect(screen.getByText('已绑定云项目：Restored')).toBeTruthy()
       expect(membership.roster).toHaveBeenCalledWith('project-1')
       expect(issuedInvitations).toHaveBeenCalledWith('project-1')
-      expect(screen.getByText('octocat')).toBeTruthy()
+      expect(screen.getByText('invitee-octocat')).toBeTruthy()
+      expect(screen.getByText('加入后为 admin')).toBeTruthy()
       fireEvent.click(screen.getByRole('button', { name: '撤回' }))
       await tick()
       expect(membership.retractInvitation).toHaveBeenCalledWith('invitation-issued')
       expect(issuedInvitations).toHaveBeenCalledTimes(2)
-      expect(screen.queryByText('octocat')).toBeNull()
+      expect(screen.queryByText('invitee-octocat')).toBeNull()
       expect(screen.queryByRole('button', { name: '创建云项目' })).toBeNull()
     } finally {
       vi.useRealTimers()
     }
   })
 
+  it('offers only member when the current actor is an admin', async () => {
+    const membership = gateway({
+      projectForWorkspace: vi.fn(async () => ({
+        id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE, receivingAccountId: 'account-admin',
+      })),
+      roster: vi.fn(async () => ({
+        project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
+        members: [{
+          membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
+          role: 'owner' as const, tags: [], presence: 'online' as const,
+        }, {
+          membershipId: 'membership-admin', accountId: 'account-admin', displayName: 'mona',
+          role: 'admin' as const, tags: [], presence: 'online' as const,
+        }],
+      })),
+    })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+    await flush()
+    const inviteRole = screen.getByLabelText(t('members.inviteRole')) as HTMLSelectElement
+    expect(Array.from(inviteRole.querySelectorAll('option')).map(option => option.value)).toEqual(['member'])
+    fireEvent.change(screen.getByLabelText(t('members.inviteLogin')), { target: { value: 'ada' } })
+    fireEvent.click(screen.getByRole('button', { name: t('members.invite') }))
+    await flush()
+    expect(membership.invite).toHaveBeenCalledWith({
+      projectId: 'project-1', githubLogin: 'ada', grantedRole: 'member',
+    })
+  })
+
   it('runs the invite wizard: accept, mandatory link with same-remote advice, close returns undecided', async () => {
     const membership = gateway({
       pendingInvitations: vi.fn(async () => [{
         invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
-        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE, grantedRole: 'admin' as const,
       }]),
     })
     vi.useFakeTimers()
@@ -255,6 +297,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       // Poll fires immediately: the wizard opens on the invitation card.
       await tick()
       expect(screen.getByText('mona 邀请你加入云项目“Assembled”。')).toBeTruthy()
+      expect(screen.getByText('加入后角色：admin')).toBeTruthy()
       expect(screen.getByText(SAME_REMOTE)).toBeTruthy()
 
       // Closing at the card decides nothing: the invitation stays pending.
@@ -273,6 +316,13 @@ describe('workspace settings and invite wizard (M4)', () => {
       const confirm = screen.getByRole('button', { name: '关联并加入' }) as HTMLButtonElement
       expect(confirm.disabled).toBe(true)
       expect(screen.getByText('同源推荐')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+      expect(screen.queryByText('关联本地工作区')).toBeNull()
+      expect(membership.decideInvitation).not.toHaveBeenCalled()
+      await tick(15_000)
+      expect(screen.getByText('加入后角色：admin')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '接受' }))
+      await tick()
       expect(screen.queryByText('暂不关联')).toBeNull()
       expect(screen.getByText('新建克隆…')).toBeTruthy()
 
@@ -302,7 +352,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     const membership = gateway({
       pendingInvitations: vi.fn(async () => [{
         invitationId: 'invitation-clone', receivingAccountId: 'account-2', projectId: 'project-1',
-        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE, grantedRole: 'member' as const,
       }]),
       cloneWorkspace,
     })
@@ -339,7 +389,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     const membership = gateway({
       pendingInvitations: vi.fn(async () => [{
         invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
-        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE, grantedRole: 'admin' as const,
       }]),
     })
     vi.useFakeTimers()
@@ -500,7 +550,7 @@ describe('workspace settings and invite wizard (M4)', () => {
   })
 
   it('runs invitation and roster administration through pending, success, and both failure forms', async () => {
-    const inviteRun = deferred<{ invitationId: string; inviteeName: string }>()
+    const inviteRun = deferred<{ invitationId: string; inviteeName: string; grantedRole: 'member' }>()
     const invite = vi.fn<ProjectMembershipGateway['invite']>()
       .mockReturnValueOnce(inviteRun.promise)
       .mockRejectedValueOnce(new Error('invite error'))
@@ -516,6 +566,10 @@ describe('workspace settings and invite wizard (M4)', () => {
       .mockRejectedValueOnce('remove string')
     const members = [
       {
+        membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
+        role: 'owner' as const, tags: [], presence: 'online' as const,
+      },
+      {
         membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
         role: 'member' as const, tags: ['triage'], presence: 'online' as const,
       },
@@ -527,7 +581,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     const membership = gateway({
       projectForWorkspace: vi.fn(async () => projectView as never),
       roster: vi.fn(async () => ({ project: projectView, members } as never)),
-      issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat' }]),
+      issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat', grantedRole: 'member' as const }]),
       invite,
       retractInvitation,
       setMemberTags,
@@ -542,9 +596,16 @@ describe('workspace settings and invite wizard (M4)', () => {
 
     const login = screen.getByLabelText(t('members.inviteLogin'))
     fireEvent.change(login, { target: { value: ' octocat ' } })
+    fireEvent.change(screen.getByLabelText(t('members.inviteRole')), { target: { value: 'admin' } })
     fireEvent.click(screen.getByRole('button', { name: t('members.invite') }))
     expect(screen.getByRole('button', { name: t('members.inviting') })).toBeTruthy()
-    await act(async () => { inviteRun.resolve({ invitationId: 'new', inviteeName: 'octocat' }); await inviteRun.promise })
+    await act(async () => {
+      inviteRun.resolve({ invitationId: 'new', inviteeName: 'octocat', grantedRole: 'member' })
+      await inviteRun.promise
+    })
+    expect(invite).toHaveBeenCalledWith({
+      projectId: 'project-1', githubLogin: 'octocat', grantedRole: 'admin',
+    })
     expect((login as HTMLInputElement).value).toBe('')
     for (const [value, message] of [['mona', 'invite error'], ['ada', 'invite string']] as const) {
       fireEvent.change(login, { target: { value } })
@@ -562,10 +623,12 @@ describe('workspace settings and invite wizard (M4)', () => {
       expect(screen.getByRole('alert').textContent).toBe(message)
     }
 
-    fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'admin' } })
+    const memberRole = screen.getAllByRole('combobox').find(node => (node as HTMLSelectElement).value === 'member')
+    expect(memberRole).toBeDefined()
+    fireEvent.change(memberRole!, { target: { value: 'admin' } })
     await flush()
     expect(membership.changeRole).toHaveBeenCalledWith('membership-1', 'admin')
-    const tags = screen.getAllByLabelText(t('members.tagsPlaceholder'))[0]!
+    const tags = screen.getAllByLabelText(t('members.tagsPlaceholder'))[1]!
     fireEvent.blur(tags)
     expect(setMemberTags).not.toHaveBeenCalled()
     fireEvent.change(tags, { target: { value: ' triage, , qa ' } })
@@ -585,7 +648,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       const run = deferred<undefined>()
       const membership = gateway({
         projectForWorkspace: vi.fn(async () => projectView as never),
-        issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat' }]),
+        issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat', grantedRole: 'member' as const }]),
         retractInvitation: vi.fn(() => run.promise),
       })
       const view = render(<WorkspaceSettingsModal

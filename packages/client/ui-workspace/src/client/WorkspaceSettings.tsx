@@ -3,10 +3,11 @@
  * wizard. The settings body carries the workspace-upgrade block — cloud
  * project creation with name/remote validation plus member management
  * (display name, role, function tags, presence dot, removal, GitHub-login
- * invitations, retractable pending rows). Every action routes through the
- * {@link ProjectMembershipGateway} the composition adapts from the
- * membership client transport. The invite wizard is a two-step modal fed by
- * the pending-invitation poll: the invitation card (accept/decline), then
+ * invitations with a grantable-role picker, retractable pending rows). Every
+ * action routes through the {@link ProjectMembershipGateway} the composition
+ * adapts from the membership client transport. The invite wizard is a two-step
+ * modal fed by the pending-invitation poll: the invitation card (inviter,
+ * Project, granted role, Accept/Decline), then
  * the mandatory local-workspace link step — same remote recommends, a known
  * different remote is labeled 异源, and a new clone is always selectable.
  * Closing the wizard decides nothing: the invitation stays pending.
@@ -15,9 +16,10 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Modal, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { WorkspaceBrowserProps } from './contract/slots.ts'
+import { grantableInviteRoles } from '@deepseek-ai/dsh-project-membership/invite-role'
 import type {
   ProjectMembershipGateway, WorkspaceIssuedInvitation, WorkspaceMemberRow,
-  WorkspacePendingInvitation, WorkspaceProjectView,
+  WorkspacePendingInvitation, WorkspaceProjectRole, WorkspaceProjectView,
 } from './contract/slots.ts'
 import css from './WorkspaceSettings.module.css'
 
@@ -138,6 +140,7 @@ function MemberManagement({ gateway, project, t }: {
   const [issued, setIssued] = useState<readonly WorkspaceIssuedInvitation[]>([])
   const [retractingId, setRetractingId] = useState<string | null>(null)
   const [login, setLogin] = useState('')
+  const [grantedRole, setGrantedRole] = useState<WorkspaceProjectRole>('member')
   const [inviting, setInviting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const alive = useRef(true)
@@ -163,14 +166,19 @@ function MemberManagement({ gateway, project, t }: {
     reloadRoster()
     reloadIssued()
   }, [gateway, project.id])
+  const actorRole = members?.find(row => row.accountId === project.receivingAccountId)?.role
+  const grantableRoles = actorRole === undefined ? [] : grantableInviteRoles(actorRole)
+  const selectedGrantedRole = grantableRoles.find(role => role === grantedRole) ?? grantableRoles[0]
   const trimmedLogin = login.trim()
-  const inviteBlocked = inviting || trimmedLogin === ''
+  const inviteBlocked = inviting || trimmedLogin === '' || selectedGrantedRole === undefined
   const submitInvite = () => {
     /* v8 ignore next -- the invite button uses the same inviteBlocked predicate. */
     if (inviteBlocked) return
     setInviting(true)
     setActionError(null)
-    gateway.invite({ projectId: project.id, githubLogin: trimmedLogin }).then(() => {
+    gateway.invite({
+      projectId: project.id, githubLogin: trimmedLogin, grantedRole: selectedGrantedRole,
+    }).then(() => {
       setInviting(false)
       setLogin('')
       reloadIssued()
@@ -226,6 +234,7 @@ function MemberManagement({ gateway, project, t }: {
             {issued.map(row => (
               <li key={row.invitationId} className={css.memberRow}>
                 <span className={css.memberName}>{row.inviteeName}</span>
+                <span className={css.grantedRole}>{t('members.grantedRole', { role: row.grantedRole })}</span>
                 <Button
                   variant="outline"
                   disabled={retractingId !== null}
@@ -247,6 +256,22 @@ function MemberManagement({ gateway, project, t }: {
           disabled={inviting}
           onChange={(e) => { setLogin(e.target.value); setActionError(null) }}
         />
+        <select
+          className={css.roleSelect}
+          aria-label={t('members.inviteRole')}
+          value={selectedGrantedRole ?? ''}
+          disabled={inviting || grantableRoles.length === 0}
+          onChange={(e) => {
+            const role = e.target.value
+            /* v8 ignore next -- a controlled select only emits its declared option values. */
+            if (role !== 'admin' && role !== 'member') return
+            setGrantedRole(role)
+          }}
+        >
+          {grantableRoles.map(role => (
+            <option key={role} value={role}>{t(`members.role.${role}`)}</option>
+          ))}
+        </select>
         <Button variant="primary" disabled={inviteBlocked} onClick={submitInvite}>
           {inviting ? t('members.inviting') : t('members.invite')}
         </Button>
@@ -434,6 +459,7 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
         ? (
           <div className={css.wizardCard}>
             <div>{t('wizard.card.body', { inviter: invitation.inviterName, project: invitation.projectName })}</div>
+            <div>{t('wizard.card.role', { role: invitation.grantedRole })}</div>
             <div>{t('wizard.card.remote', { remote: invitation.remoteUrl })}</div>
           </div>
         )

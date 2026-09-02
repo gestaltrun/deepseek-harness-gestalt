@@ -45,7 +45,7 @@ function invitation(): InvitationView {
   return {
     id: 'invitation-1' as never, projectId: 'project-1' as ProjectId,
     inviterAccountId: 'account-1' as never, inviteeAccountId: 'account-2' as never,
-    state: 'pending', invitedAt: 1,
+    state: 'pending', grantedRole: 'member', invitedAt: 1,
   }
 }
 
@@ -78,12 +78,12 @@ describe('ProjectMembershipHttpTransport', () => {
         body: [{
           invitationId: 'invitation-1', receivingAccountId: 'account-2',
           projectId: 'project-1', projectName: 'Assembled',
-          remoteUrl: 'https://github.com/o/r', inviterName: 'octocat', invitedAt: 10,
+          remoteUrl: 'https://github.com/o/r', inviterName: 'octocat', grantedRole: 'admin', invitedAt: 10,
         }],
       },
       'GET /v1/projects/project-1/invitations': {
         status: 200,
-        body: [{ invitationId: 'invitation-1', inviteeName: 'mona', invitedAt: 10 }],
+        body: [{ invitationId: 'invitation-1', inviteeName: 'mona', grantedRole: 'member', invitedAt: 10 }],
       },
       'POST /v1/projects/memberships/membership-2/role': { status: 204 },
       'POST /v1/projects/memberships/membership-2/tags': { status: 204 },
@@ -97,18 +97,20 @@ describe('ProjectMembershipHttpTransport', () => {
     expect(await transport.roster(AUTH, 'project-1' as ProjectId)).toMatchObject({
       members: [{ presence: 'online', displayName: 'mona', role: 'member' }],
     })
-    expect(await transport.invite(AUTH, { projectId: 'project-1' as ProjectId, githubLogin: 'mona' }))
-      .toMatchObject({ id: 'invitation-1', state: 'pending' })
+    expect(await transport.invite(AUTH, {
+      projectId: 'project-1' as ProjectId, githubLogin: 'mona', grantedRole: 'member',
+    }))
+      .toMatchObject({ id: 'invitation-1', state: 'pending', grantedRole: 'member' })
     expect(await transport.decideInvitation(AUTH, 'invitation-1' as never, {
       decision: 'accept-with-link', link: { workspaceName: 'mona-local' },
     })).toMatchObject({ id: 'membership-2' })
     await transport.retractInvitation(AUTH, 'invitation-1' as never)
     expect(await transport.pendingInvitations(AUTH)).toMatchObject([{
       invitationId: 'invitation-1', receivingAccountId: 'account-2',
-      projectName: 'Assembled', inviterName: 'octocat',
+      projectName: 'Assembled', inviterName: 'octocat', grantedRole: 'admin',
     }])
     expect(await transport.issuedInvitations(AUTH, 'project-1' as ProjectId)).toEqual([{
-      invitationId: 'invitation-1', inviteeName: 'mona', invitedAt: 10,
+      invitationId: 'invitation-1', inviteeName: 'mona', grantedRole: 'member', invitedAt: 10,
     }])
     await transport.changeRole(AUTH, 'membership-2' as never, 'admin')
     await transport.setMemberTags(AUTH, 'membership-2' as never, ['triage' as never])
@@ -128,7 +130,7 @@ describe('ProjectMembershipHttpTransport', () => {
       'DELETE /v1/projects/memberships/membership-2',
     ])
     expect(calls[0]).toMatchObject({ body: { name: 'Assembled', remoteUrl: 'https://github.com/o/r' } })
-    expect(calls[3]).toMatchObject({ body: { projectId: 'project-1', githubLogin: 'mona' } })
+    expect(calls[3]).toMatchObject({ body: { projectId: 'project-1', githubLogin: 'mona', grantedRole: 'member' } })
     expect(calls[4]).toMatchObject({
       body: { decision: 'accept-with-link', link: { workspaceName: 'mona-local' } },
     })
@@ -199,7 +201,7 @@ describe('ProjectMembershipHttpTransport', () => {
         },
       })
       await expect(transport.invite(AUTH, {
-        projectId: 'project-1' as ProjectId, githubLogin: 'mona',
+        projectId: 'project-1' as ProjectId, githubLogin: 'mona', grantedRole: 'member',
       })).resolves.toMatchObject({ state, settledAt: 11 })
     }
 
@@ -252,8 +254,15 @@ describe('ProjectMembershipHttpTransport', () => {
       'POST /v1/projects/invitations': { status: 201, body: { ...invitation(), state: 'expired' } },
     }).transport
     await expect(badState.invite(AUTH, {
-      projectId: 'project-1' as ProjectId, githubLogin: 'mona',
+      projectId: 'project-1' as ProjectId, githubLogin: 'mona', grantedRole: 'member',
     })).rejects.toThrow('known lifecycle state')
+
+    const badGrantedRole = wire({
+      'POST /v1/projects/invitations': { status: 201, body: { ...invitation(), grantedRole: 'owner' } },
+    }).transport
+    await expect(badGrantedRole.invite(AUTH, {
+      projectId: 'project-1' as ProjectId, githubLogin: 'mona', grantedRole: 'member',
+    })).rejects.toThrow('invitation grantedRole must be admin or member')
 
     const badTags = wire({
       'POST /v1/projects/invitations/invitation-1/decision': {

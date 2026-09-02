@@ -144,11 +144,11 @@ describe('real Project Membership HTTP composition', () => {
 
     // Invite and accept.
     const invited = await post(loaded.origin, '/v1/projects/invitations', {
-      projectId: project.id, githubLogin: mona.githubLogin,
+      projectId: project.id, githubLogin: mona.githubLogin, grantedRole: 'member',
     }, authHeaders(octocat))
     expect(invited.status).toBe(201)
-    const invitation = await invited.json() as { id: string; state: string; inviteeAccountId: string }
-    expect(invitation).toMatchObject({ state: 'pending', inviteeAccountId: mona.accountId })
+    const invitation = await invited.json() as { id: string; state: string; inviteeAccountId: string; grantedRole: string }
+    expect(invitation).toMatchObject({ state: 'pending', inviteeAccountId: mona.accountId, grantedRole: 'member' })
     const accepted = await post(loaded.origin, `/v1/projects/invitations/${invitation.id}/decision`, {
       decision: 'accept-with-link',
       link: { workspaceName: 'mona-local', normalizedRemoteUrl: 'https://github.com/octocat/Repo' },
@@ -466,7 +466,7 @@ async function createProjectWithMember(origin: string, founder: Session, joiner:
   expect(created.status).toBe(201)
   const project = await created.json() as { id: string }
   const invited = await post(origin, '/v1/projects/invitations', {
-    projectId: project.id, githubLogin: joiner.githubLogin,
+    projectId: project.id, githubLogin: joiner.githubLogin, grantedRole: 'member',
   }, authHeaders(founder))
   expect(invited.status).toBe(201)
   const invitation = await invited.json() as { id: string }

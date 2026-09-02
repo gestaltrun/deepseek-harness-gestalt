@@ -11,6 +11,7 @@ import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { ProjectMembershipError } from './errors.ts'
 export * from './events.ts'
 export * from './errors.ts'
+export * from './invite-role.ts'
 export * from './remote-url.ts'
 export * from './types.ts'
 
@@ -47,6 +48,11 @@ export interface InviteInput {
   readonly projectId: ProjectId
   /** Platform account invited to join. */
   readonly inviteeAccountId: PlatformAccountId
+  /**
+   * Role conferred when the invitee completes accept-with-workspace-link.
+   * The executor refuses `owner` and any role the actor cannot grant.
+   */
+  readonly grantedRole: ProjectRole
 }
 
 /** Inputs for accepting one pending invitation; linking is mandatory and atomic. */
@@ -104,10 +110,11 @@ export abstract class ProjectMembershipService extends Service {
   /**
    * Issue one invitation to a platform account.
    * @param actor - authenticated account holding admin or owner on the project.
-   * @param input - target project and invitee account.
-   * @returns the invitation in `pending` state.
-   * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin, `DUPLICATE_INVITEE` when the account already holds
-   *   membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.
+   * @param input - target project, invitee account, and the role granted at accept time.
+   * @returns the invitation in `pending` state, carrying that granted role.
+   * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin or when the actor cannot grant the requested role,
+   *   `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER`
+   *   when the actor holds no membership.
    */
   abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>
 

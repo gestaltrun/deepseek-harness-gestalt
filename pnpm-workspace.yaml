@@ -69,6 +69,8 @@ allowBuilds:
   # Chromedriver via Electron, so their install scripts stay denied.
   edgedriver: false
   geckodriver: false
+  # core-js runtime modules are complete in the package; its postinstall only reports project metadata.
+  core-js: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole

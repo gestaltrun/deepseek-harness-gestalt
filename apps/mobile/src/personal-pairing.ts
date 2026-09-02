@@ -17,6 +17,7 @@ import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-acco
 import type { RemoteAccessTransport } from '@deepseek-ai/dsh-remote-access-client'
 import { BrowserQRCodeReader } from '@zxing/browser'
 import type { MobilePairedDesktop, MobilePairingActions, MobilePairingSnapshot } from './personal-pairing-model.ts'
+import { randomUuid } from './random-uuid.ts'
 
 /** Process-owned foreground Relay lifecycle released on unpair and Account change. */
 interface MobilePairingLifecycleOwner {
@@ -500,7 +501,7 @@ export class MobilePairingController implements MobilePairingActions {
       requirePairingSignal(signal)
       const attempt: PreparedMobilePairingAttempt = {
         link, expiresAt: endpoint.expiresAt, accountId: this.requireAccountId(),
-        completionId: `snow-${crypto.randomUUID()}` as PairingCompletionId,
+        completionId: `snow-${randomUuid()}` as PairingCompletionId,
         mobileHandshake: message1, transmission: 'prepared', endpointChallengeId: endpoint.challengeId,
       }
       this.attempt = attempt

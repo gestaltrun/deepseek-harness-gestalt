@@ -7,6 +7,8 @@
  * writers of one file through a `wx`-created `<file>.lock` sibling, so a
  * read-modify-write cycle can never resurrect a state another writer just
  * replaced; readers stay lock-free because the rename commit is atomic.
+ * Windows replacement retries a short bounded set of transient access errors;
+ * persistent access failures remain authoritative.
  * @module @deepseek-ai/dsh-atomic-write
  */
 
@@ -32,6 +34,31 @@ export interface WriteFileAtomicOptions {
   dirMode?: number
 }
 
+// A short fixed window absorbs scanners and competing replacement handles;
+// persistent access denial still reaches the caller after 310 milliseconds.
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160] as const
+
+function isTransientWindowsRenameError(error: unknown): boolean {
+  if (process.platform !== 'win32') return false
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
+}
+
+async function renameReplacement(temp: string, filename: string): Promise<void> {
+  let failureCount = 0
+  for (;;) {
+    try {
+      await rename(temp, filename)
+      return
+    } catch (error) {
+      const delay = WINDOWS_RENAME_RETRY_DELAYS_MS[failureCount]
+      if (!isTransientWindowsRenameError(error) || delay === undefined) throw error
+      failureCount += 1
+      await new Promise(resolve => setTimeout(resolve, delay))
+    }
+  }
+}
+
 /**
  * Replace `filename` with `content` in one atomic step, creating parent
  * directories. The content is first written to a random-suffix sibling opened
@@ -40,8 +67,10 @@ export interface WriteFileAtomicOptions {
  * rename, so replacing a wider-permission file narrows it without a chmod
  * race. The rename also replaces a symlinked target itself instead of writing
  * through to its referent, and the same-directory sibling keeps the rename on
- * one filesystem. On any failure the temp file is removed and the failure
- * rethrown. Crash durability (fsync) is out of scope.
+ * one filesystem. Windows retries transient `EPERM`, `EACCES`, and `EBUSY`
+ * replacement errors for a fixed 310-millisecond window. On any persistent
+ * failure the temp file is removed and the final failure rethrown. Crash
+ * durability (fsync) is out of scope.
  * @param filename - final path receiving the content.
  * @param content - complete next file content.
  * @param options - permission bits for the replacement inode.
@@ -56,7 +85,7 @@ export async function writeFileAtomic(filename: string, content: string, options
   const temp = `${filename}.${randomBytes(6).toString('hex')}.tmp`
   try {
     await writeFile(temp, content, { mode: options.mode, flag: 'wx' })
-    await rename(temp, filename)
+    await renameReplacement(temp, filename)
   } catch (error) {
     await rm(temp, { force: true })
     throw error

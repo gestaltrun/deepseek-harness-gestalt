@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "459-release-plan-pipefail",
+  "summary": {
+    "en": "Stop Product Release planning before it can push partial generated state after a preparation failure.",
+    "zh": "让 Product Release 规划在准备失败后、推送不完整生成状态之前停止。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "The change affects only Product Release planning failure propagation and baseline validation; it does not change Desktop source, packaging, or runtime behavior."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "The change affects only Product Release planning failure propagation and baseline validation; it does not change Mobile source, packaging, or runtime behavior."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The change affects only Product Release planning failure propagation and baseline validation; it does not change Platform source, deployment, or runtime behavior."
+    }
+  ]
+}

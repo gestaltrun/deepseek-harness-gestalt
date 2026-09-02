@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -136,22 +136,31 @@ describe('validateRoutedReferences', () => {
     })
   })
 
-  it('rejects an oversize or deleted routed file', async () => {
-    const { workspace, inside } = workspaceFixture()
-    const huge = join(workspace, 'huge.bin')
-    writeFileSync(huge, Buffer.alloc(
+  it('rejects an oversize routed file', async () => {
+    const { workspace } = workspaceFixture()
+    writeFileSync(join(workspace, 'huge.bin'), Buffer.alloc(
       Math.min(
         REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
         REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
       ) + 1,
     ))
     await expect(validateRoutedReferences([{ path: 'huge.bin' }], workspace)).rejects.toMatchObject({
+      name: 'AskUserQuestionError',
       code: 'REFERENCES_INVALID',
+      message: `REFERENCES_INVALID: references[0]: path "huge.bin" exceeds the ${String(Math.min(
+        REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+        REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+      ))}-byte transfer ceiling`,
     })
-    chmodSync(inside, 0)
+  })
+
+  it('rejects a routed file that is deleted after path admission', async () => {
+    const { workspace, inside } = workspaceFixture()
+    unlinkSync(inside)
     await expect(validateRoutedReferences([{ path: 'inside.md' }], workspace)).rejects.toMatchObject({
+      name: 'AskUserQuestionError',
       code: 'REFERENCES_INVALID',
+      message: 'REFERENCES_INVALID: references[0]: path "inside.md" is unreadable or does not exist inside the session workspace',
     })
-    chmodSync(inside, 0o600)
   })
 })

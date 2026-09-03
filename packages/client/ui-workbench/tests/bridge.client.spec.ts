@@ -50,7 +50,7 @@ function projection(
   }
 }
 
-function state(tabs: Array<{ id: string; type: string; meta?: unknown }>): SidebarStateSlice {
+function state(tabs: Array<{ id: string; type: string; meta?: unknown; path?: string }>): SidebarStateSlice {
   return {
     panelOpen: false,
     splits: { kind: 'leaf', tabs },
@@ -59,7 +59,7 @@ function state(tabs: Array<{ id: string; type: string; meta?: unknown }>): Sideb
 
 function bench(input: {
   projection?: BrowserWorkspaceProjection
-  tabs?: Array<{ id: string; type: string; meta?: unknown }>
+  tabs?: Array<{ id: string; type: string; meta?: unknown; path?: string }>
 } = {}) {
   let currentSession: string | undefined = SESSION
   let currentProjection = input.projection ?? projection()
@@ -333,7 +333,7 @@ describe('OfficialBrowserBridge', () => {
     await vi.waitFor(() => { expect(b.sidebar.openTab).toHaveBeenCalledWith({ type: 'browser' }) })
   })
 
-  it('skips create without a Session or empty tab and swallows a rejected create', async () => {
+  it('skips create without a Session or empty tab and records a rejected create for retry', async () => {
     const b = bench({ projection: projection(false) })
     b.setSession(undefined)
     b.bridge.tick()
@@ -349,7 +349,59 @@ describe('OfficialBrowserBridge', () => {
     vi.mocked(b.remote.create).mockRejectedValueOnce(new Error('runtime gone'))
     b.bridge.ensureOfficial('browser:1')
     await vi.waitFor(() => { expect(b.remote.create).toHaveBeenCalledOnce() })
-    expect(b.sidebar.updateTab).not.toHaveBeenCalled()
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenCalledWith('browser:1', {
+        meta: { createError: 'runtime gone' },
+      })
+    })
+  })
+
+  it('clears the recorded failure at the next attempt and binds on success', async () => {
+    const b = bench({
+      projection: projection(false),
+      tabs: [{ id: 'browser:1', type: 'browser', meta: { createError: 'runtime gone' } }],
+    })
+    b.bridge.ensureOfficial('browser:1')
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenNthCalledWith(1, 'browser:1', { meta: {} })
+    })
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenLastCalledWith('browser:1', {
+        title: 'Example',
+        meta: officialTabMeta(TARGET, { kind: 'persistent', name: 'test' }),
+      })
+    })
+  })
+
+  it('navigates a freshly created page to the tab seed URL from a link open', async () => {
+    const b = bench({
+      projection: projection(false),
+      tabs: [{ id: 'browser:1', type: 'browser', path: 'https://gestaltrun.example/repo' }],
+    })
+    b.bridge.ensureOfficial('browser:1')
+    await vi.waitFor(() => {
+      expect(b.remote.refresh).toHaveBeenCalledWith(TARGET, 3, 'https://gestaltrun.example/repo')
+    })
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenCalledWith('browser:1', {
+        title: 'Example',
+        meta: officialTabMeta(TARGET, { kind: 'persistent', name: 'test' }),
+      })
+    })
+  })
+
+  it('leaves a non-URL tab path as a blank new page', async () => {
+    const b = bench({
+      projection: projection(false),
+      tabs: [{ id: 'browser:1', type: 'browser', path: '/tmp/local-file.md' }],
+    })
+    b.bridge.ensureOfficial('browser:1')
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenCalledWith('browser:1', expect.objectContaining({
+        meta: officialTabMeta(TARGET, { kind: 'persistent', name: 'test' }),
+      }))
+    })
+    expect(b.remote.refresh).not.toHaveBeenCalled()
   })
 
   it('omits a blank created title and skips an already bound tab', async () => {

@@ -165,18 +165,158 @@ describe('phone stream Host routes', () => {
       wireDevice('ios-real', 'ios', 'real', 'online'),
     ])
     context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: true })
+    const installAgent = vi.fn()
+    context.phoneDevices.installAgent = installAgent
 
     expect(await mint(origin, 'android-real')).toMatchObject({ preferredFormat: 'h264', agentManaged: true })
     expect((await mint(origin, 'ios-real')).preferredFormat).toBe('h264')
     expect((await mint(origin, 'ios-simulator')).preferredFormat).toBe('mjpeg')
+    expect(installAgent).not.toHaveBeenCalled()
   })
 
-  it('detects a missing iOS real-device agent before minting a picture session', async () => {
+  it('installs a missing iOS real-device agent during mint and answers a picture session', async () => {
     const { origin, context } = await mount([
       wireDevice('UDID-9', 'ios', 'real', 'online'),
     ])
     const host = new URL(origin).host
+    let installed = false
+    const installAgent = vi.fn(async (id: ReturnType<typeof deviceId>, options?: { force?: boolean }) => {
+      installed = true
+      return { deviceId: id, installed: true, reinstalled: options?.force === true }
+    })
+    context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed })
+    context.phoneDevices.installAgent = installAgent
+
+    const response = await rawRequest({
+      origin,
+      method: 'POST',
+      path: '/phone/session',
+      host,
+      body: JSON.stringify({ deviceId: 'UDID-9' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body.toString('utf8'))).toMatchObject({
+      deviceId: 'UDID-9',
+      agentManaged: true,
+      preferredFormat: 'h264',
+    })
+    expect(installAgent).toHaveBeenCalledTimes(1)
+    expect(installAgent.mock.calls[0]?.[0]).toBe(deviceId('UDID-9'))
+    expect(installAgent.mock.calls[0]?.[1]?.force).not.toBe(true)
+  })
+
+  it('keeps mint install failures on their existing error codes', async () => {
+    const cases: readonly {
+      readonly name: string
+      readonly error: PhoneDevicesError
+      readonly status: number
+      readonly body: object
+    }[] = [
+      {
+        name: 'missing provisioning profile',
+        error: new PhoneDevicesError(
+          'PHONE_AGENT_PROFILE_REQUIRED',
+          'configure provisioningProfilePath before installing the iOS real-device control agent',
+        ),
+        status: 409,
+        body: {
+          error: {
+            code: 'PHONE_AGENT_PROFILE_REQUIRED',
+            message: 'configure provisioningProfilePath before installing the iOS real-device control agent',
+          },
+        },
+      },
+      {
+        name: 'device locked',
+        error: new PhoneDevicesError('PHONE_REAL_DEVICE_ISSUE', 'unlock the device', { issue: 'device-locked' }),
+        status: 502,
+        body: { error: { code: 'PHONE_REAL_DEVICE_ISSUE', issue: 'device-locked', message: 'unlock the device' } },
+      },
+      {
+        name: 'certificate untrusted',
+        error: new PhoneDevicesError(
+          'PHONE_REAL_DEVICE_ISSUE',
+          'the signing certificate is not trusted',
+          { issue: 'cert-untrusted' },
+        ),
+        status: 502,
+        body: {
+          error: {
+            code: 'PHONE_REAL_DEVICE_ISSUE',
+            issue: 'cert-untrusted',
+            message: 'the signing certificate is not trusted',
+          },
+        },
+      },
+      {
+        name: 'profile expired',
+        error: new PhoneDevicesError(
+          'PHONE_REAL_DEVICE_ISSUE',
+          'the provisioning profile has expired',
+          { issue: 'profile-expired' },
+        ),
+        status: 502,
+        body: {
+          error: {
+            code: 'PHONE_REAL_DEVICE_ISSUE',
+            issue: 'profile-expired',
+            message: 'the provisioning profile has expired',
+          },
+        },
+      },
+      {
+        name: 'user-restricted install',
+        error: new PhoneDevicesError(
+          'PHONE_UPSTREAM',
+          'adb install failed: INSTALL_FAILED_USER_RESTRICTED',
+        ),
+        status: 502,
+        body: {
+          error: {
+            code: 'PHONE_UPSTREAM',
+            message: 'adb install failed: INSTALL_FAILED_USER_RESTRICTED',
+          },
+        },
+      },
+    ]
+    for (const testCase of cases) {
+      const { origin, context } = await mount([
+        wireDevice('UDID-9', 'ios', 'real', 'online'),
+      ])
+      const host = new URL(origin).host
+      context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: false })
+      context.phoneDevices.installAgent = async () => {
+        throw testCase.error
+      }
+
+      const response = await rawRequest({
+        origin,
+        method: 'POST',
+        path: '/phone/session',
+        host,
+        body: JSON.stringify({ deviceId: 'UDID-9' }),
+      })
+
+      expect({ name: testCase.name, status: response.status }).toEqual({
+        name: testCase.name, status: testCase.status,
+      })
+      expect({ name: testCase.name, body: JSON.parse(response.body.toString('utf8')) }).toEqual({
+        name: testCase.name, body: testCase.body,
+      })
+    }
+  })
+
+  it('answers PHONE_AGENT_MISSING when mint install still leaves the iOS real agent absent', async () => {
+    const { origin, context } = await mount([
+      wireDevice('UDID-9', 'ios', 'real', 'online'),
+    ])
+    const host = new URL(origin).host
+    const installAgent = vi.fn(async (id: ReturnType<typeof deviceId>) => ({
+      deviceId: id, installed: false, reinstalled: false,
+    }))
     context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: false })
+    context.phoneDevices.installAgent = installAgent
 
     const response = await rawRequest({
       origin,
@@ -193,6 +333,37 @@ describe('phone stream Host routes', () => {
         message: 'the iOS real-device control agent is not installed',
       },
     })
+    expect(installAgent).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not install an agent when minting an iOS simulator session', async () => {
+    const { origin, context } = await mount([
+      wireDevice('SIM-9', 'ios', 'simulator', 'online'),
+    ])
+    const host = new URL(origin).host
+    const agentStatus = vi.fn(async (id: ReturnType<typeof deviceId>) => ({ deviceId: id, installed: false }))
+    const installAgent = vi.fn(async (id: ReturnType<typeof deviceId>) => ({
+      deviceId: id, installed: true, reinstalled: false,
+    }))
+    context.phoneDevices.agentStatus = agentStatus
+    context.phoneDevices.installAgent = installAgent
+
+    const response = await rawRequest({
+      origin,
+      method: 'POST',
+      path: '/phone/session',
+      host,
+      body: JSON.stringify({ deviceId: 'SIM-9' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(JSON.parse(response.body.toString('utf8'))).toMatchObject({
+      deviceId: 'SIM-9',
+      agentManaged: false,
+      preferredFormat: 'mjpeg',
+    })
+    expect(agentStatus).not.toHaveBeenCalled()
+    expect(installAgent).not.toHaveBeenCalled()
   })
 
   it('preserves the structured real-device issue on agent status and install failures', async () => {

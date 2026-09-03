@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-28-phone-same-origin-stream-channel.md
-2026-08-28-phone-same-origin-stream-channel.md: 474f9a3c977256734826468290738e4cf1a53815
-2026-08-28-phone-same-origin-stream-channel.zh.md: c0744d412b701e48f76479195f74768fe8990320
+2026-08-28-phone-same-origin-stream-channel.md: b0ec7ed521c14fb345bd8be1d7a52a07df5c54ac
+2026-08-28-phone-same-origin-stream-channel.zh.md: e990594b4d501d5da75565eed75835181f08f4a3

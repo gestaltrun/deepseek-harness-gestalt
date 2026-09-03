@@ -192,7 +192,12 @@ export class PhoneStream extends Service {
         )
       }
       if (knownReal !== undefined) {
-        const status = await this.ctx.phoneDevices.agentStatus(id)
+        // Mint installs a missing recoverable agent; PHONE_AGENT_MISSING is the leftover-absent answer.
+        let status = await this.ctx.phoneDevices.agentStatus(id)
+        if (!status.installed) {
+          await this.ctx.phoneDevices.installAgent(id)
+          status = await this.ctx.phoneDevices.agentStatus(id)
+        }
         if (!status.installed) {
           writeJson(res, 409, {
             error: {

@@ -13,7 +13,7 @@ Status: implemented
 `packages/phone/phone-stream`（`@deepseek-ai/dsh-phone-stream`）是承载于 `ctx.phoneStream` 的 Host Consumer。它注入 `phoneDevices` 与 `webServer`，并且永不让浏览器直连 `:12000`。
 
 - IO 走精确路径 WebSocket 升级 `/phone/ws/io`，并先经过 `/api` 信任栅栏（Host 为 loopback 或已声明的 `trustedHosts`、同源 Origin、拒绝 cross-site Fetch-Metadata）。帧为 JSON-RPC `tap` / `gesture` / `text` / `button`，转发到 `phoneDevices.io`。
-- 采集走签名的 Host 同源 URL `/phone/stream/<id>/<mjpeg|h264>?token=`。签发入口是 `sessionFor` / `POST /phone/session`。每个 token 是覆盖 `deviceId`、格式与过期时间的 HMAC-SHA256，有效期为 `tokenTtlMs`（默认 30 秒）。采集还拒绝非 loopback Host，因此能调用 `/api` 的受信任 LAN 权威仍不能播放视频。
+- 采集走签名的 Host 同源 URL `/phone/stream/<id>/<mjpeg|h264>?token=`。签发入口是 `sessionFor` / `POST /phone/session`。对清单中的 iOS 真机，mint 在应答前安装可恢复的缺失控制 agent，由 [mint 自动安装笔记](../bug-fix/2026-09-03-phone-ios-real-mint-autoinstall.zh.md) 持有。每个 token 是覆盖 `deviceId`、格式与过期时间的 HMAC-SHA256，有效期为 `tokenTtlMs`（默认 30 秒）。采集还拒绝非 loopback Host，因此能调用 `/api` 的受信任 LAN 权威仍不能播放视频。
 - `phone-runtime` 追加 `io` 与 `startCapture`，不改变 `listDevices` / `boot` / `shutdown`。`startCapture` 将 `h264` 映射为上游 `avc`，并且只约束等待响应头的时间；未读 body 属于 Host 反代，浏览器断开时由其取消。
 
 画面比例（固定 1:2，轴 3）仍是 GUI Consumer 的约定。本包签发流 URL 并转发帧；它不渲染 `react-device-view`。

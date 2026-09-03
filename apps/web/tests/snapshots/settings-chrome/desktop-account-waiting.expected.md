@@ -1,0 +1,6 @@
+- text: G
+- heading "Platform 账号" [level=2]
+- paragraph: 登录 Platform 账号后，即可把手机安全连接到这台电脑。
+- strong: 请在系统浏览器中完成 GitHub 登录
+- paragraph: 此窗口会安全地等待登录结果。
+- button "取消登录"

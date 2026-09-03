@@ -30,4 +30,4 @@ preload 在 `account:cancelLogin` 上暴露 `accountCancelLogin`。Settings Acco
 
 ## Testing
 
-`apps/desktop/tests/platform-account.spec.ts` 覆盖 authorizing、persist、打开浏览器、迟到 poll、进行中 poll 在取消后完成，以及已登录 no-op。进行中 poll 要求现场快照与重读存储一致：无 session 则为 idle，有 session 则为 signed-in。`packages/client/ui-desktop/tests/account-control.client.spec.tsx` 仅在 polling 与 authorizing 显示取消按钮并调用 `accountCancelLogin`。`packages/platform/platform-account-client/tests/installation.client.spec.ts` 把 abort signal 转给 Fetch。
+`apps/desktop/tests/platform-account.spec.ts` 覆盖 authorizing、persist、打开浏览器、迟到 poll、进行中 poll 在取消后完成，以及已登录 no-op。进行中 poll 要求现场快照与重读存储一致：无 session 则为 idle，有 session 则为 signed-in。`packages/client/ui-desktop/tests/account-control.client.spec.tsx` 仅在 polling 与 authorizing 显示取消按钮并调用 `accountCancelLogin`。`apps/web/tests/settings-chrome.e2e.ts` 钉住组装后的 Desktop overlay 等待面板（`desktop-account-waiting.expected.md`），其中含 **取消登录**。`packages/platform/platform-account-client/tests/installation.client.spec.ts` 把 abort signal 转给 Fetch。

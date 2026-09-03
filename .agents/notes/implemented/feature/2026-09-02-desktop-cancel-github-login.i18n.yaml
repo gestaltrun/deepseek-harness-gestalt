@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-desktop-cancel-github-login.md
-2026-09-02-desktop-cancel-github-login.md: 0ffdab66db3210d047f0f4f0e402cc6a5f92493c
-2026-09-02-desktop-cancel-github-login.zh.md: 42d01d34fc1e24c0d26a025eb154c097b1991449
+2026-09-02-desktop-cancel-github-login.md: 806e6879b7121f5c86376da50013563882766397
+2026-09-02-desktop-cancel-github-login.zh.md: 9dd1aa4c1f87c04c189260405ae0220740d3d0ca

@@ -31,7 +31,7 @@ import {
 } from './config.ts'
 import { parentOf, requireAbsolute, listDirectory, rootLabel } from './fs-tree.ts'
 import { writeWorkspaceUpload } from './fs-operations.ts'
-import { ensureWorkspacePath, ensureWorkspaceWritePath } from './path-security.ts'
+import { ensureWorkspacePath, ensureWorkspaceWritePath, resolveReadablePath } from './path-security.ts'
 import { searchFiles } from './fs-search.ts'
 import { decodeHtmlUrl } from './html-route.ts'
 import { extractFrameAncestors } from './browser-probe.ts'
@@ -296,8 +296,10 @@ function buildApi(
       // names; the untracked diff view reads the file through this route). A
       // child-repo path is relative to the selected repoRoot, not the session
       // cwd; thread it so the path resolves inside the authorized workspace.
+      // Reads are not workspace-fenced: an explicit editor open may target a
+      // file outside the session workspace (see resolveReadablePath).
       const selected = selectedRepoOf(payload)
-      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected))
+      const path = await resolveReadablePath(await resolveGitPath(cwd, requireString(payload, 'path'), selected))
       const { content, truncated, binary, size, head } = await readText(path, resolved.readLimit)
       if (binary) return { kind: 'binary', size, truncated, head }
       return { kind: 'text', content, truncated }
@@ -843,8 +845,11 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         const sessionId = url.searchParams.get('sessionId')
         const raw = url.searchParams.get('path')
         if (sessionId === null || raw === null) throw new SidebarError('bad-request', 'sessionId and path are required')
-        const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
-        const path = await ensureWorkspacePath(cwd, raw)
+        // The session id still authorizes the request; the read itself may
+        // target a file outside the workspace (markdown images and media of
+        // an explicitly opened editor tab live next to that file).
+        sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
+        const path = await resolveReadablePath(raw)
         const info = await stat(path)
         if (!info.isFile() || info.size > resolved.mediaLimit) {
           throw new SidebarError('fs-error', 'not a file or too large', 400)
@@ -897,13 +902,11 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
           return
         }
         const { sessionId, path } = decoded.ref
-        // The session's authoritative cwd (client cwd cannot ride in the URL
-        // — the path encoding has no query; a detached first request falls
-        // back to the process cwd and is normally refused by the workspace
-        // real-path guard, with the same semantics as the media route's
-        // fallback.
-        const cwd = sessionCwdOf(ctx, sessionId)
-        const absolute = await ensureWorkspacePath(cwd, path)
+        // The session id still authorizes the request; the read itself may
+        // target a file outside the workspace (an HTML preview follows the
+        // explicitly opened file wherever it lives).
+        sessionCwdOf(ctx, sessionId)
+        const absolute = await resolveReadablePath(path)
         const info = await stat(absolute)
         if (!info.isFile() || info.size > resolved.mediaLimit) {
           throw new SidebarError('fs-error', 'not a file or too large', 400)

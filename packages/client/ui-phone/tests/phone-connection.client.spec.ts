@@ -5,7 +5,7 @@
  * suspend/resume, and the touch/keyboard io frames with their coordinates.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PhoneConnectionController } from '../src/client/phone-connection.ts'
+import { h264SurfaceForHost, PhoneConnectionController } from '../src/client/phone-connection.ts'
 import type { PhoneStreamGateway } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import { FakeGateway, flush, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
@@ -664,6 +664,15 @@ describe('PhoneConnectionController io', () => {
     controller.noteSurface('h264', 844, 390)
     expect(notifications).toBe(2)
     expect(controller.surfaceSize()).toEqual({ width: 844, height: 390 })
+  })
+
+  it('swaps a portrait H264 surface when Host logicalDisplay is landscape', () => {
+    expect(h264SurfaceForHost(1080, 2248, { width: 2248, height: 1080 }))
+      .toEqual({ width: 2248, height: 1080 })
+    expect(h264SurfaceForHost(1080, 2248, { width: 1080, height: 2248 }))
+      .toEqual({ width: 1080, height: 2248 })
+    expect(h264SurfaceForHost(2248, 1080, { width: 2248, height: 1080 }))
+      .toEqual({ width: 2248, height: 1080 })
   })
 
   it('maps a tap through the rotated landscape surface onto landscape device coordinates', async () => {

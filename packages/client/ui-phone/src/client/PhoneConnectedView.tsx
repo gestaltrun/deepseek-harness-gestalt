@@ -16,7 +16,7 @@ import type {
   ReactNode,
   WheelEvent as ReactWheelEvent,
 } from 'react'
-import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
+import { h264SurfaceForHost, type PhoneConnectionController, type PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneListingSource } from './registry.ts'
 import { measureMjpegCurrentFrame } from './measure-mjpeg-current-frame.ts'
 import { PhoneH264PlaybackOwner, PhoneH264Surface } from './PhoneH264Surface.tsx'
@@ -222,6 +222,8 @@ export function PhoneConnectedView({
   const mjpegImg = useRef<HTMLImageElement | null>(null)
   /** Drops an in-flight current-frame measurement after a newer one starts or MJPEG leaves live. */
   const mjpegMeasureGeneration = useRef(0)
+  /** Last H264 onSurface size before Host landscape swap. */
+  const h264RawSurface = useRef<{ width: number; height: number } | undefined>(undefined)
 
   const releaseDrag = useCallback((): void => {
     const state = drag.current
@@ -367,6 +369,17 @@ export function PhoneConnectedView({
   const current = devices.find(device => device.id === serial)
   const online = current?.online === true
   const unauthorized = current?.state === 'unauthorized'
+  const logicalDisplay = current?.logicalDisplay
+  useEffect(() => {
+    if (phase.kind !== 'live' || phase.format !== 'h264') {
+      h264RawSurface.current = undefined
+      return
+    }
+    const raw = h264RawSurface.current
+    if (raw === undefined) return
+    const surface = h264SurfaceForHost(raw.width, raw.height, logicalDisplay)
+    controller.noteSurface('h264', surface.width, surface.height)
+  }, [controller, logicalDisplay, phase])
 
   const screenContent = (): ReactNode => {
     // A listed-unauthorized handset cannot stream: the design's warn arm
@@ -391,7 +404,11 @@ export function PhoneConnectedView({
             label={`${name} 实时画面`}
             className={css.stream}
             url={phase.streamUrl}
-            onSurface={(width, height) => { controller.noteSurface('h264', width, height) }}
+            onSurface={(width, height) => {
+              h264RawSurface.current = { width, height }
+              const surface = h264SurfaceForHost(width, height, logicalDisplay)
+              controller.noteSurface('h264', surface.width, surface.height)
+            }}
             onError={() => { controller.noteCaptureFailure('h264') }}
           />
         )

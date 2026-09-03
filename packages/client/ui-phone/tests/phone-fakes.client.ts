@@ -32,8 +32,8 @@ export interface FakeH264PlaybackRuntime {
   readonly drawImage: ReturnType<typeof vi.fn>
   /** Deliver one asynchronous WebCodecs failure to the newest decoder. */
   failLastDecoder(): void
-  /** Emit one decoded frame of the given display size from the newest decoder (rotation). */
-  emitFrame(width: number, height: number): void
+  /** Emit one decoded frame of the given display size from the newest decoder. */
+  emitFrame(width: number, height: number, rotation?: number): void
 }
 
 /** Install a same-origin Annex-B response and WebCodecs decoder for view specs. */
@@ -65,6 +65,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     readonly output: (frame: {
       readonly displayWidth: number
       readonly displayHeight: number
+      readonly rotation: number
       close(): void
     }) => void
     readonly error: (error: DOMException) => void
@@ -89,6 +90,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
       this.output({
         displayWidth: 390,
         displayHeight: 844,
+        rotation: 0,
         close: () => { frameCloseCounts[frameIndex] = (frameCloseCounts[frameIndex] ?? 0) + 1 },
       })
     }
@@ -99,6 +101,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
         this.output({
           displayWidth: 390,
           displayHeight: 844,
+          rotation: 0,
           close: () => { frameCloseCounts[frameIndex] = (frameCloseCounts[frameIndex] ?? 0) + 1 },
         })
       }
@@ -126,11 +129,12 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     failLastDecoder() {
       decoderErrors.at(-1)?.(new DOMException('decode failed', 'EncodingError'))
     },
-    emitFrame(width: number, height: number) {
+    emitFrame(width: number, height: number, rotation = 0) {
       const frameIndex = frameCloseCounts.push(0) - 1
       decoderOutputs.at(-1)?.({
         displayWidth: width,
         displayHeight: height,
+        rotation,
         close: () => { frameCloseCounts[frameIndex] = (frameCloseCounts[frameIndex] ?? 0) + 1 },
       })
     },

@@ -135,7 +135,7 @@ export function groupEntries(devices: readonly MobilecliDevice[]): PhoneDeviceLi
  * Compute the committed change payload fields between two listings.
  * @param previous - Listing published before, or `undefined` before the first acquisition.
  * @param next - Candidate listing.
- * @returns whether any id set, name, kind, or online fact differs, plus the added/removed id arrays.
+ * @returns whether any id set, name, kind, online, or logicalDisplay fact differs, plus the added/removed id arrays.
  */
 export function changeSets(
   previous: PhoneDeviceList | undefined,
@@ -157,11 +157,19 @@ export function changeSets(
   return { changed, added, removed }
 }
 
+function logicalSignature(ref: PhoneDeviceRef): string {
+  const display = ref.logicalDisplay
+  return display === undefined ? '' : `${String(display.width)}x${String(display.height)}`
+}
+
 function signaturesOf(list: PhoneDeviceList | undefined): Map<DeviceId, string> {
   const signatures = new Map<DeviceId, string>()
   if (list === undefined) return signatures
   for (const ref of allRefs(list)) {
-    signatures.set(ref.id, `${ref.kind}\u0000${ref.state}\u0000${ref.online ? 1 : 0}\u0000${ref.name}`)
+    signatures.set(
+      ref.id,
+      `${ref.kind}\u0000${ref.state}\u0000${ref.online ? 1 : 0}\u0000${ref.name}\u0000${logicalSignature(ref)}`,
+    )
   }
   return signatures
 }

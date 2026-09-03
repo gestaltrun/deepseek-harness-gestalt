@@ -69,6 +69,46 @@ describe('phone listing source', () => {
     expect(source.getBadge()).toEqual({ onlineCount: 2 })
   })
 
+  it('carries Host logicalDisplay on Android rows and rejects invalid values', async () => {
+    stubFetch(200, {
+      android: [{
+        id: 'fbcd1d21',
+        name: 'MI 8',
+        kind: 'real',
+        state: 'online',
+        online: true,
+        logicalDisplay: { width: 2248, height: 1080 },
+      }],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await source.refresh()
+    expect(source.snapshot().android[0]).toEqual({
+      id: 'fbcd1d21',
+      name: 'MI 8',
+      channel: 'usb',
+      state: 'online',
+      online: true,
+      logicalDisplay: { width: 2248, height: 1080 },
+    })
+
+    stubFetch(200, {
+      android: [{
+        id: 'x', name: 'x', kind: 'real', state: 'online', online: true, logicalDisplay: { width: 0, height: 1080 },
+      }],
+      ios: { simulators: [], reals: [] },
+    })
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+
+    stubFetch(200, {
+      android: [{
+        id: 'x', name: 'x', kind: 'real', state: 'online', online: true, logicalDisplay: 'landscape',
+      }],
+      ios: { simulators: [], reals: [] },
+    })
+    await expect(createHttpPhoneListingSource().refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+  })
+
   it('notifies subscribers only when a refresh commits', async () => {
     stubFetch(200, WIRE_LISTING)
     const source = createHttpPhoneListingSource()

@@ -6,7 +6,7 @@ export interface PhoneH264PlaybackOptions {
   readonly url: string
   /** Canvas that receives the most recently decoded frame. */
   readonly canvas: HTMLCanvasElement
-  /** Called when decoded display dimensions first appear or change. */
+  /** Called when post-rotation display dimensions first appear or change. */
   readonly onSurface: (width: number, height: number) => void
   /** Called once when fetch, parsing, decoding, or drawing fails. */
   readonly onError: (error: unknown) => void
@@ -35,6 +35,44 @@ interface StartCode {
 
 const MAX_DECODE_QUEUE = 2
 const ACCESS_UNIT_PREFIX_TYPES = new Set([6, 7, 8, 9, 14, 15, 16, 17, 18])
+
+interface RotatableVideoFrame {
+  readonly rotation?: number
+}
+
+/** Clockwise display rotation carried by a WebCodecs `VideoFrame`, or 0 when absent. */
+function displayRotationOf(frame: VideoFrame): 0 | 90 | 180 | 270 {
+  const rotation = (frame as unknown as RotatableVideoFrame).rotation
+  if (rotation === 90 || rotation === 180 || rotation === 270) return rotation
+  return 0
+}
+
+/**
+ * Draw one decoded frame so post-rotation pixels fill the canvas.
+ * WebCodecs `VideoFrame.rotation` is clockwise degrees the picture must be
+ * rotated to display correctly; 90/270 swap the canvas axes.
+ */
+function paintRotatedFrame(
+  context: CanvasRenderingContext2D,
+  frame: VideoFrame,
+  rotation: 0 | 90 | 180 | 270,
+  width: number,
+  height: number,
+  displayWidth: number,
+  displayHeight: number,
+): void {
+  if (rotation === 0) {
+    context.drawImage(frame, 0, 0, displayWidth, displayHeight)
+    return
+  }
+  context.save()
+  if (rotation === 90) context.translate(width, 0)
+  else if (rotation === 180) context.translate(width, height)
+  else context.translate(0, height)
+  context.rotate(rotation * Math.PI / 180)
+  context.drawImage(frame, 0, 0, displayWidth, displayHeight)
+  context.restore()
+}
 
 function append(left: Uint8Array, right: Uint8Array): Uint8Array<ArrayBuffer> {
   const result = new Uint8Array(left.length + right.length)
@@ -420,14 +458,18 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
   const paint = (frame: VideoFrame): void => {
     try {
       if (isStopped()) return
-      const width = frame.displayWidth
-      const height = frame.displayHeight
-      if (width <= 0 || height <= 0) throw new Error('phone H264 decoder produced an empty frame')
+      const displayWidth = frame.displayWidth
+      const displayHeight = frame.displayHeight
+      if (displayWidth <= 0 || displayHeight <= 0) throw new Error('phone H264 decoder produced an empty frame')
+      const rotation = displayRotationOf(frame)
+      const swap = rotation === 90 || rotation === 270
+      const width = swap ? displayHeight : displayWidth
+      const height = swap ? displayWidth : displayHeight
       const context = options.canvas.getContext('2d')
       if (context === null) throw new Error('phone H264 canvas has no 2D context')
       if (options.canvas.width !== width) options.canvas.width = width
       if (options.canvas.height !== height) options.canvas.height = height
-      context.drawImage(frame, 0, 0, width, height)
+      paintRotatedFrame(context, frame, rotation, width, height, displayWidth, displayHeight)
       paintedFrames += 1
       if (surface?.width !== width || surface.height !== height) {
         surface = { width, height }

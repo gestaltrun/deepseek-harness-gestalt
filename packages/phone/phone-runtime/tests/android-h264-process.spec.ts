@@ -57,6 +57,22 @@ describe('openAndroidSystemH264', () => {
     })
   })
 
+  it('passes logical landscape size as screenrecord --size', async () => {
+    const fake = tree()
+    const launch = vi.fn(() => fake.value)
+    const body = openAndroidSystemH264({
+      deviceId: 'fbcd1d21',
+      environment: { ANDROID_SDK_ROOT: '/sdk' },
+      signal: new AbortController().signal,
+      size: { width: 2248, height: 1080 },
+    }, { platform: 'linux', isExecutable: () => true, launch })
+    fake.settle({ code: 0 })
+    expect((await new Response(body).arrayBuffer()).byteLength).toBe(0)
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      args: ['-s', 'fbcd1d21', 'exec-out', 'screenrecord', '--output-format=h264', '--size=2248x1080', '-'],
+    }))
+  })
+
   it('uses adb.exe from PATH on Windows when no SDK root is selected', async () => {
     const fake = tree()
     const launch = vi.fn(() => fake.value)

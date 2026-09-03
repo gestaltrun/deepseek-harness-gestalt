@@ -47,7 +47,7 @@ export interface PhoneH264SurfaceProps {
   readonly label: string
   /** CSS class applied to the canvas. */
   readonly className: string | undefined
-  /** Receives decoded display dimensions for touch-coordinate mapping. */
+  /** Receives post-rotation display dimensions for touch-coordinate mapping. */
   readonly onSurface: (width: number, height: number) => void
   /** Receives one terminal playback failure. */
   readonly onError: (error: unknown) => void

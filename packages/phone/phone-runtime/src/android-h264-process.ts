@@ -1,9 +1,8 @@
 /** Android system-screenrecord H264 capture owned through bounded process-tree teardown. */
 
 import type { ChildProcess } from 'node:child_process'
-import { accessSync, constants } from 'node:fs'
-import { posix, win32 } from 'node:path'
 import { PhoneDevicesError } from './errors.ts'
+import { executableOnHost, resolveAdbExecutable } from './android-display.ts'
 import { MobilecliProcessTree, type ServerExit } from './server-process.ts'
 
 interface CaptureProcessTree {
@@ -33,21 +32,16 @@ export interface AndroidH264CaptureOptions {
   readonly environment: Readonly<Record<string, string>>
   /** Runtime-generation or caller cancellation. */
   readonly signal: AbortSignal
+  /** Logical display passed as `screenrecord --size`; omitted when unknown. */
+  readonly size?: { readonly width: number; readonly height: number }
 }
 
-/** Resolve adb from the selected Android SDK, falling back to its PATH name. */
-function adbExecutable(
-  environment: Readonly<Record<string, string>>,
-  platform: NodeJS.Platform,
-  isExecutable: (path: string) => boolean,
-): string {
-  const sdkRoot = environment.ANDROID_SDK_ROOT?.trim() || environment.ANDROID_HOME?.trim()
-  const basename = platform === 'win32' ? 'adb.exe' : 'adb'
-  if (sdkRoot !== undefined && sdkRoot.length > 0) {
-    const selected = (platform === 'win32' ? win32 : posix).join(sdkRoot, 'platform-tools', basename)
-    if (isExecutable(selected)) return selected
-  }
-  return basename
+function screenrecordArgs(
+  deviceId: string,
+  size: AndroidH264CaptureOptions['size'],
+): readonly string[] {
+  const sized = size === undefined ? [] : [`--size=${String(size.width)}x${String(size.height)}`]
+  return ['-s', deviceId, 'exec-out', 'screenrecord', '--output-format=h264', ...sized, '-']
 }
 
 /**
@@ -64,12 +58,12 @@ export function openAndroidSystemH264(
 ): ReadableStream<Uint8Array> {
   if (options.signal.aborted) throw aborted(options.signal.reason)
   const platform = internals.platform ?? process.platform
-  const executablePath = adbExecutable(
+  const executablePath = resolveAdbExecutable(
     options.environment,
     platform,
     internals.isExecutable ?? executableOnHost,
   )
-  const args = ['-s', options.deviceId, 'exec-out', 'screenrecord', '--output-format=h264', '-'] as const
+  const args = screenrecordArgs(options.deviceId, options.size)
   const tree = internals.launch?.({ executablePath, args, environment: options.environment })
     ?? new MobilecliProcessTree({
       executablePath,
@@ -141,15 +135,6 @@ export function openAndroidSystemH264(
       await tree.stop()
     },
   })
-}
-
-function executableOnHost(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
 }
 
 function aborted(reason: unknown): PhoneDevicesError {

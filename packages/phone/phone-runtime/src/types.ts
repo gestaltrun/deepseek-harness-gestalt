@@ -26,6 +26,11 @@ export interface PhoneDeviceRef {
   readonly state: string
   /** True only while the upstream reports the device online; every other state reads false. */
   readonly online: boolean
+  /**
+   * Current Android logical display pixels from `dumpsys display` `logicalFrame`.
+   * Absent on iOS, offline Android, and dumpsys misses. Never `device.info.screenSize`.
+   */
+  readonly logicalDisplay?: { readonly width: number; readonly height: number }
 }
 
 /** One grouped device listing answer. */

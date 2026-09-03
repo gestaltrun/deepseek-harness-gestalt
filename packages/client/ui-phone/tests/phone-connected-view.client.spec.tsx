@@ -430,6 +430,47 @@ describe('PhoneConnectedView screen frame aspect', () => {
     })
   })
 
+  it('flips the H264 box from Host landscape when VideoFrame.rotation stays 0', async () => {
+    const source = new FakeListingSource().seed(listingOf([{
+      id: 'emulator-5554',
+      name: 'Pixel_6_API_35',
+      channel: 'emulator',
+      state: 'online',
+      online: true,
+      logicalDisplay: { width: 2248, height: 1080 },
+    }]))
+    const harness = renderView(true, undefined, source)
+    await flush()
+    await step(() => { harness.gateway.lastSocket!.accept() })
+    await act(async () => { h264Runtime.emitFrame(1080, 2248, 0) })
+    expect(frameRatio()).toBe(String(2248 / 1080))
+    stubRect(frame(), 400, 200)
+    fireEvent.pointerDown(frame(), { clientX: 300, clientY: 100 })
+    fireEvent.pointerUp(frame(), { clientX: 300, clientY: 100 })
+    expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 1686, y: 540 },
+    })
+  })
+
+  it('swaps a already-painted H264 surface when Host listing later reports landscape', async () => {
+    const source = new FakeListingSource().seed(listingOf(DEVICES))
+    const harness = renderView(true, undefined, source)
+    await flush()
+    await step(() => { harness.gateway.lastSocket!.accept() })
+    expect(frameRatio()).toBe(String(390 / 844))
+    source.scriptNext(listingOf([{
+      id: 'emulator-5554',
+      name: 'Pixel_6_API_35',
+      channel: 'emulator',
+      state: 'online',
+      online: true,
+      logicalDisplay: { width: 2248, height: 1080 },
+    }]))
+    await act(async () => { await source.refresh() })
+    expect(frameRatio()).toBe(String(844 / 390))
+  })
+
   it('keeps the locked 1:2 placeholder until the MJPEG frame reports its size', async () => {
     vi.stubGlobal('createImageBitmap', vi.fn(async () => {
       throw new Error('no current JPEG')

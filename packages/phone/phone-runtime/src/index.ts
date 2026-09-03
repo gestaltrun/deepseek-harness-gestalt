@@ -15,6 +15,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import z from '@deepseek-ai/schemastery'
 import { openAndroidSystemH264 } from './android-h264-process.ts'
+import { readAndroidLogicalDisplay } from './android-display.ts'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
@@ -287,6 +288,7 @@ export class PhoneDevices extends Service {
   private publishedList: PhoneDeviceList | undefined
   private iosScreenScales = new Map<DeviceId, number>()
   private readonly openNativeAndroidH264 = openAndroidSystemH264
+  private readonly readAndroidLogicalDisplay = readAndroidLogicalDisplay
   private startupOutcome: Promise<void> | undefined
   private pollTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -605,7 +607,8 @@ export class PhoneDevices extends Service {
   }
 
   /**
-   * Fetch and publish one fresh grouped device listing.
+   * Fetch and publish one fresh grouped device listing. Online Android rows
+   * may carry `logicalDisplay` from `dumpsys display` `logicalFrame`.
    * @param signal - Caller's optional cancellation signal.
    * @returns the current grouped listing.
    * @throws {@link PhoneDevicesError} per the class-documented failure modes.
@@ -615,7 +618,7 @@ export class PhoneDevices extends Service {
     this.requireResolved()
     await this.whenReady(signal)
     const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
-    return groupEntries(parseDeviceInfos(result))
+    return this.withAndroidLogicalDisplays(groupEntries(parseDeviceInfos(result)))
   }
 
   /**
@@ -718,8 +721,9 @@ export class PhoneDevices extends Service {
   /**
    * Open one `device.screencapture` stream. `h264` maps onto upstream `avc`;
    * Android pre-reads and replays at most one bounded key-access-unit probe,
-   * then replaces an invalid, failed, or timed-out source with the system
-   * `screenrecord` H264 stream when available. Other bodies remain unread.
+   * then replaces an invalid, failed, timed-out, or landscape-logical-display
+   * source with the system `screenrecord` H264 stream (`--size` from
+   * `dumpsys display` `logicalFrame` when known). Other bodies remain unread.
    * @param request - Branded device id, encoding, and optional cancellation.
    * @returns the live capture content type and body; the caller owns cancellation.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -761,7 +765,7 @@ export class PhoneDevices extends Service {
     if (request.format !== 'h264' || known.platform !== 'android') {
       return Object.freeze({ contentType: capture.contentType, body: capture.body })
     }
-    return await this.preferAndroidH264(capture, request.deviceId, fused)
+    return await this.preferAndroidH264(capture, known, fused)
   }
 
   /**
@@ -794,9 +798,10 @@ export class PhoneDevices extends Service {
   /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */
   private async preferAndroidH264(
     capture: PhoneCaptureStream,
-    id: DeviceId,
+    known: PhoneDeviceRef,
     signal: AbortSignal,
   ): Promise<PhoneCaptureStream> {
+    const id = known.id
     let mobilecli: Awaited<ReturnType<typeof inspectAnnexBH264KeyAccessUnit>>
     try {
       mobilecli = await this.inspectAndroidH264(capture.body, signal)
@@ -808,7 +813,12 @@ export class PhoneDevices extends Service {
         failure: errorValue(error),
       })
     }
-    if (mobilecli.recognizable) {
+    const size = this.readAndroidLogicalDisplay({
+      deviceId: id,
+      environment: this.childEnvironment,
+    }) ?? known.logicalDisplay
+    const landscape = size !== undefined && size.width > size.height
+    if (mobilecli.recognizable && !landscape) {
       return Object.freeze({ contentType: capture.contentType, body: mobilecli.body })
     }
     if (signal.aborted) {
@@ -821,6 +831,7 @@ export class PhoneDevices extends Service {
         deviceId: id,
         environment: this.childEnvironment,
         signal,
+        ...(size === undefined ? {} : { size }),
       })
       const native = await this.inspectAndroidH264(nativeBody, signal)
       if (!native.recognizable) {
@@ -1053,7 +1064,7 @@ export class PhoneDevices extends Service {
     let next: PhoneDeviceList
     try {
       const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
-      next = groupEntries(parseDeviceInfos(result))
+      next = this.withAndroidLogicalDisplays(groupEntries(parseDeviceInfos(result)))
     } catch (error) {
       const normalized = normalizeOperationError(error)
       if (required) throw normalized
@@ -1185,6 +1196,26 @@ export class PhoneDevices extends Service {
       added: Object.freeze(delta.added),
       removed: Object.freeze(delta.removed),
     }))
+  }
+
+  /**
+   * Attach current `dumpsys display` logicalFrame pixels to online Android
+   * rows. Misses leave the field absent; never `device.info.screenSize`.
+   */
+  private withAndroidLogicalDisplays(list: PhoneDeviceList): PhoneDeviceList {
+    const android = list.android.map((device) => {
+      if (!device.online) return device
+      const logicalDisplay = this.readAndroidLogicalDisplay({
+        deviceId: device.id,
+        environment: this.childEnvironment,
+      })
+      if (logicalDisplay === undefined) return device
+      return Object.freeze({ ...device, logicalDisplay })
+    })
+    return Object.freeze({
+      android: Object.freeze(android),
+      ios: list.ios,
+    })
   }
 }
 

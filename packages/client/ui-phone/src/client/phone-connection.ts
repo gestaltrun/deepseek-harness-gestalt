@@ -139,6 +139,27 @@ const defaultSchedule = (delayMs: number, fn: () => void): (() => void) => {
 }
 
 /**
+ * Present and map an H264 surface in Host landscape when the decoder still
+ * reports portrait coded size (`VideoFrame.rotation` is 0 on Android
+ * screenrecord; MI 8 `logicalFrame` is 2248×1080 while coded size stays
+ * 1080×2248).
+ * @param width - Post-rotation H264 display width.
+ * @param height - Post-rotation H264 display height.
+ * @param logicalDisplay - Host `dumpsys display` logicalFrame, when present.
+ * @returns swapped size when Host is landscape and the frame is portrait.
+ */
+export function h264SurfaceForHost(
+  width: number,
+  height: number,
+  logicalDisplay: PhoneSurfaceSize | undefined,
+): PhoneSurfaceSize {
+  if (logicalDisplay !== undefined && logicalDisplay.width > logicalDisplay.height && width < height) {
+    return { width: height, height: width }
+  }
+  return { width, height }
+}
+
+/**
  * Map one normalized screen point onto integer device pixels.
  * @param point - normalized point; both axes clamp into [0, 1].
  * @param surface - learned device pixel size of the streamed frame.

@@ -217,6 +217,23 @@ describe('changeSets', () => {
     expect(changeSets(base(), rekindled).changed).toBe(true)
   })
 
+  it('detects an Android logicalDisplay change without id movement', () => {
+    const before = base()
+    const after = groupEntries(parseDeviceInfos([
+      wire('A', 'android', 'emulator'),
+      wire('S', 'ios', 'simulator', 'offline'),
+    ]))
+    const landscape = {
+      ...after,
+      android: after.android.map(device => Object.freeze({
+        ...device,
+        logicalDisplay: { width: 2248, height: 1080 },
+      })),
+    }
+    expect(changeSets(before, landscape).changed).toBe(true)
+    expect(changeSets(landscape, landscape).changed).toBe(false)
+  })
+
   it('stays silent for identical listings regardless of extra upstream fields', () => {
     const first = base()
     const second = groupEntries(parseDeviceInfos([

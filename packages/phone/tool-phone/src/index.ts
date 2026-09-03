@@ -49,6 +49,14 @@ const DEVICE_REF_SCHEMA = {
     // Runtime listing refs carry the upstream platform even though the public
     // PhoneDeviceRef type omits it, so the declared output must accept it.
     platform: { type: 'string' as const, required: true as const, enum: ['ios', 'android'] },
+    logicalDisplay: {
+      type: 'object' as const,
+      additionalProperties: false,
+      properties: {
+        width: { type: 'number' as const, required: true as const },
+        height: { type: 'number' as const, required: true as const },
+      },
+    },
   },
 } as const
 

@@ -24,6 +24,7 @@ interface PhoneDeviceRefWireMirror {
   readonly kind: string
   readonly state: string
   readonly online: boolean
+  readonly logicalDisplay?: { readonly width: number; readonly height: number }
 }
 
 /** Wire kinds the Host listing reports; maps onto the picker group headers. */
@@ -46,13 +47,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function summaryOf(value: unknown, group: string, index: number): PhoneDeviceSummary {
   if (!isRecord(value)) throw wireError(200, `phone device listing ${group}[${String(index)}] is not an object`)
-  const { id, name, kind, online, state } = value as Partial<PhoneDeviceRefWireMirror>
+  const { id, name, kind, online, state, logicalDisplay } = value as Partial<PhoneDeviceRefWireMirror>
   if (typeof id !== 'string' || id.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] id is missing`)
   if (typeof name !== 'string' || name.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] name is missing`)
   if (!WIRE_KINDS.includes(kind as WireKind)) throw wireError(200, `phone device listing ${group}[${String(index)}] kind is unknown`)
   if (typeof online !== 'boolean') throw wireError(200, `phone device listing ${group}[${String(index)}] online is missing`)
   if (typeof state !== 'string' || state.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] state is missing`)
-  return { id, name, channel: channelOf(kind as WireKind), online, state }
+  const display = logicalDisplayOf(logicalDisplay, group, index)
+  return {
+    id,
+    name,
+    channel: channelOf(kind as WireKind),
+    online,
+    state,
+    ...(display === undefined ? {} : { logicalDisplay: display }),
+  }
+}
+
+function logicalDisplayOf(
+  value: unknown,
+  group: string,
+  index: number,
+): { readonly width: number; readonly height: number } | undefined {
+  if (value === undefined) return undefined
+  if (!isRecord(value)) {
+    throw wireError(200, `phone device listing ${group}[${String(index)}] logicalDisplay is not an object`)
+  }
+  const width = value.width
+  const height = value.height
+  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0
+    || typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
+    throw wireError(200, `phone device listing ${group}[${String(index)}] logicalDisplay is invalid`)
+  }
+  return { width, height }
 }
 
 function summariesOf(value: unknown, group: string): readonly PhoneDeviceSummary[] {

@@ -58,6 +58,11 @@ export interface PhoneDeviceSummary {
    * arm instead of keying on a dedicated flag.
    */
   readonly state: string
+  /**
+   * Current Android logical display pixels from Host `dumpsys display`.
+   * Absent on iOS and when dumpsys misses. Never `device.info.screenSize`.
+   */
+  readonly logicalDisplay?: { readonly width: number; readonly height: number }
 }
 
 /** One committed listing: summaries grouped per platform segment. */

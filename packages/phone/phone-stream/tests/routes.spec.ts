@@ -7,6 +7,15 @@ import WebSocket from 'ws'
 import type { RawData } from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
 import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
+import { readAndroidLogicalDisplay } from '../../phone-runtime/src/android-display.ts'
+
+vi.mock('../../phone-runtime/src/android-display.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../phone-runtime/src/android-display.ts')>()
+  return {
+    ...actual,
+    readAndroidLogicalDisplay: vi.fn(() => undefined),
+  }
+})
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -25,6 +34,7 @@ const contexts: Context[] = []
 const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
 
 afterEach(async () => {
+  vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
 })
@@ -520,6 +530,21 @@ describe('phone stream Host routes', () => {
         simulators: [{ id: 'iPhone-16', name: 'iPhone-16-name', kind: 'simulator', state: 'online', online: true }],
         reals: [{ id: 'UDID-9', name: 'UDID-9-name', kind: 'real', state: 'offline', online: false }],
       },
+    })
+  })
+
+  it('forwards Android logicalDisplay on the listing wire', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockImplementation(options => (
+      options.deviceId === 'emulator-5554' ? { width: 2248, height: 1080 } : undefined
+    ))
+    const { origin } = await mount([
+      wireDevice('emulator-5554', 'android', 'emulator', 'online'),
+    ])
+    const host = new URL(origin).host
+    const response = await rawRequest({ origin, path: '/phone/devices', host })
+    expect(JSON.parse(response.body.toString('utf8')).android[0]).toMatchObject({
+      id: 'emulator-5554',
+      logicalDisplay: { width: 2248, height: 1080 },
     })
   })
 

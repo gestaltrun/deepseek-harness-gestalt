@@ -136,13 +136,15 @@ class FakeVideoFrame {
   readonly codedHeight: number
   readonly displayWidth: number
   readonly displayHeight: number
+  readonly rotation?: number
   closeCount = 0
 
-  constructor(width = 390, height = 844) {
+  constructor(width = 390, height = 844, rotation?: number) {
     this.codedWidth = width
     this.codedHeight = height
     this.displayWidth = width
     this.displayHeight = height
+    if (rotation !== undefined) this.rotation = rotation
   }
 
   close(): void { this.closeCount += 1 }
@@ -155,7 +157,11 @@ class FakeVideoDecoder extends EventTarget {
   static supported = true
   static closeBeforeFlushError = false
   static autoDequeue = true
-  static frameSizes: ReadonlyArray<{ readonly width: number; readonly height: number }> = []
+  static frameSizes: ReadonlyArray<{
+    readonly width: number
+    readonly height: number
+    readonly rotation?: number
+  }> = []
   static async isConfigSupported(config: VideoDecoderConfig): Promise<VideoDecoderSupport> {
     return { supported: FakeVideoDecoder.supported, config }
   }
@@ -203,7 +209,7 @@ class FakeVideoDecoder extends EventTarget {
     }
     while (this.frames.length < this.chunks.length) {
       const size = FakeVideoDecoder.frameSizes[this.frames.length]
-      const frame = new FakeVideoFrame(size?.width, size?.height)
+      const frame = new FakeVideoFrame(size?.width, size?.height, size?.rotation)
       this.frames.push(frame)
       this.init.output(frame)
     }
@@ -888,6 +894,64 @@ describe('playPhoneH264Stream', () => {
 
     await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.frames).toHaveLength(6) })
     expect(FakeVideoDecoder.instances[0]!.chunks.every(chunk => chunk.type === 'key')).toBe(true)
+  })
+
+  it.each([
+    { rotation: 90, canvasWidth: 2248, canvasHeight: 1080 },
+    { rotation: 270, canvasWidth: 2248, canvasHeight: 1080 },
+    { rotation: 180, canvasWidth: 1080, canvasHeight: 2248 },
+    { rotation: 0, canvasWidth: 1080, canvasHeight: 2248 },
+    { rotation: 45, canvasWidth: 1080, canvasHeight: 2248 },
+  ])('paints rotation=$rotation at post-rotation $canvasWidth×$canvasHeight', async ({
+    rotation, canvasWidth, canvasHeight,
+  }) => {
+    FakeVideoDecoder.frameSizes = [{ width: 1080, height: 2248, rotation }]
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80), nal(0x65, 0x80),
+    ))))
+    const canvas = document.createElement('canvas')
+    const context = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      rotate: vi.fn(),
+      drawImage: vi.fn(),
+    }
+    vi.spyOn(canvas, 'getContext').mockReturnValue(context as never)
+    const surfaces: Array<{ width: number; height: number }> = []
+    const errors: unknown[] = []
+
+    playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas,
+      onSurface: (width, height) => { surfaces.push({ width, height }) },
+      onError: (error) => { errors.push(error) },
+    })
+
+    await vi.waitFor(() => { expect(context.drawImage).toHaveBeenCalledOnce() })
+    expect(errors).toEqual([])
+    expect(surfaces).toEqual([{ width: canvasWidth, height: canvasHeight }])
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width: canvasWidth, height: canvasHeight })
+    expect(context.drawImage.mock.calls[0]?.[0]).toBe(FakeVideoDecoder.instances[0]!.frames[0])
+    if (rotation === 0 || rotation === 45) {
+      expect(context.translate).not.toHaveBeenCalled()
+      expect(context.rotate).not.toHaveBeenCalled()
+      expect(context.drawImage).toHaveBeenCalledWith(
+        FakeVideoDecoder.instances[0]!.frames[0], 0, 0, 1080, 2248,
+      )
+      return
+    }
+    expect(context.save).toHaveBeenCalledOnce()
+    expect(context.restore).toHaveBeenCalledOnce()
+    expect(context.rotate).toHaveBeenCalledWith(rotation * Math.PI / 180)
+    if (rotation === 90) expect(context.translate).toHaveBeenCalledWith(2248, 0)
+    else if (rotation === 270) expect(context.translate).toHaveBeenCalledWith(0, 1080)
+    else expect(context.translate).toHaveBeenCalledWith(1080, 2248)
+    expect(context.drawImage).toHaveBeenCalledWith(
+      FakeVideoDecoder.instances[0]!.frames[0], 0, 0, 1080, 2248,
+    )
   })
 
   it('reports dimension changes but not repeated dimensions', async () => {

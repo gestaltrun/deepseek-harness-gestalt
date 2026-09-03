@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-画面框宽高比跟随实测画面。控制器发布 `surfaceSize()`，`noteSurface` 仅在尺寸真正变化时通知订阅者，视图经 `useSyncExternalStore` 读取画面尺寸。视图内联设置 `--phone-surface-ratio` 自定义属性（宽/高）；`.screenFrame` 从容器单位推导两轴，取显示区内能放下的最大等比矩形（`min(100cqw, 100cqh * ratio)` × `min(100cqh, 100cqw / ratio)`），`0.5` 回退在首次测量前保持锁稿的 1:2 占位。`.stream` 用 `object-fit: contain`，绝不用 `fill`。H264 播放的 `onSurface` 本就在尺寸变化时触发；MJPEG 图像在 live 期间按 500ms 节拍重新测量，因为后续 multipart JPEG 会替换已绘制画面且不触发新的 load 事件。Chromium 把 `naturalWidth`/`naturalHeight` 锁在第一帧 JPEG，因此轮询读取 live `<img>` 的 `createImageBitmap`（[当前帧测量](2026-09-04-mjpeg-current-frame-size.zh.md)）。
+画面框宽高比跟随实测画面。控制器发布 `surfaceSize()`，`noteSurface` 仅在尺寸真正变化时通知订阅者，视图经 `useSyncExternalStore` 读取画面尺寸。视图内联设置 `--phone-surface-ratio` 自定义属性（宽/高）；`.screenFrame` 从容器单位推导两轴，取显示区内能放下的最大等比矩形（`min(100cqw, 100cqh * ratio)` × `min(100cqh, 100cqw / ratio)`），`0.5` 回退在首次测量前保持锁稿的 1:2 占位。`.stream` 用 `object-fit: contain`，绝不用 `fill`。H264 播放的 `onSurface` 报告旋转后显示尺寸，Host 横屏 `logicalDisplay` 还可以把仍为竖屏编码的帧对调（[H264 旋转](2026-09-05-android-h264-videoframe-rotation.zh.md)）；MJPEG 图像在 live 期间按 500ms 节拍重新测量，因为后续 multipart JPEG 会替换已绘制画面且不触发新的 load 事件。Chromium 把 `naturalWidth`/`naturalHeight` 锁在第一帧 JPEG，因此轮询读取 live `<img>` 的 `createImageBitmap`（[当前帧测量](2026-09-04-mjpeg-current-frame-size.zh.md)）。
 
 ## Alternatives considered
 

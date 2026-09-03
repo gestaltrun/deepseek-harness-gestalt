@@ -41,6 +41,11 @@ export interface PhoneDeviceRefWire {
   readonly state: string
   /** True only while the upstream reports the device online. */
   readonly online: boolean
+  /**
+   * Current Android logical display pixels from Host `dumpsys display`.
+   * Absent on iOS and when dumpsys misses. Never `device.info.screenSize`.
+   */
+  readonly logicalDisplay?: { readonly width: number; readonly height: number }
 }
 
 /** Grouped fleet listing body served by `GET /phone/devices`. */

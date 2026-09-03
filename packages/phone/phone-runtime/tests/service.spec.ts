@@ -11,6 +11,15 @@ import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { readAndroidLogicalDisplay } from '../src/android-display.ts'
+
+vi.mock('../src/android-display.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/android-display.ts')>()
+  return {
+    ...actual,
+    readAndroidLogicalDisplay: vi.fn(() => undefined),
+  }
+})
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -27,6 +36,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
   console.error('child diagnostics:', MobilecliServerProcess.diagnostics.splice(0))
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
@@ -663,6 +673,74 @@ describe('phone runtime service lifecycle', () => {
       deviceId: 'emulator-5554',
       format: 'avc',
     })
+  })
+
+  it('replaces recognizable mobilecli AVC with sized screenrecord when dumpsys is landscape', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      openNativeAndroidH264(options: {
+        deviceId: string
+        signal: AbortSignal
+        size?: { readonly width: number; readonly height: number }
+      }): ReadableStream<Uint8Array>
+    }
+    const native = vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(new ReadableStream({
+      start(controller) {
+        controller.enqueue(buildGradientH264())
+        controller.close()
+      },
+    }))
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    assertRecognizableH264Picture(Buffer.from(await new Response(h264.body).arrayBuffer()))
+    expect(native).toHaveBeenCalledWith(expect.objectContaining({
+      deviceId: ANDROID_EMULATOR,
+      size: { width: 2248, height: 1080 },
+    }))
+  })
+
+  it('attaches dumpsys logicalDisplay to online Android listing rows', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const list = await context.phoneDevices.listDevices()
+    expect(list.android[0]?.logicalDisplay).toEqual({ width: 2248, height: 1080 })
+    expect(list.ios.reals[0]?.logicalDisplay).toBeUndefined()
+  })
+
+  it('uses the listed logicalDisplay for screenrecord --size when a live dumpsys miss happens', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      h264FailureDeviceIds: ['emulator-5554'],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
+    const captured = context.phoneDevices as unknown as {
+      openNativeAndroidH264(options: {
+        deviceId: string
+        signal: AbortSignal
+        size?: { readonly width: number; readonly height: number }
+      }): ReadableStream<Uint8Array>
+    }
+    const native = vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(new ReadableStream({
+      start(controller) {
+        controller.enqueue(buildGradientH264())
+        controller.close()
+      },
+    }))
+    await context.phoneDevices.startCapture({ deviceId: ANDROID_EMULATOR, format: 'h264' })
+    expect(native).toHaveBeenCalledWith(expect.objectContaining({
+      size: { width: 2248, height: 1080 },
+    }))
   })
 
   it('tries native Android H264 when the mobilecli key-unit probe times out', async () => {

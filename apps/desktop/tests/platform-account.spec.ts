@@ -463,6 +463,66 @@ describe('DesktopAccountController', () => {
     expect(controller.getSnapshot()).toEqual({ status: 'idle', privacyAccepted: false })
   })
 
+  it('keeps the live snapshot consistent with the store when a completed poll races cancel', async () => {
+    const poll = deferred<LoginPollResult>()
+    const pollLogin = vi.fn(async () => poll.promise)
+    const transport: PlatformAccountTransport = {
+      environment: ENVIRONMENT,
+      beginLogin: vi.fn(),
+      pollLogin,
+      refresh: vi.fn(),
+      current: vi.fn(),
+      signOut: vi.fn(),
+    }
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey
+      .export({ format: 'pem', type: 'pkcs8' }).toString()
+    const store = new MemoryDesktopStore()
+    store.record = {
+      installationId: parseInstallationId('cancel-poll-race'),
+      pending: {
+        id: 'cancel-attempt-race' as never,
+        state: 'state',
+        authorizationUrl: 'https://github.com/login/oauth/authorize',
+        pollingToken: 'polling-token',
+        expiresAt: NOW + 300_000,
+      },
+      pendingPrivateKey: privateKey,
+    }
+    const scheduled: Array<() => void> = []
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport,
+      store,
+      systemBrowser: { open: vi.fn() },
+      now: () => NOW,
+      schedule: (task) => {
+        scheduled.push(task)
+        return { unref() {} } as never
+      },
+    })
+    await controller.start()
+    scheduled.shift()?.()
+    await vi.waitFor(() => { expect(pollLogin).toHaveBeenCalledOnce() })
+
+    const cancellation = controller.cancelLogin()
+    poll.resolve({ status: 'complete', ...desktopSession() })
+    await cancellation
+
+    const snapshot = controller.getSnapshot()
+    const session = store.record?.session
+    if (session !== undefined) {
+      expect(snapshot).toEqual({
+        status: 'signed-in',
+        privacyAccepted: false,
+        account: session.account,
+      })
+    } else {
+      expect(snapshot).toEqual({ status: 'idle', privacyAccepted: false })
+      expect(store.record?.pending).toBeUndefined()
+    }
+  })
+
   it('does not reinterpret an active Account Session as a cancelled login', async () => {
     const service = platform()
     const store = new MemoryDesktopStore()

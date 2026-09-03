@@ -10,7 +10,7 @@ Desktop GitHub 登录在 Account 状态为 `authorizing` 或 `polling` 时没有
 
 ## Decision
 
-`DesktopAccountActions.cancelLogin()` 仅在状态为 `authorizing` 或 `polling` 时生效，否则返回同一快照，已登录会话保持已登录。这两种状态下它递增 login generation、中止进行中的 `beginLogin` AbortSignal、取消已调度 poll、等待当前 `AccountLifecycleTransitions` owner 排空、丢弃 `pending` 与 `pendingPrivateKey`、持久化，并发布 `{ status: 'idle', privacyAccepted }`。
+`DesktopAccountActions.cancelLogin()` 仅在状态为 `authorizing` 或 `polling` 时生效，否则返回同一快照，已登录会话保持已登录。这两种状态下它立即中止进行中的 `beginLogin` AbortSignal 并取消已调度 poll，再把 generation 递增、重读存储、持久化与发布作为同一次 `AccountLifecycleTransitions` owner 运行。丢弃 `pending` 与 `pendingPrivateKey` 后，若重读记录仍有 session 则发布 signed-in，否则发布 idle。`beginLogin` 在同一 owner 内递增 login generation 并创建 AbortController，避免并发 begin 抢在 cancel 之前。Poll HTTP 在 owner 外执行，因此取消可以在 poll 进行中完成持久化。
 
 `PlatformAccountTransport.beginLogin` 与 `PlatformAccountHttpTransport.beginLogin` 接受可选 `{ signal?: AbortSignal }` 并转给 Fetch，使取消能中止 login-attempt POST。取消 persist 之后，`beginLogin` 不再调用 `SystemBrowser.open`。`SystemBrowser.open` 接受可选 `{ signal?: AbortSignal }`；Desktop 的 `shell.openExternal` 在 abort 后仍会 settle，因此 cancel 与 dispose 等到该 open 静止。generation 已不匹配的 poll 不会写入会话。`UnavailableDesktopAccountController.cancelLogin` 返回 unavailable 快照。
 
@@ -30,4 +30,4 @@ preload 在 `account:cancelLogin` 上暴露 `accountCancelLogin`。Settings Acco
 
 ## Testing
 
-`apps/desktop/tests/platform-account.spec.ts` 覆盖 authorizing、persist、打开浏览器、迟到 poll 以及已登录 no-op。`packages/client/ui-desktop/tests/account-control.client.spec.tsx` 仅在 polling 与 authorizing 显示取消按钮并调用 `accountCancelLogin`。`packages/platform/platform-account-client/tests/installation.client.spec.ts` 把 abort signal 转给 Fetch。
+`apps/desktop/tests/platform-account.spec.ts` 覆盖 authorizing、persist、打开浏览器、迟到 poll、进行中 poll 在取消后完成，以及已登录 no-op。进行中 poll 要求现场快照与重读存储一致：无 session 则为 idle，有 session 则为 signed-in。`packages/client/ui-desktop/tests/account-control.client.spec.tsx` 仅在 polling 与 authorizing 显示取消按钮并调用 `accountCancelLogin`。`packages/platform/platform-account-client/tests/installation.client.spec.ts` 把 abort signal 转给 Fetch。

@@ -101,6 +101,7 @@ export interface DesktopAccountActions {
   beginLogin(): Promise<DesktopAccountSnapshot>
   /**
    * Abort an in-flight GitHub login while authorizing or polling.
+   * Generation bump, HTTP abort, persist, and publish run as one `AccountLifecycleTransitions` owner.
    * @returns idle with the current privacyAccepted flag, or the unchanged snapshot when status is neither authorizing nor polling.
    */
   cancelLogin(): Promise<DesktopAccountSnapshot>
@@ -180,30 +181,51 @@ export class DesktopAccountController implements DesktopAccountActions {
   }
 
   async beginLogin(): Promise<DesktopAccountSnapshot> {
-    const generation = this.loginGeneration + 1
-    this.loginGeneration = generation
-    const abort = new AbortController()
-    this.beginLoginAbort?.abort()
-    this.beginLoginAbort = abort
-    return this.transitions.run(async () => this.beginLoginTransition(generation, abort))
+    return this.transitions.run(async () => {
+      const generation = this.loginGeneration + 1
+      this.loginGeneration = generation
+      const abort = new AbortController()
+      this.beginLoginAbort?.abort()
+      this.beginLoginAbort = abort
+      return this.beginLoginTransition(generation, abort)
+    })
   }
 
   cancelLogin(): Promise<DesktopAccountSnapshot> {
     if (this.snapshot.status !== 'authorizing' && this.snapshot.status !== 'polling') {
       return Promise.resolve(this.snapshot)
     }
+    this.beginLoginAbort?.abort()
+    this.cancelScheduledPoll()
+    return this.transitions.run(async () => this.cancelLoginTransition())
+  }
+
+  private async cancelLoginTransition(): Promise<DesktopAccountSnapshot> {
+    if (this.snapshot.status !== 'authorizing' && this.snapshot.status !== 'polling') {
+      return this.snapshot
+    }
     this.loginGeneration += 1
     this.beginLoginAbort?.abort()
     this.beginLoginAbort = undefined
     this.cancelScheduledPoll()
-    return this.transitions.run(async () => {
-      const record = this.requireRecord()
-      delete record.pending
-      delete record.pendingPrivateKey
-      await this.options.store.save(record)
-      this.publish({ status: 'idle', privacyAccepted: this.snapshot.privacyAccepted })
+    const stored = await this.options.store.load()
+    if (stored !== undefined) this.record = stored
+    const record = this.requireRecord()
+    delete record.pending
+    delete record.pendingPrivateKey
+    await this.options.store.save(record)
+    const persisted = await this.options.store.load() ?? record
+    this.record = persisted
+    if (persisted.session !== undefined) {
+      this.publish({
+        status: 'signed-in',
+        privacyAccepted: this.snapshot.privacyAccepted,
+        account: persisted.session.account,
+      })
       return this.snapshot
-    })
+    }
+    this.publish({ status: 'idle', privacyAccepted: this.snapshot.privacyAccepted })
+    return this.snapshot
   }
 
   private async beginLoginTransition(generation: number, abort: AbortController): Promise<DesktopAccountSnapshot> {
@@ -218,15 +240,15 @@ export class DesktopAccountController implements DesktopAccountActions {
         presentation: this.options.presentation,
         publicKey: publicKey.export({ format: 'jwk' }),
       }, { signal: abort.signal })
-      if (generation !== this.loginGeneration) return this.snapshot
+      if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
       record.pending = attempt
       record.pendingPrivateKey = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
       await this.options.store.save(record)
-      if (generation !== this.loginGeneration) return this.snapshot
+      if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
       this.publish({ status: 'polling', privacyAccepted: true })
       this.schedulePoll()
       await this.options.systemBrowser.open(attempt.authorizationUrl, { signal: abort.signal })
-      if (generation !== this.loginGeneration) return this.snapshot
+      if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
     } catch (error) {
       if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
       this.cancelScheduledPoll()
@@ -353,52 +375,80 @@ export class DesktopAccountController implements DesktopAccountActions {
     const loginGeneration = this.loginGeneration
     this.timer = this.schedule(() => {
       this.timer = undefined
-      void this.transitions.run(async () => { await this.poll(loginGeneration) }).catch((error: unknown) => {
-        if (error instanceof AccountLifecycleClosedError) return
-        console.error('[desktop-platform-account] background poll failed:', error)
-      })
+      void this.pollCycle(loginGeneration)
     }, 1_500)
     this.timer.unref()
   }
 
-  private async poll(loginGeneration: number): Promise<void> {
-    if (this.disposed) return
-    const generation = this.disposalGeneration
+  private async pollCycle(loginGeneration: number): Promise<void> {
+    try {
+      const request = await this.transitions.run(async () => this.pollRequest(loginGeneration))
+      if (request === undefined) return
+      let result: LoginPollResult
+      try {
+        result = await this.options.transport.pollLogin(request)
+      } catch (error) {
+        await this.transitions.run(async () => {
+          if (this.disposed || loginGeneration !== this.loginGeneration) return
+          this.fail(error)
+        })
+        return
+      }
+      await this.transitions.run(async () => { await this.pollResult(loginGeneration, result) })
+    } catch (error: unknown) {
+      if (error instanceof AccountLifecycleClosedError) return
+      console.error('[desktop-platform-account] background poll failed:', error)
+    }
+  }
+
+  private async pollRequest(loginGeneration: number): Promise<{
+    attemptId: LoginAttemptView['id']
+    pollingToken: string
+    proof: AccountProof
+  } | undefined> {
+    if (this.disposed || loginGeneration !== this.loginGeneration) return undefined
     const record = this.requireRecord()
-    if (record.pending === undefined || record.pendingPrivateKey === undefined) return
+    if (record.pending === undefined || record.pendingPrivateKey === undefined) return undefined
     if (record.pending.expiresAt <= this.now()) {
       delete record.pending
       delete record.pendingPrivateKey
       await this.options.store.save(record)
       this.fail(new Error('GitHub authorization expired'))
+      return undefined
+    }
+    return {
+      attemptId: record.pending.id,
+      pollingToken: record.pending.pollingToken,
+      proof: desktopProof(
+        record.pendingPrivateKey,
+        'login-poll',
+        `${record.pending.id}:${hash(record.pending.pollingToken)}`,
+        this.now(),
+      ),
+    }
+  }
+
+  private async pollResult(loginGeneration: number, result: LoginPollResult): Promise<void> {
+    const generation = this.disposalGeneration
+    if (this.disposed || loginGeneration !== this.loginGeneration) return
+    const record = this.requireRecord()
+    if (result.status === 'pending') {
+      this.schedulePoll()
       return
     }
-    try {
-      const result: LoginPollResult = await this.options.transport.pollLogin({
-        attemptId: record.pending.id,
-        pollingToken: record.pending.pollingToken,
-        proof: desktopProof(
-          record.pendingPrivateKey,
-          'login-poll',
-          `${record.pending.id}:${hash(record.pending.pollingToken)}`,
-          this.now(),
-        ),
-      })
-      if (generation !== this.disposalGeneration || loginGeneration !== this.loginGeneration) return
-      if (result.status === 'pending') {
-        this.schedulePoll()
-        return
-      }
-      record.session = result
-      record.sessionPrivateKey = record.pendingPrivateKey
-      delete record.pending
-      delete record.pendingPrivateKey
+    if (record.pending === undefined || record.pendingPrivateKey === undefined) return
+    record.session = result
+    record.sessionPrivateKey = record.pendingPrivateKey
+    delete record.pending
+    delete record.pendingPrivateKey
+    await this.options.store.save(record)
+    if (generation !== this.disposalGeneration || loginGeneration !== this.loginGeneration) {
+      delete record.session
+      delete record.sessionPrivateKey
       await this.options.store.save(record)
-      this.publish({ status: 'signed-in', privacyAccepted: true, account: result.account })
-    } catch (error) {
-      if (generation !== this.disposalGeneration || loginGeneration !== this.loginGeneration) return
-      this.fail(error)
+      return
     }
+    this.publish({ status: 'signed-in', privacyAccepted: true, account: result.account })
   }
 
   private cancelScheduledPoll(): void {

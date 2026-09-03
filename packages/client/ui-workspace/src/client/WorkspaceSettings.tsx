@@ -86,8 +86,11 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
       setCreateError(reason instanceof Error ? reason.message : String(reason))
     })
   }
+  const dialogClass = css.settingsDialog
+  /* v8 ignore next -- CSS Modules emit .settingsDialog from WorkspaceSettings.module.css. */
+  if (dialogClass === undefined) throw new Error('WorkspaceSettings.module.css is missing .settingsDialog')
   return (
-    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')} className={css.settingsDialog}>
+    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')} className={dialogClass}>
       <div className={css.section}>
         <div className={css.sectionTitle}>{t('upgrade.title')}</div>
         {project === undefined

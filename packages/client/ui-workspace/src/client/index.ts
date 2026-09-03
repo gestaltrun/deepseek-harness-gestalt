@@ -15,7 +15,7 @@ import type {
   FunctionTag, InvitationId, MembershipId, ProjectId, ProjectMembershipClient,
   PlatformAccountId,
 } from '@deepseek-ai/dsh-project-membership-client'
-import { normalizeGitRemoteUrl } from '@deepseek-ai/dsh-project-membership/remote-url'
+import { localWorkspaceRemoteUrl, normalizeGitRemoteUrl } from '@deepseek-ai/dsh-project-membership/remote-url'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {
@@ -82,14 +82,15 @@ function projectMembershipGateway(
     createProject: async (input) => {
       const { localWorkspaceId, name } = input
       const remoteUrl = await workspaces.gitRemote(localWorkspaceId)
-      if (remoteUrl === undefined) {
-        throw new Error('This Workspace must be a Git checkout with an origin remote before it can become a Cloud Project.')
-      }
       let normalizedRemoteUrl: string
-      try {
-        normalizedRemoteUrl = normalizeGitRemoteUrl(remoteUrl)
-      } catch {
-        throw new Error('This Workspace origin is not a supported Git remote.')
+      if (remoteUrl === undefined) {
+        normalizedRemoteUrl = localWorkspaceRemoteUrl(localWorkspaceId)
+      } else {
+        try {
+          normalizedRemoteUrl = normalizeGitRemoteUrl(remoteUrl)
+        } catch {
+          normalizedRemoteUrl = localWorkspaceRemoteUrl(localWorkspaceId)
+        }
       }
       const project = await client.createProject({ name, remoteUrl: normalizedRemoteUrl })
       await bindWorkspace({
@@ -106,14 +107,17 @@ function projectMembershipGateway(
     },
     projectForWorkspace: async (workspaceId) => {
       const remoteUrl = await workspaces.gitRemote(workspaceId)
-      if (remoteUrl === undefined) return undefined
-      let normalizedRemoteUrl: string
-      try {
-        normalizedRemoteUrl = normalizeGitRemoteUrl(remoteUrl)
-      } catch {
-        return undefined
+      let normalizedRemoteUrl: string | undefined
+      if (remoteUrl !== undefined) {
+        try {
+          normalizedRemoteUrl = normalizeGitRemoteUrl(remoteUrl)
+        } catch {
+          normalizedRemoteUrl = undefined
+        }
       }
-      const project = await client.projectByRemote(normalizedRemoteUrl)
+      const project = await client.projectByRemote(
+        normalizedRemoteUrl ?? localWorkspaceRemoteUrl(workspaceId),
+      )
       if (project === undefined) return undefined
       const boundWorkspaceId = await ensureWorkspaceBinding({
         receivingAccountId: project.receivingAccountId,

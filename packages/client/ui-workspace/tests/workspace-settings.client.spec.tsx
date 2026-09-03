@@ -204,7 +204,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     }
   })
 
-  it('blocks Cloud Project creation for a Workspace without a supported origin', async () => {
+  it('enables Cloud Project creation for a Workspace without a Git origin once a name is entered', async () => {
     const membership = gateway({ localRemoteFor: vi.fn(async () => undefined) })
     vi.useFakeTimers()
     try {
@@ -212,13 +212,36 @@ describe('workspace settings and invite wizard (M4)', () => {
       openWorkspaceMenu()
       fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
       await tick()
-      fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
-      expect(screen.getByText('此工作区必须是带有 origin remote 的 Git checkout，才能升级为云项目。')).toBeTruthy()
+      const remote = screen.getByLabelText('Git remote 地址') as HTMLInputElement
+      expect(remote.readOnly).toBe(true)
+      expect(remote.value).toBe('')
       expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(true)
-      expect(membership.createProject).not.toHaveBeenCalled()
+      fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
+      expect(screen.queryByText('此工作区必须是带有 origin remote 的 Git checkout，才能升级为云项目。')).toBeNull()
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
+      await tick()
+      expect(membership.createProject).toHaveBeenCalledWith({
+        name: 'Assembled', localWorkspaceId: wid('proj'),
+      })
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('keeps a successfully read Git remote when project recovery fails independently', async () => {
+    const membership = gateway({
+      projectForWorkspace: vi.fn().mockRejectedValue(new Error('lookup error')),
+      localRemoteFor: vi.fn(async () => SAME_REMOTE),
+    })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('lookup error')
+    expect((screen.getByLabelText('Git remote 地址') as HTMLInputElement).value).toBe(SAME_REMOTE)
+    fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(false)
   })
 
   it('restores an existing Cloud Project for the exact Workspace after reopening settings', async () => {

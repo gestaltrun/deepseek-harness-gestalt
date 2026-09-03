@@ -117,7 +117,12 @@ export interface OperatedPlatformConfig {
   oss: OperatedOssConfig
   tokenSigningKey: Uint8Array
   pollingSigningKey: Uint8Array
+  /** Directory for the file-backed Project Membership corpus. */
+  membershipStoragePath: string
 }
+
+/** Default directory for the file-backed Project Membership corpus. */
+export const DEFAULT_PLATFORM_MEMBERSHIP_STORAGE = '/var/lib/dsh/projects'
 
 const SIGNING_KEY_NAMES = ['PLATFORM_TOKEN_SIGNING_KEY', 'PLATFORM_POLLING_SIGNING_KEY'] as const
 
@@ -307,7 +312,22 @@ export function loadOperatedPlatformConfig(
     }),
     tokenSigningKey: readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', env),
     pollingSigningKey: readPlatformSigningKey('PLATFORM_POLLING_SIGNING_KEY', env),
+    membershipStoragePath: membershipStoragePath(env),
   }
+}
+
+/**
+ * Directory for the file-backed Project Membership corpus.
+ * @param env - process environment supplied by Environment `production`.
+ * @returns `PLATFORM_MEMBERSHIP_STORAGE` when set, otherwise {@link DEFAULT_PLATFORM_MEMBERSHIP_STORAGE}.
+ */
+function membershipStoragePath(env: NodeJS.Dict<string>): string {
+  const value = env.PLATFORM_MEMBERSHIP_STORAGE
+  if (value === undefined || value === '') return DEFAULT_PLATFORM_MEMBERSHIP_STORAGE
+  if (value.trim() === '') {
+    throw new TypeError('PLATFORM_MEMBERSHIP_STORAGE must be a non-empty directory path')
+  }
+  return value
 }
 
 function attachmentStorage(value: string | undefined): 'postgres' | 'oss' {

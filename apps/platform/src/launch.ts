@@ -8,6 +8,8 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
 import { GitHubOAuthIdentityProvider, PlatformAccount } from '@deepseek-ai/dsh-platform-account-core'
 import * as PlatformAccountHttp from '@deepseek-ai/dsh-platform-account-http'
+import FileProjectMembership from '@deepseek-ai/dsh-project-membership-core'
+import * as ProjectMembershipHttp from '@deepseek-ai/dsh-project-membership-http'
 import {
   PersonalPairingProvider,
   parseRelayInstanceId,
@@ -137,6 +139,11 @@ export async function launchOperatedPlatform(
       },
     })
     await context.plugin(PlatformAccountHttp, { origins: productOrigins })
+    await context.plugin(FileProjectMembership, {
+      storagePath: config.membershipStoragePath,
+      environment: environment.environment,
+    })
+    await context.plugin(ProjectMembershipHttp, { origins: productOrigins })
     const relay = new RemoteRelayProvider(context, {
       instanceId: parseRelayInstanceId(config.relay.instanceId),
       routeStore: remoteAccess.routeStore,

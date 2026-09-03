@@ -14,7 +14,7 @@ Desktop Workspace settings could not complete Cloud Project create. The 云项�
 
 A Workspace without origin, or whose origin fails `normalizeGitRemoteUrl`, creates and recovers through `localWorkspaceRemoteUrl(workspaceId)`, the canonical Platform remote `local://workspace/<id>`. The identity stays case-exact; empty ids and ids containing `/`, `?`, or `#` remain `INVALID_REMOTE_URL`. Browser bundles import that constructor from `@deepseek-ai/dsh-project-membership/remote-url`. Create still persists the founder Account/Project/Workspace binding before the roster renders. Reopening settings on that exact Workspace recovers through origin when present, otherwise the sentinel.
 
-The settings dialog is `min(480px, 100%)` with wrapping errors. Inputs use `--dsw-alias-border-l2`, `--dsw-alias-bg-layer-1`, and `--dsw-alias-brand-primary`.
+Inputs use `--dsw-alias-border-l2`, `--dsw-alias-bg-layer-1`, and `--dsw-alias-brand-primary`. Dialog chrome is owned by [the settings page and retracted invitation note](2026-09-03-workspace-settings-page-and-invite-retract.md).
 
 ## Supersession check
 

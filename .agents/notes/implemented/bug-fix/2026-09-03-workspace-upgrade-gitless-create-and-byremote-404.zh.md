@@ -14,7 +14,7 @@ Desktop 的 Workspace settings 无法完成 Cloud Project 创建。云项目名�
 
 没有 origin、或其 origin 未通过 `normalizeGitRemoteUrl` 的 Workspace，通过 `localWorkspaceRemoteUrl(workspaceId)` 创建并恢复，即规范化的 Platform remote `local://workspace/<id>`。identity 保持大小写原样；空 id 以及包含 `/`、`?` 或 `#` 的 id 仍是 `INVALID_REMOTE_URL`。浏览器 bundle 从 `@deepseek-ai/dsh-project-membership/remote-url` 导入该构造函数。创建仍会在名册渲染前持久化 founder 的 Account／Project／Workspace binding。在同一 Workspace 上重开设置时，优先用 origin 恢复，否则用该哨兵。
 
-设置对话框为 `min(480px, 100%)`，错误会换行。输入使用 `--dsw-alias-border-l2`、`--dsw-alias-bg-layer-1` 与 `--dsw-alias-brand-primary`。
+输入使用 `--dsw-alias-border-l2`、`--dsw-alias-bg-layer-1` 与 `--dsw-alias-brand-primary`。对话框外观由[设置页与已撤回邀请 note](2026-09-03-workspace-settings-page-and-invite-retract.zh.md) 拥有。
 
 ## Supersession check
 

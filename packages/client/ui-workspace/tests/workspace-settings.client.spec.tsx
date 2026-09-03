@@ -13,6 +13,8 @@ import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
 import {
   cloneDirectoryName,
   InviteWizardModal,
+  isInvitationNoLongerPending,
+  membershipUserMessage,
   WorkspaceSettingsModal,
 } from '../src/client/WorkspaceSettings.tsx'
 import { zh } from '../src/client/locales.ts'
@@ -36,8 +38,8 @@ const sessionState = (items: readonly SessionSummary[]): SessionListState => ({
   subagentsByParent: {}, jobsBySession: {},
   currentAddress: undefined,
 })
-const workspace = (id: string, sessionIds: string[], title = id): WorkspaceView => ({
-  workspaceId: wid(id), path: `/projects/${id}`, title,
+const workspace = (id: string, sessionIds: string[], title = id, path = `/projects/${id}`): WorkspaceView => ({
+  workspaceId: wid(id), path, title,
   sessionIds: sessionIds.map(sid), createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
 })
 const workspaceState = (items: readonly WorkspaceView[]): WorkspaceListState => ({
@@ -194,7 +196,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       })
       // Binding resolves: the roster read rides the same gateway.
       expect(membership.roster).toHaveBeenCalledWith('project-1')
-      expect(screen.getByText('已绑定云项目：Assembled')).toBeTruthy()
+      expect(screen.getByText('Assembled')).toBeTruthy()
       expect(screen.getByText('mona')).toBeTruthy()
       const inviteRole = screen.getByLabelText('邀请角色')
       expect(inviteRole).toBeTruthy()
@@ -261,7 +263,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
       await tick()
       expect(membership.projectForWorkspace).toHaveBeenCalledWith(wid('proj'))
-      expect(screen.getByText('已绑定云项目：Restored')).toBeTruthy()
+      expect(screen.getByText('Restored')).toBeTruthy()
       expect(membership.roster).toHaveBeenCalledWith('project-1')
       expect(issuedInvitations).toHaveBeenCalledWith('project-1')
       expect(screen.getByText('invitee-octocat')).toBeTruthy()
@@ -777,10 +779,10 @@ describe('workspace settings and invite wizard (M4)', () => {
     fireEvent.click(screen.getByRole('button', { name: t('close') }))
     expect(onClose).not.toHaveBeenCalled()
     await act(async () => { declineRun.reject(new Error('decline error')); await Promise.allSettled([declineRun.promise]) })
-    expect(screen.getByRole('alert').textContent).toBe('decline error')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     fireEvent.click(screen.getByRole('button', { name: t('wizard.decline') }))
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('decline string')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
   })
 
   it('accepts an unbadged Workspace without inventing a remote and reports candidate drift and decision failure', async () => {
@@ -828,7 +830,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     />)
     fireEvent.click(screen.getByRole('button', { name: t('wizard.link.confirm') }))
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('Workspace selection did not resolve')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     drift.unmount()
 
     const rejected = render(<InviteWizardModal
@@ -846,7 +848,103 @@ describe('workspace settings and invite wizard (M4)', () => {
     fireEvent.click(screen.getByRole('radio', { name: /^First/ }))
     fireEvent.click(screen.getByRole('button', { name: t('wizard.link.confirm') }))
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('decision string')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     rejected.unmount()
+  })
+
+  it('renders workspace identity and git remote as a settings page without requiring origin', async () => {
+    const membership = gateway({ localRemoteFor: vi.fn(async () => undefined) })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="deepseek-harness"
+      workspacePath="/Users/yishu.cy/IdeaProjects/deepseek-harness"
+      gateway={membership}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    const surface = document.querySelector('[data-workspace-settings-surface="page"]')
+    expect(surface?.closest('[role="dialog"]')).toBe(screen.getByRole('dialog', { name: '工作区设置' }))
+    expect(screen.getByRole('heading', { name: '工作区设置 · deepseek-harness' })).toBeTruthy()
+    expect(screen.getByText('/Users/yishu.cy/IdeaProjects/deepseek-harness')).toBeTruthy()
+    expect(screen.getByText('代码仓库')).toBeTruthy()
+    expect(screen.getByText('未检测到 origin remote')).toBeTruthy()
+    expect(screen.getByText('多人协作')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(false)
+  })
+
+  it('maps Electron IPC prefixes and closes a retracted invitation without leaving the raw 409', async () => {
+    const ipc = 'Error invoking remote method \'projectMembership:decide\': Error: Project Membership request failed (409 INVITATION_NOT_PENDING): invitation a74b233f-4f29-44e0-b09d-6ca68eb48b0 already reached retracted'
+    expect(isInvitationNoLongerPending(new Error(ipc))).toBe(true)
+    expect(membershipUserMessage(new Error(ipc), t)).toBe(t('wizard.invitationGone'))
+    expect(membershipUserMessage('ROLE_REQUIRED', t)).toBe(t('error.ROLE_REQUIRED'))
+    expect(membershipUserMessage('INVALID_LINK', t)).toBe(t('error.INVALID_LINK'))
+    expect(membershipUserMessage('DUPLICATE_INVITEE', t)).toBe(t('error.DUPLICATE_INVITEE'))
+    expect(membershipUserMessage('PROJECT_NOT_FOUND', t)).toBe(t('error.PROJECT_NOT_FOUND'))
+    expect(membershipUserMessage('NOT_A_MEMBER', t)).toBe(t('error.NOT_A_MEMBER'))
+    expect(membershipUserMessage('LAST_OWNER', t)).toBe(t('error.LAST_OWNER'))
+    expect(membershipUserMessage('INVITATION_NOT_FOUND', t)).toBe(t('error.INVITATION_NOT_FOUND'))
+    expect(isInvitationNoLongerPending('INVITATION_NOT_FOUND')).toBe(true)
+    expect(isInvitationNoLongerPending('already reached accepted')).toBe(true)
+    expect(isInvitationNoLongerPending(new Error('lookup not found'))).toBe(false)
+
+    const onClose = vi.fn()
+    const onInvitationGone = vi.fn()
+    render(<InviteWizardModal
+      invitation={pendingInvitation}
+      workspaces={[{ workspaceId: wid('first'), title: 'First' }]}
+      gateway={gateway({
+        localRemoteFor: vi.fn(async () => SAME_REMOTE),
+        decideInvitation: vi.fn().mockRejectedValue(new Error(ipc)),
+      })}
+      onClose={onClose}
+      onInvitationGone={onInvitationGone}
+      t={t}
+    />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.accept') }))
+    fireEvent.click(screen.getByRole('radio', { name: /^First/ }))
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.link.confirm') }))
+    await flush()
+    expect(onInvitationGone).toHaveBeenCalledWith('invitation-1')
+    expect(onClose).toHaveBeenCalledOnce()
+    expect(screen.queryByText(/Error invoking remote method/)).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not reopen a retracted invitation after decide reports it is not pending', async () => {
+    const membership = gateway({
+      pendingInvitations: vi.fn(async () => [{
+        invitationId: 'invitation-retracted', receivingAccountId: 'account-2', projectId: 'project-1',
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE, grantedRole: 'admin' as const,
+      }]),
+      decideInvitation: vi.fn().mockRejectedValue(new Error(
+        'Error invoking remote method \'projectMembership:decide\': INVITATION_NOT_PENDING invitation already reached retracted',
+      )),
+    })
+    vi.useFakeTimers()
+    try {
+      mount(membership, {
+        useWorkspaces: hook(workspaceState([
+          workspace('proj', ['alpha-s'], 'IdeaProjects', '/Users/yishu.cy/IdeaProjects/deepseek-harness'),
+        ])),
+      })
+      await tick()
+      fireEvent.click(screen.getByRole('button', { name: '接受' }))
+      await tick()
+      expect(screen.getByRole('radio', { name: /deepseek-harness/ })).toBeTruthy()
+      expect(screen.queryByRole('radio', { name: /IdeaProjects/ })).toBeNull()
+      fireEvent.click(screen.getByRole('radio', { name: /deepseek-harness/ }))
+      fireEvent.click(screen.getByRole('button', { name: '关联并加入' }))
+      await tick()
+      expect(screen.queryByText('关联本地工作区')).toBeNull()
+      expect(screen.queryByText(/Error invoking remote method/)).toBeNull()
+      await tick(15_000)
+      expect(screen.queryByText('mona 邀请你加入云项目“Assembled”。')).toBeNull()
+      expect(membership.decideInvitation).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

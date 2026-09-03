@@ -11,6 +11,8 @@
  * the mandatory local-workspace link step — same remote recommends, a known
  * different remote is labeled 异源, and a new clone is always selectable.
  * Closing the wizard decides nothing: the invitation stays pending.
+ * A decide that reports the invitation is no longer pending closes the wizard
+ * and drops that id from the poll so a retracted card cannot submit again.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Button, Modal, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -32,15 +34,64 @@ export interface WizardWorkspace {
   title: string
 }
 
+/** Domain codes that mean the invitation is no longer pending. */
+const GONE_INVITATION_CODES = new Set(['INVITATION_NOT_PENDING', 'INVITATION_NOT_FOUND'])
+
+const MEMBERSHIP_FAILURE_CODES = [
+  'INVITATION_NOT_PENDING',
+  'INVITATION_NOT_FOUND',
+  'ROLE_REQUIRED',
+  'INVALID_LINK',
+  'DUPLICATE_INVITEE',
+  'PROJECT_NOT_FOUND',
+  'NOT_A_MEMBER',
+  'LAST_OWNER',
+] as const
+
+/** Known membership envelope codes that have mapped user copy. */
+const MEMBERSHIP_ERROR_CODES = new Set<string>(MEMBERSHIP_FAILURE_CODES)
+
+/**
+ * Map a membership/IPC failure to short user copy. Electron prefixes are
+ * stripped; unknown codes fall back to generic copy rather than the raw wire
+ * string.
+ * @param reason - thrown value from a gateway call.
+ * @param t - workspace dictionary.
+ * @returns localized user-facing copy.
+ */
+export function membershipUserMessage(reason: unknown, t: SettingsTranslate): string {
+  const text = reason instanceof Error ? reason.message : String(reason)
+  const code = membershipFailureCode(text)
+  if (code !== undefined && MEMBERSHIP_ERROR_CODES.has(code)) return t(`error.${code}`)
+  return t('error.generic')
+}
+
+/**
+ * True when a decide failure means the invitation left the pending pool.
+ * @param reason - thrown value from `decideInvitation`.
+ */
+export function isInvitationNoLongerPending(reason: unknown): boolean {
+  const text = reason instanceof Error ? reason.message : String(reason)
+  const code = membershipFailureCode(text)
+  if (code !== undefined) return GONE_INVITATION_CODES.has(code)
+  return /already reached\s+\w+|not pending|retracted/i.test(text)
+}
+
+function membershipFailureCode(text: string): string | undefined {
+  return MEMBERSHIP_FAILURE_CODES.find(code => text.includes(code))
+}
+
 /**
  * The workspace settings modal. Unmounted when closed; the bound project and
  * its roster live in local state so a reopened modal re-reads fresh facts.
  */
-export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, onClose, t }: {
+export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, workspacePath, gateway, onClose, t }: {
   /** Exact local Workspace whose Cloud Project relationship is being managed. */
   workspaceId: WorkspaceId
   /** Title of the workspace being configured (heading context only). */
   workspaceTitle: string
+  /** Absolute local path shown under the settings-page title. */
+  workspacePath?: string
   gateway: ProjectMembershipGateway
   onClose: () => void
   t: SettingsTranslate
@@ -90,48 +141,67 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
   /* v8 ignore next -- CSS Modules emit .settingsDialog from WorkspaceSettings.module.css. */
   if (dialogClass === undefined) throw new Error('WorkspaceSettings.module.css is missing .settingsDialog')
   return (
-    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')} className={dialogClass}>
-      <div className={css.section}>
-        <div className={css.sectionTitle}>{t('upgrade.title')}</div>
-        {project === undefined
-          ? <div className={css.sectionDesc}>{t('upgrade.loading')}</div>
-          : project === null
-            ? (
-              <div>
-                <div className={css.sectionDesc}>{t('upgrade.desc')}</div>
-                <label className={css.fieldLabel}>
-                  {t('upgrade.projectName')}
-                  <input
-                    className={css.fieldInput}
-                    value={name}
-                    aria-label={t('upgrade.projectName')}
-                    disabled={creating}
-                    onChange={(e) => { setName(e.target.value); setCreateError(null) }}
-                  />
-                </label>
-                <label className={css.fieldLabel}>
-                  {t('upgrade.remoteUrl')}
-                  <input
-                    className={css.fieldInput}
-                    value={remote ?? ''}
-                    aria-label={t('upgrade.remoteUrl')}
-                    readOnly
-                  />
-                </label>
-                {visibleCreateError !== null && <div className={css.actionError} role="alert">{visibleCreateError}</div>}
-                <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
-                  {creating ? t('upgrade.creating') : t('upgrade.create')}
-                </Button>
-              </div>
-            )
-            : (
-              <div>
-                <div className={css.sectionDesc}>{t('upgrade.bound', { name: project.name })}</div>
-                <MemberManagement gateway={gateway} project={project} t={t} />
-              </div>
-            )}
-      </div>
-      <div className={css.settingsWorkspace} aria-hidden="true">{workspaceTitle}</div>
+    <Modal open headless className={dialogClass} onClose={onClose} closeLabel={t('close')} title={t('settings.title')}>
+      <article className={css.settingsPage} data-workspace-settings-surface="page">
+        <header className={css.settingsHeader}>
+          <div>
+            <h2 className={css.settingsTitle}>{t('settings.namedTitle', { name: workspaceTitle })}</h2>
+            {workspacePath !== undefined && <div className={css.settingsPath}>{workspacePath}</div>}
+          </div>
+          <button className={css.settingsClose} type="button" aria-label={t('close')} onClick={onClose}>×</button>
+        </header>
+        <section className={css.settingsCard}>
+          <div className={css.cardTitle}>{t('settings.repository')}</div>
+          <div className={css.infoRow}>
+            <span className={css.infoLabel}>{t('settings.gitRemote')}</span>
+            <code className={css.infoCode}>{remote ?? t('settings.remoteUnavailable')}</code>
+          </div>
+        </section>
+        <section className={css.settingsCard}>
+          <div className={css.cardTitle}>{t('settings.collaboration')}</div>
+          {project === undefined
+            ? <div className={css.sectionDesc}>{t('upgrade.loading')}</div>
+            : project === null
+              ? (
+                <div>
+                  <div className={css.sectionDesc}>{t('upgrade.desc')}</div>
+                  <label className={css.fieldLabel}>
+                    {t('upgrade.projectName')}
+                    <input
+                      className={css.fieldInput}
+                      value={name}
+                      aria-label={t('upgrade.projectName')}
+                      disabled={creating}
+                      onChange={(e) => { setName(e.target.value); setCreateError(null) }}
+                    />
+                  </label>
+                  <label className={css.fieldLabel}>
+                    {t('upgrade.remoteUrl')}
+                    <input
+                      className={css.fieldInput}
+                      value={remote ?? ''}
+                      aria-label={t('upgrade.remoteUrl')}
+                      readOnly
+                    />
+                  </label>
+                  {visibleCreateError !== null && <div className={css.actionError} role="alert">{visibleCreateError}</div>}
+                  <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
+                    {creating ? t('upgrade.creating') : t('upgrade.create')}
+                  </Button>
+                </div>
+              )
+              : (
+                <div>
+                  <div className={css.infoRow}>
+                    <span className={css.infoLabel}>{t('settings.project')}</span>
+                    <span className={css.infoValue}>{project.name}</span>
+                    <code className={css.infoCode}>{project.id}</code>
+                  </div>
+                  <MemberManagement gateway={gateway} project={project} t={t} />
+                </div>
+              )}
+        </section>
+      </article>
     </Modal>
   )
 }
@@ -350,12 +420,14 @@ function MemberRowItem({ row, gateway, onAct, t }: {
  * Two-step invite wizard. `onClose` (mask or close button) decides nothing —
  * the invitation stays pending and the poll offers it again.
  */
-export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t }: {
+export function InviteWizardModal({ invitation, workspaces, gateway, onClose, onInvitationGone, t }: {
   invitation: WorkspacePendingInvitation
   /** Local workspaces offered as link candidates. */
   workspaces: readonly WizardWorkspace[]
   gateway: ProjectMembershipGateway
   onClose: () => void
+  /** Called when decide reports the invitation left the pending pool. */
+  onInvitationGone?: (invitationId: string) => void
   t: SettingsTranslate
 }) {
   const [step, setStep] = useState<'card' | 'link'>('card')
@@ -387,13 +459,19 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
     if (busy) return
     onClose()
   }
+  const failDecide = (reason: unknown) => {
+    if (isInvitationNoLongerPending(reason)) {
+      onInvitationGone?.(invitation.invitationId)
+      onClose()
+      return
+    }
+    setBusy(false)
+    setError(membershipUserMessage(reason, t))
+  }
   const decline = () => {
     setBusy(true)
     setError(null)
-    gateway.decideInvitation(invitation.invitationId, { decision: 'decline' }).then(onClose).catch((reason: unknown) => {
-      setBusy(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    gateway.decideInvitation(invitation.invitationId, { decision: 'decline' }).then(onClose).catch(failDecide)
   }
   const confirmLink = async () => {
     // Linking is mandatory: no selection (and no clone intention) keeps the
@@ -432,8 +510,7 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
       })
       onClose()
     } catch (reason: unknown) {
-      setBusy(false)
-      setError(reason instanceof Error ? reason.message : String(reason))
+      failDecide(reason)
     }
   }
   return (

@@ -26,6 +26,7 @@ import { FLAT_SESSION_ORDER_KEY } from './stores.ts'
 import { WorkspacePickFlow } from './WorkspacePicker.tsx'
 import { InviteWizardModal, WorkspaceSettingsModal, type WizardWorkspace } from './WorkspaceSettings.tsx'
 import type { WorkspacePendingInvitation } from './contract/slots.ts'
+import { workspaceLabel } from './tree.ts'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -41,6 +42,16 @@ const SEARCH_QUERY_MAX_CODE_UNITS = 500
 const COLLAPSED_SESSION_LIMIT = 5
 /** Milliseconds between pending-invitation polls while a membership gateway is composed. */
 const INVITE_POLL_MS = 15_000
+
+/**
+ * Wizard radios use the checkout basename so a Host parent-folder title such
+ * as `IdeaProjects` cannot masquerade as the Workspace itself.
+ * @param workspace - listed Workspace row.
+ */
+function wizardWorkspaceTitle(workspace: WorkspaceView): string {
+  const fromPath = workspaceLabel(workspace.path)
+  return fromPath === '' || fromPath === workspace.path ? workspace.title : fromPath
+}
 
 /** Keep controlled input and RPC payload inside the session.search wire contract. */
 function sanitizeSearchQuery(value: string): string {
@@ -802,7 +813,7 @@ export function WorkspaceBrowser({
   const workspaces = useWorkspaces(state => state.items)
   const wizardWorkspaces = useMemo(() => workspaces.map((workspace): WizardWorkspace => ({
     workspaceId: workspace.workspaceId,
-    title: workspace.title,
+    title: wizardWorkspaceTitle(workspace),
   })), [workspaces])
   const workspacePhase = useWorkspaces(state => state.phase)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
@@ -867,22 +878,30 @@ export function WorkspaceBrowser({
   const composingRef = useRef(false)
 
   // Settings modal (browser-owned so it outlives row unmounts during collapse).
-  const [settingsTarget, setSettingsTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
+  const [settingsTarget, setSettingsTarget] = useState<{
+    workspaceId: WorkspaceId
+    title: string
+    path?: string
+  } | null>(null)
 
   // Invite wizard source: the pending-invitation poll. Closing the wizard
   // decides nothing, so the invitation cools down for one poll interval and
-  // is offered again while it is still pending.
+  // is offered again while it is still pending. Ids that just failed as
+  // not-pending stay suppressed so a retracted invitation cannot reopen.
   const [wizardInvitation, setWizardInvitation] = useState<WorkspacePendingInvitation | null>(null)
   const wizardCoolUntil = useRef(0)
+  const dismissedInvitationIds = useRef(new Set<string>())
   useEffect(() => {
     if (projectMembership === undefined) return
     let disposed = false
     const poll = () => {
       if (disposed) return
       projectMembership.pendingInvitations().then((rows) => {
-        if (disposed || rows.length === 0) return
+        if (disposed) return
+        const next = rows.find(row => !dismissedInvitationIds.current.has(row.invitationId))
+        if (next === undefined) return
         if (wizardInvitation !== null || Date.now() < wizardCoolUntil.current) return
-        setWizardInvitation(rows[0] ?? null)
+        setWizardInvitation(next)
       }).catch(() => {
         // Poll failures are non-fatal: the next tick retries.
       })
@@ -1255,7 +1274,10 @@ export function WorkspaceBrowser({
                 orderBy={orderBy}
                 home={home}
                 t={t}
-                onSettingsRequest={(workspaceId, title) => { setSettingsTarget({ workspaceId, title }) }}
+                onSettingsRequest={(workspaceId, title) => {
+                  const path = workspaces.find(item => item.workspaceId === workspaceId)?.path
+                  setSettingsTarget({ workspaceId, title, ...(path === undefined ? {} : { path }) })
+                }}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })
                   setRenameDraft(currentTitle)
@@ -1273,6 +1295,7 @@ export function WorkspaceBrowser({
         <WorkspaceSettingsModal
           workspaceId={settingsTarget.workspaceId}
           workspaceTitle={settingsTarget.title}
+          workspacePath={settingsTarget.path}
           gateway={projectMembership}
           onClose={() => { setSettingsTarget(null) }}
           t={t}
@@ -1286,6 +1309,9 @@ export function WorkspaceBrowser({
           onClose={() => {
             wizardCoolUntil.current = Date.now() + INVITE_POLL_MS
             setWizardInvitation(null)
+          }}
+          onInvitationGone={(invitationId) => {
+            dismissedInvitationIds.current.add(invitationId)
           }}
           t={t}
         />

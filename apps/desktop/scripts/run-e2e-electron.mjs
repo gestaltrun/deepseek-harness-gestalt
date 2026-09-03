@@ -47,6 +47,7 @@ function scrubEnvironment(source) {
       'DSH_ELECTRON_E2E_FAKE_OWNER', 'DSH_ELECTRON_E2E_WORKSPACE',
       'DSH_PHONE_MANAGED_FIXTURE_BYTES', 'DSH_PHONE_MANAGED_FIXTURE_SHA256',
       'DSH_PHONE_MANAGED_FIXTURE_URL',
+      'DSH_ANDROID_E2E_PID_FILE', 'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'ANDROID_AVD_HOME',
     ].includes(name)
   }))
 }
@@ -127,15 +128,19 @@ async function stageFake() {
     await chmod(executable, 0o755)
     await copyFile(framesSource, join(fixtures, 'u3-visible-frames.ts'))
     const devices = JSON.parse(await readFile(devicesSource, 'utf8'))
-    await writeFile(join(fixtures, 'fakemobilecli.config.json'), JSON.stringify({
-      devices,
-      listEnvelope: true,
-      captureEnvelope: true,
-      streamFrameCount: 8,
-      h264FailureDeviceIds: ['emulator-5554'],
-      ownerToken,
-    }))
-    return { root, executable, ownerToken }
+    const configPath = join(fixtures, 'fakemobilecli.config.json')
+    const configure = async (h264FailureDeviceIds = []) => {
+      await writeFile(configPath, JSON.stringify({
+        devices,
+        listEnvelope: true,
+        captureEnvelope: true,
+        streamFrameCount: 8,
+        h264FailureDeviceIds,
+        ownerToken,
+      }))
+    }
+    await configure()
+    return { root, executable, ownerToken, configure }
   } catch (error) {
     await rm(root, { recursive: true, force: true })
     throw error
@@ -192,7 +197,8 @@ async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken, managedF
     return await runWithVerifiedPortHandoff(name, async ({ fakePort, cdpPort }, attempt) => {
       await rm(artifactDir, { recursive: true, force: true })
       return await runSpecAttempt({
-        name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, artifactDir, fakePort, cdpPort, attempt,
+        name, spec, provider, mobilecli, fakeOwnerToken, managedFixture,
+        androidFixture: name === 'phone-android', artifactDir, fakePort, cdpPort, attempt,
       })
     })
   } catch (error) {
@@ -201,7 +207,8 @@ async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken, managedF
 }
 
 async function runSpecAttempt({
-  name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, artifactDir, fakePort, cdpPort, attempt,
+  name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, androidFixture,
+  artifactDir, fakePort, cdpPort, attempt,
 }) {
   const runtimeRoot = await mkdtemp(join(tmpdir(), `dsh-desktop-e2e-${name}-`))
   const dshHome = join(runtimeRoot, 'dsh-home')
@@ -217,6 +224,7 @@ async function runSpecAttempt({
     await mkdir(dshHome, { recursive: true, mode: 0o700 })
     await mkdir(userData, { recursive: true, mode: 0o700 })
     await mkdir(workspace, { recursive: true, mode: 0o700 })
+    const android = androidFixture ? await stageAndroidSdkFixture(runtimeRoot, dshHome) : undefined
     if (managedFixture !== undefined) {
       await mkdir(managedHome, { recursive: true, mode: 0o700 })
       await mkdir(managedBin, { recursive: true, mode: 0o700 })
@@ -243,8 +251,9 @@ async function runSpecAttempt({
     const env = {
       ...cleanEnvironment,
       ...(managedFixture === undefined ? {} : {
-        // The managed lane admits one test-owned Node entry and no user tool roots.
-        PATH: managedBin,
+        // The managed lane admits one test-owned Node entry plus the OS roots
+        // Electron itself needs, while excluding user package-manager roots.
+        PATH: [managedBin, '/usr/bin', '/bin'].join(':'),
         HOME: managedHome,
         USERPROFILE: managedHome,
       }),
@@ -263,6 +272,11 @@ async function runSpecAttempt({
       DSH_ELECTRON_E2E_FAKE_OWNER: fakeOwnerToken ?? '',
       DSH_ELECTRON_E2E_USER_DATA: userData,
       DSH_ELECTRON_E2E_WORKSPACE: workspace,
+      ...(android === undefined ? {} : {
+        ANDROID_HOME: android.sdkRoot,
+        ANDROID_SDK_ROOT: android.sdkRoot,
+        DSH_ANDROID_E2E_PID_FILE: android.pidFile,
+      }),
       ...(managedFixture === undefined ? {} : {
         DSH_PHONE_MANAGED_FIXTURE_URL: managedFixture.url,
         DSH_PHONE_MANAGED_FIXTURE_BYTES: String(managedFixture.bytes),
@@ -288,7 +302,7 @@ async function runSpecAttempt({
   let ownership
   const requiredPids = fakeOwnerToken === undefined
     ? ['electronPid', 'hostPid']
-    : ['electronPid', 'hostPid', 'fakePid']
+    : ['electronPid', 'hostPid', 'fakePid', ...(androidFixture ? ['androidEmulatorPid'] : [])]
   const settled = await settleCleanupSteps([
     {
       name: 'owned process trees',
@@ -326,6 +340,60 @@ async function runSpecAttempt({
     },
     runnerLog,
   }
+}
+
+async function stageAndroidSdkFixture(runtimeRoot, dshHome) {
+  const sdkRoot = join(runtimeRoot, 'android-sdk')
+  const avdHome = join(dshHome, 'phone', 'android', 'avd')
+  const bin = join(sdkRoot, 'cmdline-tools', 'latest', 'bin')
+  const platformTools = join(sdkRoot, 'platform-tools')
+  const emulatorDir = join(sdkRoot, 'emulator')
+  const image = join(sdkRoot, 'system-images', 'android-35', 'google_apis', 'arm64-v8a')
+  const avd = join(avdHome, 'Pixel_6_API_35_Gestalt.avd')
+  const pidFile = join(dshHome, 'phone', 'android', 'emulator.pid')
+  await Promise.all([
+    mkdir(bin, { recursive: true, mode: 0o700 }),
+    mkdir(platformTools, { recursive: true, mode: 0o700 }),
+    mkdir(emulatorDir, { recursive: true, mode: 0o700 }),
+    mkdir(image, { recursive: true, mode: 0o700 }),
+    mkdir(avd, { recursive: true, mode: 0o700 }),
+  ])
+  await writeFile(join(bin, 'sdkmanager'), [
+    '#!/bin/sh',
+    'if [ "$2" = "--version" ]; then printf "20.0\\n"; fi',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o700 })
+  await writeFile(join(bin, 'avdmanager'), [
+    '#!/bin/sh',
+    'if [ "$*" = "list device -c" ]; then printf "pixel_6\\n"; fi',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o700 })
+  await writeFile(join(platformTools, 'adb'), [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  "devices") printf "List of devices attached\\nemulator-5554\\tdevice\\n" ;;',
+    '  *"emu avd name"*) printf "Pixel_6_API_35_Gestalt\\nOK\\n" ;;',
+    '  *"getprop sys.boot_completed"*) printf "1\\n" ;;',
+    '  *) exit 1 ;;',
+    'esac',
+    '',
+  ].join('\n'), { mode: 0o700 })
+  await writeFile(join(emulatorDir, 'emulator'), [
+    '#!/bin/sh',
+    'if [ "$1" = "-accel-check" ]; then',
+    '  printf "accel:\\n0\\nfixture hypervisor\\n"',
+    '  exit 0',
+    'fi',
+    'printf "%s\\n" "$$" > "${ANDROID_AVD_HOME%/*}/emulator.pid"',
+    'trap "exit 0" TERM INT',
+    'while :; do /bin/sleep 1; done',
+    '',
+  ].join('\n'), { mode: 0o700 })
+  await writeFile(join(image, 'package.xml'), '<localPackage path="system-images;android-35;google_apis;arm64-v8a" />\n')
+  await writeFile(join(avd, 'config.ini'), 'image.sysdir.1=system-images/android-35/google_apis/arm64-v8a/\n')
+  return { sdkRoot, pidFile }
 }
 
 async function assertMissing(path) {
@@ -398,19 +466,24 @@ try {
   const managed = unresolved.code === 0
     ? await runSpec('phone-managed', 'phone-managed-environment.e2e.ts', provider, undefined, fake.ownerToken, managedFixture)
     : { code: 1, errors: ['phone-managed skipped because phone-unresolved failed'], cleanup: [], portCollision: false }
-  const live = managed.code === 0
+  const android = managed.code === 0
+    ? await runSpec('phone-android', 'phone-android-environment.e2e.ts', provider, undefined, fake.ownerToken, managedFixture)
+    : { code: 1, errors: ['phone-android skipped because phone-managed failed'], cleanup: [], portCollision: false }
+  if (android.code === 0) await fake.configure(['emulator-5554'])
+  const live = android.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
-    : { code: 1, errors: ['phone-live skipped because phone-managed failed'], cleanup: [], portCollision: false }
+    : { code: 1, errors: ['phone-live skipped because phone-android failed'], cleanup: [], portCollision: false }
   const findings = await auditLogs()
   await writeFile(join(artifactRoot, 'result.json'), JSON.stringify({
     head,
     unresolved,
     managed: { ...managed, fixtureRequests: managedFixture.requests() },
+    android,
     live,
     unexplainedLogFindings: findings,
   }, undefined, 2) + '\n')
-  exitCode = unresolved.code === 0 && managed.code === 0 && live.code === 0
-    && managedFixture.requests() === 1 && findings.length === 0 ? 0 : 1
+  exitCode = unresolved.code === 0 && managed.code === 0 && android.code === 0 && live.code === 0
+    && managedFixture.requests() === 2 && findings.length === 0 ? 0 : 1
 } catch (error) {
   fatalErrors.push(asError(error))
 } finally {

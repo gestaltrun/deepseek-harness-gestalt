@@ -10,7 +10,7 @@ The iOS real-device link lives behind the listing's real group: `agentStatus` an
 
 Publication is monotonic and change-driven: a poll publishes only when the freshly grouped listing differs from the published one (id set, name, kind, or online fact), and each `PhoneDeviceChange` names exactly the added/removed ids of that difference. The `./invariant` companion re-derives every candidate difference from the published listing and halts polling loudly on a mismatch.
 
-`ctx.phoneEnvironment` publishes the revisioned `PhoneEnvironmentSnapshot` consumed by Phone Devices settings: the durable enable value, shared runtime state, and independent Android/iOS preparation states. Runtime selection uses operator override, managed current, then system discovery; disabling or losing readiness stops the owned generation and revokes its tools.
+`ctx.phoneEnvironment` publishes the revisioned `PhoneEnvironmentSnapshot` consumed by Phone Devices settings: the durable enable value, shared runtime state, and independent Android/iOS preparation states. Runtime selection uses operator override, managed current, then system discovery. Platform Providers register behind the same Service; the Android Provider prepares a fixed API 35 SDK/AVD and contributes child-only SDK environment entries. A running platform becomes ready only after the selected mobilecli generation reactivates with those entries, lists the branded emulator id online, and yields a syntactically valid Annex-B key access unit with linked SPS, PPS, and IDR slice headers. This Host probe does not decode pixels; real-picture GUI acceptance remains separate. Disable, cancellation, or teardown cancels that whole transaction and stops the owned Emulator and mobilecli children.
 
 ```ts type-equiv
 /** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
@@ -153,8 +153,9 @@ onReadinessChanged(listener: (ready: boolean) => void): () => void
  * before the replacement begins readiness probing.
  * @param executablePath - absolute executable path selected by the environment owner.
  * @param signal - optional cancellation signal for replacement and readiness.
+ * @param environment - non-sensitive SDK/AVD environment owned by the selected generation.
  */
-async activateExecutable(executablePath: string, signal?: AbortSignal): Promise<void>
+async activateExecutable( executablePath: string, signal?: AbortSignal, environment: Readonly<Record<string, string>> = {}, ): Promise<void>
 
 /** Stop the current child generation while retaining this Service for later activation. */
 async deactivate(): Promise<void>
@@ -281,6 +282,13 @@ setEnabled(enabled: boolean): Promise<void>
  * @returns the disposer.
  */
 onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void
+
+/**
+ * Register the Android platform Provider while retaining this Service as the full-snapshot owner.
+ * @param provider - Android SDK, AVD, and emulator lifecycle owner.
+ * @returns disposer that detaches the Provider and restores the deferred state.
+ */
+registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void
 
 /**
  * Re-detect runtime sources in fixed override-managed-system precedence.

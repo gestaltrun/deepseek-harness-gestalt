@@ -9,7 +9,6 @@ import type {
   PhoneEnvironmentCheck, PhoneEnvironmentError, PhoneEnvironmentView, PhoneReadyDevice,
 } from './phone-environment.ts'
 import {
-  ANDROID_CREATE_AVD, ANDROID_INSTALL_SYSTEM_IMAGE, ANDROID_LAUNCH_EMULATOR,
   IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
 } from './phone-wizard-commands.ts'
 import { PhoneTabIcon } from './phone-icon.tsx'
@@ -30,12 +29,6 @@ export interface PhoneSettingsCardProps {
   /** Fire the unified next-action verb for one error row. */
   readonly onNextAction: (kind: string) => void
 }
-
-const ANDROID_WIZARD_ROWS = [
-  { comment: '# 下载 Android 系统镜像（API 35，Google APIs ARM64）', command: ANDROID_INSTALL_SYSTEM_IMAGE },
-  { comment: '# 创建名为 Pixel_6_API_35 的 AVD（机型 pixel_6）', command: ANDROID_CREATE_AVD },
-  { comment: '# 启动模拟器（也可以留到会话里让 Agent 启动）', command: ANDROID_LAUNCH_EMULATOR },
-] as const
 
 const IOS_WIZARD_ROWS = [
   { comment: '# 下载 iOS 模拟器运行时', command: IOS_DOWNLOAD_PLATFORM },
@@ -65,7 +58,7 @@ const TITLES = {
 const DESCRIPTIONS = {
   off: '把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。',
   probing: '正在检测本机的调试工具与模拟器运行时，检测完成后按缺失项给出指引。',
-  'android-wizard': '需要 Android SDK 命令行工具；插件不会替你下载 SDK 二进制。依次执行以下命令（macOS / Linux）：',
+  'android-wizard': '尚无设备。请在上方 Android 分栏一键准备默认模拟器，或连接已启用 USB 调试的真机。',
   'ios-wizard': '仅 macOS 可用；需要完整 Xcode。先补齐模拟器运行时，再创建一台 iPhone 模拟器。',
   ready: '环境就绪。点击任一设备的「打开面板」在右侧查看实时画面，Agent 的 device_* 工具同时生效。',
   errors: '启用后发现的问题列在这里，每条都带下一步动作；处理完条目自动消失。',
@@ -74,7 +67,7 @@ const DESCRIPTIONS = {
 const FOOTERS = {
   off: <p className={css.foot}>关闭时不注册任何 device_* 工具，也不监听 adb / mobilecli 进程；本机环境不受影响。</p>,
   probing: null,
-  'android-wizard': <p className={css.foot}>完成后点右上角「重新检测」，AVD 出现在清单即可打开面板。USB 真机无需此步，打开 USB 调试并授权即可。</p>,
+  'android-wizard': <p className={css.foot}>Android 自动准备与 USB 调试、RSA 信任等人工前置条件分开显示。</p>,
   'ios-wizard': <p className={css.foot}>模拟器不需要 WDA；真机上的每次点击都有真实后果，涉及登录与支付的步骤请人工接管。</p>,
   ready: <p className={css.foot}>停止的设备先用「启动」拉起再打开面板；清单变化会实时刷新，无需重启会话。</p>,
   errors: null,
@@ -198,6 +191,7 @@ function AndroidWizardBody(props: {
   platformToolsInstalled: boolean
   onCopy: (command: string) => void
 }): ReactNode {
+  void props.onCopy
   return (
     <div className={css.body}>
       <div className={css.steps}>
@@ -209,7 +203,13 @@ function AndroidWizardBody(props: {
         <span className={css.stepchip}><i>3</i>创建 AVD</span>
         <span className={css.stepchip}><i>4</i>启动模拟器</span>
       </div>
-      <CommandList rows={ANDROID_WIZARD_ROWS} onCopy={props.onCopy} />
+      <div className={clsx(css.alert, css.info)}>
+        <span className={clsx(css.iconDot, css.infoDot)} aria-hidden="true">A</span>
+        <p>
+          Android 环境尚未准备
+          <small>使用上方 Android 分栏查看下载来源、磁盘需求与 SDK License，然后一键完成。</small>
+        </p>
+      </div>
     </div>
   )
 }

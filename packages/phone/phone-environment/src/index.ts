@@ -6,7 +6,9 @@ import { join, resolve } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { writeJson } from '@deepseek-ai/dsh-host-webserver'
-import { resolveMobilecliExecutable } from '@deepseek-ai/dsh-phone-runtime'
+import {
+  resolveMobilecliExecutable, verifyAnnexBH264KeyAccessUnit, type DeviceId,
+} from '@deepseek-ai/dsh-phone-runtime'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-request-trust'
 import {
   installManagedMobilecli, PhoneEnvironmentError, probeMobilecliVersion, readManagedMobilecli,
@@ -15,7 +17,8 @@ import type { MobilecliVersionProbe } from './installer.ts'
 import { MOBILECLI_MANAGED_VERSION, selectMobilecliReleaseAsset } from './manifest.ts'
 import { initialPhoneEnvironmentSnapshot, selectPhoneRuntimeCandidate } from './planner.ts'
 import type {
-  PhoneEnvironmentSnapshot, PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
+  AndroidEnvironmentProvider, AndroidPrepareRequest, PhoneAndroidState, PhoneEnvironmentSnapshot,
+  PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
 } from './types.ts'
 
 export { MOBILECLI_MANAGED_VERSION, MOBILECLI_RELEASE_ASSETS, selectMobilecliReleaseAsset } from './manifest.ts'
@@ -23,8 +26,9 @@ export { PhoneEnvironmentError } from './installer.ts'
 export { initialPhoneEnvironmentSnapshot, selectPhoneRuntimeCandidate } from './planner.ts'
 export type { PhoneRuntimeCandidates } from './planner.ts'
 export type {
-  MobilecliArchitecture, MobilecliPlatform, MobilecliReleaseAsset, PhoneEnvironmentSnapshot,
-  PhonePlatformState, PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
+  AndroidEnvironmentProvider, AndroidPreparationPlan, AndroidPrepareRequest, AndroidSdkSource,
+  MobilecliArchitecture, MobilecliPlatform, MobilecliReleaseAsset, PhoneAndroidState,
+  PhoneEnvironmentSnapshot, PhonePlatformState, PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
 } from './types.ts'
 
 /** Full snapshot path consumed by the Phone Devices settings client. */
@@ -35,6 +39,19 @@ export const PHONE_ENVIRONMENT_PREPARE_PATH = '/phone/environment/prepare'
 export const PHONE_ENVIRONMENT_CANCEL_PATH = '/phone/environment/cancel'
 /** Runtime source re-detection path. */
 export const PHONE_ENVIRONMENT_REFRESH_PATH = '/phone/environment/refresh'
+/** Android SDK and default-AVD preparation path. */
+export const PHONE_ENVIRONMENT_ANDROID_PREPARE_PATH = '/phone/environment/android/prepare'
+/** Android environment cancellation path. */
+export const PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH = '/phone/environment/android/cancel'
+/** Android environment re-detection path. */
+export const PHONE_ENVIRONMENT_ANDROID_REFRESH_PATH = '/phone/environment/android/refresh'
+/** Start the prepared default Android emulator. */
+export const PHONE_ENVIRONMENT_ANDROID_START_PATH = '/phone/environment/android/start'
+
+/** Maximum wait for one syntactically recognizable H264 key access unit from a booted Android device. */
+const ANDROID_RUNTIME_VERIFY_MS = 15_000
+/** Maximum Android H264 bytes inspected before readiness fails. */
+const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
 
 /** Host-specific configuration; release trust facts remain fixed in source. */
 export interface Config {
@@ -71,6 +88,10 @@ export class PhoneEnvironment extends Service {
   private refreshController: AbortController | undefined
   private prepareTask: Promise<PhoneEnvironmentSnapshot> | undefined
   private refreshTask: Promise<PhoneEnvironmentSnapshot> | undefined
+  private android: AndroidEnvironmentProvider | undefined
+  private unsubscribeAndroid: (() => void) | undefined
+  private androidController: AbortController | undefined
+  private androidTask: Promise<void> | undefined
   private transactionTail: Promise<unknown> = Promise.resolve()
   private enableTail: Promise<void> = Promise.resolve()
   private readonly lifetime = new AbortController()
@@ -98,15 +119,19 @@ export class PhoneEnvironment extends Service {
       }
     }), 'phone environment runtime readiness tracking')
     ctx.effect(() => async () => {
+      const failures: unknown[] = []
       this.disposed = true
       this.lifetime.abort(new PhoneEnvironmentError(
         'PHONE_ENVIRONMENT_DISPOSED', 'the phone environment service is disposed',
       ))
       this.cancel()
+      try { await this.androidTask } catch (error) { if (!isCancellation(error)) failures.push(error) }
+      try { await this.android?.deactivate() } catch (error) { failures.push(error) }
       await this.prepareTask?.catch(() => {})
       await this.refreshTask
       await this.enableTail
       await ctx.phoneDevices.deactivate().catch(() => {})
+      if (failures.length > 0) throw new AggregateError(failures, 'phone environment teardown failed')
     }, 'phone environment teardown')
   }
 
@@ -146,7 +171,9 @@ export class PhoneEnvironment extends Service {
     this.publish({ ...this.current, enabled })
     if (!enabled) {
       await this.prepareTask?.catch(() => {})
-      await this.refreshTask
+      await this.refreshTask?.catch(() => {})
+      await this.androidTask?.catch(() => {})
+      await this.android?.deactivate()
       await this.ctx.phoneDevices.deactivate()
       return
     }
@@ -162,6 +189,28 @@ export class PhoneEnvironment extends Service {
   onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+
+  /**
+   * Register the Android platform Provider while retaining this Service as the full-snapshot owner.
+   * @param provider - Android SDK, AVD, and emulator lifecycle owner.
+   * @returns disposer that detaches the Provider and restores the deferred state.
+   */
+  registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void {
+    if (this.android !== undefined) throw new Error('phone-environment: Android Provider is already registered')
+    this.android = provider
+    this.unsubscribeAndroid = provider.onChanged((state) => {
+      this.publishAndroid(this.pendingAndroidRuntime(state))
+    })
+    this.publishAndroid(this.pendingAndroidRuntime(provider.snapshot()))
+    void provider.refresh(this.lifetime.signal).catch(() => {})
+    return () => {
+      if (this.android !== provider) return
+      this.unsubscribeAndroid?.()
+      this.unsubscribeAndroid = undefined
+      this.android = undefined
+      this.publishAndroid({ kind: 'deferred' })
+    }
   }
 
   /**
@@ -258,6 +307,160 @@ export class PhoneEnvironment extends Service {
     this.activationController?.abort(reason)
     this.enableController?.abort(reason)
     this.refreshController?.abort(reason)
+    this.androidController?.abort(reason)
+    this.android?.cancel()
+  }
+
+  private async prepareAndroid(request: AndroidPrepareRequest): Promise<void> {
+    await this.runAndroidOperation(async (provider, signal) => {
+      const prepared = await provider.prepare(request, signal)
+      if (!this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) return
+      const running = prepared.kind === 'ready' && prepared.running
+        ? prepared
+        : await provider.start(signal)
+      await this.activateAndroidRuntime(running, signal)
+    })
+  }
+
+  private async startAndroid(): Promise<void> {
+    if (!this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) {
+      throw new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_REQUIRED',
+        'enable Phone Devices and prepare mobilecli before starting the Android Emulator',
+      )
+    }
+    await this.runAndroidOperation(async (provider, signal) => {
+      await this.activateAndroidRuntime(await provider.start(signal), signal)
+    })
+  }
+
+  private async refreshAndroid(): Promise<void> {
+    await this.runAndroidOperation(async (provider, signal) => {
+      this.publishAndroid(this.pendingAndroidRuntime(await provider.refresh(signal)))
+    })
+  }
+
+  private requireAndroid(): AndroidEnvironmentProvider {
+    if (this.android !== undefined) return this.android
+    throw new PhoneEnvironmentError('PHONE_ANDROID_UNAVAILABLE', 'the Android environment Provider is unavailable')
+  }
+
+  private async activateAndroidRuntime(state: PhoneAndroidState, signal: AbortSignal): Promise<void> {
+    if (state.kind !== 'ready' || this.candidate === undefined || this.candidateVersion === undefined) return
+    if (!state.running || state.deviceId === undefined) return
+    this.publishAndroid({ kind: 'booting', plan: state.plan })
+    try {
+      await this.activateCandidate(this.candidate, this.candidateVersion, signal)
+      await this.verifyAndroidRuntime(state.deviceId, signal)
+      signal.throwIfAborted()
+      this.requireCurrentAndroidRuntime(state.deviceId)
+      this.publishAndroid(state)
+    } catch (error) {
+      await this.ctx.phoneDevices.deactivate().catch(() => {})
+      await this.android?.deactivate().catch(() => {})
+      const failure = environmentError(error)
+      this.publishAndroid({
+        kind: 'failed', plan: state.plan, code: failure.code, message: failure.message, retryable: true,
+      })
+      throw error
+    }
+  }
+
+  private pendingAndroidRuntime(state: PhoneAndroidState): PhoneAndroidState {
+    return state.kind === 'ready' && state.running
+      ? { kind: 'booting', plan: state.plan }
+      : state
+  }
+
+  private requireCurrentAndroidRuntime(expectedId: DeviceId): void {
+    const current = this.android?.snapshot()
+    if (current?.kind === 'failed') {
+      throw new PhoneEnvironmentError(current.code, current.message)
+    }
+    if (current?.kind !== 'ready' || !current.running || current.deviceId !== expectedId) {
+      throw new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `the Android Provider revoked running device ${expectedId} before Host readiness commit`,
+      )
+    }
+  }
+
+  private async runAndroidOperation(
+    operation: (provider: AndroidEnvironmentProvider, signal: AbortSignal) => Promise<void>,
+  ): Promise<void> {
+    if (this.androidTask !== undefined) {
+      throw new PhoneEnvironmentError('PHONE_ANDROID_BUSY', 'an Android environment operation is already running')
+    }
+    const provider = this.requireAndroid()
+    const controller = new AbortController()
+    this.androidController = controller
+    const signal = AbortSignal.any([this.lifetime.signal, controller.signal])
+    const task = operation(provider, signal)
+    this.androidTask = task
+    try {
+      await task
+    } finally {
+      this.androidTask = undefined
+      this.androidController = undefined
+    }
+  }
+
+  private async cancelAndroid(): Promise<void> {
+    this.androidController?.abort(new PhoneEnvironmentError(
+      'PHONE_ANDROID_ABORTED', 'the Android environment operation was cancelled',
+    ))
+    this.android?.cancel()
+    let failure: unknown
+    try { await this.androidTask } catch (error) { if (!isCancellation(error)) failure = error }
+    try { await this.android?.deactivate() } catch (error) { failure ??= error }
+    if (this.android !== undefined) this.publishAndroid(this.android.snapshot())
+    if (failure !== undefined) throw environmentError(failure)
+  }
+
+  private async verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      controller.abort(new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `mobilecli did not produce an Android H264 frame within ${String(ANDROID_RUNTIME_VERIFY_MS)}ms`,
+      ))
+    }, ANDROID_RUNTIME_VERIFY_MS)
+    timeout.unref()
+    const verificationSignal = AbortSignal.any([signal, controller.signal])
+    try {
+      const devices = await this.ctx.phoneDevices.listDevices(verificationSignal)
+      const listed = devices.android.find(device => device.id === id && device.online)
+      if (listed === undefined) {
+        throw new PhoneEnvironmentError(
+          'PHONE_ANDROID_RUNTIME_VERIFY',
+          `mobilecli did not list the prepared Android device ${id} online`,
+        )
+      }
+      const capture = await this.ctx.phoneDevices.startCapture({
+        deviceId: id, format: 'h264', signal: verificationSignal,
+      })
+      if (!/^video\/h264(?:;|$)/iu.test(capture.contentType)) {
+        await capture.body.cancel()
+        throw new PhoneEnvironmentError(
+          'PHONE_ANDROID_RUNTIME_VERIFY',
+          `mobilecli returned ${capture.contentType || 'no Content-Type'} for the Android H264 probe`,
+        )
+      }
+      await verifyAnnexBH264KeyAccessUnit(capture.body, {
+        signal: verificationSignal, maxBytes: ANDROID_H264_PROBE_MAX_BYTES,
+      })
+    } catch (error) {
+      if (controller.signal.aborted && controller.signal.reason instanceof Error) throw controller.signal.reason
+      if (signal.aborted) throw signal.reason
+      if (error instanceof PhoneEnvironmentError && error.code === 'PHONE_ANDROID_RUNTIME_VERIFY') throw error
+      throw new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `mobilecli could not verify the Android H264 stream: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   /**
@@ -332,7 +535,11 @@ export class PhoneEnvironment extends Service {
     this.activationController = controller
     const activationSignal = AbortSignal.any([this.lifetime.signal, controller.signal, signal])
     try {
-      await this.ctx.phoneDevices.activateExecutable(candidate.executablePath, activationSignal)
+      await this.ctx.phoneDevices.activateExecutable(
+        candidate.executablePath,
+        activationSignal,
+        this.android?.runtimeEnvironment(),
+      )
       this.publishReady(candidate.source, version)
     } catch (error) {
       if (this.activationController === controller) this.publishRuntime(environmentFailure(error))
@@ -348,6 +555,13 @@ export class PhoneEnvironment extends Service {
 
   private publishRuntime(runtime: PhoneRuntimeState): void {
     this.publish({ ...this.current, runtime: Object.freeze(runtime) })
+  }
+
+  private publishAndroid(android: PhoneAndroidState): void {
+    this.publish({
+      ...this.current,
+      platforms: Object.freeze({ ...this.current.platforms, android: Object.freeze(android) }),
+    })
   }
 
   private publish(candidate: Omit<PhoneEnvironmentSnapshot, 'revision'> & { readonly revision?: number }): void {
@@ -386,6 +600,18 @@ export class PhoneEnvironment extends Service {
       if (pathname === PHONE_ENVIRONMENT_PREPARE_PATH) await this.prepare()
       else if (pathname === PHONE_ENVIRONMENT_CANCEL_PATH) this.cancel()
       else if (pathname === PHONE_ENVIRONMENT_REFRESH_PATH) await this.refresh()
+      else if (pathname === PHONE_ENVIRONMENT_ANDROID_PREPARE_PATH) {
+        const body = await readJsonBody(req)
+        if (!record(body) || body.licenseAccepted !== true) {
+          throw new PhoneEnvironmentError(
+            'PHONE_ANDROID_LICENSE_REQUIRED',
+            'Android SDK preparation requires explicit license acceptance',
+          )
+        }
+        await this.prepareAndroid({ licenseAccepted: true })
+      } else if (pathname === PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH) await this.cancelAndroid()
+      else if (pathname === PHONE_ENVIRONMENT_ANDROID_REFRESH_PATH) await this.refreshAndroid()
+      else if (pathname === PHONE_ENVIRONMENT_ANDROID_START_PATH) await this.startAndroid()
       else {
         writeJson(res, 404, { error: { code: 'not-found', message: 'unknown phone environment path' } })
         return
@@ -393,11 +619,32 @@ export class PhoneEnvironment extends Service {
       writeJson(res, 200, this.current)
     } catch (error) {
       const failure = environmentError(error)
-      writeJson(res, failure.code === 'PHONE_ENVIRONMENT_BUSY' ? 409 : 502, {
+      writeJson(res, failure.code === 'PHONE_ENVIRONMENT_BUSY' || failure.code === 'PHONE_ANDROID_BUSY' ? 409 : 502, {
         error: { code: failure.code, message: failure.message },
       })
     }
   }
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  for await (const raw of req) {
+    const chunk = Buffer.from(raw)
+    bytes += chunk.byteLength
+    if (bytes > 4_096) throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_REQUEST', 'request body exceeds 4096 bytes')
+    chunks.push(chunk)
+  }
+  if (bytes === 0) return undefined
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+  } catch (error) {
+    throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_REQUEST', 'request body is not valid JSON', { cause: error })
+  }
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function downloadingState(totalBytes: number, receivedBytes: number): PhoneRuntimeState {
@@ -424,6 +671,14 @@ function environmentError(error: unknown): PhoneEnvironmentError {
     : new PhoneEnvironmentError(
       'PHONE_ENVIRONMENT_ACTIVATION', error instanceof Error ? error.message : String(error), { cause: error },
     )
+}
+
+function isCancellation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  const code = (error as { readonly code?: unknown }).code
+  return code === 'PHONE_ANDROID_ABORTED'
+    || code === 'PHONE_ENVIRONMENT_ABORTED'
+    || code === 'PHONE_ENVIRONMENT_DISPOSED'
 }
 
 function sameSnapshot(previous: PhoneEnvironmentSnapshot, next: PhoneEnvironmentSnapshot): boolean {

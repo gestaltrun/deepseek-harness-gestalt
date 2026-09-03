@@ -7,7 +7,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { childEnv } from '@deepseek-ai/dsh-subprocess'
 
 /** Stderr bytes retained for failure diagnostics. */
 const STDERR_TAIL_BYTES = 4096
@@ -72,15 +72,19 @@ export class MobilecliServerProcess {
 
   /**
    * Spawn `mobilecli server start --listen 127.0.0.1:<port>`.
-   * @param options - Absolute executable path and the validated loopback port.
+   * @param options - Absolute executable path, validated loopback port, and environment owned by the selected runtime.
    */
-  constructor(options: { readonly executablePath: string; readonly port: number }) {
+  constructor(options: {
+    readonly executablePath: string
+    readonly port: number
+    readonly environment?: Readonly<Record<string, string>>
+  }) {
     this.exitSettlement = Promise.withResolvers<ServerExit>()
     this.child = spawn(
       options.executablePath,
       ['server', 'start', '--listen', `127.0.0.1:${String(options.port)}`],
       {
-        env: scrubbedParentEnv(),
+        env: childEnv(options.environment),
         stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,
       },

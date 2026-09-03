@@ -159,20 +159,14 @@ interface PrimaryPictureIdentity {
   readonly picOrderCntLsb: number
 }
 
+const HIGH_PROFILE_IDS: ReadonlySet<number> = new Set([
+  100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135,
+])
+
 function parseSps(nal: Uint8Array): SequenceParameterSet {
   const reader = new RbspReader(rbspOf(nal), 'SPS')
-  const profile = reader.bits(8)
-  reader.bits(8)
-  reader.bits(8)
-  const id = reader.ue()
-  if ([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135].includes(profile)) {
-    const chromaFormat = reader.ue()
-    if (chromaFormat > 2) throw new Error(`phone H264 SPS uses unsupported chroma_format_idc ${String(chromaFormat)}`)
-    reader.ue()
-    reader.ue()
-    reader.bit()
-    if (reader.bit() === 1) throw new Error('phone H264 SPS uses unsupported scaling matrices')
-  }
+  const { profile, id } = readSpsIdentity(reader)
+  readHighProfileFields(reader, profile)
   const log2MaxFrameNum = reader.ue() + 4
   const picOrderCntType = reader.ue()
   let log2MaxPicOrderCntLsb = 0
@@ -188,12 +182,24 @@ function parseSps(nal: Uint8Array): SequenceParameterSet {
   reader.ue()
   reader.ue()
   if (reader.bit() !== 1) throw new Error('phone H264 SPS uses unsupported interlaced pictures')
-  return {
-    id,
-    log2MaxFrameNum,
-    picOrderCntType,
-    log2MaxPicOrderCntLsb,
-  }
+  return { id, log2MaxFrameNum, picOrderCntType, log2MaxPicOrderCntLsb }
+}
+
+function readSpsIdentity(reader: RbspReader): { readonly profile: number; readonly id: number } {
+  const profile = reader.bits(8)
+  reader.bits(8)
+  reader.bits(8)
+  return { profile, id: reader.ue() }
+}
+
+function readHighProfileFields(reader: RbspReader, profile: number): void {
+  if (!HIGH_PROFILE_IDS.has(profile)) return
+  const chromaFormat = reader.ue()
+  if (chromaFormat > 2) throw new Error(`phone H264 SPS uses unsupported chroma_format_idc ${String(chromaFormat)}`)
+  reader.ue()
+  reader.ue()
+  reader.bit()
+  if (reader.bit() === 1) throw new Error('phone H264 SPS uses unsupported scaling matrices')
 }
 
 function parsePps(nal: Uint8Array): PictureParameterSet {

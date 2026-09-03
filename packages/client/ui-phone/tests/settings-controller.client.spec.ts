@@ -156,6 +156,10 @@ describe('PhoneSettingsCardController', () => {
       refresh: async () => {},
       prepare: async () => {},
       cancel: async () => {},
+      prepareAndroid: async () => {},
+      cancelAndroid: async () => {},
+      refreshAndroid: async () => {},
+      startAndroid: async () => {},
       ensureDetected: () => {},
       subscribe: (listener) => {
         runtimeListeners.add(listener)
@@ -183,11 +187,19 @@ describe('PhoneSettingsCardController', () => {
     const refresh = vi.fn(async () => { throw new Error('refresh failed') })
     const prepare = vi.fn(async () => { throw new Error('prepare failed') })
     const cancel = vi.fn(async () => { throw new Error('cancel failed') })
+    const prepareAndroid = vi.fn(async () => { throw new Error('Android prepare failed') })
+    const cancelAndroid = vi.fn(async () => { throw new Error('Android cancel failed') })
+    const refreshAndroid = vi.fn(async () => { throw new Error('Android refresh failed') })
+    const startAndroid = vi.fn(async () => { throw new Error('Android start failed') })
     const runtime: PhoneRuntimeSource = {
       getSnapshot: () => runtimeSnapshot,
       refresh,
       prepare,
       cancel,
+      prepareAndroid,
+      cancelAndroid,
+      refreshAndroid,
+      startAndroid,
       ensureDetected: vi.fn(),
       subscribe: (listener) => {
         runtimeListeners.add(listener)
@@ -213,10 +225,18 @@ describe('PhoneSettingsCardController', () => {
     face.prepareRuntime()
     face.cancelRuntime()
     face.refreshRuntime()
+    face.prepareAndroid()
+    face.cancelAndroid()
+    face.refreshAndroid()
+    face.startAndroid()
     await flush()
     expect(prepare).toHaveBeenCalledOnce()
     expect(cancel).toHaveBeenCalledOnce()
     expect(refresh).toHaveBeenCalledOnce()
+    expect(prepareAndroid).toHaveBeenCalledOnce()
+    expect(cancelAndroid).toHaveBeenCalledOnce()
+    expect(refreshAndroid).toHaveBeenCalledOnce()
+    expect(startAndroid).toHaveBeenCalledOnce()
     controller.dispose()
   })
 

@@ -9,7 +9,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { childEnv } from '@deepseek-ai/dsh-subprocess'
 import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import { realDeviceIssueError } from './classify.ts'
 import { PhoneDevicesError } from './errors.ts'
@@ -37,6 +37,8 @@ export interface MobilecliAgentRunOptions {
   readonly signal: AbortSignal | undefined
   /** Validated ceiling bounding the child run, in milliseconds. */
   readonly timeoutMs: number
+  /** Non-sensitive runtime environment selected with the executable generation. */
+  readonly environment?: Readonly<Record<string, string>>
 }
 
 /**
@@ -60,7 +62,7 @@ export async function runMobilecliAgent(options: MobilecliAgentRunOptions): Prom
   const budget = deadline(options.signal, options.timeoutMs, label)
   return await new Promise<MobilecliAgentAnswer>((resolveRun, rejectRun) => {
     const child = spawn(options.executablePath, [...options.args], {
-      env: scrubbedParentEnv(),
+      env: childEnv(options.environment),
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })

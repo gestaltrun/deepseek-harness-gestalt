@@ -4,7 +4,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 760px;
+  max-width: 980px;
   color: var(--dsw-alias-label-primary);
 }
 
@@ -18,15 +18,4 @@
   margin: 0;
   font-size: 13px;
   color: var(--dsw-alias-label-tertiary);
-}
-
-.platformNotice {
-  display: flex;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-subtle);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
 }

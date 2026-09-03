@@ -7,6 +7,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PhoneSettingsCard } from './PhoneSettingsCard.tsx'
 import { PhoneRuntimeBar } from './PhoneRuntimeBar.tsx'
+import { PhonePlatformCards } from './PhonePlatformCards.tsx'
 import type { PhoneSettingsCardFace } from './phone-settings-controller.ts'
 import css from './PhoneSettingsSection.module.css'
 
@@ -33,12 +34,15 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
         onCancel={props.cancelRuntime}
         onRefresh={props.refreshRuntime}
       />
-      {state.platforms.ios.kind === 'unsupported' && (
-        <p className={css.platformNotice} data-phone-platform-ios="unsupported">
-          <strong>iOS</strong>
-          <span>{props.t('iosUnsupported')}</span>
-        </p>
-      )}
+      <PhonePlatformCards
+        android={state.platforms.android}
+        ios={state.platforms.ios}
+        iosUnsupportedMessage={props.t('iosUnsupported')}
+        onPrepareAndroid={props.prepareAndroid}
+        onCancelAndroid={props.cancelAndroid}
+        onRefreshAndroid={props.refreshAndroid}
+        onStartAndroid={props.startAndroid}
+      />
       <PhoneSettingsCard
         enabled={state.enabled}
         view={state.view}

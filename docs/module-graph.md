@@ -263,6 +263,7 @@ flowchart TD
   end
   subgraph group_phone["packages/phone"]
     pkg_phone_environment["phone-environment"]
+    pkg_phone_environment_android["phone-environment-android"]
     pkg_phone_runtime["phone-runtime"]
     pkg_phone_stream["phone-stream"]
     pkg_tool_phone["tool-phone"]
@@ -519,6 +520,11 @@ flowchart TD
   pkg_lsp --> pkg_brand
   pkg_lsp --> pkg_invariants
   pkg_lsp --> pkg_llm
+  pkg_phone_environment_android --> pkg_home_paths
+  pkg_phone_environment_android --> pkg_invariants
+  pkg_phone_environment_android --> pkg_phone_environment
+  pkg_phone_environment_android --> pkg_phone_runtime
+  pkg_phone_environment_android --> pkg_subprocess
   pkg_noise_channel --> pkg_invariants
   pkg_noise_channel --> pkg_remote_access
   pkg_noise_channel --> pkg_remote_protocol
@@ -1720,6 +1726,7 @@ flowchart TD
 | [`web`](../packages/web/web) | `web` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`authorization`](../packages/credentials/authorization) | `credentials` | [`credentials`](../packages/credentials/credentials), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`lsp`](../packages/lsp/lsp) | `lsp` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`phone-environment-android`](../packages/phone/phone-environment-android) | `phone` | [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`phone-environment`](../packages/phone/phone-environment), [`phone-runtime`](../packages/phone/phone-runtime), [`subprocess`](../packages/subprocess/subprocess) |
 | [`noise-channel`](../packages/platform/noise-channel) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-client`](../packages/platform/remote-access-client) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-http`](../packages/platform/remote-access-http) | `platform` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |

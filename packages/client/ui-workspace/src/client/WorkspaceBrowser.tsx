@@ -1276,7 +1276,9 @@ export function WorkspaceBrowser({
                 t={t}
                 onSettingsRequest={(workspaceId, title) => {
                   const path = workspaces.find(item => item.workspaceId === workspaceId)?.path
-                  setSettingsTarget({ workspaceId, title, ...(path === undefined ? {} : { path }) })
+                  setSettingsTarget(path === undefined
+                    ? { workspaceId, title }
+                    : { workspaceId, title, path })
                 }}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })
@@ -1295,7 +1297,7 @@ export function WorkspaceBrowser({
         <WorkspaceSettingsModal
           workspaceId={settingsTarget.workspaceId}
           workspaceTitle={settingsTarget.title}
-          workspacePath={settingsTarget.path}
+          {...(settingsTarget.path === undefined ? {} : { workspacePath: settingsTarget.path })}
           gateway={projectMembership}
           onClose={() => { setSettingsTarget(null) }}
           t={t}

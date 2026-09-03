@@ -62,7 +62,20 @@ const MEMBERSHIP_ERROR_CODES = new Set<string>(MEMBERSHIP_FAILURE_CODES)
 export function membershipUserMessage(reason: unknown, t: SettingsTranslate): string {
   const text = reason instanceof Error ? reason.message : String(reason)
   const code = membershipFailureCode(text)
-  if (code !== undefined && MEMBERSHIP_ERROR_CODES.has(code)) return t(`error.${code}`)
+  if (code !== undefined && MEMBERSHIP_ERROR_CODES.has(code)) {
+    switch (code) {
+      case 'INVITATION_NOT_PENDING': return t('error.INVITATION_NOT_PENDING')
+      case 'INVITATION_NOT_FOUND': return t('error.INVITATION_NOT_FOUND')
+      case 'ROLE_REQUIRED': return t('error.ROLE_REQUIRED')
+      case 'INVALID_LINK': return t('error.INVALID_LINK')
+      case 'DUPLICATE_INVITEE': return t('error.DUPLICATE_INVITEE')
+      case 'PROJECT_NOT_FOUND': return t('error.PROJECT_NOT_FOUND')
+      case 'NOT_A_MEMBER': return t('error.NOT_A_MEMBER')
+      case 'LAST_OWNER': return t('error.LAST_OWNER')
+      /* v8 ignore next -- MEMBERSHIP_ERROR_CODES only contains the mapped keys. */
+      default: return t('error.generic')
+    }
+  }
   return t('error.generic')
 }
 

@@ -7,7 +7,7 @@ import {
 } from './helpers.ts'
 
 describe('Desktop phone tab live chain', () => {
-  it('renders a 390x844 H264 picture and forwards exact tap and Home io', async () => {
+  it('deduplicates devices, falls back to MJPEG, keeps H264 success, and forwards exact io', async () => {
     const startup = await assertStartupEvidence()
     await recordOwnedProcesses(startup.hostPid, true)
     await openSession()
@@ -24,6 +24,8 @@ describe('Desktop phone tab live chain', () => {
       text: document.body.innerText,
       alerts: [...document.querySelectorAll<HTMLElement>('[role="alert"]')].map(element => element.innerText),
     }))
+    expect(picker.text.match(/Pixel_6_API_35/gu)).toHaveLength(1)
+    expect(picker.text).not.toContain('duplicate upstream row')
     await writeArtifact('phone-picker.json', picker)
     expect(picker.text).toContain('真机未授权调试')
     await saveWindowEvidence('phone-picker-window')
@@ -35,10 +37,10 @@ describe('Desktop phone tab live chain', () => {
 
     const screen = browser.$('div[role="application"]')
     await screen.waitForExist({ timeout: 30_000 })
-    await expect(browser.$('[aria-label="当前画面编码 H264 · 30 fps"]')).toBeExisting()
-    const live = browser.$('canvas[aria-label="Pixel_6_API_35 实时画面"]')
+    await expect(browser.$('[aria-label="当前画面编码 MJPEG"]')).toBeExisting()
+    const live = browser.$('img[alt="Pixel_6_API_35 实时画面"]')
     await live.waitForExist({ timeout: 30_000 })
-    const lastPicture = await waitForDecodedPicture('Pixel_6_API_35')
+    const lastPicture = await waitForMjpegPicture('Pixel_6_API_35')
     const transport = await browser.execute(async () => {
       const resource = performance.getEntriesByType('resource').find((entry) => {
         const url = new URL(entry.name)
@@ -48,6 +50,7 @@ describe('Desktop phone tab live chain', () => {
       const url = new URL(resource.name)
       const response = await fetch(url)
       const body = new Uint8Array(await response.arrayBuffer())
+      const text = new TextDecoder().decode(body)
       return {
         path: url.pathname,
         status: response.status,
@@ -55,26 +58,28 @@ describe('Desktop phone tab live chain', () => {
         bytes: body.length,
         annexB: body.length >= 4 && body[0] === 0 && body[1] === 0
           && (body[2] === 1 || (body[2] === 0 && body[3] === 1)),
+        upstreamError: text === 'Error: Error 0x80001001',
       }
     })
     await writeArtifact('h264-transport.json', transport)
     const visibility = await browser.execute(() => ({
-      canvasPresent: document.querySelector('canvas[aria-label="Pixel_6_API_35 实时画面"]') !== null,
+      mjpegPresent: document.querySelector('img[alt="Pixel_6_API_35 实时画面"]') !== null,
       text: document.body.innerText,
     }))
-    await writeArtifact('h264-visibility.json', { lastPicture, ...visibility })
-    await saveWindowEvidence('phone-h264-visibility-window')
-    expect(transport).toMatchObject({ status: 200, contentType: 'video/h264', annexB: true })
+    await writeArtifact('mjpeg-fallback-visibility.json', { lastPicture, ...visibility })
+    await saveWindowEvidence('phone-mjpeg-fallback-visibility-window')
+    expect(transport).toMatchObject({
+      status: 200, contentType: 'video/h264', annexB: false, upstreamError: true,
+    })
     expect(transport?.bytes ?? 0).toBeGreaterThan(0)
     expect(lastPicture?.width ?? 0).toBe(390)
     expect(lastPicture?.height ?? 0).toBe(844)
-    expect(lastPicture?.nonTransparentPixels ?? 0).toBeGreaterThan(0)
     expect(lastPicture?.display).toBe('block')
     expect(lastPicture?.visibility).toBe('visible')
     expect(lastPicture?.opacity).toBe(1)
     expect(lastPicture.renderedWidth).toBeGreaterThan(0)
     expect(lastPicture.renderedHeight).toBeGreaterThan(0)
-    await saveWindowEvidence('phone-live-h264-window')
+    await saveWindowEvidence('phone-live-mjpeg-fallback-window')
 
     await clickSurfaceButton('切换设备：Pixel_6_API_35')
     const menuItems = await browser.$$('[role="menu"] [role="menuitem"]').getElements()
@@ -88,12 +93,14 @@ describe('Desktop phone tab live chain', () => {
     await browser.$('button[aria-label="切换设备：iPhone 16"]').waitForExist({ timeout: 30_000 })
     expect(await phoneTabTitles()).toEqual(['手机·iPhone 16'])
     await waitForDecodedPicture('iPhone 16')
+    await expect(browser.$('[aria-label="当前画面编码 H264 · 30 fps"]')).toBeExisting()
     await saveWindowEvidence('phone-iphone-window')
     await clickSurfaceButton('切换设备：iPhone 16')
     await clickSurfaceButton('Pixel_6_API_35切换')
     await browser.$('button[aria-label="切换设备：Pixel_6_API_35"]').waitForExist({ timeout: 30_000 })
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
-    await waitForDecodedPicture('Pixel_6_API_35')
+    await waitForMjpegPicture('Pixel_6_API_35')
+    await expect(browser.$('[aria-label="当前画面编码 MJPEG"]')).toBeExisting()
     await saveWindowEvidence('phone-pixel-return-window')
 
     const captureResources = await browser.execute(() => performance.getEntriesByType('resource')
@@ -102,23 +109,31 @@ describe('Desktop phone tab live chain', () => {
       .map(url => ({ path: url.pathname })))
     await writeArtifact('phone-capture-resources.json', captureResources)
     expect(captureResources.length).toBeGreaterThan(0)
-    expect(captureResources.every(resource => resource.path.endsWith('/h264'))).toBe(true)
-    expect(captureResources.some(resource => resource.path.endsWith('/mjpeg'))).toBe(false)
+    expect(captureResources.some(resource => resource.path.endsWith('/h264'))).toBe(true)
+    expect(captureResources.some(resource => resource.path.endsWith('/mjpeg'))).toBe(true)
+    const captureCounters = await fakeCounters()
+    expect(captureCounters.captures.slice(0, 2)).toEqual([
+      { deviceId: 'emulator-5554', format: 'avc' },
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+    ])
+    expect(captureCounters.captures).toContainEqual({ deviceId: 'iPhone-16', format: 'avc' })
 
     const beforeTap = await fakeCounters()
     await browser.execute(() => {
       const target = document.querySelector<HTMLDivElement>('div[role="application"]')
-      const canvas = target?.querySelector<HTMLCanvasElement>('canvas')
-      if (target === null || target === undefined || canvas === null || canvas === undefined) {
-        throw new Error('phone surface and canvas are required')
+      const surface = target?.querySelector<HTMLCanvasElement | HTMLImageElement>('canvas, img')
+      if (target === null || target === undefined || surface === null || surface === undefined) {
+        throw new Error('phone surface is required')
       }
       target.addEventListener('pointerdown', (event) => {
         const rect = target.getBoundingClientRect()
         const u = (event.clientX - rect.left) / rect.width
         const v = (event.clientY - rect.top) / rect.height
+        const width = surface instanceof HTMLImageElement ? surface.naturalWidth : surface.width
+        const height = surface instanceof HTMLImageElement ? surface.naturalHeight : surface.height
         Object.assign(window, {
           __DSH_PHONE_E2E_POINTER__: {
-            u, v, x: Math.round(u * canvas.width), y: Math.round(v * canvas.height),
+            u, v, x: Math.round(u * width), y: Math.round(v * height),
           },
         })
       }, { capture: true, once: true })
@@ -162,6 +177,35 @@ async function waitForDecodedPicture(label: string): Promise<NonNullable<Awaited
   }, { timeout: 10_000, interval: 250, timeoutMsg: `${label} did not paint a decoded 390x844 picture` })
   if (picture === undefined) throw new Error(`${label} decoded picture disappeared after readiness`)
   return picture
+}
+
+async function waitForMjpegPicture(label: string): Promise<NonNullable<Awaited<ReturnType<typeof readMjpegPicture>>>> {
+  let picture: Awaited<ReturnType<typeof readMjpegPicture>>
+  await browser.waitUntil(async () => {
+    picture = await readMjpegPicture(label)
+    return picture?.width === 390 && picture.height === 844
+      && picture.renderedWidth > 0 && picture.renderedHeight > 0
+  }, { timeout: 10_000, interval: 250, timeoutMsg: `${label} did not render a 390x844 MJPEG picture` })
+  if (picture === undefined) throw new Error(`${label} MJPEG picture disappeared after readiness`)
+  return picture
+}
+
+async function readMjpegPicture(label: string) {
+  return await browser.execute((name: string) => {
+    const image = document.querySelector<HTMLImageElement>(`img[alt="${name} 实时画面"]`)
+    if (image === null) return undefined
+    const style = getComputedStyle(image)
+    const rect = image.getBoundingClientRect()
+    return {
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      renderedWidth: rect.width,
+      renderedHeight: rect.height,
+      display: style.display,
+      visibility: style.visibility,
+      opacity: Number(style.opacity),
+    }
+  }, label)
 }
 
 async function readPicture(label: string) {

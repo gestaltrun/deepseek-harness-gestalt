@@ -132,6 +132,7 @@ async function stageFake() {
       listEnvelope: true,
       captureEnvelope: true,
       streamFrameCount: 8,
+      h264FailureDeviceIds: ['emulator-5554'],
       ownerToken,
     }))
     return { root, executable, ownerToken }

@@ -13,6 +13,7 @@ interface FakeIoRecord {
 export interface FakeCounters {
   readonly requests: number
   readonly io: readonly FakeIoRecord[]
+  readonly captures: ReadonlyArray<{ readonly deviceId: string; readonly format: string }>
 }
 
 interface StartupEvidence {
@@ -178,15 +179,16 @@ export async function assertPhoneDevicesSettingsSection(): Promise<void> {
 export async function fakeCounters(): Promise<FakeCounters> {
   const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/counters`)
   const record = await response.json() as Partial<FakeCounters>
-  if (typeof record.requests !== 'number' || !Number.isSafeInteger(record.requests) || !Array.isArray(record.io)) {
+  if (typeof record.requests !== 'number' || !Number.isSafeInteger(record.requests)
+    || !Array.isArray(record.io) || !Array.isArray(record.captures)) {
     throw new Error(`invalid fakemobilecli counters: ${JSON.stringify(record)}`)
   }
-  return { requests: record.requests, io: record.io }
+  return { requests: record.requests, io: record.io, captures: record.captures }
 }
 
 /** Wait until the external fake records the requested state. */
 export async function waitForFakeIo(match: (counters: FakeCounters) => boolean): Promise<FakeCounters> {
-  let last: FakeCounters = { requests: 0, io: [] }
+  let last: FakeCounters = { requests: 0, io: [], captures: [] }
   await browser.waitUntil(async () => {
     last = await fakeCounters()
     return match(last)

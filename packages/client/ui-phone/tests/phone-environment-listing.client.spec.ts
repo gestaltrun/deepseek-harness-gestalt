@@ -117,6 +117,28 @@ describe('createListingPhoneEnvironmentSource', () => {
     expect(MOBILECLI_MISSING_ERROR.command).toBeUndefined()
   })
 
+  it('keeps no-device recovery when runtime is ready and listing reports PHONE_UNRESOLVED', async () => {
+    const listing = new FakeListingSource()
+    listing.scriptNext(Promise.reject(new PhoneStreamHttpError(
+      502,
+      'PHONE_UNRESOLVED',
+      'phone-runtime: cannot resolve the mobilecli executable.\n  npm install -g mobilecli@latest',
+    )))
+    const source = createListingPhoneEnvironmentSource(listing, {
+      runtimeReady: () => true,
+    })
+    await source.redetect()
+    expect(source.getView()).toEqual({
+      kind: 'errors',
+      errors: [{
+        kind: 'no-devices',
+        title: '当前没有可用设备',
+        detail: '上方 Android / iOS 分栏显示本机可准备的模拟器环境；USB 真机完成授权后也会出现在这里。',
+        nextAction: '重新检测',
+      }],
+    })
+  })
+
   it('notifies subscribers when a pull settles', async () => {
     const listing = new FakeListingSource()
     listing.scriptNext(listingOf([ANDROID_EMULATOR]))

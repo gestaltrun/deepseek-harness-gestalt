@@ -59,8 +59,12 @@ export const PHONE_ENVIRONMENT_IOS_REFRESH_PATH = '/phone/environment/ios/refres
 /** Start the prepared default iOS Simulator. */
 export const PHONE_ENVIRONMENT_IOS_START_PATH = '/phone/environment/ios/start'
 
-/** Maximum wait for one syntactically recognizable H264 key access unit from a booted Android device. */
+/** Maximum wait for one syntactically recognizable H264 key access unit from an online Android device. */
 const ANDROID_RUNTIME_VERIFY_MS = 15_000
+/** Interval between fleet listing polls while waiting for the prepared Android device to come online. */
+const ANDROID_ONLINE_POLL_MS = 1_000
+/** Default ceiling for mobilecli listing the prepared Android device online; a cold Emulator boot outlasts the H264 probe budget. */
+const DEFAULT_ANDROID_RUNTIME_VERIFY_TIMEOUT_MS = 180_000
 /** Maximum Android H264 bytes inspected before readiness fails. */
 const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
 /** Default maximum wait for one recognizable JPEG picture from a booted iOS Simulator. */
@@ -80,6 +84,8 @@ export interface Config {
   readonly root?: string
   /** Explicit operator executable override, ahead of managed and system discovery. */
   readonly executablePath?: string
+  /** Ceiling for mobilecli listing the prepared Android device online before the H264 probe. */
+  readonly androidRuntimeVerifyTimeoutMs?: number
   /** Ceiling for online-listing, device-agent, and recognizable-picture verification. */
   readonly iosRuntimeVerifyTimeoutMs?: number
   /** Delay after installing the Simulator device agent before the first capture. */
@@ -94,6 +100,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   root: z.string(),
   executablePath: z.string(),
+  androidRuntimeVerifyTimeoutMs: z.number().step(1).min(1).default(DEFAULT_ANDROID_RUNTIME_VERIFY_TIMEOUT_MS),
   iosRuntimeVerifyTimeoutMs: z.number().step(1).min(1).default(DEFAULT_IOS_RUNTIME_VERIFY_TIMEOUT_MS),
   iosAgentSettleDelayMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_SETTLE_DELAY_MS),
   iosAgentCaptureRetryDelayMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_CAPTURE_RETRY_DELAY_MS),
@@ -101,10 +108,10 @@ export const Config: z<Config> = z.object({
 })
 
 type ResolvedConfig = Omit<Config,
-  'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs' | 'iosAgentCaptureRetryDelayMs'
-  | 'iosAgentFirstCaptureTimeoutMs'> & Required<Pick<Config,
-  'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs' | 'iosAgentCaptureRetryDelayMs'
-  | 'iosAgentFirstCaptureTimeoutMs'>>
+  'androidRuntimeVerifyTimeoutMs' | 'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs'
+  | 'iosAgentCaptureRetryDelayMs' | 'iosAgentFirstCaptureTimeoutMs'> & Required<Pick<Config,
+  'androidRuntimeVerifyTimeoutMs' | 'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs'
+  | 'iosAgentCaptureRetryDelayMs' | 'iosAgentFirstCaptureTimeoutMs'>>
 
 function resolveConfig(config: Config): ResolvedConfig {
   return Config(config) as ResolvedConfig
@@ -126,6 +133,7 @@ export class PhoneEnvironment extends Service {
   private readonly listeners = new Set<(snapshot: PhoneEnvironmentSnapshot) => void>()
   private readonly root: string
   private readonly executableOverride: string | undefined
+  private readonly androidRuntimeVerifyTimeoutMs: number
   private readonly iosRuntimeVerifyTimeoutMs: number
   private readonly iosAgentSettleDelayMs: number
   private readonly iosAgentCaptureRetryDelayMs: number
@@ -162,6 +170,7 @@ export class PhoneEnvironment extends Service {
     const resolved = resolveConfig(config)
     this.root = resolve(resolved.root ?? join(resolveDshHome(), 'phone'))
     this.executableOverride = nonEmpty(resolved.executablePath)
+    this.androidRuntimeVerifyTimeoutMs = resolved.androidRuntimeVerifyTimeoutMs
     this.iosRuntimeVerifyTimeoutMs = resolved.iosRuntimeVerifyTimeoutMs
     this.iosAgentSettleDelayMs = resolved.iosAgentSettleDelayMs
     this.iosAgentCaptureRetryDelayMs = resolved.iosAgentCaptureRetryDelayMs
@@ -455,7 +464,8 @@ export class PhoneEnvironment extends Service {
       this.requireCurrentAndroidRuntime(state.deviceId)
       this.publishAndroid(state)
     } catch (error) {
-      await this.ctx.phoneDevices.deactivate().catch(() => {})
+      // A failed verification leaves the activated mobilecli fleet ready; only
+      // the Android Provider's owned emulator is stopped.
       await this.android?.deactivate().catch(() => {})
       const failure = environmentError(error)
       this.publishAndroid({
@@ -742,6 +752,7 @@ export class PhoneEnvironment extends Service {
   }
 
   private async verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {
+    await this.waitForAndroidDeviceOnline(id, signal)
     const controller = new AbortController()
     const timeout = setTimeout(() => {
       controller.abort(new PhoneEnvironmentError(
@@ -752,14 +763,6 @@ export class PhoneEnvironment extends Service {
     timeout.unref()
     const verificationSignal = AbortSignal.any([signal, controller.signal])
     try {
-      const devices = await this.ctx.phoneDevices.listDevices(verificationSignal)
-      const listed = devices.android.find(device => device.id === id && device.online)
-      if (listed === undefined) {
-        throw new PhoneEnvironmentError(
-          'PHONE_ANDROID_RUNTIME_VERIFY',
-          `mobilecli did not list the prepared Android device ${id} online`,
-        )
-      }
       const capture = await this.ctx.phoneDevices.startCapture({
         deviceId: id, format: 'h264', signal: verificationSignal,
       })
@@ -780,6 +783,42 @@ export class PhoneEnvironment extends Service {
       throw new PhoneEnvironmentError(
         'PHONE_ANDROID_RUNTIME_VERIFY',
         `mobilecli could not verify the Android H264 stream: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  /**
+   * Poll the fleet listing until mobilecli reports the prepared Android device online.
+   * @param id - prepared device identity from the Android Provider.
+   * @param signal - owner cancellation.
+   */
+  private async waitForAndroidDeviceOnline(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      controller.abort(new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `mobilecli did not list the prepared Android device ${id} online within ${String(this.androidRuntimeVerifyTimeoutMs)}ms`,
+      ))
+    }, this.androidRuntimeVerifyTimeoutMs)
+    timeout.unref()
+    const waitSignal = AbortSignal.any([signal, controller.signal])
+    try {
+      for (;;) {
+        const devices = await this.ctx.phoneDevices.listDevices(waitSignal)
+        const listed = devices.android.find(device => device.id === id && device.online)
+        if (listed !== undefined) return
+        await delay(ANDROID_ONLINE_POLL_MS, undefined, { signal: waitSignal, ref: false })
+      }
+    } catch (error) {
+      if (controller.signal.aborted && controller.signal.reason instanceof Error) throw controller.signal.reason
+      if (signal.aborted) throw signal.reason
+      if (error instanceof PhoneEnvironmentError && error.code === 'PHONE_ANDROID_RUNTIME_VERIFY') throw error
+      throw new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `mobilecli could not list Android devices: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error },
       )
     } finally {

@@ -1694,6 +1694,8 @@ export interface Config {
   readonly root?: string
   /** Explicit operator executable override, ahead of managed and system discovery. */
   readonly executablePath?: string
+  /** Ceiling for mobilecli listing the prepared Android device online before the H264 probe. */
+  readonly androidRuntimeVerifyTimeoutMs?: number
   /** Ceiling for online-listing, device-agent, and recognizable-picture verification. */
   readonly iosRuntimeVerifyTimeoutMs?: number
   /** Delay after installing the Simulator device agent before the first capture. */
@@ -1705,7 +1707,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-environment/src/index.ts:78`](../packages/phone/phone-environment/src/index.ts)
+来源：[`packages/phone/phone-environment/src/index.ts:82`](../packages/phone/phone-environment/src/index.ts)
 
 <a id="deepseek-aidsh-phone-environment-android"></a>
 

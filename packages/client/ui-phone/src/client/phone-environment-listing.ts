@@ -2,7 +2,9 @@
  * Settings-card environment source over the same Host fleet listing the
  * picker already consumes. A successful `GET /phone/devices` pull reaches
  * probing, platform-neutral no-device recovery, and ready; a `PHONE_UNRESOLVED` pull stays on the
- * mobilecli-missing row; any other failed first pull stays on the
+ * mobilecli-missing row only while the runtime snapshot is not ready — a ready
+ * runtime means the fleet is active, so the pull falls to no-device recovery;
+ * any other failed first pull stays on the
  * missing-service probe-failed row. After ready, the source follows later
  * listing commits and refreshes on the Host `pollIntervalMs` default so the
  * card does not wait for 「重新检测」.
@@ -12,6 +14,7 @@ import {
   type PhoneEnvironmentCheck, type PhoneEnvironmentError, type PhoneEnvironmentSource, type PhoneEnvironmentView,
   type PhoneReadyDevice,
 } from './phone-environment.ts'
+import { PhoneStreamHttpError } from './phone-stream-client.ts'
 import type { PhoneDeviceSummary, PhoneListingSnapshot, PhoneListingSource } from './registry.ts'
 
 /**
@@ -106,6 +109,16 @@ function viewFromListing(listing: PhoneListingSnapshot): PhoneEnvironmentView {
   return NO_DEVICES_VIEW
 }
 
+/** Optional Host runtime readiness face consulted when a fleet pull fails. */
+export interface ListingPhoneEnvironmentOptions {
+  /**
+   * Whether the Host runtime snapshot currently reports ready. A
+   * `PHONE_UNRESOLVED` pull may only render mobilecli-missing while this is
+   * false; a ready runtime proves the fleet is active.
+   */
+  readonly runtimeReady?: () => boolean
+}
+
 /**
  * Wrap one fleet listing source as the settings-card environment snapshot.
  * First detection still goes through {@link PhoneEnvironmentSource.redetect}
@@ -113,10 +126,12 @@ function viewFromListing(listing: PhoneListingSnapshot): PhoneEnvironmentView {
  * a 5000 ms `GET /phone/devices` poll keeps the inventory current; a failed
  * poll keeps the last committed listing.
  * @param listing - Host `GET /phone/devices` source already used by the picker.
+ * @param options - optional Host runtime readiness face.
  * @returns the environment source the Plugins-tab card injects.
  */
 export function createListingPhoneEnvironmentSource(
   listing: PhoneListingSource,
+  options: ListingPhoneEnvironmentOptions = {},
 ): PhoneEnvironmentSource {
   let phase: DetectPhase = 'idle'
   let lastError: PhoneEnvironmentError = PROBE_FAILED_ERROR
@@ -169,8 +184,15 @@ export function createListingPhoneEnvironmentSource(
       } catch (error) {
         // A refused or unreachable fleet route is the missing-service arm;
         // PHONE_UNRESOLVED is the unresolvable-binary arm with install copy.
-        lastError = environmentErrorOf(error)
-        phase = 'failed'
+        // A ready runtime snapshot proves the fleet is active, so a stale
+        // PHONE_UNRESOLVED falls to the platform-neutral no-device recovery.
+        if (options.runtimeReady?.() === true
+          && error instanceof PhoneStreamHttpError && error.code === 'PHONE_UNRESOLVED') {
+          phase = 'ready'
+        } else {
+          lastError = environmentErrorOf(error)
+          phase = 'failed'
+        }
       }
       syncPolling()
       notify()

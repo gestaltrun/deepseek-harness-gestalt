@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是注册到 `ctx.phoneEnvironment` 的 Android 平台提供方。它从 `ANDROID_HOME`、`ANDROID_SDK_ROOT`、Host 默认位置或 `sdkmanager` 路径探测兼容且可写的 Android SDK；兼容探测要求可工作的 `sdkmanager` 12+、`avdmanager` 与 `pixel_6` 设备定义，否则准备到 `$DSH_HOME/phone/android/sdk`。默认 AVD 始终位于 `$DSH_HOME/phone/android/avd`，只有 mobilecli 子进程收到两个根目录，不修改用户的 `PATH`。
+这是注册到 `ctx.phoneEnvironment` 的 Android 平台提供方。它从 `ANDROID_HOME`、`ANDROID_SDK_ROOT`、Host 默认位置或 `sdkmanager` 路径探测兼容且可写的 Android SDK；兼容探测要求可工作的 `sdkmanager` 12+、`avdmanager` 与 `pixel_6` 设备定义，否则准备到 `$DSH_HOME/phone/android/sdk`；当发现完全未命中时，提供方会从磁盘探测该托管根目录，使已准备好的安装在重新检测后保持就绪。默认 AVD 始终位于 `$DSH_HOME/phone/android/avd`，只有 mobilecli 子进程收到两个根目录，不修改用户的 `PATH`。
 
 托管命令行工具清单固定 Google build `15859902`，覆盖 macOS arm64/x64、Windows x64 与 Linux x64，并记录精确下载 URL、字节长度和 SHA-256。准备流程通过 `sdkmanager` 安装固定的 `platform-tools`、`emulator` 与 `system-images;android-35;google_apis;<Host ABI>` 包，再通过 `avdmanager` 创建 `Pixel_6_API_35_Gestalt`。Apple silicon 使用 `arm64-v8a`，受支持的 x64 Host 使用 `x86_64`。Google 没有发布所需 Host 工具链，因此 Windows 与 Linux arm64 稳定显示为不支持。
 

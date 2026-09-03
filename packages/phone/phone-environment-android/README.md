@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Android platform Provider for `ctx.phoneEnvironment`. It detects a compatible writable Android SDK from `ANDROID_HOME`, `ANDROID_SDK_ROOT`, the Host default, or the `sdkmanager` path. Reuse requires working `sdkmanager` 12+, `avdmanager`, and the `pixel_6` device definition; an obsolete or broken installation falls back to `$DSH_HOME/phone/android/sdk`. The default AVD always lives under `$DSH_HOME/phone/android/avd`, and child-only environment entries expose both roots to mobilecli without changing the user's `PATH`.
+Android platform Provider for `ctx.phoneEnvironment`. It detects a compatible writable Android SDK from `ANDROID_HOME`, `ANDROID_SDK_ROOT`, the Host default, or the `sdkmanager` path. Reuse requires working `sdkmanager` 12+, `avdmanager`, and the `pixel_6` device definition; an obsolete or broken installation falls back to `$DSH_HOME/phone/android/sdk`, and when discovery misses entirely the Provider probes that managed root from disk so redetecting a prepared installation stays ready. The default AVD always lives under `$DSH_HOME/phone/android/avd`, and child-only environment entries expose both roots to mobilecli without changing the user's `PATH`.
 
 The managed command-line tools manifest pins Google build `15859902` for macOS arm64/x64, Windows x64, and Linux x64 with the exact download URL, byte length, and SHA-256 digest. Preparation installs the fixed `platform-tools`, `emulator`, and `system-images;android-35;google_apis;<host ABI>` package ids through `sdkmanager`, then creates `Pixel_6_API_35_Gestalt` through `avdmanager`. Apple silicon uses `arm64-v8a`; supported x64 Hosts use `x86_64`. Windows and Linux arm64 report unsupported because Google does not publish the required Host toolchains.
 

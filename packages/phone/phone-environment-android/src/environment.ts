@@ -109,7 +109,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   private async refreshOwned(signal?: AbortSignal): Promise<PhoneAndroidState> {
     this.publish({ kind: 'checking' })
     const root = await this.discoverExistingSdkRoot(signal)
-    const probe = root === undefined ? undefined : await this.probe(root, 'existing')
+    const probe = root === undefined ? await this.probeManagedSdkRoot() : await this.probe(root, 'existing')
     const planned = planAndroidEnvironment(
       this.platform,
       this.architecture,
@@ -408,6 +408,16 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       if (signal?.aborted === true) throw error
       return false
     }
+  }
+
+  /**
+   * Probe the private managed SDK root after Host environment and PATH discovery miss.
+   * @returns disk facts for the managed root, or undefined when nothing was ever prepared there.
+   */
+  private async probeManagedSdkRoot(): Promise<AndroidInstallationProbe | undefined> {
+    const root = join(this.options.phoneRoot, 'android', 'sdk')
+    if (!await exists(root)) return undefined
+    return await this.probe(root, 'managed')
   }
 
   private async probe(sdkRoot: string, sdkSource: 'existing' | 'managed'): Promise<AndroidInstallationProbe> {

@@ -318,6 +318,7 @@ function runningIosProvider(options: { readonly initialRunning?: boolean; readon
 describe('PhoneEnvironment', () => {
   it('resolves and validates the named iOS readiness durations', () => {
     expect(Config({})).toMatchObject({
+      androidRuntimeVerifyTimeoutMs: 180_000,
       iosRuntimeVerifyTimeoutMs: 25_000,
       iosAgentSettleDelayMs: 2_000,
       iosAgentCaptureRetryDelayMs: 1_000,
@@ -325,6 +326,7 @@ describe('PhoneEnvironment', () => {
     })
 
     for (const field of [
+      'androidRuntimeVerifyTimeoutMs',
       'iosRuntimeVerifyTimeoutMs',
       'iosAgentSettleDelayMs',
       'iosAgentCaptureRetryDelayMs',
@@ -1175,7 +1177,7 @@ describe('PhoneEnvironment', () => {
       activateExecutable: async () => {},
       deactivate: deactivateRuntime,
       listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
-    }, { executablePath: path })
+    }, { executablePath: path, androidRuntimeVerifyTimeoutMs: 1 })
     let state: PhoneAndroidState = { kind: 'missing', plan: ANDROID_PLAN }
     const listeners = new Set<(value: PhoneAndroidState) => void>()
     const deactivateAndroid = vi.fn(async () => {})
@@ -1205,8 +1207,9 @@ describe('PhoneEnvironment', () => {
     })
     expect(response.status).toBe(502)
     expect(await response.json()).toMatchObject({ error: { code: 'PHONE_ANDROID_RUNTIME_VERIFY' } })
-    expect(deactivateRuntime).toHaveBeenCalled()
+    expect(deactivateRuntime).not.toHaveBeenCalled()
     expect(deactivateAndroid).toHaveBeenCalled()
+    expect(service.snapshot().runtime).toMatchObject({ kind: 'ready' })
     expect(service.snapshot().platforms.android).toMatchObject({
       kind: 'failed', code: 'PHONE_ANDROID_RUNTIME_VERIFY', retryable: true,
     })
@@ -1494,7 +1497,7 @@ describe('PhoneEnvironment', () => {
     const { service } = await mountEnvironment(context, {
       deactivate: async () => { throw new Error('fleet stop failed') },
       listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
-    }, { executablePath: path })
+    }, { executablePath: path, androidRuntimeVerifyTimeoutMs: 1 })
     await service.setEnabled(true)
     const fixture = runningAndroidProvider()
     fixture.provider.deactivate = async () => { throw new Error('provider stop failed') }
@@ -1538,6 +1541,39 @@ describe('PhoneEnvironment', () => {
     expect(cancel).toHaveBeenCalled()
   })
 
+  it('waits until mobilecli lists the prepared Android device online before capturing H264', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    vi.useFakeTimers()
+    let listings = 0
+    const startCapture = vi.fn(async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(H264_PICTURE) } }),
+    }))
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => {
+        listings += 1
+        if (listings < 3) return { android: [], ios: { simulators: [], reals: [] } }
+        return {
+          android: [{
+            id: deviceId('emulator-5554'), name: 'Pixel', kind: 'emulator', platform: 'android',
+            state: 'online', online: true,
+          }],
+          ios: { simulators: [], reals: [] },
+        }
+      },
+      startCapture,
+    }, { executablePath: path })
+    const verified = internals(service).verifyAndroidRuntime(
+      deviceId('emulator-5554'), new AbortController().signal,
+    )
+    await vi.advanceTimersByTimeAsync(3_000)
+    await expect(verified).resolves.toBeUndefined()
+    expect(listings).toBeGreaterThanOrEqual(3)
+    expect(startCapture).toHaveBeenCalledOnce()
+  })
+
   it('maps verification timeout, owner cancellation, and unexpected failures', async () => {
     vi.useFakeTimers()
     const path = await executable()
@@ -1553,7 +1589,7 @@ describe('PhoneEnvironment', () => {
     const timed = internals(service).verifyAndroidRuntime(
       deviceId('emulator-5554'), new AbortController().signal,
     ).catch((error: unknown) => error)
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(180_000)
     expect(await timed).toMatchObject({ code: 'PHONE_ANDROID_RUNTIME_VERIFY' })
 
     const owner = new AbortController()

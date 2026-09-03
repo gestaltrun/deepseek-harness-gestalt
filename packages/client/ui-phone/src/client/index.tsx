@@ -155,11 +155,14 @@ export function apply(ctx: ClientContext, config: Config): void {
       if (deviceId !== undefined) runSettingsDeviceOpen(openListedDevice(deviceId))
     }), 'ui-phone: Desktop settings device open')
   }
+  const runtime = createHttpPhoneRuntimeSource()
   const card = new PhoneSettingsCardController(
     scope,
-    createListingPhoneEnvironmentSource(listing),
+    createListingPhoneEnvironmentSource(listing, {
+      runtimeReady: () => runtime.getSnapshot().runtime.kind === 'ready',
+    }),
     globalThis.navigator.clipboard,
-    createHttpPhoneRuntimeSource(),
+    runtime,
     openFromSettings,
   )
   ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings section')

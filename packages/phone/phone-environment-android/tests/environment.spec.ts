@@ -445,6 +445,41 @@ describe('Android environment manager', () => {
     expect(environment.PATH).toMatch(/;C:\\Windows\\System32$/u)
   })
 
+  it('redetects a prepared managed SDK under phoneRoot/android/sdk after env and PATH miss', async () => {
+    const root = await tempRoot()
+    const sdkRoot = join(root, 'android', 'sdk')
+    const avdHome = join(root, 'android', 'avd')
+    for (const path of [
+      join(sdkRoot, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'),
+      join(sdkRoot, 'cmdline-tools', 'latest', 'bin', 'avdmanager'),
+      join(sdkRoot, 'platform-tools', 'adb'),
+      join(sdkRoot, 'emulator', 'emulator'),
+      join(sdkRoot, 'system-images', 'android-35', 'google_apis', 'arm64-v8a', 'package.xml'),
+      join(avdHome, 'Pixel_6_API_35_Gestalt.avd', 'config.ini'),
+    ]) {
+      await mkdir(join(path, '..'), { recursive: true })
+      await writeFile(path, path.endsWith('config.ini')
+        ? 'image.sysdir.1=system-images/android-35/google_apis/arm64-v8a/\n'
+        : 'fixture\n')
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { PATH: '' }, homeDirectory: join(root, 'home'),
+      runner: new FixtureRunner(root), freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    expect(manager.snapshot()).toMatchObject({
+      kind: 'ready', running: false,
+      plan: {
+        sdkSource: 'managed',
+        sdkRoot,
+        components: {
+          commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true,
+        },
+      },
+    })
+  })
+
   it.each([
     ['obsolete', commandResult({ stdout: '11.0\n' })],
     ['broken', commandResult({ exitCode: 1, stderr: 'Java runtime failed' })],

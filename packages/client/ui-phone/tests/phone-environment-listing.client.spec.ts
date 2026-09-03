@@ -1,6 +1,6 @@
 /**
  * Listing-backed settings-card source: a mounted phoneDevices fleet
- * (GET /phone/devices) reaches probing, both wizards, and ready; only a
+ * (GET /phone/devices) reaches probing, no-device recovery, and ready; only a
  * failed first pull falls back to the missing-service probe-failed row.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -70,22 +70,24 @@ describe('createListingPhoneEnvironmentSource', () => {
     expect(view.devices[3]?.meta).toBe('未授权 · UDID-9')
   })
 
-  it('renders the Android wizard when a successful pull finds no Android emulator', async () => {
-    vi.stubGlobal('navigator', { platform: 'Win32' })
+  it('renders platform-neutral recovery without reading browser platform', async () => {
+    const navigator = Object.defineProperty({}, 'platform', {
+      get() { throw new Error('browser platform must not decide Host capability') },
+    })
+    vi.stubGlobal('navigator', navigator)
     const listing = new FakeListingSource()
     listing.scriptNext(listingOf())
     const source = createListingPhoneEnvironmentSource(listing)
     await source.redetect()
-    expect(source.getView()).toEqual({ kind: 'android-wizard', platformToolsInstalled: true })
-  })
-
-  it('renders the iOS wizard when a successful pull finds no simulator on macOS', async () => {
-    vi.stubGlobal('navigator', { platform: 'MacIntel' })
-    const listing = new FakeListingSource()
-    listing.scriptNext(listingOf())
-    const source = createListingPhoneEnvironmentSource(listing)
-    await source.redetect()
-    expect(source.getView()).toEqual({ kind: 'ios-wizard' })
+    expect(source.getView()).toEqual({
+      kind: 'errors',
+      errors: [{
+        kind: 'no-devices',
+        title: '当前没有可用设备',
+        detail: '上方 Android / iOS 分栏显示本机可准备的模拟器环境；USB 真机完成授权后也会出现在这里。',
+        nextAction: '重新检测',
+      }],
+    })
   })
 
   it('falls back to probe-failed when the first fleet pull fails', async () => {
@@ -106,7 +108,8 @@ describe('createListingPhoneEnvironmentSource', () => {
     const source = createListingPhoneEnvironmentSource(listing)
     await source.redetect()
     expect(source.getView()).toEqual({ kind: 'errors', errors: [MOBILECLI_MISSING_ERROR] })
-    expect(MOBILECLI_MISSING_ERROR.command).toBe('npm install -g mobilecli@latest')
+    expect(MOBILECLI_MISSING_ERROR).toMatchObject({ nextAction: '准备 mobilecli' })
+    expect(MOBILECLI_MISSING_ERROR.command).toBeUndefined()
   })
 
   it('notifies subscribers when a pull settles', async () => {

@@ -1,5 +1,7 @@
 /** Bounded Host-side syntax recognition of one Annex-B H264 key access unit. */
 
+import { inspectRecognizable, readUntilRecognizable, type RecognizableStreamInspection } from './recognizable-stream.ts'
+
 interface StartCode {
   readonly index: number
   readonly length: 3 | 4
@@ -29,28 +31,33 @@ export async function verifyAnnexBH264KeyAccessUnit(
   if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1) {
     throw new TypeError('H264 verification maxBytes must be a positive safe integer')
   }
-  const reader = body.getReader()
   const probe = new AnnexBKeyAccessUnitProbe(options.maxBytes)
-  let rejectAbort: (reason?: unknown) => void
-  const halt = (): void => { rejectAbort(options.signal.reason) }
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject
-    if (options.signal.aborted) halt()
-    else options.signal.addEventListener('abort', halt, { once: true })
-  })
-  try {
-    for (;;) {
-      const chunk = await Promise.race([reader.read(), aborted])
-      if (chunk.done) {
-        if (probe.finish()) return
-        throw new Error('phone H264 stream ended before a complete SPS, PPS, and IDR key access unit')
-      }
-      if (probe.push(chunk.value)) return
-    }
-  } finally {
-    options.signal.removeEventListener('abort', halt)
-    await reader.cancel().catch(() => {})
+  await readUntilRecognizable(
+    body, options.signal, probe,
+    'phone H264 stream ended before a complete SPS, PPS, and IDR key access unit',
+  )
+}
+
+/**
+ * Inspect an Annex-B stream through one key access unit while preserving every
+ * byte for playback or renderer-side failure handling.
+ * @param body - Live upstream H264 response body.
+ * @param options - Cancellation and byte ceiling.
+ * @returns recognition facts plus a replayable continuation.
+ */
+export async function inspectAnnexBH264KeyAccessUnit(
+  body: ReadableStream<Uint8Array>,
+  options: H264KeyAccessUnitVerificationOptions,
+): Promise<RecognizableStreamInspection> {
+  if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1) {
+    throw new TypeError('H264 verification maxBytes must be a positive safe integer')
   }
+  return await inspectRecognizable(
+    body,
+    options.signal,
+    new AnnexBKeyAccessUnitProbe(options.maxBytes),
+    'phone H264 stream ended before a complete SPS, PPS, and IDR key access unit',
+  )
 }
 
 class AnnexBKeyAccessUnitProbe {
@@ -78,6 +85,7 @@ class AnnexBKeyAccessUnitProbe {
       return following
     })
     this.pending = this.pending.slice(last.index)
+    if (this.phase === 'idr') this.acceptLiveTrailingIdr()
     return this.phase === 'complete'
   }
 
@@ -113,6 +121,20 @@ class AnnexBKeyAccessUnitProbe {
     } else if (this.phase === 'idr' && type === 5) {
       parseIdr(nal, this.sequence as SequenceParameterSet, this.picture as PictureParameterSet)
       this.phase = 'complete'
+    }
+  }
+
+  private acceptLiveTrailingIdr(): void {
+    const start = startCodesIn(this.pending)[0] as StartCode
+    const nal = this.pending.subarray(start.index + start.length)
+    const header = nal[0]
+    if (header === undefined || (header & 0x1f) !== 5) return
+    try {
+      parseIdr(nal, this.sequence as SequenceParameterSet, this.picture as PictureParameterSet)
+      this.phase = 'complete'
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('truncated IDR')) return
+      throw error
     }
   }
 }

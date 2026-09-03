@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { chmod, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { MobilecliServerProcess, retainTail } from '../src/server-process.ts'
 
 import { stageFake } from './helpers.ts'
@@ -12,7 +14,7 @@ afterEach(async () => {
 })
 
 describe('MobilecliServerProcess', () => {
-  it('spawns the fake, reaches liveness, and stops to exit quiescence on SIGTERM', async () => {
+  it.skipIf(process.platform === 'win32')('spawns the fake, reaches liveness, and stops to exit quiescence on SIGTERM', async () => {
     const fake = await stageFake()
     fakes.push(fake)
     await fake.claim()
@@ -41,7 +43,39 @@ describe('MobilecliServerProcess', () => {
     expect(proc.alive).toBe(false)
   }, 15_000)
 
-  it.runIf(process.platform === 'win32')('reaches quiescence when Windows terminates the native launcher on SIGTERM', async () => {
+  it.skipIf(process.platform === 'win32')('stops the official-style Node launcher and its native descendant', async () => {
+    const fake = await stageFake()
+    fakes.push(fake)
+    await fake.claim()
+    const fixtureDir = dirname(fake.executablePath)
+    const launcher = join(fixtureDir, 'mobilecli-launcher')
+    const descendantPidFile = join(fixtureDir, 'descendant.pid')
+    await writeFile(launcher, `#!/usr/bin/env node
+const { spawn } = require('node:child_process')
+const { writeFileSync } = require('node:fs')
+const child = spawn(${JSON.stringify(fake.executablePath)}, process.argv.slice(2), { stdio: 'inherit' })
+writeFileSync(${JSON.stringify(descendantPidFile)}, String(child.pid))
+child.on('close', code => { process.exit(code ?? 1) })
+`)
+    await chmod(launcher, 0o755)
+    const proc = new MobilecliServerProcess({ executablePath: launcher, port: fake.port })
+    processes.push(proc)
+    await fake.awaitOnline()
+    const descendantPid = Number(await readFile(descendantPidFile, 'utf8'))
+
+    try {
+      await proc.stop()
+      await expect(fetch(fake.baseUrl)).rejects.toThrow()
+    } finally {
+      try {
+        process.kill(descendantPid, 'SIGKILL')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+  }, 15_000)
+
+  it.runIf(process.platform === 'win32')('reaches quiescence after Windows forcibly terminates the native launcher', async () => {
     const fake = await stageFake({ ignoreTerm: true })
     fakes.push(fake)
     await fake.claim()
@@ -50,7 +84,7 @@ describe('MobilecliServerProcess', () => {
     await fake.awaitOnline()
     await proc.stop()
     const exit = await proc.exit
-    expect(exit.signal).toBe('SIGTERM')
+    expect(exit).toEqual({ code: 1 })
     expect(proc.alive).toBe(false)
   }, 15_000)
 

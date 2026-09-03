@@ -62,6 +62,46 @@ const FAILURE_COPY: Record<PhoneStreamFailureKind, {
     title: '无法连接设备画面',
     detail: () => '画面服务暂时不可达；请确认宿主服务正在运行。',
   },
+  'agent-missing': {
+    tone: 'warn',
+    title: '设备控制代理未安装',
+    detail: () => '安装后设备才能稳定接收点击、拖拽与文本操作；Android 会通过 USB 安装，iPhone 会使用 Host 当前配置的签名描述文件。',
+  },
+  'agent-install-restricted': {
+    tone: 'warn',
+    title: '设备拒绝安装控制代理',
+    detail: () => '请保持手机解锁，并在开发者选项中允许「USB 安装」与「USB 调试（安全设置）」后重试。系统确认必须在手机上完成。',
+  },
+  'agent-profile-required': {
+    tone: 'warn',
+    title: '未配置真机签名描述文件',
+    detail: () => '请打开配置文件，为 phone-runtime 选择可用的 provisioningProfilePath，再返回此处安装；产品不会自动创建签名 identity 或 provisioning profile。',
+  },
+  'device-locked': {
+    tone: 'warn',
+    title: 'iPhone 已锁定',
+    detail: () => '请解锁 iPhone、保持屏幕常亮，再重新连接。产品不会代替你输入设备密码。',
+  },
+  'cert-untrusted': {
+    tone: 'warn',
+    title: '设备控制代理未受信任',
+    detail: () => '请在 iPhone 上启用 Developer Mode，并按系统提示信任开发者证书；签名 identity、provisioning 与信任仍需你在 Xcode 和设备上完成。',
+  },
+  'profile-expired': {
+    tone: 'warn',
+    title: '签名描述文件已过期',
+    detail: () => '请先在配置中选择当前可用的 provisioning profile，再重新安装设备控制代理；免费团队签名通常需要定期续签。',
+  },
+  'tunnel-failed': {
+    tone: 'err',
+    title: '真机连接通道未建立',
+    detail: () => '请保持 iPhone 解锁、已信任此 Mac 且数据线连接稳定，然后重新连接。',
+  },
+  'device-unplugged': {
+    tone: 'err',
+    title: 'iPhone 已断开连接',
+    detail: () => '请重新连接数据线并确认设备重新出现在清单中。',
+  },
 }
 
 /** Pointer travel (px) below which a press still counts as a tap. */
@@ -81,16 +121,33 @@ interface ReconnectAlertProps {
   readonly title: string
   readonly detail: string
   readonly onReconnect: () => void
+  readonly agentRecovery?: 'install' | 'reinstall'
+  readonly onRecoverAgent?: (force: boolean) => void
 }
 
-function ReconnectAlert({ tone, title, detail, onReconnect }: ReconnectAlertProps): ReactNode {
+function ReconnectAlert({
+  tone, title, detail, onReconnect, agentRecovery, onRecoverAgent,
+}: ReconnectAlertProps): ReactNode {
   return (
     <div role="alert" className={`${css.alertCard} ${tone === 'warn' ? css.alertWarn : css.alertErr}`}>
       <p className={css.alertTitle}>{title}</p>
       <p className={css.alertDetail}>{detail}</p>
       <div className={css.alertActions}>
-        <button type="button" className={shared.minibtnPrimary} onClick={onReconnect}>
-          重新连接
+        {agentRecovery !== undefined && onRecoverAgent !== undefined && (
+          <button
+            type="button"
+            className={shared.minibtnPrimary}
+            onClick={() => { onRecoverAgent(agentRecovery === 'reinstall') }}
+          >
+            {agentRecovery === 'install' ? '安装设备控制代理' : '重新安装设备控制代理'}
+          </button>
+        )}
+        <button
+          type="button"
+          className={agentRecovery === undefined ? shared.minibtnPrimary : shared.minibtnSecondary}
+          onClick={onReconnect}
+        >
+          {agentRecovery === undefined ? '重新连接' : '重新检测'}
         </button>
       </div>
     </div>
@@ -126,13 +183,28 @@ export function PhoneConnectedView({
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
   const drag = useRef<{
+    readonly pointerId: number
+    readonly target: HTMLDivElement
     readonly origin: { u: number; v: number; clientX: number; clientY: number }
-    last: { u: number; v: number }
+    readonly trail: Array<{ u: number; v: number }>
     dragging: boolean
   } | undefined>(undefined)
 
+  const releaseDrag = useCallback((): void => {
+    const state = drag.current
+    drag.current = undefined
+    if (state?.target.hasPointerCapture(state.pointerId) === true) {
+      state.target.releasePointerCapture(state.pointerId)
+    }
+  }, [])
+
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
-  useEffect(() => () => { controller.dispose() }, [controller])
+  useEffect(() => () => {
+    releaseDrag()
+    controller.dispose()
+  }, [controller, releaseDrag])
+  const liveStreamUrl = phase.kind === 'live' ? phase.streamUrl : undefined
+  useEffect(() => () => { releaseDrag() }, [liveStreamUrl, releaseDrag, visible])
   useEffect(() => {
     // The dropdown needs the fleet even when this tab restored from layout
     // without the picker having pulled first; a failed pull keeps the
@@ -150,32 +222,45 @@ export function PhoneConnectedView({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const point = normalize(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = {
+      pointerId: event.pointerId,
+      target: event.currentTarget,
       origin: { ...point, clientX: event.clientX, clientY: event.clientY },
-      last: point,
+      trail: [],
       dragging: false,
     }
   }
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const state = drag.current
-    if (state === undefined) return
+    if (state === undefined || state.pointerId !== event.pointerId) return
+    state.trail.push(normalize(event))
     if (!state.dragging
       && Math.hypot(event.clientX - state.origin.clientX, event.clientY - state.origin.clientY)
         < DRAG_THRESHOLD_PX) {
       return
     }
     state.dragging = true
-    state.last = normalize(event)
   }
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const state = drag.current
+    if (state === undefined || state.pointerId !== event.pointerId) return
     drag.current = undefined
-    if (state === undefined) return
+    state.target.releasePointerCapture(event.pointerId)
     const point = normalize(event)
-    if (state.dragging) controller.swipe([state.origin, point])
+    const dragging = state.dragging
+      || Math.hypot(event.clientX - state.origin.clientX, event.clientY - state.origin.clientY) >= DRAG_THRESHOLD_PX
+    if (dragging) controller.swipe([state.origin, ...state.trail, point])
     else controller.tap(point.u, point.v)
+  }
+
+  const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const state = drag.current
+    if (state === undefined || state.pointerId !== event.pointerId) return
+    drag.current = undefined
+    state.target.releasePointerCapture(event.pointerId)
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -243,6 +328,7 @@ export function PhoneConnectedView({
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
           onKeyDown={onKeyDown}
         >
           {surface}
@@ -253,13 +339,15 @@ export function PhoneConnectedView({
         </div>
       )
     }
-    if (phase.kind === 'connecting' || phase.kind === 'reconnecting') {
+    if (phase.kind === 'connecting' || phase.kind === 'reconnecting'
+      || phase.kind === 'checking-agent' || phase.kind === 'repairing-agent') {
       return (
         <div className={css.statusNote}>
           <span aria-hidden="true" className={css.spinner} />
-          {phase.kind === 'connecting'
-            ? '正在连接画面…'
-            : `画面重连中（第 ${phase.attempt} 次尝试）…`}
+          {phase.kind === 'connecting' ? '正在连接画面…'
+            : phase.kind === 'reconnecting' ? `画面重连中（第 ${phase.attempt} 次尝试）…`
+              : phase.kind === 'checking-agent' ? '正在检测设备控制代理…'
+                : phase.force ? '正在重新安装设备控制代理…' : '正在安装设备控制代理…'}
         </div>
       )
     }
@@ -271,6 +359,8 @@ export function PhoneConnectedView({
           title={copy.title}
           detail={copy.detail(name)}
           onReconnect={() => { controller.connect() }}
+          {...(phase.failure.agentRecovery === undefined ? {} : { agentRecovery: phase.failure.agentRecovery })}
+          onRecoverAgent={(force) => { controller.recoverAgent(force) }}
         />
       )
     }

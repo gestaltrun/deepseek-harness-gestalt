@@ -8,14 +8,31 @@ import { dirname, join } from 'node:path'
 import { zipSync } from 'fflate'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { deviceId, type DeviceId } from '@deepseek-ai/dsh-phone-runtime'
+import { buildGradientJpeg } from '../../phone-runtime/tests/fixtures/u3-visible-frames.ts'
 import PhoneEnvironment, {
+  Config,
   PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH, PHONE_ENVIRONMENT_ANDROID_START_PATH,
-  PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
+  PHONE_ENVIRONMENT_IOS_CANCEL_PATH, PHONE_ENVIRONMENT_IOS_PREPARE_PATH, PHONE_ENVIRONMENT_IOS_REFRESH_PATH,
+  PHONE_ENVIRONMENT_IOS_START_PATH, PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
 } from '../src/index.ts'
-import type { AndroidEnvironmentProvider, AndroidPreparationPlan, PhoneAndroidState } from '../src/index.ts'
-import type { MobilecliReleaseAsset } from '../src/types.ts'
+import type {
+  AndroidEnvironmentProvider, AndroidPreparationPlan, IosEnvironmentProvider,
+  IosPreparationPlan, PhoneAndroidState, PhoneIosState,
+  MobilecliReleaseAsset,
+} from '../src/index.ts'
+
+let managedAssetOverride: MobilecliReleaseAsset | undefined
+let systemRuntimeDisabled = false
 
 class TestPhoneEnvironment extends PhoneEnvironment {
+  protected override selectManagedAsset(platform: string, architecture: string): MobilecliReleaseAsset {
+    return managedAssetOverride ?? super.selectManagedAsset(platform, architecture)
+  }
+
+  protected override resolveSystemRuntime(): string | undefined {
+    return systemRuntimeDisabled ? undefined : super.resolveSystemRuntime()
+  }
+
   protected override readonly probeRuntimeVersion = async (executablePath: string): Promise<string> => {
     try {
       await access(executablePath)
@@ -62,6 +79,13 @@ const H264_PICTURE = Uint8Array.from([
   0, 0, 0, 1, 0x65, 0x88, 0x84, 0x86, 0x80, 0xff, 0xff, 0xff, 0xff,
   0, 0, 1, 0x09, 0xf0,
 ])
+const IOS_ID = deviceId('8294A429-4C99-411F-A46D-0AD9499B7FDD')
+const IOS_PLAN: IosPreparationPlan = {
+  developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+  simulatorName: 'DSH Gestalt iPhone',
+  runtime: { identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', available: true },
+  deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+}
 const servers: Server[] = []
 
 async function rawGet(url: string, host: string): Promise<{ status: number; body: unknown }> {
@@ -83,6 +107,9 @@ async function rawGet(url: string, host: string): Promise<{ status: number; body
 
 afterEach(async () => {
   vi.useRealTimers()
+  managedAssetOverride = undefined
+  systemRuntimeDisabled = false
+  vi.unstubAllGlobals()
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(servers.splice(0).map(server => new Promise<void>((resolveClose) => {
     server.close(() => { resolveClose() })
@@ -112,7 +139,7 @@ function isolateSystemMobilecliSearch(): void {
 async function mountEnvironment(
   context: Context,
   phoneDevices: object = {},
-  config: { root?: string; executablePath?: string } = {},
+  config: Config = {},
   Plugin: typeof PhoneEnvironment = TestPhoneEnvironment,
 ) {
   const fleet = {
@@ -120,6 +147,8 @@ async function mountEnvironment(
     onReadinessChanged: () => () => {},
     activateExecutable: async () => {},
     deactivate: async () => {},
+    agentStatus: async () => ({ installed: true }),
+    installAgent: async () => ({ installed: true, reinstalled: false }),
     ...phoneDevices,
   }
   context.provide('phoneDevices', fleet as never)
@@ -170,7 +199,10 @@ interface ServiceInternals {
   candidateVersion: string | undefined
   refreshTask: Promise<ReturnType<PhoneEnvironment['snapshot']>> | undefined
   androidTask: Promise<void> | undefined
+  iosTask: Promise<void> | undefined
+  iosController: AbortController | undefined
   android: AndroidEnvironmentProvider | undefined
+  ios: IosEnvironmentProvider | undefined
   prepareAndroid(request: { licenseAccepted: true }): Promise<void>
   startAndroid(): Promise<void>
   refreshAndroid(): Promise<void>
@@ -179,6 +211,19 @@ interface ServiceInternals {
   cancelAndroid(): Promise<void>
   verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void>
   requireCurrentAndroidRuntime(id: DeviceId): void
+  prepareIos(): Promise<void>
+  startIos(): Promise<void>
+  refreshIos(): Promise<void>
+  reconcilePendingIosRuntime(signal?: AbortSignal): Promise<void>
+  activateIosRuntime(state: PhoneIosState, signal: AbortSignal): Promise<void>
+  runIosOperation(
+    operation: (provider: IosEnvironmentProvider, signal: AbortSignal) => Promise<void>,
+    signal?: AbortSignal,
+  ): Promise<void>
+  cancelIos(): Promise<void>
+  verifyNewIosAgentPicture(id: DeviceId, signal: AbortSignal): Promise<void>
+  verifyIosRuntime(id: DeviceId, signal: AbortSignal): Promise<void>
+  requireCurrentIosRuntime(id: DeviceId): void
 }
 
 function internals(service: PhoneEnvironment): ServiceInternals {
@@ -242,7 +287,798 @@ async function rawRequest(
   })
 }
 
+function runningIosProvider(options: { readonly initialRunning?: boolean; readonly preserveRunningOnDeactivate?: boolean } = {}) {
+  let state: PhoneIosState = {
+    kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: options.initialRunning === true,
+  }
+  const listeners = new Set<(value: PhoneIosState) => void>()
+  const emit = (next: PhoneIosState): void => {
+    state = next
+    for (const listener of listeners) listener(state)
+  }
+  const deactivate = vi.fn(async () => {
+    if (options.preserveRunningOnDeactivate !== true) {
+      emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false })
+    }
+  })
+  const provider: IosEnvironmentProvider = {
+    snapshot: () => state,
+    refresh: async () => state,
+    prepare: async () => state,
+    start: async () => {
+      emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true })
+      return state
+    },
+    cancel: vi.fn(), deactivate,
+    onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+  }
+  return { provider, deactivate, emit }
+}
+
 describe('PhoneEnvironment', () => {
+  it('resolves and validates the named iOS readiness durations', () => {
+    expect(Config({})).toMatchObject({
+      iosRuntimeVerifyTimeoutMs: 25_000,
+      iosAgentSettleDelayMs: 2_000,
+      iosAgentCaptureRetryDelayMs: 1_000,
+      iosAgentFirstCaptureTimeoutMs: 5_000,
+    })
+
+    for (const field of [
+      'iosRuntimeVerifyTimeoutMs',
+      'iosAgentSettleDelayMs',
+      'iosAgentCaptureRetryDelayMs',
+      'iosAgentFirstCaptureTimeoutMs',
+    ] as const) {
+      expect(() => Config({ [field]: 0 })).toThrow()
+      expect(() => Config({ [field]: 1.5 })).toThrow()
+    }
+  })
+
+  it('marks active iOS preparation without marking passive refresh checking', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service, origin } = await mountEnvironment(context)
+    let state: PhoneIosState = { kind: 'no-simulator', plan: IOS_PLAN }
+    const listeners = new Set<(value: PhoneIosState) => void>()
+    let refreshes = 0
+    const waitForCancellation = async (signal: AbortSignal): Promise<PhoneIosState> => {
+      state = { kind: 'checking' }
+      for (const listener of listeners) listener(state)
+      return await new Promise<PhoneIosState>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error('iOS operation cancelled'))
+        }, { once: true })
+      })
+    }
+    const provider: IosEnvironmentProvider = {
+      snapshot: () => state,
+      refresh: async (signal = new AbortController().signal) => {
+        refreshes += 1
+        return refreshes === 1 ? state : await waitForCancellation(signal)
+      },
+      prepare: async (signal = new AbortController().signal) => await waitForCancellation(signal),
+      start: async () => state,
+      cancel: () => {},
+      deactivate: async () => {},
+      onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    }
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+
+    const preparation = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_PREPARE_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toEqual({ kind: 'checking', operation: 'prepare' })
+    })
+    expect((await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })).status).toBe(200)
+    expect((await preparation).status).toBe(502)
+    expect(service.snapshot().platforms.ios).toEqual({ kind: 'checking' })
+
+    const refresh = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_REFRESH_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toEqual({ kind: 'checking' })
+    })
+    expect((await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })).status).toBe(200)
+    expect((await refresh).status).toBe(502)
+  })
+
+  it('publishes iOS readiness only after mobilecli lists the Simulator and yields a JPEG picture', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let picture!: ReadableStreamDefaultController<Uint8Array>
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({ start(controller) { picture = controller } }),
+    }))
+    const installAgent = vi.fn(async (_id: DeviceId, _options: { signal: AbortSignal }) => ({
+      installed: true, reinstalled: false,
+    }))
+    const agentStatus = vi.fn(async () => ({ installed: false }))
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      agentStatus,
+      installAgent,
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture,
+    }, {
+      executablePath: path,
+      iosAgentSettleDelayMs: 1,
+      iosAgentCaptureRetryDelayMs: 1,
+    })
+    const { provider } = runningIosProvider()
+    service.registerIosEnvironment(provider)
+    await service.setEnabled(true)
+
+    const starting = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() }, { timeout: 3_000 })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    picture.enqueue(buildGradientJpeg(4))
+    expect((await starting).status).toBe(200)
+    expect(agentStatus).toHaveBeenCalledWith(IOS_ID, expect.any(AbortSignal))
+    expect(installAgent.mock.calls[0]?.[0]).toBe(IOS_ID)
+    expect(installAgent.mock.calls[0]?.[1].signal).toBeInstanceOf(AbortSignal)
+    expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it('uses configured settle and retry delays for an early-ended first Simulator capture', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let captureAttempt = 0
+    const startCapture = vi.fn(async () => {
+      captureAttempt += 1
+      return {
+        contentType: 'multipart/x-mixed-replace; boundary=frame',
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            if (captureAttempt === 1) controller.close()
+            else controller.enqueue(buildGradientJpeg(8))
+          },
+        }),
+      }
+    })
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      agentStatus: async () => ({ installed: false }),
+      installAgent: async () => ({ installed: true, reinstalled: false }),
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture,
+    }, {
+      executablePath: path,
+      iosAgentSettleDelayMs: 1,
+      iosAgentCaptureRetryDelayMs: 1,
+    })
+    service.registerIosEnvironment(runningIosProvider().provider)
+    await service.setEnabled(true)
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
+
+    expect(response.status).toBe(200)
+    expect(startCapture).toHaveBeenCalledTimes(2)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  }, 5_000)
+
+  it('uses the configured first-capture timeout before retrying a hung Simulator capture', async () => {
+    const context = new Context()
+    contexts.push(context)
+    let captureAttempt = 0
+    const { service } = await mountEnvironment(context, {
+      agentStatus: async () => ({ installed: false }),
+      installAgent: async () => ({ installed: true, reinstalled: false }),
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture: async (request: { signal: AbortSignal }) => {
+        captureAttempt += 1
+        return {
+          contentType: 'multipart/x-mixed-replace; boundary=frame',
+          body: captureAttempt === 1
+            ? new ReadableStream<Uint8Array>({
+              start(controller) {
+                request.signal.addEventListener('abort', () => { controller.close() }, { once: true })
+              },
+            })
+            : new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(9)) } }),
+        }
+      },
+    }, {
+      iosRuntimeVerifyTimeoutMs: 100,
+      iosAgentSettleDelayMs: 1,
+      iosAgentFirstCaptureTimeoutMs: 7,
+      iosAgentCaptureRetryDelayMs: 1,
+    })
+
+    await expect(internals(service).verifyIosRuntime(IOS_ID, new AbortController().signal)).resolves.toBeUndefined()
+    expect(captureAttempt).toBe(2)
+  }, 5_000)
+
+  it('does not retry first-session verification after its owner cancels', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async (request: { signal: AbortSignal }) => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          request.signal.addEventListener('abort', () => {
+            controller.error(request.signal.reason)
+          }, { once: true })
+        },
+      }),
+    }))
+    const { service } = await mountEnvironment(context, { startCapture })
+    const controller = new AbortController()
+    const verification = internals(service).verifyNewIosAgentPicture(IOS_ID, controller.signal)
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalledOnce() })
+
+    const cancellation = new Error('owner cancelled first-session verification')
+    controller.abort(cancellation)
+
+    await expect(verification).rejects.toBe(cancellation)
+    expect(startCapture).toHaveBeenCalledOnce()
+  })
+
+  it('rejects iOS readiness when the Simulator stream is not a recognizable picture', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const deactivateRuntime = vi.fn(async () => {})
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {}, deactivate: deactivateRuntime,
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture: async () => ({
+        contentType: 'multipart/x-mixed-replace; boundary=frame',
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('Error')); controller.close() } }),
+      }),
+    }, { executablePath: path })
+    const { provider, deactivate } = runningIosProvider()
+    service.registerIosEnvironment(provider)
+    await service.setEnabled(true)
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
+    expect(response.status).toBe(502)
+    expect(await response.json()).toMatchObject({ error: { code: 'PHONE_IOS_RUNTIME_VERIFY' } })
+    expect(deactivateRuntime).toHaveBeenCalled()
+    expect(deactivate).toHaveBeenCalled()
+    expect(service.snapshot().platforms.ios).toMatchObject({
+      kind: 'failed', code: 'PHONE_IOS_RUNTIME_VERIFY', retryable: true,
+    })
+  })
+
+  it('reconciles a running Simulator discovered during Provider registration through picture verification', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(5)) } }),
+    }))
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    const { provider } = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+
+    service.registerIosEnvironment(provider)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    await service.setEnabled(true)
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+    })
+    expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
+  })
+
+  it('verifies a Simulator that becomes running before manual iOS refresh', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'image/jpeg',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(6)) } }),
+    }))
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    const { provider, emit } = runningIosProvider()
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => { expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: false }) })
+    await service.setEnabled(true)
+    emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_REFRESH_PATH}`, { method: 'POST' })
+    expect(response.status).toBe(200)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+    expect(startCapture).toHaveBeenCalledOnce()
+  })
+
+  it('makes a cancelled running Provider verification retryable without promoting it', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let attempt = 0
+    const startCapture = vi.fn(async () => {
+      attempt += 1
+      return {
+        contentType: 'multipart/x-mixed-replace; boundary=frame',
+        body: attempt === 1
+          ? new ReadableStream<Uint8Array>()
+          : new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(6)) } }),
+      }
+    })
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    await service.setEnabled(true)
+    const { provider } = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalledOnce() })
+
+    const cancelled = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })
+    expect(cancelled.status).toBe(200)
+    expect(service.snapshot().platforms.ios).toMatchObject({
+      kind: 'failed', code: 'PHONE_IOS_ABORTED', retryable: true,
+    })
+    expect(service.snapshot().platforms.ios).not.toMatchObject({ kind: 'ready', running: true })
+
+    const retried = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_REFRESH_PATH}`, { method: 'POST' })
+    expect(retried.status).toBe(200)
+    expect(startCapture).toHaveBeenCalledTimes(2)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it('rejects duplicate iOS Providers and ignores a stale registration disposer', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const first = runningIosProvider()
+    const unregisterFirst = service.registerIosEnvironment(first.provider)
+    expect(() => service.registerIosEnvironment(runningIosProvider().provider)).toThrow(/already registered/u)
+    await Promise.resolve()
+    unregisterFirst()
+    const second = runningIosProvider()
+    service.registerIosEnvironment(second.provider)
+    unregisterFirst()
+    second.emit({ kind: 'xcode-missing', message: 'install Xcode' })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'xcode-missing' })
+  })
+
+  it('prepares iOS while disabled and rejects start without an active runtime', async () => {
+    isolateSystemMobilecliSearch()
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-isolated-'))
+    roots.push(root)
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {}, { root })
+    const fixture = runningIosProvider()
+    const prepare = vi.spyOn(fixture.provider, 'prepare')
+    const start = vi.spyOn(fixture.provider, 'start')
+    service.registerIosEnvironment(fixture.provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+    await internals(service).prepareIos()
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(start).not.toHaveBeenCalled()
+    await expect(internals(service).startIos()).rejects.toMatchObject({ code: 'PHONE_IOS_RUNTIME_REQUIRED' })
+  })
+
+  it('prepares and verifies iOS through the trusted HTTP operation', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture: async () => ({
+        contentType: 'image/jpeg',
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(8)) } }),
+      }),
+    }, { executablePath: path })
+    const fixture = runningIosProvider()
+    const start = vi.spyOn(fixture.provider, 'start')
+    service.registerIosEnvironment(fixture.provider)
+    await service.setEnabled(true)
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_PREPARE_PATH}`, { method: 'POST' })
+    expect(response.status).toBe(200)
+    expect(start).toHaveBeenCalledOnce()
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it('uses a Provider preparation that already started the Simulator', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture: async () => ({
+        contentType: 'image/jpeg',
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(9)) } }),
+      }),
+    }, { executablePath: path })
+    const fixture = runningIosProvider()
+    fixture.provider.prepare = async () => {
+      fixture.emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true })
+      return fixture.provider.snapshot()
+    }
+    const start = vi.spyOn(fixture.provider, 'start')
+    service.registerIosEnvironment(fixture.provider)
+    await service.setEnabled(true)
+    await internals(service).prepareIos()
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('covers pending iOS reconciliation terminal and ownership states', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const owned = internals(service)
+    await expect(owned.reconcilePendingIosRuntime()).resolves.toBeUndefined()
+
+    const fixture = runningIosProvider()
+    service.registerIosEnvironment(fixture.provider)
+    await vi.waitFor(() => { expect(owned.iosTask).toBeUndefined() })
+    owned.iosTask = Promise.reject(new Error('pending verification failed'))
+    await expect(owned.reconcilePendingIosRuntime()).rejects.toThrow('pending verification failed')
+    owned.iosTask = Promise.reject(new PhoneEnvironmentError('PHONE_IOS_ABORTED', 'cancelled'))
+    await expect(owned.reconcilePendingIosRuntime()).resolves.toBeUndefined()
+    owned.iosTask = undefined
+
+    owned.current = { ...owned.current, enabled: true }
+    owned.candidate = { source: 'override', executablePath: '/mobilecli' }
+    owned.candidateVersion = '1.0.5'
+    fixture.emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true })
+    owned.current = {
+      ...owned.current,
+      platforms: { ...owned.current.platforms, ios: { kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true } },
+    }
+    await expect(owned.reconcilePendingIosRuntime()).resolves.toBeUndefined()
+
+    owned.current = { ...owned.current, platforms: { ...owned.current.platforms, ios: { kind: 'deferred' } } }
+    const controller = new AbortController()
+    controller.abort(new Error('owner stopped'))
+    await expect(owned.reconcilePendingIosRuntime(controller.signal)).rejects.toThrow('owner stopped')
+  })
+
+  it('returns early for iOS states that cannot be committed as running', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const owned = internals(service)
+    const signal = new AbortController().signal
+    await owned.activateIosRuntime({ kind: 'xcode-missing', message: 'missing' }, signal)
+    owned.candidate = { source: 'override', executablePath: '/mobilecli' }
+    owned.candidateVersion = '1.0.5'
+    await owned.activateIosRuntime({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false }, signal)
+    owned.candidate = undefined
+    await owned.activateIosRuntime({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true }, signal)
+  })
+
+  it('rejects absent and concurrent iOS transactions and preserves replacement ownership', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const owned = internals(service)
+    await expect(owned.runIosOperation(async () => {})).rejects.toMatchObject({ code: 'PHONE_IOS_UNAVAILABLE' })
+    const fixture = runningIosProvider()
+    service.registerIosEnvironment(fixture.provider)
+    owned.iosTask = new Promise(() => {})
+    await expect(owned.runIosOperation(async () => {})).rejects.toMatchObject({ code: 'PHONE_IOS_BUSY' })
+    owned.iosTask = undefined
+
+    const replacementTask = Promise.resolve()
+    const replacementController = new AbortController()
+    await owned.runIosOperation(async () => {
+      await Promise.resolve()
+      owned.iosTask = replacementTask
+      owned.iosController = replacementController
+    }, new AbortController().signal)
+    expect(owned.iosTask).toBe(replacementTask)
+    expect(owned.iosController).toBe(replacementController)
+    owned.iosTask = undefined
+    owned.iosController = undefined
+  })
+
+  it('preserves iOS cancellation failures and normalizes a non-Error task rejection', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const fixture = runningIosProvider()
+    fixture.provider.deactivate = async () => { throw new Error('provider stop failed') }
+    service.registerIosEnvironment(fixture.provider)
+    const owned = internals(service)
+    owned.iosTask = Promise.reject(new Error('operation failed'))
+    await expect(owned.cancelIos()).rejects.toThrow('operation failed')
+
+    fixture.provider.deactivate = async () => {}
+    const nonErrorFailure: unknown = 'non-error cancellation failure'
+    owned.iosTask = Promise.reject(nonErrorFailure) // oxlint-disable-line typescript/prefer-promise-reject-errors
+    await expect(owned.cancelIos()).rejects.toMatchObject({
+      message: 'iOS environment cancellation failed with a non-Error reason',
+    })
+    owned.iosTask = undefined
+  })
+
+  it('cancels iOS safely when no Provider is registered and joins it while disabling', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, { activateExecutable: async () => {} }, { executablePath: path })
+    const owned = internals(service)
+    await expect(owned.cancelIos()).resolves.toBeUndefined()
+
+    const fixture = runningIosProvider()
+    service.registerIosEnvironment(fixture.provider)
+    await service.setEnabled(true)
+    const cancelled = Promise.reject(new PhoneEnvironmentError('PHONE_IOS_ABORTED', 'cancelled'))
+    void cancelled.catch(() => {})
+    owned.iosTask = cancelled
+    await expect(service.setEnabled(false)).resolves.toBeUndefined()
+  })
+
+  it('rejects iOS readiness when the device is absent or the capture type is not MJPEG', async () => {
+    const path = await executable()
+    const cancelled = vi.fn()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
+      startCapture: async () => ({
+        contentType: '', body: new ReadableStream<Uint8Array>({ cancel: cancelled }),
+      }),
+    }, { executablePath: path })
+    const owned = internals(service)
+    await expect(owned.verifyIosRuntime(IOS_ID, new AbortController().signal)).rejects.toMatchObject({
+      code: 'PHONE_IOS_RUNTIME_VERIFY',
+    })
+
+    context.phoneDevices.listDevices = async () => ({ android: [], ios: { simulators: [{
+      id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+    }], reals: [] } })
+    await expect(owned.verifyIosRuntime(IOS_ID, new AbortController().signal)).rejects.toThrow(/no Content-Type/u)
+    expect(cancelled).toHaveBeenCalledOnce()
+  })
+
+  it('preserves iOS verification cancellation, timeout, and non-Error upstream failures', async () => {
+    vi.useFakeTimers()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async (signal: AbortSignal) => await new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const reason: unknown = signal.reason
+          reject(reason) // oxlint-disable-line typescript/prefer-promise-reject-errors
+        }, { once: true })
+      }),
+    }, { iosRuntimeVerifyTimeoutMs: 7 })
+    const owned = internals(service)
+    const timed = owned.verifyIosRuntime(IOS_ID, new AbortController().signal)
+    const timedAssertion = expect(timed).rejects.toThrow(/within 7ms/u)
+    await vi.advanceTimersByTimeAsync(7)
+    await timedAssertion
+
+    const aborted = new AbortController()
+    aborted.abort(new Error('owner cancelled picture'))
+    context.phoneDevices.listDevices = async (signal: AbortSignal) => { signal.throwIfAborted(); throw new Error('unreachable') }
+    await expect(owned.verifyIosRuntime(IOS_ID, aborted.signal)).rejects.toThrow('owner cancelled picture')
+
+    context.phoneDevices.listDevices = async () => { throw 'upstream string failure' }
+    await expect(owned.verifyIosRuntime(IOS_ID, new AbortController().signal)).rejects.toThrow('upstream string failure')
+  })
+
+  it('rejects a readiness commit after the iOS Provider fails or revokes its running device', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    const fixture = runningIosProvider()
+    service.registerIosEnvironment(fixture.provider)
+    fixture.emit({ kind: 'failed', plan: IOS_PLAN, code: 'PROVIDER_EXIT', message: 'Simulator exited', retryable: true })
+    expect(() => { internals(service).requireCurrentIosRuntime(IOS_ID) }).toThrow('Simulator exited')
+    fixture.emit({ kind: 'ready', plan: IOS_PLAN, deviceId: deviceId('another-device'), running: true })
+    expect(() => { internals(service).requireCurrentIosRuntime(IOS_ID) }).toThrow(/revoked running device/u)
+  })
+
+  it('contains cleanup failures after iOS verification rejects', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      deactivate: async () => { throw new Error('fleet stop failed') },
+      listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
+    }, { executablePath: path })
+    await service.setEnabled(true)
+    const fixture = runningIosProvider()
+    fixture.provider.deactivate = async () => { throw new Error('provider stop failed') }
+    service.registerIosEnvironment(fixture.provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+    await expect(internals(service).activateIosRuntime({
+      kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true,
+    }, new AbortController().signal)).rejects.toMatchObject({ code: 'PHONE_IOS_RUNTIME_VERIFY' })
+  })
+
+  it('logs a failed pending iOS reconcile after managed preparation without losing mobilecli readiness', async () => {
+    isolateSystemMobilecliSearch()
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-ios-prepare-log-'))
+    roots.push(root)
+    controlledAsset = await localAsset()
+    const context = new Context()
+    contexts.push(context)
+    const report = vi.spyOn(context.logger, 'error').mockImplementation(() => {})
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
+    }, { root }, ControlledPhoneEnvironment)
+    await service.setEnabled(true)
+    const fixture = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(fixture.provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+    await expect(service.prepare()).resolves.toMatchObject({ runtime: { kind: 'ready' } })
+    expect(report).toHaveBeenCalled()
+  })
+
+  it('propagates cancellation from pending iOS reconciliation during managed preparation', async () => {
+    isolateSystemMobilecliSearch()
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-ios-prepare-cancel-'))
+    roots.push(root)
+    controlledAsset = await localAsset()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'image/jpeg', body: new ReadableStream<Uint8Array>(),
+    }))
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { root }, ControlledPhoneEnvironment)
+    await service.setEnabled(true)
+    const fixture = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(fixture.provider)
+    const preparation = service.prepare()
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() }, { timeout: 3_000 })
+    service.cancel()
+    await expect(preparation).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ABORTED' })
+  })
+
+  it('logs a failed pending iOS reconcile after full runtime detection', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const report = vi.spyOn(context.logger, 'error').mockImplementation(() => {})
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
+    }, { executablePath: path })
+    await service.setEnabled(true)
+    const fixture = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(fixture.provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+    await service.refresh()
+    expect(report).toHaveBeenCalled()
+  })
+
+  it('propagates cancellation from pending iOS reconciliation during runtime detection', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'image/jpeg', body: new ReadableStream<Uint8Array>(),
+    }))
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    const fixture = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(fixture.provider)
+    await vi.waitFor(() => { expect(internals(service).iosTask).toBeUndefined() })
+    const owned = internals(service)
+    owned.current = { ...owned.current, enabled: true }
+    const refreshing = service.refresh()
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() })
+    service.cancel()
+    await expect(refreshing).resolves.toMatchObject({ runtime: { kind: 'failed' } })
+  })
+
+  it('joins non-cancellation iOS task and Provider failures during teardown', async () => {
+    const context = new Context()
+    const { service, fiber } = await mountEnvironment(context)
+    const fixture = runningIosProvider()
+    const deactivate = vi.fn(async () => { throw new Error('provider teardown failed') })
+    fixture.provider.deactivate = deactivate
+    service.registerIosEnvironment(fixture.provider)
+    const failed = Promise.reject(new Error('iOS task failed'))
+    void failed.catch(() => {})
+    internals(service).iosTask = failed
+    await expect(fiber.dispose()).resolves.toBeUndefined()
+    expect(deactivate).toHaveBeenCalled()
+    await context.fiber.dispose()
+  })
+
+  it.skipIf(process.platform === 'win32')('reconciles pending booted iOS after one-click mobilecli preparation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-managed-order-'))
+    roots.push(root)
+    const executableBytes = new TextEncoder().encode('#!/bin/sh\necho "mobilecli version 1.0.5"\n')
+    const archive = zipSync({ mobilecli: executableBytes })
+    managedAssetOverride = {
+      platform: process.platform === 'darwin' ? 'darwin' : 'linux',
+      architecture: process.arch === 'arm64' ? 'arm64' : 'x64',
+      name: 'mobilecli-1.0.5-fixture.zip',
+      url: 'https://github.com/mobile-next/mobilecli/releases/download/1.0.5/mobilecli-fixture.zip',
+      bytes: archive.byteLength,
+      sha256: createHash('sha256').update(archive).digest('hex'),
+      executable: 'mobilecli',
+    }
+    systemRuntimeDisabled = true
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(archive, {
+      status: 200, headers: { 'content-length': String(archive.byteLength) },
+    }))
+    vi.stubGlobal('fetch', fetcher)
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(7)) } }),
+    }))
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { root })
+    await service.setEnabled(true)
+    expect(service.snapshot().runtime).toMatchObject({ kind: 'missing' })
+    const { provider } = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    })
+    expect(startCapture).not.toHaveBeenCalled()
+
+    await service.prepare()
+
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(service.snapshot().runtime).toMatchObject({ kind: 'ready', source: 'managed' })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+    expect(startCapture).toHaveBeenCalledWith(expect.objectContaining({ deviceId: IOS_ID, format: 'mjpeg' }))
+  })
+
   it('discovers a compatible system mobilecli from PATH', async () => {
     const path = await executable()
     vi.stubEnv('PATH', dirname(path))

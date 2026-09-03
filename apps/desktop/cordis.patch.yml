@@ -17,6 +17,7 @@
       config:
         deferStart: true
         serverPort: !!js "Number(process.env.DSH_PHONE_SERVER_PORT || 12000)"
+        provisioningProfilePath: !!js process.env.DSH_PHONE_PROVISIONING_PROFILE
 
     - id: phone-environment
       name: '@deepseek-ai/dsh-phone-environment'
@@ -28,6 +29,9 @@
       name: '@deepseek-ai/dsh-phone-environment-android'
       config:
         root: !!js dshHomePath('phone')
+
+    - id: phone-environment-ios
+      name: '@deepseek-ai/dsh-phone-environment-ios'
 
     - id: phone-stream
       name: '@deepseek-ai/dsh-phone-stream'

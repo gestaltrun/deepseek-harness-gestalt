@@ -8,6 +8,7 @@ The phone device fleet over the external mobilecli binary: one Host-half Service
 |---|---|---|
 | [`phone-environment/`](phone-environment/README.md) | Host toolchain detection and trusted managed mobilecli preparation | `ctx.phoneEnvironment` |
 | [`phone-environment-android/`](phone-environment-android/README.md) | Android SDK, API 35 image, and default AVD preparation Provider | registers into `ctx.phoneEnvironment` |
+| [`phone-environment-ios/`](phone-environment-ios/README.md) | Xcode iOS Runtime and default iPhone Simulator preparation Provider | registers into `ctx.phoneEnvironment` |
 | [`phone-runtime/`](phone-runtime/README.md) | mobilecli Provider and Service Definition, folded | `ctx.phoneDevices` |
 | [`phone-stream/`](phone-stream/README.md) | same-origin IO WebSocket and signed MJPEG/H264 reverse-proxy | `ctx.phoneStream` |
 | [`tool-phone/`](tool-phone/README.md) | Deferred model-facing Consumer | registers on `ctx.tools` |

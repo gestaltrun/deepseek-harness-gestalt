@@ -13,12 +13,19 @@ import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
 import {
-  FakeGateway, FakeListingSource, flush, installFakeH264Playback, listingOf, ManualScheduler,
+  FakeGateway, FakeListingSource, flush, installFakeH264Playback, listingOf, ManualScheduler, SESSION_A,
 } from './phone-fakes.client.ts'
 
 let h264Runtime: ReturnType<typeof installFakeH264Playback>
 
-beforeEach(() => { h264Runtime = installFakeH264Playback() })
+beforeEach(() => {
+  h264Runtime = installFakeH264Playback()
+  Object.defineProperties(HTMLElement.prototype, {
+    hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+    setPointerCapture: { configurable: true, value: vi.fn() },
+    releasePointerCapture: { configurable: true, value: vi.fn() },
+  })
+})
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -119,6 +126,7 @@ describe('PhoneConnectedView chrome', () => {
 
     expect(screen.queryByLabelText('当前画面编码 H264 · 30 fps')).toBeNull()
     expect(screen.getByLabelText('当前画面编码 MJPEG').textContent).toContain('MJPEG')
+    expect(screen.queryByText(/decode failed/)).toBeNull()
     const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
     expect(surface).toBeInstanceOf(HTMLImageElement)
     expect(surface.getAttribute('src')).toBe('/phone/stream/emulator-5554/mjpeg?token=a')
@@ -366,21 +374,72 @@ describe('PhoneConnectedView touch and keys', () => {
     })
   })
 
-  it('sends a pointerDown/pointerUp gesture once the drag passes the threshold', async () => {
+  it('captures the pointer and sends the complete pointerDown/move/up drag path', async () => {
     const { gateway } = await withSurface()
-    fireEvent.pointerDown(frame(), { clientX: 20, clientY: 20 })
-    fireEvent.pointerMove(frame(), { clientX: 120, clientY: 220 })
-    fireEvent.pointerUp(frame(), { clientX: 130, clientY: 230 })
+    const target = frame()
+    const setPointerCapture = vi.fn()
+    const releasePointerCapture = vi.fn()
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: setPointerCapture },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 7, clientX: 20, clientY: 20 })
+    fireEvent.pointerMove(target, { pointerId: 7, clientX: 22, clientY: 22 })
+    fireEvent.pointerMove(target, { pointerId: 7, clientX: 120, clientY: 220 })
+    fireEvent.pointerMove(target, { pointerId: 7, clientX: 125, clientY: 225 })
+    fireEvent.pointerUp(target, { pointerId: 7, clientX: 130, clientY: 230 })
+    expect(setPointerCapture).toHaveBeenCalledWith(7)
+    expect(releasePointerCapture).toHaveBeenCalledWith(7)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'gesture',
       params: {
         deviceId: 'emulator-5554',
         actions: [
           { type: 'pointerDown', x: 39, y: 42 },
+          { type: 'pointerMove', x: 43, y: 46 },
+          { type: 'pointerMove', x: 234, y: 464 },
+          { type: 'pointerMove', x: 244, y: 475 },
           { type: 'pointerUp', x: 254, y: 485 },
         ],
       },
     })
+  })
+
+  it('treats a release that crosses the threshold as a drag without an intermediate move', async () => {
+    const { gateway } = await withSurface()
+    fireEvent.pointerDown(frame(), { pointerId: 10, clientX: 20, clientY: 20 })
+    fireEvent.pointerUp(frame(), { pointerId: 10, clientX: 30, clientY: 30 })
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'gesture',
+      params: {
+        deviceId: 'emulator-5554',
+        actions: [
+          { type: 'pointerDown', x: 39, y: 42 },
+          { type: 'pointerUp', x: 59, y: 63 },
+        ],
+      },
+    })
+  })
+
+  it('releases pointer capture and drops a cancelled drag', async () => {
+    const { gateway } = await withSurface()
+    const target = frame()
+    const releasePointerCapture = vi.fn()
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 8, clientX: 20, clientY: 20 })
+    fireEvent.pointerMove(target, { pointerId: 9, clientX: 120, clientY: 220 })
+    fireEvent.pointerUp(target, { pointerId: 9, clientX: 120, clientY: 220 })
+    fireEvent.pointerCancel(target, { pointerId: 9, clientX: 120, clientY: 220 })
+    expect(releasePointerCapture).not.toHaveBeenCalled()
+    fireEvent.pointerMove(target, { pointerId: 8, clientX: 120, clientY: 220 })
+    fireEvent.pointerCancel(target, { pointerId: 8, clientX: 120, clientY: 220 })
+    expect(releasePointerCapture).toHaveBeenCalledWith(8)
+    expect(gateway.lastSocket!.sent).toEqual([])
   })
 
   it('drops stray pointer events and keeps sub-threshold travel as a tap', async () => {
@@ -391,11 +450,84 @@ describe('PhoneConnectedView touch and keys', () => {
 
     fireEvent.pointerDown(frame(), { clientX: 50, clientY: 50 })
     fireEvent.pointerMove(frame(), { clientX: 53, clientY: 54 })
-    fireEvent.pointerUp(frame(), { clientX: 60, clientY: 60 })
+    fireEvent.pointerUp(frame(), { clientX: 53, clientY: 54 })
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 117, y: 127 },
+      params: { deviceId: 'emulator-5554', x: 103, y: 114 },
     })
+  })
+
+  it('drops a captured press when the tab hides or switches to another device', async () => {
+    const firstGateway = new FakeGateway()
+    const secondGateway = new FakeGateway()
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'device-a', name: 'Device A', channel: 'usb', state: 'online', online: true },
+      { id: 'device-b', name: 'Device B', channel: 'usb', state: 'online', online: true },
+    ]))
+    const view = render(
+      <PhoneConnectedView
+        serial="device-a"
+        name="Device A"
+        visible={true}
+        source={source}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway: serial === 'device-a' ? firstGateway : secondGateway,
+          deviceId: serial,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { firstGateway.lastSocket!.accept() })
+    let target = screen.getByRole('application', { name: /Device A 画面/ })
+    const releasePointerCapture = vi.fn()
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 11, clientX: 20, clientY: 20 })
+
+    view.rerender(
+      <PhoneConnectedView
+        serial="device-a" name="Device A" visible={false} source={source} onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: firstGateway, deviceId: serial })}
+      />,
+    )
+    expect(releasePointerCapture).toHaveBeenCalledWith(11)
+    view.rerender(
+      <PhoneConnectedView
+        serial="device-a" name="Device A" visible={true} source={source} onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: firstGateway, deviceId: serial })}
+      />,
+    )
+    await flush()
+    await step(() => { firstGateway.lastSocket!.accept() })
+    target = screen.getByRole('application', { name: /Device A 画面/ })
+    fireEvent.pointerUp(target, { pointerId: 11, clientX: 120, clientY: 220 })
+    expect(firstGateway.sockets.flatMap(socket => socket.sent)).toEqual([])
+
+    Object.defineProperties(target, {
+      hasPointerCapture: { configurable: true, value: vi.fn(() => true) },
+      setPointerCapture: { configurable: true, value: vi.fn() },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    })
+    fireEvent.pointerDown(target, { pointerId: 12, clientX: 20, clientY: 20 })
+    view.rerender(
+      <PhoneConnectedView
+        serial="device-b" name="Device B" visible={true} source={source} onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: secondGateway, deviceId: serial })}
+      />,
+    )
+    await flush()
+    await step(() => { secondGateway.lastSocket!.accept() })
+    fireEvent.pointerUp(
+      screen.getByRole('application', { name: /Device B 画面/ }),
+      { pointerId: 12, clientX: 120, clientY: 220 },
+    )
+    expect(releasePointerCapture).toHaveBeenCalledWith(12)
+    expect(firstGateway.sockets.flatMap(socket => socket.sent)).toEqual([])
+    expect(secondGateway.sockets.flatMap(socket => socket.sent)).toEqual([])
   })
 
   it('maps a zero-size rendered frame to the safe zero coordinate', async () => {
@@ -451,6 +583,153 @@ describe('PhoneConnectedView toolbar', () => {
 })
 
 describe('PhoneConnectedView error and recovery arms', () => {
+  it('installs a missing real-iPhone agent and reaches live GUI control', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
+    gateway.queueMint({ session: {
+      ...SESSION_A,
+      deviceId: 'UDID-9',
+      agentManaged: true,
+    } })
+    render(
+      <PhoneConnectedView
+        serial="UDID-9"
+        name="Yishu iPhone"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([], [
+          { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
+      />,
+    )
+    await step(() => {})
+    expect(screen.getByText('设备控制代理未安装')).toBeTruthy()
+    const install = screen.getByRole('button', { name: '安装设备控制代理' })
+    const detect = screen.getByRole('button', { name: '重新检测' })
+    expect(install.className).toContain('minibtnPrimary')
+    expect(detect.className).toContain('minibtnSecondary')
+    fireEvent.click(install)
+    expect(screen.getByText('正在安装设备控制代理…')).toBeTruthy()
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    expect(screen.getByRole('img', { name: 'Yishu iPhone 实时画面' })).toBeTruthy()
+    expect(gateway.agentInstallCalls).toEqual([{ deviceId: 'UDID-9', force: false }])
+  })
+
+  it('keeps one-click Android agent preparation visible when USB installation is restricted', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
+    gateway.queueAgentInstall({
+      error: new PhoneStreamHttpError(
+        502, 'PHONE_UPSTREAM', 'adb install failed: INSTALL_FAILED_USER_RESTRICTED',
+      ),
+    })
+    render(
+      <PhoneConnectedView
+        serial="fbcd1d21"
+        name="MI 8"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([
+          { id: 'fbcd1d21', name: 'MI 8', channel: 'usb', state: 'online', online: true },
+        ], []))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
+      />,
+    )
+    await step(() => {})
+    fireEvent.click(screen.getByRole('button', { name: '安装设备控制代理' }))
+    await flush()
+    expect(screen.getByText('设备拒绝安装控制代理')).toBeTruthy()
+    expect(screen.getByText(/USB 调试（安全设置）/u)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '安装设备控制代理' })).toBeTruthy()
+  })
+
+  it('renders every structured real-iPhone prerequisite without claiming automatic signing or trust', async () => {
+    const cases = [
+      ['device-locked', '请解锁 iPhone', 'iPhone 已锁定'],
+      ['agent-profile-required', '打开配置文件', '未配置真机签名描述文件'],
+      ['cert-untrusted', 'Developer Mode', '设备控制代理未受信任'],
+      ['profile-expired', '重新安装设备控制代理', '签名描述文件已过期'],
+      ['tunnel-failed', '重新连接', '真机连接通道未建立'],
+      ['device-unplugged', '重新连接', 'iPhone 已断开连接'],
+    ] as const
+    for (const [issue, action, title] of cases) {
+      const gateway = new FakeGateway()
+      gateway.queueMint({
+        error: issue === 'agent-profile-required'
+          ? new PhoneStreamHttpError(409, 'PHONE_AGENT_PROFILE_REQUIRED', issue)
+          : new PhoneStreamHttpError(502, 'PHONE_REAL_DEVICE_ISSUE', issue, issue),
+      })
+      const mounted = render(
+        <PhoneConnectedView
+          serial="UDID-9"
+          name="Yishu iPhone"
+          visible={true}
+          source={new FakeListingSource().seed(listingOf([], [
+            { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+          ]))}
+          onOpenDevice={() => {}}
+          createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
+        />,
+      )
+      await step(() => {})
+      expect(screen.getByText(title)).toBeTruthy()
+      expect(screen.getAllByText(new RegExp(action)).length).toBeGreaterThan(0)
+      mounted.unmount()
+    }
+  })
+
+  it('shows the agent-check and force-reinstall progress states', async () => {
+    const checkingGateway = new FakeGateway()
+    checkingGateway.queueMint({ session: { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true } })
+    vi.spyOn(checkingGateway, 'agentStatus').mockReturnValue(new Promise(() => {}))
+    const checking = render(
+      <PhoneConnectedView
+        serial="UDID-9"
+        name="Yishu iPhone"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([], [
+          { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway: checkingGateway, deviceId: serial, retryLimit: 0,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { checkingGateway.lastSocket!.accept() })
+    await act(async () => { h264Runtime.failLastDecoder(); await flush() })
+    await act(async () => {
+      fireEvent.error(screen.getByRole('img', { name: 'Yishu iPhone 实时画面' }))
+      await flush()
+    })
+    expect(screen.getByText('正在检测设备控制代理…')).toBeTruthy()
+    checking.unmount()
+
+    const reinstallGateway = new FakeGateway()
+    reinstallGateway.queueMint({ error: new PhoneStreamHttpError(
+      502, 'PHONE_REAL_DEVICE_ISSUE', 'profile expired', 'profile-expired',
+    ) })
+    vi.spyOn(reinstallGateway, 'installAgent').mockReturnValue(new Promise(() => {}))
+    render(
+      <PhoneConnectedView
+        serial="UDID-9"
+        name="Yishu iPhone"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([], [
+          { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway: reinstallGateway, deviceId: serial })}
+      />,
+    )
+    await step(() => {})
+    fireEvent.click(screen.getByRole('button', { name: '重新安装设备控制代理' }))
+    expect(screen.getByText('正在重新安装设备控制代理…')).toBeTruthy()
+  })
+
   it('shows the refused and unavailable next-action copy', async () => {
     renderView(true, new PhoneStreamHttpError(403, 'forbidden', 'forbidden'))
     await step(() => {})

@@ -1692,10 +1692,18 @@ export interface Config {
   readonly root?: string
   /** Explicit operator executable override, ahead of managed and system discovery. */
   readonly executablePath?: string
+  /** Ceiling for online-listing, device-agent, and recognizable-picture verification. */
+  readonly iosRuntimeVerifyTimeoutMs?: number
+  /** Delay after installing the Simulator device agent before the first capture. */
+  readonly iosAgentSettleDelayMs?: number
+  /** Delay before retrying an unsuccessful first capture after device-agent installation. */
+  readonly iosAgentCaptureRetryDelayMs?: number
+  /** Ceiling for the first capture opened after device-agent installation. */
+  readonly iosAgentFirstCaptureTimeoutMs?: number
 }
 ```
 
-来源：[`packages/phone/phone-environment/src/index.ts:57`](../packages/phone/phone-environment/src/index.ts)
+来源：[`packages/phone/phone-environment/src/index.ts:78`](../packages/phone/phone-environment/src/index.ts)
 
 <a id="deepseek-aidsh-phone-environment-android"></a>
 
@@ -1743,6 +1751,8 @@ export interface Config {
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number
+  /** Ceiling for recognizing one H264 key access unit from each Android source. */
+  h264ProbeTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -1757,7 +1767,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-runtime/src/index.ts:100`](../packages/phone/phone-runtime/src/index.ts)
+来源：[`packages/phone/phone-runtime/src/index.ts:109`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 
@@ -1777,7 +1787,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-stream/src/index.ts:57`](../packages/phone/phone-stream/src/index.ts)
+来源：[`packages/phone/phone-stream/src/index.ts:59`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -3844,6 +3854,7 @@ export interface Config {
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
 - `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
+- `@deepseek-ai/dsh-phone-environment-ios` — 需要 `phoneEnvironment`（[`packages/phone/phone-environment-ios/src/index.ts`](../packages/phone/phone-environment-ios/src/index.ts)）
 - `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence`（[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
 - `@deepseek-ai/dsh-session`（[`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts)）
 - `@deepseek-ai/dsh-session-checkpoint-policy` — 需要 `llm` · `sessionPersistence` · `sessions` · `tools`（[`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts)）

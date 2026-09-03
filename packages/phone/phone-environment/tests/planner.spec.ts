@@ -27,7 +27,7 @@ describe('initial phone environment snapshot', () => {
     const snapshot = initialPhoneEnvironmentSnapshot(platform, 'x64', false)
     expect(snapshot.platforms.ios).toEqual({
       kind: 'unsupported',
-      reason: 'iOS simulators require macOS and Xcode.',
+      reason: 'iOS Simulator and physical iPhone control require macOS with a complete Xcode installation.',
     })
   })
 

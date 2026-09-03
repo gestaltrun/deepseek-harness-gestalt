@@ -383,9 +383,6 @@ describe('Android environment defensive outcomes', () => {
   })
 
   it.each([
-    ['declared length', (bytes: Uint8Array) => ({
-      asset: assetFor(bytes), response: new Response(responseBody(bytes), { headers: { 'content-length': String(bytes.byteLength + 1) } }),
-    })],
     ['excess body', (bytes: Uint8Array) => ({
       asset: { ...assetFor(bytes), bytes: bytes.byteLength - 1 }, response: new Response(responseBody(bytes)),
     })],
@@ -402,6 +399,55 @@ describe('Android environment defensive outcomes', () => {
     })
     await value.refresh()
     await expect(value.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_LENGTH' })
+  })
+
+  it('requests an identity response and validates decoded bytes instead of a gzip Content-Length', async () => {
+    const root = await tempRoot()
+    const bytes = zipSync({ 'cmdline-tools/bin/sdkmanager': new Uint8Array([1]) })
+    let request: RequestInit | undefined
+    const partial = {
+      ...planFor(root),
+      components: { ...PLAN.components, commandLineTools: false },
+    }
+    const value = manager(root, {
+      runner: runner(async () => result({ exitCode: 1, stderr: 'stop after download' })),
+      commandLineToolsAsset: assetFor(bytes),
+      fetch: async (_url, init) => {
+        request = init
+        return new Response(responseBody(bytes), {
+          headers: {
+            'content-encoding': 'gzip',
+            'content-length': String(bytes.byteLength - 1),
+          },
+        })
+      },
+    })
+    const owned = internals(value)
+    owned.plan = partial
+    owned.asset = assetFor(bytes)
+
+    await expect(value.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_LICENSES' })
+    expect(new Headers(request?.headers).get('accept-encoding')).toBe('identity')
+  })
+
+  it('cancels an oversized response without replacing the pinned-length failure', async () => {
+    const root = await tempRoot()
+    const reportError = vi.fn()
+    const cancel = vi.fn(() => { throw new Error('response cancel failed') })
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array([1, 2])) },
+      cancel,
+    })
+    const value = manager(root, {
+      reportError,
+      commandLineToolsAsset: assetFor(new Uint8Array([1])),
+      fetch: async () => new Response(body),
+    })
+    await value.refresh()
+
+    await expect(value.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_LENGTH' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: 'response cancel failed' }))
   })
 
   it.each([

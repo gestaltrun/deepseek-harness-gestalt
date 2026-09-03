@@ -5,8 +5,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  createHttpPhoneGateway, encodePhoneIoFrame, mintPhoneSession, openPhoneIoSocket,
-  parsePhoneIoReply, PHONE_SESSION_PATH, PhoneStreamHttpError,
+  createHttpPhoneGateway, encodePhoneIoFrame, installPhoneAgent, mintPhoneSession, openPhoneIoSocket,
+  parsePhoneIoReply, PHONE_AGENT_PATH, PHONE_SESSION_PATH, PhoneStreamHttpError, readPhoneAgentStatus,
 } from '../src/client/phone-stream-client.ts'
 
 async function rejectionOf(run: () => Promise<unknown>): Promise<PhoneStreamHttpError> {
@@ -72,6 +72,8 @@ describe('session minting', () => {
     const session = {
       deviceId: 'emulator-5554',
       ioPath: '/phone/ws/io',
+      agentManaged: false,
+      preferredFormat: 'h264',
       mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1234 },
       h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1234 },
     }
@@ -85,10 +87,14 @@ describe('session minting', () => {
   it('uses the requested device when an otherwise valid response omits its echo', async () => {
     await stubFetch(200, {
       ioPath: '/phone/ws/io',
+      agentManaged: false,
+      preferredFormat: 'mjpeg',
       mjpeg: { url: '/phone/stream/fallback/mjpeg?token=a', expiresAt: 1234 },
       h264: { url: '/phone/stream/fallback/h264?token=a', expiresAt: 1234 },
     })
-    expect((await mintPhoneSession('fallback-device')).deviceId).toBe('fallback-device')
+    expect(await mintPhoneSession('fallback-device')).toMatchObject({
+      deviceId: 'fallback-device', preferredFormat: 'mjpeg',
+    })
   })
 
   it('maps error payloads and malformed bodies onto the wire error', async () => {
@@ -96,11 +102,30 @@ describe('session minting', () => {
     const missing = await rejectionOf(() => mintPhoneSession('gone'))
     expect(missing.code).toBe('not-found')
 
+    await stubFetch(502, {
+      error: {
+        code: 'PHONE_REAL_DEVICE_ISSUE',
+        issue: 'device-locked',
+        message: 'unlock the device',
+      },
+    })
+    const locked = await rejectionOf(() => mintPhoneSession('UDID-9'))
+    expect(locked.issue).toBe('device-locked')
+
     await stubFetch(500, 'not json')
     const broken = await rejectionOf(() => mintPhoneSession('x'))
     expect(broken.code).toBe('http')
 
     await stubFetch(200, { ioPath: 42 })
+    await expect(mintPhoneSession('x')).rejects.toBeInstanceOf(PhoneStreamHttpError)
+
+    await stubFetch(200, {
+      ioPath: '/phone/ws/io',
+      agentManaged: false,
+      preferredFormat: 'av1',
+      mjpeg: { url: '/phone/stream/x/mjpeg?token=a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/x/h264?token=a', expiresAt: 1234 },
+    })
     await expect(mintPhoneSession('x')).rejects.toBeInstanceOf(PhoneStreamHttpError)
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 500 })))
@@ -120,6 +145,67 @@ describe('session minting', () => {
     }))
     const nonError = await rejectionOf(() => mintPhoneSession('x'))
     expect(nonError.message).toBe('socket reset')
+  })
+})
+
+describe('iOS real-device agent operations', () => {
+  it('reads status and requests a forced reinstall through trusted same-origin POSTs', async () => {
+    const calls: Array<{ readonly input: RequestInfo | URL; readonly init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, ...(init === undefined ? {} : { init }) })
+      return new Response(JSON.stringify(calls.length === 1
+        ? {
+          deviceId: 'UDID-9', installed: true, version: '0.0.25', bundleId: 'agent.bundle',
+          profileReminder: 'free profile expires',
+        }
+        : { deviceId: 'UDID-9', installed: true, reinstalled: true }), { status: 200 })
+    }))
+
+    expect(await readPhoneAgentStatus('UDID-9')).toMatchObject({ installed: true, version: '0.0.25' })
+    expect(await installPhoneAgent('UDID-9', true)).toMatchObject({ installed: true, reinstalled: true })
+    expect(calls.map(call => call.input)).toEqual([
+      `${PHONE_AGENT_PATH}/status`,
+      `${PHONE_AGENT_PATH}/install`,
+    ])
+    expect(calls.map(call => call.init?.body)).toEqual([
+      JSON.stringify({ deviceId: 'UDID-9' }),
+      JSON.stringify({ deviceId: 'UDID-9', force: true }),
+    ])
+  })
+
+  it('keeps structured install issues and rejects malformed status answers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: 'PHONE_REAL_DEVICE_ISSUE', issue: 'profile-expired', message: 'profile expired',
+      },
+    }), { status: 502 })))
+    expect((await rejectionOf(() => installPhoneAgent('UDID-9', true))).issue).toBe('profile-expired')
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ installed: 'yes' }), { status: 200 })))
+    await expect(readPhoneAgentStatus('UDID-9')).rejects.toMatchObject({ code: 'protocol' })
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('null', { status: 200 })))
+    await expect(readPhoneAgentStatus('UDID-9')).rejects.toMatchObject({ code: 'protocol' })
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      deviceId: 'UDID-9', installed: true, reinstalled: 'yes',
+    }), { status: 200 })))
+    await expect(installPhoneAgent('UDID-9', true)).rejects.toMatchObject({ code: 'protocol' })
+  })
+
+  it('normalizes agent network and non-JSON failures and accepts the minimal status', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('network down') }))
+    await expect(readPhoneAgentStatus('UDID-9')).rejects.toMatchObject({ code: 'network', message: 'network down' })
+    vi.stubGlobal('fetch', vi.fn(async () => { throw 'socket gone' }))
+    await expect(installPhoneAgent('UDID-9', false)).rejects.toMatchObject({ code: 'network', message: 'socket gone' })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 502 })))
+    await expect(readPhoneAgentStatus('UDID-9')).rejects.toMatchObject({
+      code: 'http', message: 'phone agent status failed with HTTP 502',
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      deviceId: 'UDID-9', installed: false,
+    }), { status: 200 })))
+    expect(await readPhoneAgentStatus('UDID-9')).toEqual({ deviceId: 'UDID-9', installed: false })
   })
 })
 
@@ -192,10 +278,26 @@ describe('io socket wiring', () => {
     const body = {
       deviceId: 'R3CN30',
       ioPath: MINTED_IO_PATH,
+      agentManaged: false,
+      preferredFormat: 'h264',
       mjpeg: { url: '/phone/stream/R3CN30/mjpeg?token=a', expiresAt: 1234 },
       h264: { url: '/phone/stream/R3CN30/h264?token=a', expiresAt: 1234 },
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })))
     expect((await createHttpPhoneGateway().mintSession('R3CN30')).deviceId).toBe('R3CN30')
+  })
+
+  it('runs agent status and install through the production gateway facade', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body !== 'string') throw new Error('agent gateway request body must be JSON text')
+      const request = JSON.parse(init.body) as { force?: boolean }
+      return new Response(JSON.stringify({
+        deviceId: 'UDID-9', installed: true,
+        ...(request.force === undefined ? {} : { reinstalled: request.force }),
+      }), { status: 200 })
+    }))
+    const gateway = createHttpPhoneGateway()
+    expect(await gateway.agentStatus('UDID-9')).toMatchObject({ installed: true })
+    expect(await gateway.installAgent('UDID-9', true)).toMatchObject({ reinstalled: true })
   })
 })

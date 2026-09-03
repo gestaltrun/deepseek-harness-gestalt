@@ -5,7 +5,9 @@
  * badge online count — against stubbed browser globals.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createHttpPhoneListingSource, PHONE_DEVICES_PATH } from '../src/client/phone-listing.ts'
+import {
+  createHttpPhoneListingSource, fetchPhoneListing, PHONE_DEVICES_PATH,
+} from '../src/client/phone-listing.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -190,6 +192,17 @@ describe('phone listing source', () => {
     }))
     const nonError = await rejectionOf(() => source.refresh())
     expect(nonError.message).toBe('socket reset')
+  })
+
+  it('passes selection cancellation to fetch without wrapping the abort', async () => {
+    const lifetime = new AbortController()
+    const abort = new DOMException('selection superseded', 'AbortError')
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal).toBe(lifetime.signal)
+      lifetime.abort()
+      throw abort
+    }))
+    await expect(fetchPhoneListing(lifetime.signal)).rejects.toBe(abort)
   })
 
   it('keeps the snapshot reference stable between commits', async () => {

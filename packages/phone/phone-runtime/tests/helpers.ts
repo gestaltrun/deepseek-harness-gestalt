@@ -23,6 +23,8 @@ interface FakeAgentKnobs {
   installExitCode?: number
   /** When set, a successful install prints this JSON answer verbatim. */
   installAnswer?: string
+  /** When set, status prints this JSON answer verbatim. */
+  statusAnswer?: string
   /** Makes the POSIX agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
   ignoreTerm?: boolean
 }
@@ -34,6 +36,8 @@ export interface FakeKnobs {
   /** Apply listDelayMs only after this many total RPC requests. */
   listDelayAfterRequests?: number
   screencaptureDelayMs?: number
+  /** Delay one device.info answer after recording that the request arrived. */
+  infoDelayMs?: number
   hang?: boolean
   exitAfter?: number
   /** Exit before binding anything; simulates a binary that cannot start. */
@@ -72,6 +76,8 @@ export interface StagedFake {
   /** Release the placeholder port reservation and wait until the child can bind it. */
   claim(): Promise<void>
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
+  /** Rewrite the device seed that the next server generation reads at startup. */
+  setLaunchDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
   /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
   setAgent(agent: FakeAgentKnobs): Promise<void>
   /** Read the persistent agent state the fake CLI invocations record. */
@@ -80,6 +86,7 @@ export interface StagedFake {
     requests: number
     bootCount: number
     shutdownCount: number
+    infoCount: number
     io: unknown[]
     captures: Array<{ readonly deviceId: string; readonly format: string }>
   }>
@@ -196,6 +203,7 @@ export async function stageFake(
     }
     const profilePath = join(fixturesDir, 'profile.mobileprovision')
     await writeFile(profilePath, 'fake provisioning profile payload')
+    const configPath = join(fixturesDir, 'fakemobilecli.config.json')
     const port = await randomPort()
     const hold = await holdPort(port)
     const baseUrl = `http://127.0.0.1:${String(port)}`
@@ -216,8 +224,11 @@ export async function stageFake(
         })
         if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
       },
+      async setLaunchDevices(devices): Promise<void> {
+        const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+        await writeFile(configPath, JSON.stringify({ ...current, devices }))
+      },
       async setAgent(agent): Promise<void> {
-        const configPath = join(fixturesDir, 'fakemobilecli.config.json')
         const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
         await writeFile(configPath, JSON.stringify({ ...current, agent }))
       },
@@ -232,6 +243,7 @@ export async function stageFake(
         requests: number
         bootCount: number
         shutdownCount: number
+        infoCount: number
         io: unknown[]
         captures: Array<{ readonly deviceId: string; readonly format: string }>
       }> {
@@ -239,6 +251,7 @@ export async function stageFake(
           requests: number
           bootCount: number
           shutdownCount: number
+          infoCount: number
           io: unknown[]
           captures: Array<{ readonly deviceId: string; readonly format: string }>
         }

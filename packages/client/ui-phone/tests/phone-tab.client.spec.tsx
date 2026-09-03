@@ -81,6 +81,7 @@ describe('PhoneTab empty state', () => {
     expect(ios.getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('切换到 Android 将列出 ADB 模拟器与 USB 真机')).toBeTruthy()
     expect(screen.getByText('iPhone 16')).toBeTruthy()
+    expect(screen.getByText(/解锁并确认信任此 Mac、启用 Developer Mode/)).toBeTruthy()
     expect(screen.queryByText('Pixel_6_API_35')).toBeNull()
   })
 
@@ -119,6 +120,15 @@ describe('PhoneTab empty state', () => {
     // The offline copy and the open action never coexist with the arm.
     expect(screen.queryByText('离线')).toBeNull()
     expect(screen.queryByRole('button', { name: '打开' })).toBeNull()
+  })
+
+  it('renders iOS trust and Developer Mode guidance for an unauthorized iPhone', async () => {
+    const source = new FakeListingSource().seed(listingOf([], [
+      { id: 'iphone-1', name: 'iPhone 17', channel: 'usb', state: 'unauthorized', online: false },
+    ]))
+    await renderTab(true, source)
+    fireEvent.click(screen.getByRole('button', { name: 'iOS' }))
+    expect(screen.getByText(/解锁设备，确认信任此 Mac 并启用 Developer Mode/)).toBeTruthy()
   })
 
   it('re-pulls the listing from the 重新检测 action of the unauthorized arm', async () => {
@@ -187,7 +197,7 @@ describe('PhoneTab empty state', () => {
     expect(screen.getByText('设备清单请求失败；请重新检测。')).toBeTruthy()
   })
 
-  it('renders the install command when the Host reports PHONE_UNRESOLVED', async () => {
+  it('routes PHONE_UNRESOLVED to managed Settings preparation', async () => {
     const source = new FakeListingSource()
     source.scriptNext(Promise.reject(new PhoneStreamHttpError(
       502,
@@ -197,7 +207,8 @@ describe('PhoneTab empty state', () => {
     await renderTab(true, source)
     expect(screen.getByRole('alert')).toBeTruthy()
     expect(screen.getByText('未找到 mobilecli')).toBeTruthy()
-    expect(screen.getByText('npm install -g mobilecli@latest')).toBeTruthy()
+    expect(screen.getByText(/设置 → 手机设备/)).toBeTruthy()
+    expect(screen.queryByText('npm install -g mobilecli@latest')).toBeNull()
     expect(screen.getByRole('button', { name: '重新检测' })).toBeTruthy()
   })
 })

@@ -1,17 +1,21 @@
 /** Scheme-C Android/iOS platform cards below the shared mobilecli runtime. */
 import { useState, type ReactNode } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PhoneAndroidView, PhonePlatformView } from './phone-runtime-source.ts'
+import type { PhoneAndroidView, PhoneIosView } from './phone-runtime-source.ts'
 import css from './PhonePlatformCards.module.css'
 
 export interface PhonePlatformCardsProps {
   readonly android: PhoneAndroidView
-  readonly ios: PhonePlatformView
+  readonly ios: PhoneIosView
   readonly iosUnsupportedMessage: string
   readonly onPrepareAndroid: () => void
   readonly onCancelAndroid: () => void
   readonly onRefreshAndroid: () => void
   readonly onStartAndroid: () => void
+  readonly onPrepareIos: () => void
+  readonly onCancelIos: () => void
+  readonly onRefreshIos: () => void
+  readonly onStartIos: () => void
 }
 
 /** Render Android preparation and the stable iOS capability card as parallel platform lanes. */
@@ -76,11 +80,94 @@ export function PhonePlatformCards(props: PhonePlatformCardsProps): ReactNode {
           <div><h3>iOS</h3><p>模拟器与 USB 真机</p></div>
         </header>
         {props.ios.kind === 'unsupported'
-          ? <div className={css.unavailable}><strong>iOS 设备需要 Mac</strong><p>{props.iosUnsupportedMessage}</p></div>
-          : <div className={css.deferred}><strong>需要 macOS + 完整 Xcode</strong><p>iOS Runtime 与默认模拟器准备由独立平台能力提供。</p></div>}
+          ? <IosUnsupported message={props.iosUnsupportedMessage || props.ios.reason} />
+          : <>
+            <IosComponents state={props.ios} />
+            <IosStatus state={props.ios} />
+            <IosActions
+              state={props.ios}
+              onPrepare={props.onPrepareIos}
+              onCancel={props.onCancelIos}
+              onRefresh={props.onRefreshIos}
+              onStart={props.onStartIos}
+            />
+          </>}
       </article>
     </div>
   )
+}
+
+function IosComponents({ state }: { readonly state: PhoneIosView }): ReactNode {
+  const plan = 'plan' in state ? state.plan : undefined
+  const xcodeDetected = plan !== undefined || state.kind === 'license-required'
+    || state.kind === 'manual-required' && state.developerDir !== undefined
+  return (
+    <div className={css.components}>
+      <ComponentRow title="完整 Xcode" detail={componentDetail(xcodeDetected, '需要手动安装或更新')} />
+      <ComponentRow title="iOS Simulator Runtime" detail={componentDetail(plan?.runtime !== undefined, '可在这里一键下载')} />
+      <ComponentRow title="DSH Gestalt iPhone" detail={componentDetail(
+        state.kind === 'ready' || state.kind === 'preparing' && state.step === 'booting',
+        plan?.deviceType?.name ?? '默认 iPhone 模拟器',
+      )} />
+    </div>
+  )
+}
+
+function IosUnsupported({ message }: { readonly message: string }): ReactNode {
+  return <div className={css.unavailable}><strong>iOS 设备控制需要 macOS + Xcode</strong><p>{message}</p></div>
+}
+
+type SupportedIosView = Exclude<PhoneIosView, { readonly kind: 'unsupported' }>
+
+function IosStatus(props: { readonly state: SupportedIosView }): ReactNode {
+  const state = props.state
+  switch (state.kind) {
+    case 'deferred': return <p className={css.status}>等待 iOS 环境 Provider…</p>
+    case 'checking': return <p className={css.status}>正在检测 Xcode、Apple 授权、iOS Runtime 与模拟器…</p>
+    case 'xcode-missing': return <p className={css.problem}>{state.message}</p>
+    case 'license-required': return <p className={css.problem}>请在 Xcode 中接受 Apple 许可；Gestalt 不会代替你接受。{state.message}</p>
+    case 'manual-required': return <p className={css.problem}>{state.message}</p>
+    case 'runtime-missing': return <p className={css.status}>可由 Xcode 下载 iOS Simulator Runtime；下载体积由 Apple 决定。</p>
+    case 'no-simulator': return <p className={css.status}>iOS Runtime 已就绪，可创建产品默认 iPhone 模拟器。</p>
+    case 'preparing': return <p className={css.status}>{iosStep(state.step)}</p>
+    case 'ready': return <p className={css.success}>{state.running ? `已启动 · MJPEG 实时画面 · ${state.deviceId}` : '环境已准备，可启动默认 iPhone 模拟器'}</p>
+    case 'failed': return <p className={css.problem}>{state.message}</p>
+  }
+}
+
+function IosActions(props: {
+  readonly state: SupportedIosView
+  readonly onPrepare: () => void
+  readonly onCancel: () => void
+  readonly onRefresh: () => void
+  readonly onStart: () => void
+}): ReactNode {
+  if (props.state.kind === 'preparing'
+    || props.state.kind === 'checking' && props.state.operation === 'prepare') {
+    return <Button variant="outline" onClick={props.onCancel}>取消</Button>
+  }
+  if (props.state.kind === 'ready') {
+    return <SimulatorReadyActions running={props.state.running} onStart={props.onStart} onRefresh={props.onRefresh} />
+  }
+  if (props.state.kind === 'runtime-missing' || props.state.kind === 'no-simulator'
+    || props.state.kind === 'failed' && props.state.retryable) {
+    return (
+      <div className={css.actions}>
+        <Button variant="primary" onClick={props.onPrepare}>一键准备 iOS</Button>
+        <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
+      </div>
+    )
+  }
+  if (props.state.kind === 'xcode-missing' || props.state.kind === 'license-required' || props.state.kind === 'manual-required') {
+    return <Button variant="outline" onClick={props.onRefresh}>完成手动步骤后重新检测</Button>
+  }
+  return null
+}
+
+function iosStep(step: 'downloading-runtime' | 'creating-simulator' | 'booting'): string {
+  if (step === 'downloading-runtime') return '正在通过 Xcode 下载 iOS Simulator Runtime…'
+  if (step === 'creating-simulator') return '正在创建 DSH Gestalt iPhone…'
+  return '正在启动模拟器，并由设备控制代理验证 mobilecli MJPEG 真实画面…'
 }
 
 function ComponentRow(props: { readonly title: string; readonly detail: { ok: boolean; text: string } }): ReactNode {
@@ -127,17 +214,25 @@ function AndroidActions(props: {
     || props.state.kind === 'booting'
   if (busy) return <Button variant="outline" onClick={props.onCancel}>取消</Button>
   if (props.state.kind === 'ready') {
-    return (
-      <div className={css.actions}>
-        {!props.state.running && <Button variant="primary" onClick={props.onStart}>启动默认模拟器</Button>}
-        <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
-      </div>
-    )
+    return <SimulatorReadyActions running={props.state.running} onStart={props.onStart} onRefresh={props.onRefresh} />
   }
   if (props.state.kind === 'unsupported' || props.state.kind === 'deferred' || props.state.kind === 'checking') return null
   return (
     <div className={css.actions}>
       <Button variant="primary" onClick={props.onPrepare}>一键准备 Android</Button>
+      <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
+    </div>
+  )
+}
+
+function SimulatorReadyActions(props: {
+  readonly running: boolean
+  readonly onStart: () => void
+  readonly onRefresh: () => void
+}): ReactNode {
+  return (
+    <div className={css.actions}>
+      {!props.running && <Button variant="primary" onClick={props.onStart}>启动默认模拟器</Button>}
       <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
     </div>
   )

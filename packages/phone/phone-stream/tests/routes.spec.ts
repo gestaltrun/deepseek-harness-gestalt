@@ -53,6 +53,7 @@ async function mount(
 
 async function mint(origin: string, id = 'emulator-5554'): Promise<{
   ioPath: string
+  preferredFormat: 'h264' | 'mjpeg'
   mjpeg: { url: string; expiresAt: number }
   h264: { url: string; expiresAt: number }
 }> {
@@ -64,6 +65,7 @@ async function mint(origin: string, id = 'emulator-5554'): Promise<{
   expect(response.status).toBe(200)
   return await response.json() as {
     ioPath: string
+    preferredFormat: 'h264' | 'mjpeg'
     mjpeg: { url: string; expiresAt: number }
     h264: { url: string; expiresAt: number }
   }
@@ -156,6 +158,177 @@ function readFrame(origin: string, path: string, host: string): Promise<{
 }
 
 describe('phone stream Host routes', () => {
+  it('prefers MJPEG only for the iOS simulator that mobilecli cannot encode as AVC', async () => {
+    const { origin, context } = await mount([
+      wireDevice('android-real', 'android', 'real', 'online'),
+      wireDevice('ios-simulator', 'ios', 'simulator', 'online'),
+      wireDevice('ios-real', 'ios', 'real', 'online'),
+    ])
+    context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: true })
+
+    expect(await mint(origin, 'android-real')).toMatchObject({ preferredFormat: 'h264', agentManaged: true })
+    expect((await mint(origin, 'ios-real')).preferredFormat).toBe('h264')
+    expect((await mint(origin, 'ios-simulator')).preferredFormat).toBe('mjpeg')
+  })
+
+  it('detects a missing iOS real-device agent before minting a picture session', async () => {
+    const { origin, context } = await mount([
+      wireDevice('UDID-9', 'ios', 'real', 'online'),
+    ])
+    const host = new URL(origin).host
+    context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: false })
+
+    const response = await rawRequest({
+      origin,
+      method: 'POST',
+      path: '/phone/session',
+      host,
+      body: JSON.stringify({ deviceId: 'UDID-9' }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(JSON.parse(response.body.toString('utf8'))).toEqual({
+      error: {
+        code: 'PHONE_AGENT_MISSING',
+        message: 'the iOS real-device control agent is not installed',
+      },
+    })
+  })
+
+  it('preserves the structured real-device issue on agent status and install failures', async () => {
+    const { origin, context } = await mount([
+      wireDevice('UDID-9', 'ios', 'real', 'online'),
+    ])
+    const host = new URL(origin).host
+    context.phoneDevices.agentStatus = async () => {
+      throw new PhoneDevicesError(
+        'PHONE_REAL_DEVICE_ISSUE',
+        'the signing certificate is not trusted',
+        { issue: 'cert-untrusted' },
+      )
+    }
+
+    const status = await rawRequest({
+      origin,
+      method: 'POST',
+      path: '/phone/agent/status',
+      host,
+      body: JSON.stringify({ deviceId: 'UDID-9' }),
+    })
+    expect(status.status).toBe(502)
+    expect(JSON.parse(status.body.toString('utf8'))).toEqual({
+      error: {
+        code: 'PHONE_REAL_DEVICE_ISSUE',
+        issue: 'cert-untrusted',
+        message: 'the signing certificate is not trusted',
+      },
+    })
+
+    context.phoneDevices.installAgent = async () => {
+      throw new PhoneDevicesError(
+        'PHONE_REAL_DEVICE_ISSUE',
+        'the provisioning profile has expired',
+        { issue: 'profile-expired' },
+      )
+    }
+    const install = await rawRequest({
+      origin,
+      method: 'POST',
+      path: '/phone/agent/install',
+      host,
+      body: JSON.stringify({ deviceId: 'UDID-9', force: true }),
+    })
+    expect(install.status).toBe(502)
+    expect(JSON.parse(install.body.toString('utf8'))).toMatchObject({
+      error: { code: 'PHONE_REAL_DEVICE_ISSUE', issue: 'profile-expired' },
+    })
+  })
+
+  it('projects a missing provisioning profile as an actionable agent prerequisite', async () => {
+    const { origin, context } = await mount([
+      wireDevice('UDID-9', 'ios', 'real', 'online'),
+    ])
+    const host = new URL(origin).host
+    context.phoneDevices.installAgent = async () => {
+      throw new PhoneDevicesError(
+        'PHONE_AGENT_PROFILE_REQUIRED',
+        'configure a provisioning profile before installing the iOS real-device control agent',
+      )
+    }
+
+    const response = await rawRequest({
+      origin,
+      method: 'POST',
+      path: '/phone/agent/install',
+      host,
+      body: JSON.stringify({ deviceId: 'UDID-9', force: false }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(JSON.parse(response.body.toString('utf8'))).toEqual({
+      error: {
+        code: 'PHONE_AGENT_PROFILE_REQUIRED',
+        message: 'configure a provisioning profile before installing the iOS real-device control agent',
+      },
+    })
+  })
+
+  it('serves managed Android and iOS real-device agent operations only on trusted exact POST routes', async () => {
+    const { origin, context } = await mount([
+      wireDevice('android-real', 'android', 'real', 'online'),
+      wireDevice('UDID-9', 'ios', 'real', 'online'),
+      wireDevice('SIM-9', 'ios', 'simulator', 'online'),
+    ])
+    const host = new URL(origin).host
+    context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: true, version: '0.0.25' })
+    context.phoneDevices.installAgent = async (id, options) => ({
+      deviceId: id, installed: true, reinstalled: options?.force === true,
+    })
+
+    const session = await rawRequest({
+      origin, method: 'POST', path: '/phone/session', host, body: JSON.stringify({ deviceId: 'UDID-9' }),
+    })
+    expect(session.status).toBe(200)
+    expect(JSON.parse(session.body.toString('utf8'))).toMatchObject({ agentManaged: true })
+
+    const status = await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/status', host, body: JSON.stringify({ deviceId: 'UDID-9' }),
+    })
+    expect(status.status).toBe(200)
+    expect(JSON.parse(status.body.toString('utf8'))).toMatchObject({ installed: true, version: '0.0.25' })
+    const install = await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/install', host,
+      body: JSON.stringify({ deviceId: 'UDID-9', force: true }),
+    })
+    expect(JSON.parse(install.body.toString('utf8'))).toMatchObject({ installed: true, reinstalled: true })
+
+    const androidStatus = await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/status', host,
+      body: JSON.stringify({ deviceId: 'android-real' }),
+    })
+    expect(androidStatus.status).toBe(200)
+    expect(JSON.parse(androidStatus.body.toString('utf8'))).toMatchObject({ installed: true })
+
+    expect((await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/status', host: 'evil.example', body: '{}',
+    })).status).toBe(403)
+    expect((await rawRequest({ origin, method: 'GET', path: '/phone/agent/status', host })).status).toBe(405)
+    expect((await rawRequest({ origin, method: 'POST', path: '/phone/agent/unknown', host, body: '{}' })).status).toBe(404)
+    expect((await rawRequest({ origin, method: 'POST', path: '/phone/agent/status', host, body: '{}' })).status).toBe(400)
+    expect((await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/install', host,
+      body: JSON.stringify({ deviceId: 'UDID-9', force: 'yes' }),
+    })).status).toBe(400)
+    expect((await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/status', host,
+      body: JSON.stringify({ deviceId: 'SIM-9' }),
+    })).status).toBe(400)
+    expect((await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/status', host,
+      body: JSON.stringify({ deviceId: 'MISSING' }),
+    })).status).toBe(404)
+  })
+
   it('answers the grouped device listing with platform groups and online states', async () => {
     const { origin } = await mount([
       wireDevice('emulator-5554', 'android', 'emulator', 'online'),

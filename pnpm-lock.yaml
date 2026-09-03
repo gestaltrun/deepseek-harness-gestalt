@@ -253,6 +253,9 @@ importers:
       '@deepseek-ai/dsh-phone-environment-android':
         specifier: workspace:^
         version: link:../../packages/phone/phone-environment-android
+      '@deepseek-ai/dsh-phone-environment-ios':
+        specifier: workspace:^
+        version: link:../../packages/phone/phone-environment-ios
       '@deepseek-ai/dsh-phone-runtime':
         specifier: workspace:^
         version: link:../../packages/phone/phone-runtime
@@ -3388,6 +3391,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-better-sidebar':
         specifier: workspace:^
         version: link:../ui-better-sidebar
+      '@deepseek-ai/dsh-client-ui-desktop':
+        specifier: workspace:^
+        version: link:../ui-desktop
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: workspace:^
         version: link:../ui-primitives
@@ -7082,6 +7088,24 @@ importers:
       '@deepseek-ai/dsh-home-paths':
         specifier: workspace:^
         version: link:../../util/home-paths
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-phone-environment':
+        specifier: workspace:^
+        version: link:../phone-environment
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../phone-runtime
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
+
+  packages/phone/phone-environment-ios:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants

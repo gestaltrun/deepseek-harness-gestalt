@@ -436,26 +436,31 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     await chmod(staging, 0o700)
     try {
       this.publish({ kind: 'downloading', plan, receivedBytes: 0, totalBytes: asset.bytes })
-      const response = await this.fetcher(asset.url, { signal, redirect: 'error' })
+      const response = await this.fetcher(asset.url, {
+        signal,
+        redirect: 'error',
+        headers: { 'accept-encoding': 'identity' },
+      })
       if (!response.ok || response.body === null) {
         throw new AndroidEnvironmentError('PHONE_ANDROID_DOWNLOAD', `command-line tools download failed with HTTP ${String(response.status)}`)
-      }
-      const declared = response.headers.get('content-length')
-      if (declared !== null && Number(declared) !== asset.bytes) {
-        throw new AndroidEnvironmentError('PHONE_ANDROID_LENGTH', 'command-line tools Content-Length did not match the pinned asset')
       }
       const reader = response.body.getReader()
       const chunks: Uint8Array[] = []
       const digest = createHash('sha256')
       let receivedBytes = 0
-      for (;;) {
-        const chunk = await reader.read()
-        if (chunk.done) break
-        receivedBytes += chunk.value.byteLength
-        if (receivedBytes > asset.bytes) throw new AndroidEnvironmentError('PHONE_ANDROID_LENGTH', 'command-line tools download exceeded its pinned length')
-        chunks.push(chunk.value)
-        digest.update(chunk.value)
-        this.publish({ kind: 'downloading', plan, receivedBytes, totalBytes: asset.bytes })
+      try {
+        for (;;) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          receivedBytes += chunk.value.byteLength
+          if (receivedBytes > asset.bytes) throw new AndroidEnvironmentError('PHONE_ANDROID_LENGTH', 'command-line tools download exceeded its pinned length')
+          chunks.push(chunk.value)
+          digest.update(chunk.value)
+          this.publish({ kind: 'downloading', plan, receivedBytes, totalBytes: asset.bytes })
+        }
+      } catch (error) {
+        try { await reader.cancel() } catch (cancelError) { this.reportError(cancelError) }
+        throw error
       }
       if (receivedBytes !== asset.bytes) throw new AndroidEnvironmentError('PHONE_ANDROID_LENGTH', 'command-line tools download was truncated')
       if (digest.digest('hex') !== asset.sha256) throw new AndroidEnvironmentError('PHONE_ANDROID_DIGEST', 'command-line tools SHA-256 did not match the pinned asset')

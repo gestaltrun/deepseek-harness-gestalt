@@ -10,6 +10,13 @@ const ANDROID_PLAN = {
   components: { commandLineTools: false, platformTools: false, emulator: false, systemImage: false, avd: false },
 } as const
 
+const IOS_PLAN = {
+  developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+  simulatorName: 'DSH Gestalt iPhone',
+  runtime: { identifier: 'runtime-26', name: 'iOS 26.0', version: '26.0', available: true },
+  deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+} as const
+
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 function snapshot(runtime: unknown, revision = 1, platforms: unknown = {
@@ -21,6 +28,36 @@ function snapshot(runtime: unknown, revision = 1, platforms: unknown = {
 }
 
 describe('Host phone runtime source', () => {
+  it('projects iOS preparation plans and invokes the trusted managed operation', async () => {
+    const plan = {
+      developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+      simulatorName: 'DSH Gestalt iPhone',
+      runtime: { identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', isAvailable: true },
+      deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+    }
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 2,
+      { android: { kind: 'deferred' }, ios: { kind: 'no-simulator', plan: {
+        ...plan, runtime: { ...plan.runtime, available: true },
+      } } },
+    ))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+    await source.prepareIos()
+    await source.cancelIos()
+    await source.refreshIos()
+    await source.startIos()
+    expect(source.getSnapshot().platforms.ios).toMatchObject({
+      kind: 'no-simulator', plan: { simulatorName: 'DSH Gestalt iPhone', runtime: { version: '26.0' } },
+    })
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/phone/environment/ios/prepare',
+      '/phone/environment/ios/cancel',
+      '/phone/environment/ios/refresh',
+      '/phone/environment/ios/start',
+    ])
+  })
+
   it('projects Android plans and sends explicit license consent to the trusted Host operation', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(snapshot(
       { kind: 'ready', version: '1.0.5', source: 'managed' },
@@ -148,6 +185,190 @@ describe('Host phone runtime source', () => {
     expect(source.getSnapshot().runtime).toEqual({ kind: 'ready', version: '1.0.5', source: 'system' })
   })
 
+  it('keeps detecting while Host startup activation is in flight', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(snapshot({
+        kind: 'activating', targetVersion: '1.0.5', source: 'override',
+      }))
+      .mockResolvedValueOnce(snapshot({
+        kind: 'ready', version: '1.0.5', source: 'override',
+      }, 2))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    source.ensureDetected()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(source.getSnapshot().runtime).toEqual({
+      kind: 'activating', targetVersion: '1.0.5', source: 'override',
+    })
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(source.getSnapshot().runtime).toEqual({
+      kind: 'ready', version: '1.0.5', source: 'override',
+    })
+    expect(fetcher.mock.calls.map(([path, init]) => [path, init?.method])).toEqual([
+      ['/phone/environment', 'GET'],
+      ['/phone/environment', 'GET'],
+    ])
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces passive polling with an active refresh and clears the pending timer at readiness', async () => {
+    vi.useFakeTimers()
+    let finishRefresh!: (response: Response) => void
+    const refreshResponse = new Promise<Response>((resolve) => { finishRefresh = resolve })
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }))
+      .mockImplementationOnce(async () => await refreshResponse)
+      .mockResolvedValueOnce(snapshot({ kind: 'ready', version: '1.0.5', source: 'override' }, 3))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    source.ensureDetected()
+    await vi.advanceTimersByTimeAsync(0)
+    const refresh = source.refresh()
+    await vi.advanceTimersByTimeAsync(100)
+    finishRefresh(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }, 2))
+    await refresh
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(source.getSnapshot().runtime.kind).toBe('ready')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('retries passive polling after a transient Host request failure', async () => {
+    vi.useFakeTimers()
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }))
+      .mockRejectedValueOnce(new Error('temporary Host restart'))
+      .mockResolvedValueOnce(snapshot({ kind: 'ready', version: '1.0.5', source: 'override' }, 2))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    source.ensureDetected()
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(source.getSnapshot().runtime.kind).toBe('ready')
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('clears passive polling and ignores a late response after disposal', async () => {
+    vi.useFakeTimers()
+    let finish!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { finish = resolve })
+    let signal: AbortSignal | undefined
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_path, init) => {
+      signal = init?.signal ?? undefined
+      return await pending
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+    const listener = vi.fn()
+    source.subscribe(listener)
+
+    source.ensureDetected()
+    expect(fetcher).toHaveBeenCalledOnce()
+    source.dispose()
+    expect(signal?.aborted).toBe(true)
+
+    finish(snapshot({ kind: 'activating', targetVersion: '1.0.5', source: 'override' }))
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(source.getSnapshot().revision).toBe(-1)
+    expect(listener).not.toHaveBeenCalled()
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    source.ensureDetected()
+    await expect(source.refresh()).rejects.toThrow('phone runtime source is disposed')
+    await expect(source.prepare()).rejects.toThrow('phone runtime source is disposed')
+    await expect(source.cancel()).rejects.toThrow('phone runtime source is disposed')
+    await expect(source.prepareIos()).rejects.toThrow('phone runtime source is disposed')
+    const disposedListener = vi.fn()
+    source.subscribe(disposedListener)()
+    expect(disposedListener).not.toHaveBeenCalled()
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
+  it('ignores a response body that finishes parsing after disposal', async () => {
+    let finishBody!: (body: unknown) => void
+    const body = new Promise<unknown>((resolve) => { finishBody = resolve })
+    const response = new Response('{}')
+    const parse = vi.spyOn(response, 'json').mockImplementation(async () => await body)
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(response))
+    const source = createHttpPhoneRuntimeSource()
+
+    const refresh = source.refresh()
+    await vi.waitFor(() => { expect(parse).toHaveBeenCalledOnce() })
+    source.dispose()
+    finishBody({
+      revision: 1,
+      enabled: true,
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+    })
+
+    await expect(refresh).resolves.toBeUndefined()
+    expect(source.getSnapshot().revision).toBe(-1)
+  })
+
+  it('aborts polled operation requests and clears all timers with one lifecycle abort', async () => {
+    vi.useFakeTimers()
+    const responses: Array<(response: Response) => void> = []
+    const signals: AbortSignal[] = []
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_path, init) => {
+      if (init?.signal != null) signals.push(init.signal)
+      return await new Promise<Response>((resolve) => { responses.push(resolve) })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+
+    const operation = source.prepare()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    responses[1]!(snapshot({
+      kind: 'downloading', targetVersion: '1.0.5', receivedBytes: 1, totalBytes: 2,
+    }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.getTimerCount()).toBe(2)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+
+    source.dispose()
+    source.dispose()
+    expect(signals).toHaveLength(3)
+    expect(new Set(signals).size).toBe(1)
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
+
+    responses[2]!(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }, 3))
+    responses[0]!(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }, 2))
+    await expect(operation).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(source.getSnapshot()).toMatchObject({ revision: 1, runtime: { kind: 'downloading' } })
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('clears an operation timer before its first poll can start', async () => {
+    vi.useFakeTimers()
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async () => await new Promise<Response>(
+      (resolve) => { finish = resolve },
+    )))
+    const source = createHttpPhoneRuntimeSource()
+
+    const operation = source.prepare()
+    expect(vi.getTimerCount()).toBe(1)
+    source.dispose()
+    expect(vi.getTimerCount()).toBe(0)
+    finish(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }))
+    await expect(operation).resolves.toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it('joins preparation to an already active Host request', async () => {
     let finish!: (response: Response) => void
     const pending = new Promise<Response>((resolve) => { finish = resolve })
@@ -178,28 +399,23 @@ describe('Host phone runtime source', () => {
   })
 
   it('continues polling after a transient refresh failure and stops stale poll callbacks', async () => {
+    vi.useFakeTimers()
     let finish!: (response: Response) => void
     const preparing = new Promise<Response>((resolve) => { finish = resolve })
-    const callbacks: Array<() => void> = []
-    vi.stubGlobal('setTimeout', vi.fn((callback: () => void) => {
-      callbacks.push(callback)
-      return callbacks.length as unknown as ReturnType<typeof setTimeout>
-    }))
-    vi.stubGlobal('clearTimeout', vi.fn())
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockImplementation(async (path) => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (path) => {
       if (path === '/phone/environment/prepare') return await preparing
       throw new Error('transient poll failure')
-    }))
+    })
+    vi.stubGlobal('fetch', fetcher)
     const source = createHttpPhoneRuntimeSource()
 
     const operation = source.prepare()
-    callbacks.shift()?.()
-    await Promise.resolve()
-    expect(callbacks).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fetcher).toHaveBeenCalledTimes(3)
     finish(snapshot({ kind: 'ready', version: '1.0.5', source: 'managed' }, 2))
     await operation
-    callbacks.shift()?.()
-    expect(callbacks).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it.each([
@@ -275,17 +491,94 @@ describe('Host phone runtime source', () => {
   })
 
   it.each([
-    null,
-    [],
-    { kind: 'unsupported', reason: 1 },
-    { kind: 'other' },
-  ])('rejects invalid iOS platform state %#', async (ios) => {
+    [null, 'invalid iOS state'],
+    [[], 'invalid iOS state'],
+    [{ kind: 'unsupported', reason: 1 }, 'invalid platform state'],
+    [{ kind: 'other' }, 'invalid iOS plan'],
+  ])('rejects invalid iOS platform state %#', async (ios, expectedMessage) => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
       { kind: 'missing', targetVersion: '1.0.5' },
       1,
       { android: { kind: 'deferred' }, ios },
     )))
-    await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow('invalid platform state')
+    await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow(expectedMessage)
+  })
+
+  it.each([
+    { kind: 'deferred' },
+    { kind: 'unsupported', reason: 'macOS required' },
+    { kind: 'checking' },
+    { kind: 'checking', operation: 'prepare' },
+    { kind: 'xcode-missing', message: 'install Xcode' },
+    { kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 'accept license' },
+    { kind: 'manual-required', code: 'first-launch', message: 'finish launch' },
+    { kind: 'manual-required', code: 'xcode-update', message: 'update Xcode', developerDir: IOS_PLAN.developerDir },
+    { kind: 'failed', code: 'BROKEN', message: 'failed', retryable: false },
+    { kind: 'failed', code: 'BROKEN', message: 'failed', retryable: true, plan: IOS_PLAN },
+    { kind: 'runtime-missing', plan: IOS_PLAN },
+    { kind: 'runtime-missing', plan: {
+      developerDir: IOS_PLAN.developerDir,
+      xcodeVersion: IOS_PLAN.xcodeVersion,
+      simulatorName: IOS_PLAN.simulatorName,
+    } },
+    { kind: 'no-simulator', plan: IOS_PLAN },
+    { kind: 'preparing', plan: IOS_PLAN, step: 'downloading-runtime' },
+    { kind: 'preparing', plan: IOS_PLAN, step: 'creating-simulator' },
+    { kind: 'preparing', plan: IOS_PLAN, step: 'booting' },
+    { kind: 'ready', plan: IOS_PLAN, deviceId: 'ios-simulator-1', running: false },
+  ])('accepts iOS state %#', async (ios) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 1,
+      { android: { kind: 'deferred' }, ios },
+    )))
+    const source = createHttpPhoneRuntimeSource()
+    await source.refresh()
+    expect(source.getSnapshot().platforms.ios).toMatchObject(ios)
+  })
+
+  it.each([
+    [{}, 'invalid iOS state'],
+    [{ kind: 'checking', operation: 'refresh' }, 'invalid iOS state'],
+    [{ kind: 'xcode-missing', message: 1 }, 'invalid iOS plan'],
+    [{ kind: 'license-required', developerDir: 1, message: 'accept' }, 'invalid iOS plan'],
+    [{ kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 1 }, 'invalid iOS plan'],
+    [{ kind: 'manual-required', code: 'other', message: 'manual' }, 'invalid iOS plan'],
+    [{ kind: 'manual-required', code: 'first-launch', message: 1 }, 'invalid iOS plan'],
+    [{ kind: 'manual-required', code: 'first-launch', message: 'manual', developerDir: 1 }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 1, message: 'failed', retryable: true }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 'BROKEN', message: 1, retryable: true }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 'BROKEN', message: 'failed', retryable: 'yes' }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 'BROKEN', message: 'failed', retryable: true, plan: {} }, 'invalid iOS plan'],
+    [{ kind: 'preparing', plan: IOS_PLAN, step: 'other' }, 'invalid iOS state'],
+    [{ kind: 'ready', plan: IOS_PLAN, deviceId: 1, running: false }, 'invalid iOS state'],
+    [{ kind: 'ready', plan: IOS_PLAN, deviceId: 'ios-simulator-1', running: 'yes' }, 'invalid iOS state'],
+    [{ kind: 'other', plan: IOS_PLAN }, 'invalid iOS state'],
+  ])('rejects malformed iOS state %#', async (ios, expectedMessage) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 1,
+      { android: { kind: 'deferred' }, ios },
+    )))
+    await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow(expectedMessage)
+  })
+
+  it.each([
+    [{ ...IOS_PLAN, developerDir: 1 }, 'invalid iOS plan'],
+    [{ ...IOS_PLAN, xcodeVersion: 1 }, 'invalid iOS plan'],
+    [{ ...IOS_PLAN, simulatorName: 1 }, 'invalid iOS plan'],
+    [{ ...IOS_PLAN, runtime: null }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, identifier: 1 } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, name: 1 } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, version: 1 } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, available: false } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, deviceType: null }, 'invalid iOS device type'],
+    [{ ...IOS_PLAN, deviceType: { ...IOS_PLAN.deviceType, identifier: 1 } }, 'invalid iOS device type'],
+    [{ ...IOS_PLAN, deviceType: { ...IOS_PLAN.deviceType, name: 1 } }, 'invalid iOS device type'],
+  ])('rejects malformed iOS plan %#', async (plan, expectedMessage) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 1,
+      { android: { kind: 'deferred' }, ios: { kind: 'runtime-missing', plan } },
+    )))
+    await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow(expectedMessage)
   })
 
   it('invokes every Android operation, omits absent bodies, and joins an active operation', async () => {

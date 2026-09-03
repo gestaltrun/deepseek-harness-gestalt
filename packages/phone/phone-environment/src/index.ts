@@ -3,11 +3,12 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { writeJson } from '@deepseek-ai/dsh-host-webserver'
 import {
-  resolveMobilecliExecutable, verifyAnnexBH264KeyAccessUnit, type DeviceId,
+  resolveMobilecliExecutable, verifyAnnexBH264KeyAccessUnit, verifyMjpegJpegPicture, type DeviceId,
 } from '@deepseek-ai/dsh-phone-runtime'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-request-trust'
 import {
@@ -17,7 +18,8 @@ import type { MobilecliVersionProbe } from './installer.ts'
 import { MOBILECLI_MANAGED_VERSION, selectMobilecliReleaseAsset } from './manifest.ts'
 import { initialPhoneEnvironmentSnapshot, selectPhoneRuntimeCandidate } from './planner.ts'
 import type {
-  AndroidEnvironmentProvider, AndroidPrepareRequest, PhoneAndroidState, PhoneEnvironmentSnapshot,
+  AndroidEnvironmentProvider, AndroidPrepareRequest, IosEnvironmentProvider, PhoneAndroidState,
+  PhoneEnvironmentSnapshot, PhoneIosState,
   PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
 } from './types.ts'
 
@@ -27,7 +29,8 @@ export { initialPhoneEnvironmentSnapshot, selectPhoneRuntimeCandidate } from './
 export type { PhoneRuntimeCandidates } from './planner.ts'
 export type {
   AndroidEnvironmentProvider, AndroidPreparationPlan, AndroidPrepareRequest, AndroidSdkSource,
-  MobilecliArchitecture, MobilecliPlatform, MobilecliReleaseAsset, PhoneAndroidState,
+  IosDeviceTypePlan, IosEnvironmentProvider, IosPreparationPlan, IosRuntimePlan,
+  MobilecliArchitecture, MobilecliPlatform, MobilecliReleaseAsset, PhoneAndroidState, PhoneIosState,
   PhoneEnvironmentSnapshot, PhonePlatformState, PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
 } from './types.ts'
 
@@ -47,11 +50,29 @@ export const PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH = '/phone/environment/android
 export const PHONE_ENVIRONMENT_ANDROID_REFRESH_PATH = '/phone/environment/android/refresh'
 /** Start the prepared default Android emulator. */
 export const PHONE_ENVIRONMENT_ANDROID_START_PATH = '/phone/environment/android/start'
+/** iOS Runtime and default-Simulator preparation path. */
+export const PHONE_ENVIRONMENT_IOS_PREPARE_PATH = '/phone/environment/ios/prepare'
+/** iOS environment cancellation path. */
+export const PHONE_ENVIRONMENT_IOS_CANCEL_PATH = '/phone/environment/ios/cancel'
+/** iOS environment re-detection path. */
+export const PHONE_ENVIRONMENT_IOS_REFRESH_PATH = '/phone/environment/ios/refresh'
+/** Start the prepared default iOS Simulator. */
+export const PHONE_ENVIRONMENT_IOS_START_PATH = '/phone/environment/ios/start'
 
 /** Maximum wait for one syntactically recognizable H264 key access unit from a booted Android device. */
 const ANDROID_RUNTIME_VERIFY_MS = 15_000
 /** Maximum Android H264 bytes inspected before readiness fails. */
 const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
+/** Default maximum wait for one recognizable JPEG picture from a booted iOS Simulator. */
+const DEFAULT_IOS_RUNTIME_VERIFY_TIMEOUT_MS = 25_000
+/** Default settlement after installing the Simulator device agent. */
+const DEFAULT_IOS_AGENT_SETTLE_DELAY_MS = 2_000
+/** Default delay before retrying the first capture after device-agent installation. */
+const DEFAULT_IOS_AGENT_CAPTURE_RETRY_DELAY_MS = 1_000
+/** Default ceiling for the first capture opened after device-agent installation. */
+const DEFAULT_IOS_AGENT_FIRST_CAPTURE_TIMEOUT_MS = 5_000
+/** Maximum MJPEG bytes inspected before iOS readiness fails. */
+const IOS_MJPEG_PROBE_MAX_BYTES = 8 * 1024 * 1024
 
 /** Host-specific configuration; release trust facts remain fixed in source. */
 export interface Config {
@@ -59,10 +80,35 @@ export interface Config {
   readonly root?: string
   /** Explicit operator executable override, ahead of managed and system discovery. */
   readonly executablePath?: string
+  /** Ceiling for online-listing, device-agent, and recognizable-picture verification. */
+  readonly iosRuntimeVerifyTimeoutMs?: number
+  /** Delay after installing the Simulator device agent before the first capture. */
+  readonly iosAgentSettleDelayMs?: number
+  /** Delay before retrying an unsuccessful first capture after device-agent installation. */
+  readonly iosAgentCaptureRetryDelayMs?: number
+  /** Ceiling for the first capture opened after device-agent installation. */
+  readonly iosAgentFirstCaptureTimeoutMs?: number
 }
 
 /** Runtime configuration schema. */
-export const Config: z<Config> = z.object({ root: z.string(), executablePath: z.string() })
+export const Config: z<Config> = z.object({
+  root: z.string(),
+  executablePath: z.string(),
+  iosRuntimeVerifyTimeoutMs: z.number().step(1).min(1).default(DEFAULT_IOS_RUNTIME_VERIFY_TIMEOUT_MS),
+  iosAgentSettleDelayMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_SETTLE_DELAY_MS),
+  iosAgentCaptureRetryDelayMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_CAPTURE_RETRY_DELAY_MS),
+  iosAgentFirstCaptureTimeoutMs: z.number().step(1).min(1).default(DEFAULT_IOS_AGENT_FIRST_CAPTURE_TIMEOUT_MS),
+})
+
+type ResolvedConfig = Omit<Config,
+  'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs' | 'iosAgentCaptureRetryDelayMs'
+  | 'iosAgentFirstCaptureTimeoutMs'> & Required<Pick<Config,
+  'iosRuntimeVerifyTimeoutMs' | 'iosAgentSettleDelayMs' | 'iosAgentCaptureRetryDelayMs'
+  | 'iosAgentFirstCaptureTimeoutMs'>>
+
+function resolveConfig(config: Config): ResolvedConfig {
+  return Config(config) as ResolvedConfig
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -80,6 +126,10 @@ export class PhoneEnvironment extends Service {
   private readonly listeners = new Set<(snapshot: PhoneEnvironmentSnapshot) => void>()
   private readonly root: string
   private readonly executableOverride: string | undefined
+  private readonly iosRuntimeVerifyTimeoutMs: number
+  private readonly iosAgentSettleDelayMs: number
+  private readonly iosAgentCaptureRetryDelayMs: number
+  private readonly iosAgentFirstCaptureTimeoutMs: number
   private candidate: PhoneRuntimeCandidate | undefined
   private candidateVersion: string | undefined
   private prepareController: AbortController | undefined
@@ -92,6 +142,11 @@ export class PhoneEnvironment extends Service {
   private unsubscribeAndroid: (() => void) | undefined
   private androidController: AbortController | undefined
   private androidTask: Promise<void> | undefined
+  private ios: IosEnvironmentProvider | undefined
+  private unsubscribeIos: (() => void) | undefined
+  private iosController: AbortController | undefined
+  private iosTask: Promise<void> | undefined
+  private iosOperation: 'prepare' | undefined
   private transactionTail: Promise<unknown> = Promise.resolve()
   private enableTail: Promise<void> = Promise.resolve()
   private readonly lifetime = new AbortController()
@@ -104,8 +159,13 @@ export class PhoneEnvironment extends Service {
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'phoneEnvironment')
-    this.root = resolve(config.root ?? join(resolveDshHome(), 'phone'))
-    this.executableOverride = nonEmpty(config.executablePath)
+    const resolved = resolveConfig(config)
+    this.root = resolve(resolved.root ?? join(resolveDshHome(), 'phone'))
+    this.executableOverride = nonEmpty(resolved.executablePath)
+    this.iosRuntimeVerifyTimeoutMs = resolved.iosRuntimeVerifyTimeoutMs
+    this.iosAgentSettleDelayMs = resolved.iosAgentSettleDelayMs
+    this.iosAgentCaptureRetryDelayMs = resolved.iosAgentCaptureRetryDelayMs
+    this.iosAgentFirstCaptureTimeoutMs = resolved.iosAgentFirstCaptureTimeoutMs
     this.current = initialPhoneEnvironmentSnapshot(process.platform, process.arch, false)
     ctx.effect(() => () => { this.listeners.clear() }, 'phone environment subscriber cleanup')
     ctx.effect(() => ctx.webServer.register({
@@ -127,6 +187,8 @@ export class PhoneEnvironment extends Service {
       this.cancel()
       try { await this.androidTask } catch (error) { if (!isCancellation(error)) failures.push(error) }
       try { await this.android?.deactivate() } catch (error) { failures.push(error) }
+      try { await this.iosTask } catch (error) { if (!isCancellation(error)) failures.push(error) }
+      try { await this.ios?.deactivate() } catch (error) { failures.push(error) }
       await this.prepareTask?.catch(() => {})
       await this.refreshTask
       await this.enableTail
@@ -174,11 +236,14 @@ export class PhoneEnvironment extends Service {
       await this.refreshTask?.catch(() => {})
       await this.androidTask?.catch(() => {})
       await this.android?.deactivate()
+      await this.iosTask?.catch(() => {})
+      await this.ios?.deactivate()
       await this.ctx.phoneDevices.deactivate()
       return
     }
     if (this.candidate === undefined || this.candidateVersion === undefined) await this.refresh(signal)
     else await this.activateCandidate(this.candidate, this.candidateVersion, signal)
+    await this.reconcilePendingIosRuntime(signal)
   }
 
   /**
@@ -210,6 +275,30 @@ export class PhoneEnvironment extends Service {
       this.unsubscribeAndroid = undefined
       this.android = undefined
       this.publishAndroid({ kind: 'deferred' })
+    }
+  }
+
+  /**
+   * Register the iOS platform Provider while retaining this Service as the full-snapshot owner.
+   * A running snapshot discovered during registration remains pending until
+   * the active mobilecli generation passes list and picture verification.
+   * @param provider - Xcode runtime and Simulator lifecycle owner.
+   * @returns disposer that detaches the Provider and restores the deferred state.
+   */
+  registerIosEnvironment(provider: IosEnvironmentProvider): () => void {
+    if (this.ios !== undefined) throw new Error('phone-environment: iOS Provider is already registered')
+    this.ios = provider
+    this.unsubscribeIos = provider.onChanged((state) => {
+      this.publishIos(this.pendingIosRuntime(state))
+    })
+    this.publishIos(this.pendingIosRuntime(provider.snapshot()))
+    void this.refreshIos().catch(() => {})
+    return () => {
+      if (this.ios !== provider) return
+      this.unsubscribeIos?.()
+      this.unsubscribeIos = undefined
+      this.ios = undefined
+      this.publishIos({ kind: 'deferred' })
     }
   }
 
@@ -281,6 +370,14 @@ export class PhoneEnvironment extends Service {
         this.candidateVersion = installed.version
         if (this.current.enabled) await this.activateCandidate(this.candidate, installed.version, controller.signal)
         else this.publishReady('managed', installed.version)
+        if (this.current.enabled) {
+          try {
+            await this.reconcilePendingIosRuntime(controller.signal)
+          } catch (error) {
+            if (isCancellation(error)) throw error
+            this.ctx.logger.error(error)
+          }
+        }
         return this.current
       } catch (error) {
         this.publishRuntime(controller.signal.aborted
@@ -309,6 +406,8 @@ export class PhoneEnvironment extends Service {
     this.refreshController?.abort(reason)
     this.androidController?.abort(reason)
     this.android?.cancel()
+    this.iosController?.abort(reason)
+    this.ios?.cancel()
   }
 
   private async prepareAndroid(request: AndroidPrepareRequest): Promise<void> {
@@ -417,6 +516,231 @@ export class PhoneEnvironment extends Service {
     if (failure !== undefined) throw environmentError(failure)
   }
 
+  private async prepareIos(): Promise<void> {
+    await this.runIosOperation(async (provider, signal) => {
+      const prepared = await provider.prepare(signal)
+      if (!this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) return
+      const running = prepared.kind === 'ready' && prepared.running
+        ? prepared
+        : await provider.start(signal)
+      await this.activateIosRuntime(running, signal)
+    }, undefined, 'prepare')
+  }
+
+  private async startIos(): Promise<void> {
+    if (!this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) {
+      throw new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_REQUIRED',
+        'enable Phone Devices and prepare mobilecli before starting iOS Simulator',
+      )
+    }
+    await this.runIosOperation(async (provider, signal) => {
+      await this.activateIosRuntime(await provider.start(signal), signal)
+    })
+  }
+
+  private async refreshIos(): Promise<void> {
+    await this.runIosOperation(async (provider, signal) => {
+      const state = await provider.refresh(signal)
+      this.publishIos(this.pendingIosRuntime(state))
+      if (state.kind === 'ready' && state.running
+        && this.current.enabled && this.candidate !== undefined && this.candidateVersion !== undefined) {
+        await this.activateIosRuntime(state, signal)
+      }
+    })
+  }
+
+  private async reconcilePendingIosRuntime(ownerSignal?: AbortSignal): Promise<void> {
+    if (this.ios === undefined) return
+    const active = this.iosTask
+    if (active !== undefined) {
+      try { await active } catch (error) { if (!isCancellation(error)) throw error }
+    }
+    const state = this.ios.snapshot()
+    if (state.kind !== 'ready' || !state.running
+      || !this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) return
+    if (this.current.platforms.ios.kind === 'ready' && this.current.platforms.ios.running
+      && this.current.platforms.ios.deviceId === state.deviceId) return
+    ownerSignal?.throwIfAborted()
+    await this.runIosOperation(async (_provider, signal) => {
+      await this.activateIosRuntime(state, signal)
+    }, ownerSignal)
+  }
+
+  private requireIos(): IosEnvironmentProvider {
+    if (this.ios !== undefined) return this.ios
+    throw new PhoneEnvironmentError('PHONE_IOS_UNAVAILABLE', 'the iOS environment Provider is unavailable')
+  }
+
+  private async activateIosRuntime(state: PhoneIosState, signal: AbortSignal): Promise<void> {
+    if (state.kind !== 'ready' || this.candidate === undefined || this.candidateVersion === undefined) return
+    if (!state.running) return
+    this.publishIos({ kind: 'preparing', plan: state.plan, step: 'booting' })
+    try {
+      await this.activateCandidate(this.candidate, this.candidateVersion, signal)
+      await this.verifyIosRuntime(state.deviceId, signal)
+      signal.throwIfAborted()
+      this.requireCurrentIosRuntime(state.deviceId)
+      this.publishIos(state)
+    } catch (error) {
+      await this.ctx.phoneDevices.deactivate().catch(() => {})
+      await this.ios?.deactivate().catch(() => {})
+      const failure = environmentError(error)
+      this.publishIos({
+        kind: 'failed', plan: state.plan, code: failure.code, message: failure.message, retryable: true,
+      })
+      throw error
+    }
+  }
+
+  private pendingIosRuntime(state: PhoneIosState): PhoneIosState {
+    return state.kind === 'ready' && state.running
+      ? { kind: 'preparing', plan: state.plan, step: 'booting' }
+      : state
+  }
+
+  private requireCurrentIosRuntime(expectedId: DeviceId): void {
+    const current = this.ios?.snapshot()
+    if (current?.kind === 'failed') throw new PhoneEnvironmentError(current.code, current.message)
+    if (current?.kind !== 'ready' || !current.running || current.deviceId !== expectedId) {
+      throw new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `the iOS Provider revoked running device ${expectedId} before Host readiness commit`,
+      )
+    }
+  }
+
+  private async runIosOperation(
+    operation: (provider: IosEnvironmentProvider, signal: AbortSignal) => Promise<void>,
+    ownerSignal?: AbortSignal,
+    snapshotOperation?: 'prepare',
+  ): Promise<void> {
+    if (this.iosTask !== undefined) {
+      throw new PhoneEnvironmentError('PHONE_IOS_BUSY', 'an iOS environment operation is already running')
+    }
+    const provider = this.requireIos()
+    const controller = new AbortController()
+    this.iosController = controller
+    this.iosOperation = snapshotOperation
+    const signal = ownerSignal === undefined
+      ? AbortSignal.any([this.lifetime.signal, controller.signal])
+      : AbortSignal.any([this.lifetime.signal, controller.signal, ownerSignal])
+    const task = operation(provider, signal)
+    this.iosTask = task
+    try {
+      await task
+    } finally {
+      if (this.iosTask === task) this.iosTask = undefined
+      if (this.iosController === controller) this.iosController = undefined
+      if (snapshotOperation !== undefined && this.iosOperation === snapshotOperation) {
+        this.iosOperation = undefined
+        if (this.current.platforms.ios.kind === 'checking') this.publishIos(provider.snapshot())
+      }
+    }
+  }
+
+  private async cancelIos(): Promise<void> {
+    this.iosController?.abort(new PhoneEnvironmentError(
+      'PHONE_IOS_ABORTED', 'the iOS environment operation was cancelled',
+    ))
+    this.ios?.cancel()
+    let failure: unknown
+    try { await this.iosTask } catch (error) { if (!isCancellation(error)) failure = error }
+    try { await this.ios?.deactivate() } catch (error) { failure ??= error }
+    if (this.ios !== undefined) {
+      const state = this.ios.snapshot()
+      this.publishIos(state.kind === 'ready' && state.running
+        ? {
+          kind: 'failed', plan: state.plan, code: 'PHONE_IOS_ABORTED',
+          message: 'iOS Simulator picture verification was cancelled; retry preparation or detection to verify it',
+          retryable: true,
+        }
+        : state)
+    }
+    if (failure !== undefined) {
+      throw failure instanceof Error
+        ? failure
+        : new Error('iOS environment cancellation failed with a non-Error reason', { cause: failure })
+    }
+  }
+
+  private async verifyIosRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      controller.abort(new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `mobilecli did not produce an iOS Simulator MJPEG picture within ${String(this.iosRuntimeVerifyTimeoutMs)}ms`,
+      ))
+    }, this.iosRuntimeVerifyTimeoutMs)
+    timeout.unref()
+    const verificationSignal = AbortSignal.any([signal, controller.signal])
+    try {
+      const devices = await this.ctx.phoneDevices.listDevices(verificationSignal)
+      const listed = devices.ios.simulators.find(device => device.id === id && device.online)
+      if (listed === undefined) {
+        throw new PhoneEnvironmentError(
+          'PHONE_IOS_RUNTIME_VERIFY',
+          `mobilecli did not list the prepared iOS Simulator ${id} online`,
+        )
+      }
+      const agent = await this.ctx.phoneDevices.agentStatus(id, verificationSignal)
+      let installedNow = false
+      if (!agent.installed) {
+        await this.ctx.phoneDevices.installAgent(id, { signal: verificationSignal })
+        installedNow = true
+        await delay(this.iosAgentSettleDelayMs, undefined, { signal: verificationSignal, ref: false })
+      }
+      if (!installedNow) await this.verifyIosPicture(id, verificationSignal)
+      else await this.verifyNewIosAgentPicture(id, verificationSignal)
+    } catch (error) {
+      if (controller.signal.aborted && controller.signal.reason instanceof Error) throw controller.signal.reason
+      if (signal.aborted) throw signal.reason
+      if (error instanceof PhoneEnvironmentError && error.code === 'PHONE_IOS_RUNTIME_VERIFY') throw error
+      throw new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `mobilecli could not verify the iOS Simulator MJPEG stream: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      )
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  private async verifyNewIosAgentPicture(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const first = new AbortController()
+    const timeout = setTimeout(() => {
+      first.abort(new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `the first mobilecli Simulator capture session did not settle within ${String(this.iosAgentFirstCaptureTimeoutMs)}ms`,
+      ))
+    }, this.iosAgentFirstCaptureTimeoutMs)
+    timeout.unref()
+    try {
+      await this.verifyIosPicture(id, AbortSignal.any([signal, first.signal]))
+      return
+    } catch (error) {
+      if (signal.aborted) throw error
+    } finally {
+      clearTimeout(timeout)
+    }
+    await delay(this.iosAgentCaptureRetryDelayMs, undefined, { signal, ref: false })
+    await this.verifyIosPicture(id, signal)
+  }
+
+  private async verifyIosPicture(id: DeviceId, signal: AbortSignal): Promise<void> {
+    const capture = await this.ctx.phoneDevices.startCapture({
+      deviceId: id, format: 'mjpeg', signal,
+    })
+    if (!/^(?:multipart\/x-mixed-replace|image\/jpeg)(?:;|$)/iu.test(capture.contentType)) {
+      await capture.body.cancel()
+      throw new PhoneEnvironmentError(
+        'PHONE_IOS_RUNTIME_VERIFY',
+        `mobilecli returned ${capture.contentType || 'no Content-Type'} for the iOS Simulator MJPEG probe`,
+      )
+    }
+    await verifyMjpegJpegPicture(capture.body, { signal, maxBytes: IOS_MJPEG_PROBE_MAX_BYTES })
+  }
+
   private async verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {
     const controller = new AbortController()
     const timeout = setTimeout(() => {
@@ -481,15 +805,22 @@ export class PhoneEnvironment extends Service {
    */
   protected readonly probeRuntimeVersion: MobilecliVersionProbe = probeMobilecliVersion
 
+  /**
+   * Resolve the optional system mobilecli candidate without changing candidate precedence.
+   * @returns the executable path, or undefined when system discovery finds none.
+   */
+  protected resolveSystemRuntime(): string | undefined {
+    try {
+      return resolveMobilecliExecutable({ env: process.env })
+    } catch {
+      return undefined
+    }
+  }
+
   private async detectRuntime(signal: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     try {
       const managed = await readManagedMobilecli(this.root, process.platform, process.arch, signal)
-      let system: string | undefined
-      try {
-        system = resolveMobilecliExecutable({ env: process.env })
-      } catch {
-        // Absence is the ordinary missing state; fixed guidance belongs in the UI.
-      }
+      const system = this.resolveSystemRuntime()
       const candidate = selectPhoneRuntimeCandidate({
         ...(this.executableOverride === undefined ? {} : { override: this.executableOverride }),
         ...(managed === undefined ? {} : { managed: managed.executablePath }),
@@ -513,7 +844,15 @@ export class PhoneEnvironment extends Service {
       }
       this.candidate = candidate
       this.candidateVersion = version
-      if (this.current.enabled) await this.activateCandidate(candidate, version, signal)
+      if (this.current.enabled) {
+        await this.activateCandidate(candidate, version, signal)
+        try {
+          await this.reconcilePendingIosRuntime(signal)
+        } catch (error) {
+          if (isCancellation(error)) throw error
+          this.ctx.logger.error(error)
+        }
+      }
       else this.publishReady(candidate.source, version)
     } catch (error) {
       this.candidate = undefined
@@ -561,6 +900,16 @@ export class PhoneEnvironment extends Service {
     this.publish({
       ...this.current,
       platforms: Object.freeze({ ...this.current.platforms, android: Object.freeze(android) }),
+    })
+  }
+
+  private publishIos(ios: PhoneIosState): void {
+    const projected = ios.kind === 'checking'
+      ? this.iosOperation === 'prepare' ? { kind: 'checking', operation: 'prepare' } as const : { kind: 'checking' } as const
+      : ios
+    this.publish({
+      ...this.current,
+      platforms: Object.freeze({ ...this.current.platforms, ios: Object.freeze(projected) }),
     })
   }
 
@@ -612,6 +961,10 @@ export class PhoneEnvironment extends Service {
       } else if (pathname === PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH) await this.cancelAndroid()
       else if (pathname === PHONE_ENVIRONMENT_ANDROID_REFRESH_PATH) await this.refreshAndroid()
       else if (pathname === PHONE_ENVIRONMENT_ANDROID_START_PATH) await this.startAndroid()
+      else if (pathname === PHONE_ENVIRONMENT_IOS_PREPARE_PATH) await this.prepareIos()
+      else if (pathname === PHONE_ENVIRONMENT_IOS_CANCEL_PATH) await this.cancelIos()
+      else if (pathname === PHONE_ENVIRONMENT_IOS_REFRESH_PATH) await this.refreshIos()
+      else if (pathname === PHONE_ENVIRONMENT_IOS_START_PATH) await this.startIos()
       else {
         writeJson(res, 404, { error: { code: 'not-found', message: 'unknown phone environment path' } })
         return
@@ -619,7 +972,7 @@ export class PhoneEnvironment extends Service {
       writeJson(res, 200, this.current)
     } catch (error) {
       const failure = environmentError(error)
-      writeJson(res, failure.code === 'PHONE_ENVIRONMENT_BUSY' || failure.code === 'PHONE_ANDROID_BUSY' ? 409 : 502, {
+      writeJson(res, ['PHONE_ENVIRONMENT_BUSY', 'PHONE_ANDROID_BUSY', 'PHONE_IOS_BUSY'].includes(failure.code) ? 409 : 502, {
         error: { code: failure.code, message: failure.message },
       })
     }
@@ -677,6 +1030,7 @@ function isCancellation(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false
   const code = (error as { readonly code?: unknown }).code
   return code === 'PHONE_ANDROID_ABORTED'
+    || code === 'PHONE_IOS_ABORTED'
     || code === 'PHONE_ENVIRONMENT_ABORTED'
     || code === 'PHONE_ENVIRONMENT_DISPOSED'
 }

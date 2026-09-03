@@ -59,6 +59,7 @@ const state = {
   devices: knobs.devices ?? [],
   bootCount: 0,
   shutdownCount: 0,
+  infoCount: 0,
   io: [],
   captures: [],
 }
@@ -87,8 +88,8 @@ function writeAgentState(agentState) {
 }
 
 function replyAgent(payload) {
+  process.exitCode = 0
   process.stdout.write(`${JSON.stringify(payload)}\n`)
-  process.exit(0)
 }
 
 // CLI mode: `fakemobilecli agent status|install --device <id> ...` runs as a
@@ -109,36 +110,47 @@ if (args[0] === 'agent') {
   const delayMs = subcommand === 'install' ? (agentKnobs.installDelayMs ?? 0) : (agentKnobs.statusDelayMs ?? 0)
   setTimeout(() => {
     if (typeof failText === 'string') {
+      process.exitCode = subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1)
       process.stderr.write(`${failText}\n`)
-      process.exit(subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1))
+      return
     }
     if (subcommand === 'status') {
       agentState.statusCount += 1
       writeAgentState(agentState)
+      if (typeof agentKnobs.statusAnswer === 'string') {
+        process.exitCode = 0
+        process.stdout.write(`${agentKnobs.statusAnswer}\n`)
+        return
+      }
       if (agentState.installed) {
         replyAgent({ status: 'ok', data: { message: 'Agent version 0.0.0-test is installed on device', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+        return
       }
       replyAgent({ status: 'fail', data: { message: 'Agent is not installed on the device' } })
+      return
     }
     if (subcommand === 'install') {
       agentState.installCount += 1
       agentState.lastInstallArgv = [...args]
       writeAgentState(agentState)
       const deviceEntry = state.devices.find(candidate => candidate.id === device)
-      if (deviceEntry?.type === 'real' && !args.includes('--provisioning-profile')) {
+      if (deviceEntry?.platform === 'ios' && deviceEntry.type === 'real' && !args.includes('--provisioning-profile')) {
+        process.exitCode = 1
         process.stderr.write('--provisioning-profile is required for real iOS devices\n')
-        process.exit(1)
+        return
       }
       agentState.installed = true
       writeAgentState(agentState)
       if (typeof agentKnobs.installAnswer === 'string') {
+        process.exitCode = 0
         process.stdout.write(`${agentKnobs.installAnswer}\n`)
-        process.exit(0)
+        return
       }
       replyAgent({ status: 'ok', data: { message: 'Agent installed successfully', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+      return
     }
+    process.exitCode = 1
     process.stderr.write(`unknown agent subcommand: ${String(subcommand)}\n`)
-    process.exit(1)
   }, delayMs)
 }
 
@@ -215,6 +227,28 @@ async function handleRpc(req, res) {
       }))
       // Real mobilecli 1.0.5 wraps the array in a `{ devices: [...] }` envelope.
       reply(res, id, { result: knobs.listEnvelope === true ? { devices: entries } : entries })
+      return
+    }
+    case 'device.info': {
+      const deviceId = params?.deviceId
+      const device = state.devices.find(candidate => candidate.id === deviceId)
+      if (device === undefined) {
+        reply(res, id, { error: { code: -32010, message: `no device ${String(deviceId)}` } })
+        return
+      }
+      state.infoCount += 1
+      const infoDelayMs = knobs.infoDelayMs ?? 0
+      if (infoDelayMs > 0) await new Promise(resolveDelay => setTimeout(resolveDelay, infoDelayMs))
+      reply(res, id, {
+        result: {
+          device: {
+            ...device,
+            screenSize: device.screenSize ?? (device.platform === 'ios'
+              ? { width: 402, height: 874, scale: 3 }
+              : { width: 390, height: 844, scale: 1 }),
+          },
+        },
+      })
       return
     }
     case 'device.boot':
@@ -326,6 +360,7 @@ const server = http.createServer((req, res) => {
           requests,
           bootCount: state.bootCount,
           shutdownCount: state.shutdownCount,
+          infoCount: state.infoCount,
           io: state.io,
           captures: state.captures,
         })

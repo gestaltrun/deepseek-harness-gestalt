@@ -14,6 +14,27 @@ export type PhonePlatformView =
   | { readonly kind: 'deferred' }
   | { readonly kind: 'unsupported'; readonly reason: string }
 
+/** Xcode and product-Simulator facts displayed by the iOS preparation lane. */
+export interface IosPreparationPlanView {
+  readonly developerDir: string
+  readonly xcodeVersion: string
+  readonly simulatorName: string
+  readonly runtime?: { readonly identifier: string; readonly name: string; readonly version: string; readonly available: true }
+  readonly deviceType?: { readonly identifier: string; readonly name: string }
+}
+
+/** iOS platform state projected from the Host full snapshot. */
+export type PhoneIosView =
+  | PhonePlatformView
+  | { readonly kind: 'checking'; readonly operation?: 'prepare' }
+  | { readonly kind: 'xcode-missing'; readonly message: string }
+  | { readonly kind: 'license-required'; readonly developerDir: string; readonly message: string }
+  | { readonly kind: 'manual-required'; readonly code: 'first-launch' | 'xcode-update'; readonly message: string; readonly developerDir?: string }
+  | { readonly kind: 'runtime-missing' | 'no-simulator'; readonly plan: IosPreparationPlanView }
+  | { readonly kind: 'preparing'; readonly plan: IosPreparationPlanView; readonly step: 'downloading-runtime' | 'creating-simulator' | 'booting' }
+  | { readonly kind: 'ready'; readonly plan: IosPreparationPlanView; readonly deviceId: string; readonly running: boolean }
+  | { readonly kind: 'failed'; readonly plan?: IosPreparationPlanView; readonly code: string; readonly message: string; readonly retryable: boolean }
+
 interface AndroidComponentView {
   readonly commandLineTools: boolean
   readonly platformTools: boolean
@@ -82,7 +103,7 @@ export interface PhoneEnvironmentClientSnapshot {
   readonly runtime: PhoneManagedRuntimeView
   readonly platforms: {
     readonly android: PhoneAndroidView
-    readonly ios: PhonePlatformView
+    readonly ios: PhoneIosView
   }
 }
 
@@ -96,8 +117,14 @@ export interface PhoneRuntimeSource {
   cancelAndroid(): Promise<void>
   refreshAndroid(): Promise<void>
   startAndroid(): Promise<void>
+  prepareIos(): Promise<void>
+  cancelIos(): Promise<void>
+  refreshIos(): Promise<void>
+  startIos(): Promise<void>
   ensureDetected(): void
   subscribe(listener: () => void): () => void
+  /** Abort Host requests, clear polling, and silence later publications. */
+  dispose(): void
 }
 
 /** Initial state before the first Host pull. */
@@ -130,6 +157,10 @@ export function createHttpPhoneRuntimeSource(
   let snapshot = MISSING_PHONE_ENVIRONMENT
   let detected = false
   let active: Promise<void> | undefined
+  let passiveTimer: ReturnType<typeof setTimeout> | undefined
+  let operationTimer: ReturnType<typeof setTimeout> | undefined
+  const abortController = new AbortController()
+  const isDisposed = (): boolean => abortController.signal.aborted
   const listeners = new Set<() => void>()
   const notify = (): void => {
     for (const listener of [...listeners]) {
@@ -140,9 +171,31 @@ export function createHttpPhoneRuntimeSource(
       }
     }
   }
-  const request = async (path: string, method: 'GET' | 'POST'): Promise<void> => {
-    const response = await fetch(path, { method, headers: { accept: 'application/json' } })
+  const schedulePassivePoll = (): void => {
+    if (isDisposed() || !transient(snapshot)) {
+      if (passiveTimer !== undefined) clearTimeout(passiveTimer)
+      passiveTimer = undefined
+      return
+    }
+    if (passiveTimer !== undefined) return
+    passiveTimer = setTimeout(() => {
+      passiveTimer = undefined
+      if (active !== undefined) {
+        schedulePassivePoll()
+        return
+      }
+      void run(PATH, 'GET').catch(() => { schedulePassivePoll() })
+    }, PREPARE_POLL_MS)
+  }
+  const request = async (path: string, init: RequestInit): Promise<void> => {
+    if (isDisposed()) throw new Error('phone runtime source is disposed')
+    const response = await fetch(path, {
+      ...init,
+      signal: abortController.signal,
+    })
+    if (isDisposed()) return
     const body: unknown = await response.json()
+    if (isDisposed()) return
     if (!response.ok) throw new Error(errorMessage(body, response.status))
     const next = parseSnapshot(body)
     detected = true
@@ -150,10 +203,12 @@ export function createHttpPhoneRuntimeSource(
       snapshot = next
       notify()
     }
+    schedulePassivePoll()
   }
   const run = (path: string, method: 'GET' | 'POST'): Promise<void> => {
+    if (isDisposed()) return Promise.reject(new Error('phone runtime source is disposed'))
     if (active !== undefined) return active
-    const operation = request(path, method)
+    const operation = request(path, { method, headers: { accept: 'application/json' } })
     active = operation
     void operation.then(
       () => { active = undefined },
@@ -163,57 +218,79 @@ export function createHttpPhoneRuntimeSource(
   }
   const pollOperation = (operation: Promise<void>): Promise<void> => {
     active = operation
-    let timer: ReturnType<typeof setTimeout>
     const poll = (): void => {
-      if (active !== operation) return
-      void request(PATH, 'GET').catch(() => {})
-      timer = setTimeout(poll, PREPARE_POLL_MS)
+      operationTimer = undefined
+      void request(PATH, { method: 'GET', headers: { accept: 'application/json' } }).catch(() => {}).finally(() => {
+        if (active === operation) operationTimer = setTimeout(poll, PREPARE_POLL_MS)
+      })
     }
-    timer = setTimeout(poll, 0)
-    void operation.then(
-      () => {
-        active = undefined
-        clearTimeout(timer)
-      },
-      () => {
-        active = undefined
-        clearTimeout(timer)
-      },
-    )
+    operationTimer = setTimeout(poll, 0)
+    const settled = (): void => {
+      if (active === operation) active = undefined
+      if (operationTimer !== undefined) clearTimeout(operationTimer)
+      operationTimer = undefined
+    }
+    void operation.then(settled, settled)
     return operation
   }
-  const prepare = (): Promise<void> => active ?? pollOperation(request(`${PATH}/prepare`, 'POST'))
+  const prepare = (): Promise<void> => {
+    if (isDisposed()) return Promise.reject(new Error('phone runtime source is disposed'))
+    return active ?? pollOperation(request(
+      `${PATH}/prepare`, { method: 'POST', headers: { accept: 'application/json' } },
+    ))
+  }
   const runPolled = (path: string, body?: unknown): Promise<void> => {
+    if (isDisposed()) return Promise.reject(new Error('phone runtime source is disposed'))
     if (active !== undefined) return active
     return pollOperation(requestWithBody(path, body))
   }
-  const requestWithBody = async (path: string, body?: unknown): Promise<void> => {
-    const response = await fetch(path, {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/json' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    const value: unknown = await response.json()
-    if (!response.ok) throw new Error(errorMessage(value, response.status))
-    const next = parseSnapshot(value)
-    detected = true
-    if (next.revision > snapshot.revision) { snapshot = next; notify() }
-  }
+  const requestWithBody = (path: string, body?: unknown): Promise<void> => request(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
   return {
     getSnapshot: () => snapshot,
     refresh: () => run(`${PATH}/refresh`, 'POST'),
     prepare,
-    cancel: () => request(`${PATH}/cancel`, 'POST'),
+    cancel: () => request(`${PATH}/cancel`, { method: 'POST', headers: { accept: 'application/json' } }),
     prepareAndroid: () => runPolled(`${PATH}/android/prepare`, { licenseAccepted: true }),
     cancelAndroid: () => requestWithBody(`${PATH}/android/cancel`),
     refreshAndroid: () => runPolled(`${PATH}/android/refresh`),
     startAndroid: () => runPolled(`${PATH}/android/start`),
-    ensureDetected: () => { if (!detected && active === undefined) void run(PATH, 'GET') },
+    prepareIos: () => runPolled(`${PATH}/ios/prepare`),
+    cancelIos: () => requestWithBody(`${PATH}/ios/cancel`),
+    refreshIos: () => runPolled(`${PATH}/ios/refresh`),
+    startIos: () => runPolled(`${PATH}/ios/start`),
+    ensureDetected: () => {
+      if (!isDisposed() && !detected && active === undefined) void run(PATH, 'GET').catch(() => {})
+    },
     subscribe: (listener) => {
+      if (isDisposed()) return () => {}
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
+    dispose: () => {
+      if (isDisposed()) return
+      listeners.clear()
+      if (passiveTimer !== undefined) clearTimeout(passiveTimer)
+      passiveTimer = undefined
+      if (operationTimer !== undefined) clearTimeout(operationTimer)
+      operationTimer = undefined
+      active = undefined
+      abortController.abort()
+    },
   }
+}
+
+function transient(snapshot: PhoneEnvironmentClientSnapshot): boolean {
+  const runtime = snapshot.runtime.kind
+  const android = snapshot.platforms.android.kind
+  const ios = snapshot.platforms.ios.kind
+  return runtime === 'downloading' || runtime === 'verifying' || runtime === 'activating'
+    || android === 'checking' || android === 'downloading' || android === 'installing'
+    || android === 'creating-avd' || android === 'checking-acceleration' || android === 'booting'
+    || ios === 'checking' || ios === 'preparing'
 }
 
 function parseSnapshot(value: unknown): PhoneEnvironmentClientSnapshot {
@@ -222,7 +299,7 @@ function parseSnapshot(value: unknown): PhoneEnvironmentClientSnapshot {
     throw new Error('phone environment response was not a full revisioned snapshot')
   }
   const android = parseAndroid(value.platforms.android)
-  const ios = parsePlatform(value.platforms.ios)
+  const ios = parseIos(value.platforms.ios)
   return Object.freeze({
     revision: value.revision,
     enabled: value.enabled,
@@ -256,13 +333,77 @@ function parseRuntime(runtime: Record<string, unknown>): PhoneManagedRuntimeView
   throw new Error('phone environment snapshot carried an invalid runtime state')
 }
 
-function parsePlatform(value: unknown): PhonePlatformView {
-  if (!record(value)) throw new Error('phone environment snapshot carried an invalid platform state')
+function parsePlatform(value: Record<string, unknown>): PhonePlatformView {
   if (value.kind === 'deferred') return Object.freeze({ kind: 'deferred' })
   if (value.kind === 'unsupported' && string(value.reason)) {
     return Object.freeze({ kind: 'unsupported', reason: value.reason })
   }
   throw new Error('phone environment snapshot carried an invalid platform state')
+}
+
+function parseIos(value: unknown): PhoneIosView {
+  if (!record(value) || !string(value.kind)) throw new Error('phone environment snapshot carried an invalid iOS state')
+  if (value.kind === 'deferred' || value.kind === 'unsupported') return parsePlatform(value)
+  if (value.kind === 'checking') {
+    if (value.operation !== undefined && value.operation !== 'prepare') {
+      throw new Error('phone environment snapshot carried an invalid iOS state')
+    }
+    return Object.freeze({
+      kind: 'checking',
+      ...(value.operation === undefined ? {} : { operation: value.operation }),
+    })
+  }
+  if (value.kind === 'xcode-missing' && string(value.message)) return Object.freeze({ kind: value.kind, message: value.message })
+  if (value.kind === 'license-required' && string(value.developerDir) && string(value.message)) {
+    return Object.freeze({ kind: value.kind, developerDir: value.developerDir, message: value.message })
+  }
+  if (value.kind === 'manual-required' && (value.code === 'first-launch' || value.code === 'xcode-update')
+    && string(value.message) && (value.developerDir === undefined || string(value.developerDir))) {
+    return Object.freeze({
+      kind: value.kind, code: value.code, message: value.message,
+      ...(value.developerDir === undefined ? {} : { developerDir: value.developerDir }),
+    })
+  }
+  if (value.kind === 'failed' && string(value.code) && string(value.message) && typeof value.retryable === 'boolean') {
+    return Object.freeze({
+      kind: value.kind, code: value.code, message: value.message, retryable: value.retryable,
+      ...(value.plan === undefined ? {} : { plan: parseIosPlan(value.plan) }),
+    })
+  }
+  const plan = parseIosPlan(value.plan)
+  if (value.kind === 'runtime-missing' || value.kind === 'no-simulator') return Object.freeze({ kind: value.kind, plan })
+  if (value.kind === 'preparing' && ['downloading-runtime', 'creating-simulator', 'booting'].includes(String(value.step))) {
+    return Object.freeze({ kind: value.kind, plan, step: value.step as 'downloading-runtime' | 'creating-simulator' | 'booting' })
+  }
+  if (value.kind === 'ready' && string(value.deviceId) && typeof value.running === 'boolean') {
+    return Object.freeze({ kind: value.kind, plan, deviceId: value.deviceId, running: value.running })
+  }
+  throw new Error('phone environment snapshot carried an invalid iOS state')
+}
+
+function parseIosPlan(value: unknown): IosPreparationPlanView {
+  if (!record(value) || !string(value.developerDir) || !string(value.xcodeVersion) || !string(value.simulatorName)) {
+    throw new Error('phone environment snapshot carried an invalid iOS plan')
+  }
+  const runtime = value.runtime
+  const deviceType = value.deviceType
+  if (runtime !== undefined && (!record(runtime) || !string(runtime.identifier) || !string(runtime.name)
+    || !string(runtime.version) || runtime.available !== true)) {
+    throw new Error('phone environment snapshot carried an invalid iOS runtime')
+  }
+  if (deviceType !== undefined && (!record(deviceType) || !string(deviceType.identifier) || !string(deviceType.name))) {
+    throw new Error('phone environment snapshot carried an invalid iOS device type')
+  }
+  return Object.freeze({
+    developerDir: value.developerDir, xcodeVersion: value.xcodeVersion, simulatorName: value.simulatorName,
+    ...(runtime === undefined ? {} : { runtime: Object.freeze({
+      identifier: runtime.identifier as string, name: runtime.name as string,
+      version: runtime.version as string, available: true as const,
+    }) }),
+    ...(deviceType === undefined ? {} : { deviceType: Object.freeze({
+      identifier: deviceType.identifier as string, name: deviceType.name as string,
+    }) }),
+  })
 }
 
 function parseAndroid(value: unknown): PhoneAndroidView {

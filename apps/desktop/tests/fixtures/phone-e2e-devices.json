@@ -45,12 +45,21 @@
     "provider": { "type": "local" }
   },
   {
-    "id": "iPhone-16",
+    "id": "8294A429-4C99-411F-A46D-0AD9499B7FDD",
     "name": "iPhone 16",
     "platform": "ios",
     "type": "simulator",
     "state": "online",
     "model": "iPhone 16-model",
+    "provider": { "type": "local" }
+  },
+  {
+    "id": "00008120-REAL-E2E",
+    "name": "Acceptance iPhone",
+    "platform": "ios",
+    "type": "real",
+    "state": "online",
+    "model": "Acceptance-iPhone-model",
     "provider": { "type": "local" }
   }
 ]

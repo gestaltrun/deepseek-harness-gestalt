@@ -82,15 +82,20 @@ function parseListing(body: unknown): PhoneListingSnapshot {
 
 /**
  * Pull the fleet listing from the Host.
+ * @param signal - Optional owner cancellation for a selection-local pull.
  * @returns the parsed per-platform summary groups.
  * @throws {@link PhoneStreamHttpError} when the Host refuses or the body breaks the wire contract.
  * @throws the network error wrapped as a status-0 {@link PhoneStreamHttpError} when the Host is unreachable.
  */
-async function pullListing(): Promise<PhoneListingSnapshot> {
+export async function fetchPhoneListing(signal?: AbortSignal): Promise<PhoneListingSnapshot> {
   let response: Response
   try {
-    response = await fetch(PHONE_DEVICES_PATH, { method: 'GET' })
+    response = await fetch(PHONE_DEVICES_PATH, {
+      method: 'GET',
+      ...(signal === undefined ? {} : { signal }),
+    })
   } catch (error) {
+    if (signal?.aborted === true) throw error
     throw new PhoneStreamHttpError(0, 'network', error instanceof Error ? error.message : String(error))
   }
   const body: unknown = await response.json().catch(() => null)
@@ -124,7 +129,7 @@ export function createHttpPhoneListingSource(): PhoneListingSource {
     }),
     snapshot: () => committed,
     refresh: async () => {
-      const next = await pullListing()
+      const next = await fetchPhoneListing()
       committed = next
       for (const listener of [...listeners]) listener()
     },

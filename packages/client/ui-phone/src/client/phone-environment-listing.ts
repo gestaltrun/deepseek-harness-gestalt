@@ -1,7 +1,7 @@
 /**
  * Settings-card environment source over the same Host fleet listing the
  * picker already consumes. A successful `GET /phone/devices` pull reaches
- * probing, both wizards, and ready; a `PHONE_UNRESOLVED` pull stays on the
+ * probing, platform-neutral no-device recovery, and ready; a `PHONE_UNRESOLVED` pull stays on the
  * mobilecli-missing row; any other failed first pull stays on the
  * missing-service probe-failed row.
  */
@@ -49,11 +49,18 @@ const PROBING_VIEW: PhoneEnvironmentView = Object.freeze({
   checks: PROBING_CHECKS,
 })
 
-type DetectPhase = 'idle' | 'probing' | 'ready' | 'failed'
+const NO_DEVICES_ERROR: PhoneEnvironmentError = Object.freeze({
+  kind: 'no-devices',
+  title: '当前没有可用设备',
+  detail: '上方 Android / iOS 分栏显示本机可准备的模拟器环境；USB 真机完成授权后也会出现在这里。',
+  nextAction: '重新检测',
+})
 
-function isMacPlatform(platform: string): boolean {
-  return /mac/i.test(platform)
-}
+const NO_DEVICES_VIEW: PhoneEnvironmentView = Object.freeze({
+  kind: 'errors', errors: Object.freeze([NO_DEVICES_ERROR]),
+})
+
+type DetectPhase = 'idle' | 'probing' | 'ready' | 'failed'
 
 function readyDevicesOf(listing: PhoneListingSnapshot): readonly PhoneReadyDevice[] {
   const android = listing.android.map((device): PhoneReadyDevice => ({
@@ -79,7 +86,7 @@ function metaOf(device: PhoneDeviceSummary): string {
   return `${run} · ${device.id}`
 }
 
-function viewFromListing(listing: PhoneListingSnapshot, platform: string): PhoneEnvironmentView {
+function viewFromListing(listing: PhoneListingSnapshot): PhoneEnvironmentView {
   const devices = readyDevicesOf(listing)
   if (devices.length > 0) {
     return {
@@ -88,19 +95,16 @@ function viewFromListing(listing: PhoneListingSnapshot, platform: string): Phone
       availableCount: devices.filter(device => device.online).length,
     }
   }
-  if (isMacPlatform(platform)) return { kind: 'ios-wizard' }
-  return { kind: 'android-wizard', platformToolsInstalled: true }
+  return NO_DEVICES_VIEW
 }
 
 /**
  * Wrap one fleet listing source as the settings-card environment snapshot.
  * @param listing - Host `GET /phone/devices` source already used by the picker.
- * @param platform - `navigator.platform` stand-in; defaults to the browser value.
  * @returns the environment source the Plugins-tab card injects.
  */
 export function createListingPhoneEnvironmentSource(
   listing: PhoneListingSource,
-  platform: string = globalThis.navigator.platform,
 ): PhoneEnvironmentSource {
   let phase: DetectPhase = 'idle'
   let lastError: PhoneEnvironmentError = PROBE_FAILED_ERROR
@@ -112,7 +116,7 @@ export function createListingPhoneEnvironmentSource(
   const source: PhoneEnvironmentSource = {
     getView: () => {
       if (phase === 'probing') return PROBING_VIEW
-      if (phase === 'ready') return viewFromListing(listing.snapshot(), platform)
+      if (phase === 'ready') return viewFromListing(listing.snapshot())
       return { kind: 'errors', errors: [lastError] }
     },
     redetect: async () => {

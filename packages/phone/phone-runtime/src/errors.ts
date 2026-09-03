@@ -24,3 +24,25 @@ export class PhoneDevicesError extends Error {
     if (options?.issue !== undefined) this.issue = options.issue
   }
 }
+
+/**
+ * Preserve an authoritative phone failure while attaching a separate cleanup failure.
+ * @param failure - Operation failure whose public code and structured issue remain authoritative.
+ * @param cleanup - Later teardown failure that must remain independently inspectable.
+ * @param label - Cleanup operation named in the operator-facing diagnostic.
+ * @returns a normalized error carrying both failures in an {@link AggregateError} cause.
+ */
+export function phoneFailureWithCleanup(
+  failure: PhoneDevicesError,
+  cleanup: unknown,
+  label: string,
+): PhoneDevicesError {
+  return new PhoneDevicesError(
+    failure.code,
+    `${failure.message}\n${label}: ${cleanup instanceof Error ? cleanup.message : String(cleanup)}`,
+    {
+      cause: new AggregateError([failure, cleanup], `${label} after ${failure.code}`),
+      ...(failure.issue !== undefined ? { issue: failure.issue } : {}),
+    },
+  )
+}

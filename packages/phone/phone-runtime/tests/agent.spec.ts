@@ -3,10 +3,12 @@ import { Context } from '@deepseek-ai/cordis'
 import PhoneDevices, { deviceId, FREE_SIGNING_PROFILE_REMINDER } from '@deepseek-ai/dsh-phone-runtime'
 import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import { PhoneDevicesError } from '../src/errors.ts'
+import { runMobilecliAgent } from '../src/agent-process.ts'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
-import { MobilecliServerProcess } from '../src/server-process.ts'
+import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
 import { stageFake, wireDevice } from './helpers.ts'
-import { rename } from 'node:fs/promises'
+import { chmod, readFile, rename, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -31,9 +33,11 @@ async function errorOf(run: () => Promise<unknown>): Promise<PhoneDevicesError> 
 
 const IOS_REAL = deviceId('REAL-UDID')
 const ANDROID_EMULATOR = deviceId('emulator-5554')
+const ANDROID_REAL = deviceId('ANDROID-REAL')
 
 const BASE_DEVICES = [
   wireDevice('emulator-5554', 'android', 'emulator', 'online'),
+  wireDevice('ANDROID-REAL', 'android', 'real', 'online'),
   wireDevice('REAL-UDID', 'ios', 'real', 'online'),
 ]
 
@@ -94,6 +98,23 @@ describe('phone runtime on-device agent operations', () => {
     expect(state.statusCount).toBe(3)
   })
 
+  it('accepts the pretty-printed missing-agent JSON emitted by mobilecli 1.0.5', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      agent: {
+        statusAnswer: JSON.stringify({
+          status: 'fail', data: { message: 'Agent is not installed on the device' },
+        }, null, 2),
+      },
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+
+    const status = await context.phoneDevices.agentStatus(IOS_REAL)
+
+    expect(status.installed).toBe(false)
+  })
+
   it('reinstalls on demand with force and passes the configured profile through', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
@@ -118,6 +139,33 @@ describe('phone runtime on-device agent operations', () => {
     const android = await context.phoneDevices.agentStatus(ANDROID_EMULATOR)
     expect(android.installed).toBe(true)
     expect(android.bundleId).toBe('com.mobilenext.devicekit-iosUITests.xctrunner')
+  })
+
+  it('installs an agent on a non-real device without a provisioning profile', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+
+    const installed = await context.phoneDevices.installAgent(ANDROID_EMULATOR)
+
+    expect(installed.installed).toBe(true)
+    expect((await fake.agentState()).lastInstallArgv).toEqual([
+      'agent', 'install', '--device', 'emulator-5554',
+    ])
+  })
+
+  it('installs an agent on an Android real device without applying an iOS provisioning profile', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+
+    const installed = await context.phoneDevices.installAgent(ANDROID_REAL)
+
+    expect(installed.installed).toBe(true)
+    expect(installed.profileReminder).toBeUndefined()
+    expect((await fake.agentState()).lastInstallArgv).toEqual([
+      'agent', 'install', '--device', 'ANDROID-REAL',
+    ])
   })
 
   it('attaches the free-signing reminder to answers about a re-signed real handset', async () => {
@@ -148,20 +196,22 @@ describe('phone runtime on-device agent operations', () => {
     }).await()).rejects.toThrow(/provisioningProfilePath/)
   })
 
-  it('surfaces the upstream profile requirement as PHONE_UPSTREAM without inventing an arm', async () => {
+  it('rejects a real-iOS install without a profile before spawning agent install', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
     const context = await mountWith(fake)
     const refused = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL))
-    expect(refused.code).toBe('PHONE_UPSTREAM')
-    expect(refused.message).toContain('--provisioning-profile is required')
+    expect(refused.code).toBe('PHONE_AGENT_PROFILE_REQUIRED')
+    expect(refused.message).toContain('provisioningProfilePath')
     expect(refused.issue).toBeUndefined()
-    expect((await fake.agentState()).installCount).toBe(1)
+    const state = await fake.agentState()
+    expect(state.statusCount).toBe(1)
+    expect(state.installCount).toBe(0)
   })
   it('classifies locked-device install failures onto the structured arm', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
-    const context = await mountWith(fake)
+    const context = await mountWith(fake, { provisioningProfilePath: fake.profilePath })
     await fake.setAgent({ installText: 'the device is locked; unlock it and try again' })
     const locked = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL))
     expect(locked.code).toBe('PHONE_REAL_DEVICE_ISSUE')
@@ -176,6 +226,17 @@ describe('phone runtime on-device agent operations', () => {
     const tunneled = await errorOf(() => context.phoneDevices.agentStatus(IOS_REAL))
     expect(tunneled.code).toBe('PHONE_REAL_DEVICE_ISSUE')
     expect(tunneled.issue).toBe('tunnel-failed')
+  })
+
+  it('keeps an unclassified nonzero agent failure on PHONE_UPSTREAM', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await fake.setAgent({ statusText: 'upstream agent status failed without a known device arm' })
+
+    const upstream = await errorOf(() => context.phoneDevices.agentStatus(IOS_REAL))
+
+    expect(upstream.code).toBe('PHONE_UPSTREAM')
   })
 
   it('keeps a zero-exit answer without parsable agent JSON a protocol failure', async () => {
@@ -231,12 +292,81 @@ describe('phone runtime on-device agent operations', () => {
     expect(cancelled.code).toBe('PHONE_ABORTED')
   })
 
+  it.skipIf(process.platform === 'win32')('cancels an official-style launcher and its native agent descendant', async () => {
+    const fake = await stageFake({ agent: { statusDelayMs: 5_000 } })
+    fakes.push(fake)
+    const fixtureDir = dirname(fake.executablePath)
+    const launcher = join(fixtureDir, 'mobilecli-agent-launcher')
+    const descendantPidFile = join(fixtureDir, 'agent-descendant.pid')
+    await writeFile(launcher, `#!/usr/bin/env node
+const { spawn } = require('node:child_process')
+const { writeFileSync } = require('node:fs')
+const child = spawn(${JSON.stringify(fake.executablePath)}, process.argv.slice(2), { stdio: 'inherit' })
+writeFileSync(${JSON.stringify(descendantPidFile)}, String(child.pid))
+child.on('close', code => { process.exit(code ?? 1) })
+`)
+    await chmod(launcher, 0o755)
+    const controller = new AbortController()
+    const running = runMobilecliAgent({
+      executablePath: launcher,
+      args: ['agent', 'status', '--device', 'REAL-UDID'],
+      signal: controller.signal,
+      timeoutMs: 10_000,
+    })
+    await vi.waitFor(async () => {
+      expect(Number(await readFile(descendantPidFile, 'utf8'))).toBeGreaterThan(0)
+    })
+    const descendantPid = Number(await readFile(descendantPidFile, 'utf8'))
+
+    try {
+      controller.abort()
+      await expect(running).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+      await vi.waitFor(() => {
+        expect(() => { process.kill(descendantPid, 0) }).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+      })
+    } finally {
+      try {
+        process.kill(descendantPid, 'SIGKILL')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      }
+    }
+  })
+
   it('escalates an ignored SIGTERM to the SIGKILL escape and still times out', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES, agent: { installDelayMs: 5_000, ignoreTerm: true } })
     fakes.push(fake)
     const context = await mountWith(fake, { agentTimeoutMs: 300, provisioningProfilePath: fake.profilePath })
     const timedOut = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL))
     expect(timedOut.code).toBe('PHONE_TIMEOUT')
+  })
+
+  it.each([
+    new Error('tree cleanup refused'),
+    'non-error tree cleanup refusal',
+  ])('preserves timeout while surfacing process-tree cleanup failure (%s)', async (failure) => {
+    const fake = await stageFake({ agent: { statusDelayMs: 5_000 } })
+    fakes.push(fake)
+    const descriptor = Object.getOwnPropertyDescriptor(MobilecliProcessTree.prototype, 'stop')
+    if (typeof descriptor?.value !== 'function') throw new Error('process-tree stop method is unavailable')
+    const originalStop = descriptor.value as (this: MobilecliProcessTree) => Promise<void>
+    const stop = vi.spyOn(MobilecliProcessTree.prototype, 'stop').mockImplementation(async function (this: MobilecliProcessTree) {
+      await originalStop.call(this)
+      throw failure
+    })
+    try {
+      const rejected = await errorOf(() => runMobilecliAgent({
+        executablePath: fake.executablePath,
+        args: ['agent', 'status', '--device', 'REAL-UDID'],
+        signal: undefined,
+        timeoutMs: 100,
+      }))
+      expect(rejected.code).toBe('PHONE_TIMEOUT')
+      expect(rejected.message).toContain(failure instanceof Error ? failure.message : failure)
+      expect(rejected.cause).toBeInstanceOf(AggregateError)
+    } finally {
+      stop.mockRestore()
+    }
   })
 
   it('keeps an empty zero-exit answer a protocol failure naming the missing output', async () => {

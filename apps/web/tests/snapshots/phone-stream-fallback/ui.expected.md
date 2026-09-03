@@ -22,3 +22,29 @@ after: format=MJPEG renderer=img
 - button "截图" [disabled]
 - button "刷新流"
 - text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+simulator: format=MJPEG renderer=img
+- button "切换设备：iOS Simulator": iOS Simulator
+- text: MJPEG
+- application "iOS Simulator 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+  - img "iOS Simulator 实时画面"
+  - text: 代理中
+- button "返回"
+- button "主屏幕"
+- button "最近任务"
+- button "截图" [disabled]
+- button "刷新流"
+- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+restricted:
+- button "切换设备：Android Restricted": Android Restricted
+- text: H264 30 fps
+- alert:
+  - paragraph: 设备拒绝安装控制代理
+  - paragraph: 请保持手机解锁，并在开发者选项中允许「USB 安装」与「USB 调试（安全设置）」后重试。系统确认必须在手机上完成。
+  - button "安装设备控制代理"
+  - button "重新检测"
+- button "返回"
+- button "主屏幕"
+- button "最近任务"
+- button "截图" [disabled]
+- button "刷新流"
+- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。

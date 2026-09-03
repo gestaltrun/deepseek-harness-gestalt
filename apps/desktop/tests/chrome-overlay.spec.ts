@@ -148,6 +148,7 @@ describe('chrome overlay helpers', () => {
     expect(parseChromeOverlayResult({ type: 'select', requestId: 'r', id: 'browser' })).toEqual({
       type: 'select', requestId: 'r', id: 'browser',
     })
+    expect(parseChromeOverlayResult({ type: 'select', requestId: 'r', id: 'x'.repeat(129) })).toBeUndefined()
     expect(isOverlaySender(3, 3)).toBe(true)
     expect(isOverlaySender(3, 4)).toBe(false)
     expect(isOverlaySender(3, undefined)).toBe(false)

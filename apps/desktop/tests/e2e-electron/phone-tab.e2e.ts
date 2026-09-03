@@ -7,7 +7,7 @@ import {
 } from './helpers.ts'
 
 describe('Desktop phone tab live chain', () => {
-  it('deduplicates devices, falls back to MJPEG, keeps H264 success, and forwards exact io', async () => {
+  it('deduplicates devices, falls back to MJPEG, and forwards exact GUI and Agent io', async () => {
     const startup = await assertStartupEvidence()
     await recordOwnedProcesses(startup.hostPid, true)
     await openSession()
@@ -87,36 +87,15 @@ describe('Desktop phone tab live chain', () => {
     expect(names.some(name => name.includes('Pixel_6_API_35'))).toBe(true)
     expect(names.some(name => name.includes('SM-S9310'))).toBe(true)
     expect(names.some(name => name.includes('iPhone 16'))).toBe(true)
+    expect(names.some(name => name.includes('Acceptance iPhone'))).toBe(true)
     expect(names.some(name => name.includes('Offline Pixel'))).toBe(false)
     expect(names.some(name => name.includes('Unauthorized Android'))).toBe(false)
     await clickSurfaceButton('iPhone 16切换')
     await browser.$('button[aria-label="切换设备：iPhone 16"]').waitForExist({ timeout: 30_000 })
     expect(await phoneTabTitles()).toEqual(['手机·iPhone 16'])
-    await waitForDecodedPicture('iPhone 16')
-    await expect(browser.$('[aria-label="当前画面编码 H264 · 30 fps"]')).toBeExisting()
-    await saveWindowEvidence('phone-iphone-window')
-    await clickSurfaceButton('切换设备：iPhone 16')
-    await clickSurfaceButton('Pixel_6_API_35切换')
-    await browser.$('button[aria-label="切换设备：Pixel_6_API_35"]').waitForExist({ timeout: 30_000 })
-    expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
-    await waitForMjpegPicture('Pixel_6_API_35')
+    await waitForMjpegPicture('iPhone 16')
     await expect(browser.$('[aria-label="当前画面编码 MJPEG"]')).toBeExisting()
-    await saveWindowEvidence('phone-pixel-return-window')
-
-    const captureResources = await browser.execute(() => performance.getEntriesByType('resource')
-      .map(entry => new URL(entry.name))
-      .filter(url => url.pathname.startsWith('/phone/stream/'))
-      .map(url => ({ path: url.pathname })))
-    await writeArtifact('phone-capture-resources.json', captureResources)
-    expect(captureResources.length).toBeGreaterThan(0)
-    expect(captureResources.some(resource => resource.path.endsWith('/h264'))).toBe(true)
-    expect(captureResources.some(resource => resource.path.endsWith('/mjpeg'))).toBe(true)
-    const captureCounters = await fakeCounters()
-    expect(captureCounters.captures.slice(0, 2)).toEqual([
-      { deviceId: 'emulator-5554', format: 'avc' },
-      { deviceId: 'emulator-5554', format: 'mjpeg' },
-    ])
-    expect(captureCounters.captures).toContainEqual({ deviceId: 'iPhone-16', format: 'avc' })
+    await saveWindowEvidence('phone-iphone-window')
 
     const beforeTap = await fakeCounters()
     await browser.execute(() => {
@@ -152,7 +131,11 @@ describe('Desktop phone tab live chain', () => {
     expect(pointer.v).toBeLessThan(0.51)
     expect(afterTap.io.at(-1)).toMatchObject({
       method: 'device.io.tap',
-      params: { deviceId: 'emulator-5554', x: pointer.x, y: pointer.y },
+      params: {
+        deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD',
+        x: Math.round(pointer.x / 3),
+        y: Math.round(pointer.y / 3),
+      },
     })
 
     const beforeHome = afterTap.io.length
@@ -160,7 +143,80 @@ describe('Desktop phone tab live chain', () => {
     const afterHome = await waitForFakeIo(counters => counters.io.length === beforeHome + 1)
     expect(afterHome.io.at(-1)).toMatchObject({
       method: 'device.io.button',
-      params: { deviceId: 'emulator-5554', button: 'HOME' },
+      params: { deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', button: 'HOME' },
+    })
+
+    const beforeAgent = afterHome.io.length
+    const composer = browser.$('textarea')
+    await composer.waitForDisplayed({ timeout: 20_000 })
+    await composer.setValue('Use device_act to press Home on the active iOS Simulator.')
+    await composer.click()
+    await browser.keys(['Enter'])
+    const allow = browser.$('//button[normalize-space()="允许一次" or normalize-space()="Allow once"]')
+    await allow.waitForDisplayed({ timeout: 30_000 })
+    await saveWindowEvidence('phone-agent-device-act-approval-window')
+    await allow.click()
+    const afterAgent = await waitForFakeIo(counters => counters.io.length === beforeAgent + 1)
+    expect(afterAgent.io.at(-1)).toMatchObject({
+      method: 'device.io.button',
+      params: { deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', button: 'HOME' },
+    })
+    await writeArtifact('ios-control-chain.json', {
+      encoding: 'MJPEG', gui: afterHome.io.slice(-2), agent: afterAgent.io.at(-1),
+    })
+
+    await clickSurfaceButton('切换设备：iPhone 16')
+    await clickSurfaceButton('Acceptance iPhone切换')
+    await browser.$('button[aria-label="切换设备：Acceptance iPhone"]').waitForExist({ timeout: 30_000 })
+    await browser.$('p=设备控制代理未安装').waitForDisplayed({ timeout: 30_000 })
+    await saveWindowEvidence('phone-real-ios-agent-missing-window')
+    await browser.$('button=安装设备控制代理').click()
+    await browser.$('img[alt="Acceptance iPhone 实时画面"]').waitForExist({ timeout: 30_000 })
+    await waitForMjpegPicture('Acceptance iPhone')
+    const agentStatus = await browser.execute(async () => {
+      const response = await fetch('/phone/agent/status', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ deviceId: '00008120-REAL-E2E' }),
+      })
+      return { status: response.status, body: await response.json() as unknown }
+    })
+    expect(agentStatus).toMatchObject({ status: 200, body: { installed: true } })
+    const beforeRealHome = (await fakeCounters()).io.length
+    await browser.$('button[aria-label="主屏幕"]').click()
+    const afterRealHome = await waitForFakeIo(counters => counters.io.length === beforeRealHome + 1)
+    expect(afterRealHome.io.at(-1)).toMatchObject({
+      method: 'device.io.button',
+      params: { deviceId: '00008120-REAL-E2E', button: 'HOME' },
+    })
+    await writeArtifact('ios-real-agent-recovery.json', {
+      agentStatus, encoding: 'MJPEG', gui: afterRealHome.io.at(-1),
+    })
+    await saveWindowEvidence('phone-real-ios-agent-live-window')
+
+    await clickSurfaceButton('切换设备：Acceptance iPhone')
+    await clickSurfaceButton('Pixel_6_API_35切换')
+    await browser.$('button[aria-label="切换设备：Pixel_6_API_35"]').waitForExist({ timeout: 30_000 })
+    expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
+    await waitForMjpegPicture('Pixel_6_API_35')
+    await expect(browser.$('[aria-label="当前画面编码 MJPEG"]')).toBeExisting()
+    await saveWindowEvidence('phone-pixel-return-window')
+
+    const captureResources = await browser.execute(() => performance.getEntriesByType('resource')
+      .map(entry => new URL(entry.name))
+      .filter(url => url.pathname.startsWith('/phone/stream/'))
+      .map(url => ({ path: url.pathname })))
+    await writeArtifact('phone-capture-resources.json', captureResources)
+    expect(captureResources.length).toBeGreaterThan(0)
+    expect(captureResources.some(resource => resource.path.endsWith('/h264'))).toBe(true)
+    expect(captureResources.some(resource => resource.path.endsWith('/mjpeg'))).toBe(true)
+    const captureCounters = await fakeCounters()
+    expect(captureCounters.captures.slice(0, 2)).toEqual([
+      { deviceId: 'emulator-5554', format: 'avc' },
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+    ])
+    expect(captureCounters.captures).toContainEqual({
+      deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', format: 'mjpeg',
     })
 
     await assertPhoneDevicesSettingsSection()
@@ -168,16 +224,6 @@ describe('Desktop phone tab live chain', () => {
     await saveWindowEvidence('phone-complete-window')
   })
 })
-
-async function waitForDecodedPicture(label: string): Promise<NonNullable<Awaited<ReturnType<typeof readPicture>>>> {
-  let picture: Awaited<ReturnType<typeof readPicture>>
-  await browser.waitUntil(async () => {
-    picture = await readPicture(label)
-    return picture?.width === 390 && picture.height === 844 && picture.nonTransparentPixels > 0
-  }, { timeout: 10_000, interval: 250, timeoutMsg: `${label} did not paint a decoded 390x844 picture` })
-  if (picture === undefined) throw new Error(`${label} decoded picture disappeared after readiness`)
-  return picture
-}
 
 async function waitForMjpegPicture(label: string): Promise<NonNullable<Awaited<ReturnType<typeof readMjpegPicture>>>> {
   let picture: Awaited<ReturnType<typeof readMjpegPicture>>
@@ -199,35 +245,6 @@ async function readMjpegPicture(label: string) {
     return {
       width: image.naturalWidth,
       height: image.naturalHeight,
-      renderedWidth: rect.width,
-      renderedHeight: rect.height,
-      display: style.display,
-      visibility: style.visibility,
-      opacity: Number(style.opacity),
-    }
-  }, label)
-}
-
-async function readPicture(label: string) {
-  return await browser.execute((name: string) => {
-    const canvas = document.querySelector<HTMLCanvasElement>(`canvas[aria-label="${name} 实时画面"]`)
-    if (canvas === null) return undefined
-    const style = getComputedStyle(canvas)
-    const rect = canvas.getBoundingClientRect()
-    const context = canvas.getContext('2d')
-    const sampleWidth = Math.min(canvas.width, 32)
-    const sampleHeight = Math.min(canvas.height, 32)
-    const pixels = context === null || sampleWidth === 0 || sampleHeight === 0
-      ? new Uint8ClampedArray()
-      : context.getImageData(0, 0, sampleWidth, sampleHeight).data
-    let nonTransparentPixels = 0
-    for (let offset = 3; offset < pixels.length; offset += 4) {
-      if (pixels[offset] !== 0) nonTransparentPixels += 1
-    }
-    return {
-      width: canvas.width,
-      height: canvas.height,
-      nonTransparentPixels,
       renderedWidth: rect.width,
       renderedHeight: rect.height,
       display: style.display,

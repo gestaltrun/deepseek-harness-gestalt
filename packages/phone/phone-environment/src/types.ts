@@ -131,6 +131,74 @@ export interface AndroidEnvironmentProvider {
   onChanged(listener: (state: PhoneAndroidState) => void): () => void
 }
 
+/** One iOS Simulator runtime selected from the complete Xcode installation. */
+export interface IosRuntimePlan {
+  readonly identifier: string
+  readonly name: string
+  readonly version: string
+  readonly available: true
+}
+
+/** One iPhone device type selected from the complete Xcode installation. */
+export interface IosDeviceTypePlan {
+  readonly identifier: string
+  readonly name: string
+}
+
+/** Immutable Xcode and default-Simulator facts shown by the settings client. */
+export interface IosPreparationPlan {
+  readonly developerDir: string
+  readonly xcodeVersion: string
+  readonly simulatorName: string
+  readonly runtime?: IosRuntimePlan
+  readonly deviceType?: IosDeviceTypePlan
+}
+
+/** iOS-specific Xcode preparation and Simulator lifecycle state. */
+export type PhoneIosState =
+  | { readonly kind: 'deferred' }
+  | { readonly kind: 'unsupported'; readonly reason: string }
+  | { readonly kind: 'checking'; readonly operation?: 'prepare' }
+  | { readonly kind: 'xcode-missing'; readonly message: string }
+  | { readonly kind: 'license-required'; readonly developerDir: string; readonly message: string }
+  | {
+    readonly kind: 'manual-required'
+    readonly code: 'first-launch' | 'xcode-update'
+    readonly message: string
+    readonly developerDir?: string
+  }
+  | { readonly kind: 'runtime-missing'; readonly plan: IosPreparationPlan }
+  | { readonly kind: 'no-simulator'; readonly plan: IosPreparationPlan }
+  | {
+    readonly kind: 'preparing'
+    readonly plan: IosPreparationPlan
+    readonly step: 'downloading-runtime' | 'creating-simulator' | 'booting'
+  }
+  | {
+    readonly kind: 'ready'
+    readonly plan: IosPreparationPlan
+    readonly deviceId: DeviceId
+    readonly running: boolean
+  }
+  | {
+    readonly kind: 'failed'
+    readonly plan?: IosPreparationPlan
+    readonly code: string
+    readonly message: string
+    readonly retryable: boolean
+  }
+
+/** iOS platform Provider registered into the stable phone environment Service. */
+export interface IosEnvironmentProvider {
+  snapshot(): PhoneIosState
+  refresh(signal?: AbortSignal): Promise<PhoneIosState>
+  prepare(signal?: AbortSignal): Promise<PhoneIosState>
+  start(signal?: AbortSignal): Promise<PhoneIosState>
+  cancel(): void
+  deactivate(): Promise<void>
+  onChanged(listener: (state: PhoneIosState) => void): () => void
+}
+
 /** Complete immutable Host snapshot consumed by the Phone Devices settings client. */
 export interface PhoneEnvironmentSnapshot {
   /** Monotonic publication revision. */
@@ -142,6 +210,6 @@ export interface PhoneEnvironmentSnapshot {
   /** Platform preparation states owned by later Android/iOS tickets. */
   readonly platforms: {
     readonly android: PhoneAndroidState
-    readonly ios: PhonePlatformState
+    readonly ios: PhoneIosState
   }
 }

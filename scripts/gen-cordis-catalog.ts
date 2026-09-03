@@ -248,6 +248,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   PhoneCaptureFormat: 'phone-runtime.md',
   PhoneCaptureRequest: 'phone-runtime.md',
   PhoneCaptureStream: 'phone-runtime.md',
+  PhoneScreenshot: 'phone-runtime.md',
   PhoneDeviceChange: 'phone-runtime.md',
   PhoneDeviceKind: 'phone-runtime.md',
   PhoneDeviceList: 'phone-runtime.md',

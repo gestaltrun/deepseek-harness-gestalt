@@ -7,10 +7,10 @@
 // environment of its own. Never shipped; never imported by src.
 
 import http from 'node:http'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
+import { buildGradientH264, buildGradientJpeg, buildGradientPng } from './u3-visible-frames.ts'
 
 /**
  * Vertical page-offset delta for one gesture list. A tap-shaped list, any
@@ -134,6 +134,64 @@ function writeAgentState(agentState) {
 function replyAgent(payload) {
   process.exitCode = 0
   process.stdout.write(`${JSON.stringify(payload)}\n`)
+}
+
+// CLI mode: `fakemobilecli screenshot --device <id> --format png --output <path>`
+// writes one still PNG, mirroring the upstream still-capture command.
+if (args[0] === 'screenshot') {
+  const screenshotKnobs = knobs.screenshot ?? {}
+  if (screenshotKnobs.ignoreTerm === true) {
+    process.on('SIGTERM', () => {
+      // Simulate a stuck screenshot child that forces the caller's SIGKILL escape.
+    })
+  }
+  const deviceIndex = args.indexOf('--device')
+  const outputIndex = args.indexOf('--output')
+  const deviceId = deviceIndex >= 0 ? (args[deviceIndex + 1] ?? '') : ''
+  const outputPath = outputIndex >= 0 ? (args[outputIndex + 1] ?? '') : ''
+  const formatIndex = args.indexOf('--format')
+  const format = formatIndex >= 0 ? (args[formatIndex + 1] ?? 'png') : 'png'
+  const delayMs = screenshotKnobs.delayMs ?? 0
+  setTimeout(() => {
+    const device = state.devices.find(candidate => candidate.id === deviceId)
+    const failText = typeof screenshotKnobs.failText === 'string'
+      ? screenshotKnobs.failText
+      : failArm !== null && (failArm.method === 'screenshot' || failArm.method === 'device.screencapture')
+        ? failArm.message
+        : undefined
+    if (typeof failText === 'string') {
+      process.exitCode = screenshotKnobs.failExitCode ?? 1
+      if (failText.length > 0) process.stderr.write(`${failText}\n`)
+      return
+    }
+    if (device === undefined) {
+      process.exitCode = 1
+      process.stderr.write(`no device ${deviceId}\n`)
+      return
+    }
+    if (format !== 'png') {
+      process.exitCode = 1
+      process.stderr.write(`unsupported screenshot format ${format}\n`)
+      return
+    }
+    if (outputPath.length === 0) {
+      process.exitCode = 1
+      process.stderr.write('screenshot requires --output\n')
+      return
+    }
+    mkdirSync(dirname(outputPath), { recursive: true })
+    if (screenshotKnobs.output === 'missing') {
+      process.exitCode = 0
+      return
+    }
+    if (screenshotKnobs.output === 'not-png') {
+      writeFileSync(outputPath, 'not a png')
+      process.exitCode = 0
+      return
+    }
+    writeFileSync(outputPath, buildGradientPng(0))
+    process.exitCode = 0
+  }, delayMs)
 }
 
 // CLI mode: `fakemobilecli agent status|install --device <id> ...` runs as a
@@ -408,6 +466,7 @@ const server = http.createServer((req, res) => {
           infoCount: state.infoCount,
           io: state.io,
           captures: state.captures,
+          screenshots: state.screenshots,
           scroll: state.scroll,
         })
         return
@@ -435,8 +494,8 @@ const server = http.createServer((req, res) => {
   })()
 })
 
-// Server startup never runs in agent CLI mode, which exits from its own timer.
-if (args[0] !== 'agent') {
+// Server startup never runs in agent or screenshot CLI mode, which exit from their own timers.
+if (args[0] !== 'agent' && args[0] !== 'screenshot') {
   process.stderr.write(`fakemobilecli listening on ${address}\n`)
   let listenAttempts = 0
   server.on('error', (error) => {

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-28-tool-phone-deferred-device-tools.md
-2026-08-28-tool-phone-deferred-device-tools.md: d9a72dc5d66fc4e1ff6bbff3f509f4c1dfd19849
-2026-08-28-tool-phone-deferred-device-tools.zh.md: 55ea57550ffcf44424db3f6b12f5c66bc6d4eec3
+2026-08-28-tool-phone-deferred-device-tools.md: c9878f9e36f09884d5bfcf3b58606b686bd227d9
+2026-08-28-tool-phone-deferred-device-tools.zh.md: ee5b4adeeaef83fec9e534f8a421fbb2420a62e1

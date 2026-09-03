@@ -2,8 +2,10 @@
  * Dependency-free 390×844 gradient color-bar capture frames for fakemobilecli.
  * JPEG is baseline SOF0; H264 is Constrained Baseline Annex-B with I_PCM IDR
  * slices so a browser decoder reconstructs a visible picture without ffmpeg
- * or a checked-in bitstream.
+ * or a checked-in bitstream. PNG is a truecolor zlib stream of the same bars.
  */
+
+import { crc32, deflateSync } from 'node:zlib'
 
 export const FRAME_WIDTH = 390
 export const FRAME_HEIGHT = 844
@@ -668,4 +670,41 @@ export function buildGradientJpeg(frameIndex = 0): Buffer {
   }
   writer.marker(0xd9)
   return writer.toBuffer()
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const header = Buffer.alloc(8)
+  header.writeUInt32BE(data.byteLength, 0)
+  header.write(type, 4, 4, 'ascii')
+  const crcInput = Buffer.concat([header.subarray(4), data])
+  const crc = Buffer.alloc(4)
+  crc.writeUInt32BE(crc32(crcInput) >>> 0, 0)
+  return Buffer.concat([header, data, crc])
+}
+
+/** Truecolor 390×844 PNG of the same gradient color bars. */
+export function buildGradientPng(frameIndex = 0): Buffer {
+  const rows = Buffer.alloc(FRAME_HEIGHT * (1 + FRAME_WIDTH * 3))
+  for (let y = 0; y < FRAME_HEIGHT; y += 1) {
+    const row = y * (1 + FRAME_WIDTH * 3)
+    rows[row] = 0
+    for (let x = 0; x < FRAME_WIDTH; x += 1) {
+      const [r, g, b] = rgbAt(x, y, frameIndex)
+      const pixel = row + 1 + x * 3
+      rows[pixel] = r
+      rows[pixel + 1] = g
+      rows[pixel + 2] = b
+    }
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(FRAME_WIDTH, 0)
+  ihdr.writeUInt32BE(FRAME_HEIGHT, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', deflateSync(rows)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ])
 }

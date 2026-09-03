@@ -6,16 +6,22 @@ import {
   annexBNals,
   buildGradientH264,
   buildGradientJpeg,
+  buildGradientPng,
   decodeFirstIpcmIdr,
   lumaAt,
 } from './fixtures/u3-visible-frames.ts'
-import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions } from './helpers.ts'
+import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, pngDimensions } from './helpers.ts'
 
 describe('U3 visible capture frames', () => {
   it('encodes a 390x844 baseline JPEG of the gradient color bars', () => {
     const jpeg = buildGradientJpeg(0)
     assertStructurallyDecodableJpeg(jpeg)
     expect(jpegDimensions(jpeg)).toEqual({ width: FRAME_WIDTH, height: FRAME_HEIGHT })
+  })
+
+  it('encodes a 390x844 truecolor PNG of the gradient color bars', () => {
+    const png = buildGradientPng(0)
+    expect(pngDimensions(png)).toEqual({ width: FRAME_WIDTH, height: FRAME_HEIGHT })
   })
 
   it('encodes a Constrained Baseline Annex-B stream whose first IDR luma matches the gradient', () => {

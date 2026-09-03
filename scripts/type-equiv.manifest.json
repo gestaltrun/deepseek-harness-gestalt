@@ -2022,6 +2022,11 @@
     },
     {
       "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneScreenshot",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/phone-runtime.md",
       "symbol": "PhoneRealDeviceIssue",
       "source": "packages/phone/phone-runtime/src/types.ts"
     },

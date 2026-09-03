@@ -5,7 +5,7 @@ import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import type { DeviceId, PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
-import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
+import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, pngDimensions, PNG_SIGNATURE, stageFake, wireDevice } from './helpers.ts'
 import { buildGradientH264 } from './fixtures/u3-visible-frames.ts'
 import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
 
@@ -554,7 +554,37 @@ describe('phone runtime service lifecycle', () => {
       format: 'mjpeg',
     }))
     expect(unknownCapture.code).toBe('PHONE_DEVICE_NOT_FOUND')
+    const unknownShot = await errorOf(() => context.phoneDevices.screenshot(deviceId('emulator-nope')))
+    expect(unknownShot.code).toBe('PHONE_DEVICE_NOT_FOUND')
     expect((await fake.counters()).io).toEqual([])
+  })
+
+  it('returns a PNG screenshot from one MJPEG capture frame', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const android = await context.phoneDevices.screenshot(ANDROID_EMULATOR)
+    expect(android.mediaType).toBe('image/png')
+    const androidBytes = Buffer.from(android.data, 'base64')
+    expect(androidBytes.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true)
+    expect(pngDimensions(androidBytes)).toEqual({ width: 390, height: 844 })
+
+    const ios = await context.phoneDevices.screenshot(IOS_REAL)
+    expect(ios.mediaType).toBe('image/png')
+    expect(pngDimensions(Buffer.from(ios.data, 'base64'))).toEqual({ width: 390, height: 844 })
+    expect((await fake.counters()).captures).toEqual([])
+  })
+
+  it('maps screenshot fleet errors onto PhoneDevicesError', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      screenshot: { failText: 'screenshot rejected upstream' },
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const upstream = await errorOf(() => context.phoneDevices.screenshot(ANDROID_EMULATOR))
+    expect(upstream.code).toBe('PHONE_UPSTREAM')
+    expect(upstream.message).toContain('screenshot rejected upstream')
   })
 
   it('opens MJPEG and H264 capture streams from the loopback screencapture RPC', async () => {

@@ -21,6 +21,7 @@ import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
 import { ioParams, iosScreenScale } from './io.ts'
 import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
+import { runMobilecliScreenshot } from './screenshot-process.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
 import { statSync } from 'node:fs'
@@ -42,6 +43,7 @@ import type {
   PhoneDeviceList,
   PhoneDeviceRef,
   PhoneIoRequest,
+  PhoneScreenshot,
 } from './types.ts'
 
 export type {
@@ -61,6 +63,7 @@ export type {
   PhoneIoMethod,
   PhoneIoRequest,
   PhoneRealDeviceIssue,
+  PhoneScreenshot,
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
@@ -249,8 +252,8 @@ declare module '@deepseek-ai/cordis' {
  *   (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`,
  *   `device-unplugged`).
  *
- * `io` and `startCapture` accept physical handsets; they only refuse ids
- * absent from the latest published listing. `agentStatus` and `installAgent`
+ * `io`, `startCapture`, and `screenshot` accept physical handsets; they only
+ * refuse ids absent from the latest published listing. `agentStatus` and `installAgent`
  * drive the upstream `agent status` / `agent install` commands as one-shot
  * child runs of the same executable, keep the on-device agent installed
  * idempotently, re-sign real handsets through the configured provisioning
@@ -760,6 +763,32 @@ export class PhoneDevices extends Service {
     return await this.preferAndroidH264(capture, request.deviceId, fused)
   }
 
+  /**
+   * Capture one PNG still of a listed device through `mobilecli screenshot`.
+   * Live MJPEG/H264 capture stays on `startCapture`.
+   * @param id - Branded Android serial or iOS UDID whose screen to capture.
+   * @param signal - Caller's optional cancellation signal.
+   * @returns PNG media type and canonical base64 file bytes.
+   * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+   *   absent from the latest published listing, and otherwise per the
+   *   class-documented failure modes.
+   */
+  async screenshot(id: DeviceId, signal?: AbortSignal): Promise<PhoneScreenshot> {
+    this.assertAccepting()
+    this.requireResolved()
+    await this.whenReady(signal)
+    this.assertUsable()
+    this.requireKnown(id, 'screenshot')
+    const png = await runMobilecliScreenshot({
+      executablePath: this.executable,
+      deviceId: id,
+      signal,
+      timeoutMs: this.resolved.requestTimeoutMs,
+      environment: this.childEnvironment,
+    })
+    return Object.freeze({ mediaType: 'image/png' as const, data: Buffer.from(png).toString('base64') })
+  }
+
   /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */
   private async preferAndroidH264(
     capture: PhoneCaptureStream,
@@ -946,7 +975,7 @@ export class PhoneDevices extends Service {
     }
   }
 
-  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install'): PhoneDeviceRef {
+  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install' | 'screenshot'): PhoneDeviceRef {
     this.assertAccepting()
     const known = this.findKnown(id)
     if (known === undefined) {

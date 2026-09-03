@@ -1298,7 +1298,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'phoneDevices',
     summary: 'Phone fleet Service over one external mobilecli server child.',
-    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing. An unresolvable mobilecli still activates the Service; every operation then rejects with `PHONE_UNRESOLVED` and install guidance instead of failing composition.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_UNRESOLVED` — the mobilecli executable could not be resolved.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n- `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device failure arm; PhoneDevicesError.issue carries which one (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`, `device-unplugged`).\n\n`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing. `agentStatus` and `installAgent` drive the upstream `agent status` / `agent install` commands as one-shot child runs of the same executable, keep the on-device agent installed idempotently, re-sign real handsets through the configured provisioning profile, and attach the free-signing expiry reminder to every answer about a re-signed real handset.',
+    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing. An unresolvable mobilecli still activates the Service; every operation then rejects with `PHONE_UNRESOLVED` and install guidance instead of failing composition.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_UNRESOLVED` — the mobilecli executable could not be resolved.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n- `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device failure arm; PhoneDevicesError.issue carries which one (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`, `device-unplugged`).\n\n`io`, `startCapture`, and `screenshot` accept physical handsets; they only refuse ids absent from the latest published listing. `agentStatus` and `installAgent` drive the upstream `agent status` / `agent install` commands as one-shot child runs of the same executable, keep the on-device agent installed idempotently, re-sign real handsets through the configured provisioning profile, and attach the free-signing expiry reminder to every answer about a re-signed real handset.',
     methods: [
       {
         signature: 'isReady(): boolean',
@@ -1352,6 +1352,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Open one `device.screencapture` stream. `h264` maps onto upstream `avc`; Android pre-reads and replays at most one bounded key-access-unit probe, then replaces an invalid, failed, or timed-out source with the system `screenrecord` H264 stream when available. Other bodies remain unread.',
         parameters: [{ name: 'request', description: 'Branded device id, encoding, and optional cancellation.' }],
         returns: 'the live capture content type and body; the caller owns cancellation.',
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+      },
+      {
+        signature: 'async screenshot(id: DeviceId, signal?: AbortSignal): Promise<PhoneScreenshot>',
+        description: 'Capture one PNG still of a listed device through `mobilecli screenshot`. Live MJPEG/H264 capture stays on `startCapture`.',
+        parameters: [{ name: 'id', description: 'Branded Android serial or iOS UDID whose screen to capture.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        returns: 'PNG media type and canonical base64 file bytes.',
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
       },
       {
@@ -4913,6 +4920,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PhoneRuntimeState',
     declaration: 'export type PhoneRuntimeState = {\n    readonly kind: \'missing\';\n    readonly targetVersion: string;\n    readonly assetBytes?: number;\n} | {\n    readonly kind: \'downloading\';\n    readonly targetVersion: string;\n    readonly receivedBytes: number;\n    readonly totalBytes: number;\n} | {\n    readonly kind: \'verifying\';\n    readonly targetVersion: string;\n} | {\n    readonly kind: \'activating\';\n    readonly targetVersion: string;\n    readonly source: PhoneRuntimeSource;\n} | {\n    readonly kind: \'ready\';\n    readonly version: string;\n    readonly source: PhoneRuntimeSource;\n} | {\n    readonly kind: \'failed\';\n    readonly targetVersion: string;\n    readonly code: string;\n    readonly message: string;\n};',
+  },
+  {
+    name: 'PhoneScreenshot',
+    declaration: 'export interface PhoneScreenshot {\n    readonly mediaType: \'image/png\';\n    readonly data: string;\n}',
   },
   {
     name: 'PhoneStreamSession',

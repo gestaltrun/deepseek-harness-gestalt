@@ -14,7 +14,7 @@ Status: implemented
 
 `device_act` 只接受封闭的 `tap` / `swipe` / `type` / `button` 动作，并转发到 `phoneDevices.io`（`tap`、`gesture`、`text`、`button`）。没有 shell、`adb` 或自由命令参数。`device_act`、`device_open` 与 `device_close` 监听 `tools/pre-execute`，在先前监听器返回 `allow` 后替换为 `ask`。先前的 deny 或 ask 保持不变。审批 `allowed-once` 会执行一次设备群调用；拒绝则永远到不了 `boot` / `shutdown` / `io`。
 
-已携带 `PhoneDevicesError` 代码的设备群失败会以同一代码重抛为 `HarnessError`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 仍要求注入 PNG 方法；实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。本票不把 Consumer 编入已交付的 Desktop/headless preset；发现重建由包测试通过 `systemPrompt.assemble` 证明。
+已携带 `PhoneDevicesError` 代码的设备群失败会以同一代码重抛为 `HarnessError`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 调用 `phoneDevices.screenshot`，返回 `{ mediaType: 'image/png', data }` 的 canonical base64；仅当注入的测试设备群省略该方法时仍走 `PHONE_UNSUPPORTED`。实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。本 Consumer 未编入已交付的 Desktop/headless preset；发现重建由包测试通过 `systemPrompt.assemble` 证明。
 
 ## Alternatives considered
 
@@ -28,4 +28,4 @@ Status: implemented
 
 ## Consequences
 
-模型可以在首次请求不支付 schema 成本的情况下发现六工具手机词表，有后果的变更默认走一次性审批。运维继承设备群的安装前置。`device_screenshot` 在当前 Service 上仍无 PNG 方法，因此实况采集仍由签名流 Consumer 负责。GUI chrome 与 preset 组合仍是后续票。
+模型可以在首次请求不支付 schema 成本的情况下发现六工具手机词表，有后果的变更默认走一次性审批。运维继承设备群的安装前置。`PhoneDevices.screenshot` 通过 `mobilecli screenshot --format png` 捕获一张 PNG 静帧，因此 `device_screenshot` 对现行 Service 返回 `image/png`。GUI chrome 与 preset 组合仍是后续票。

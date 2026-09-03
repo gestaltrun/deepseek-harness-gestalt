@@ -1,24 +1,24 @@
 ---
 name: record-browser-gif
-description: Record browser or Web UI interaction demos as optimized GIFs using the available built-in browser, state-based frame capture, and deterministic encoding, then publish to a dedicated assets branch when the task includes attaching the GIF to a pull request. Use when asked to make, record, or generate a GIF that demonstrates a browser workflow, and for every pull request that changes product-user-visible GUI behavior, which MUST include a GIF recorded from the pull request's real server and model flow.
+description: Record browser or Web UI interaction demos as optimized GIFs using the available built-in browser, state-based frame capture, and deterministic encoding, then publish onto the shared `gif-assets` branch when the task includes attaching the GIF to a pull request. Use when asked to make, record, or generate a GIF that demonstrates a browser workflow, and for every pull request that changes product-user-visible GUI behavior, which MUST include a GIF recorded from the pull request's real server and model flow.
 ---
 
 # Record Browser GIF
 
-Produce a short, truthful UI demonstration as a local GIF, and — only when the task includes attaching it to a pull request — publish it through the assets-branch workflow at the end of this skill. Use the browser-control skill for interaction and the bundled encoder for repeatable timing, dimensions, and size.
+Produce a short, truthful UI demonstration as a local GIF, and — only when the task includes attaching it to a pull request — publish it onto `gif-assets` at the end of this skill. Use the browser-control skill for interaction and the bundled encoder for repeatable timing, dimensions, and size.
 
-The [evidence-chain decision](../../notes/implemented/process/2026-08-08-browser-gif-evidence-chain.md) owns why one storyboard comes from one isolated run and why publication revalidates both the artifact and the demonstrated pull-request head.
+The [evidence-chain decision](../../notes/implemented/process/2026-08-08-browser-gif-evidence-chain.md) owns why one storyboard comes from one isolated run and why publication revalidates both the artifact and the demonstrated pull-request head. The [unified assets-branch decision](../../notes/implemented/process/2026-09-02-unified-gif-assets-branch.md) owns the single `gif-assets` home.
 
 ## Every GUI pull request includes a GIF
 
-A pull request that changes product-user-visible GUI behavior MUST include a demonstration GIF recorded with this skill and embedded in the pull request body via [the assets-branch workflow](#publish-to-an-assets-branch).
+A pull request that changes product-user-visible GUI behavior MUST include a demonstration GIF recorded with this skill and embedded in the pull request body via [the `gif-assets` workflow](#publish-to-gif-assets).
 
 The recording itself is part of the evidence: use a real server booted from that pull request's branch tree, a real API key, and real model rounds. Never substitute fixture queries, mock transports, synthetic event injection, or test-only hooks unless the user explicitly asked for a fixture recording. Next to the embed, state the exact demonstrated commit SHA, the tree and origin that served it, any mode flags or browser-state exceptions, and whether a real model round ran, so reviewers know exactly what the recording proves.
 
 ## Keep recording separate from publication
 
 - Recording produces frame images and one local `.gif` artifact only; it never mutates remote state.
-- Publication — pushing the GIF to an assets branch and embedding it in a pull request body — is the separate final step, performed only when the task includes attaching the GIF to a pull request. It never touches the pull request's own branch.
+- Publication — appending the GIF to `gif-assets` and embedding it in a pull request body — is the separate final step, performed only when the task includes attaching the GIF to a pull request. It never touches the pull request's own branch.
 - Preserve the requested recording conditions. A real-server or real-API demo must not use fixture queries, mock transports, synthetic event injection, or test-only hooks. If credentials or the server are unavailable, report that limitation instead of substituting a fixture.
 - Never read or expose credential values. Use the application's normal configuration path and a benign demonstration prompt.
 
@@ -82,35 +82,39 @@ For a large artifact, reduce `--max-width` first, then `--colors` or `--fps`; re
 3. Run `git status --short` and confirm frames and the artifact landed only under ignored paths.
 4. Return the absolute GIF path, render it when the client supports local media, and state whether the recording used a real API, fixture, or another transport. When the task does not include attaching the GIF to a pull request, stop here.
 
-## Publish to an assets branch
+## Publish to gif-assets
 
 Perform this step only when the task includes attaching the GIF to a pull request.
 
-Never commit a GIF to the pull request's own branch or any branch that merges into a long-lived branch: binary media committed there bloats the repository history for every future clone. GIFs live on a dedicated orphan assets branch — a branch with no parent commit and nothing but media — and one assets branch serves a whole pull request series (named `<series>-assets`; list existing ones with `git ls-remote --heads origin '*assets*'`).
+Never commit a GIF to the pull request's own branch or any branch that merges into a long-lived branch: binary media committed there bloats the repository history for every future clone. All GIFs live on the single orphan branch `gif-assets` — a branch with no parent commit and nothing but media. Isolate recordings by path, not by extra branches: `pr/<number>/<name>.gif` for a pull request, `issue/<number>/<name>.gif` for an issue-only recording. Do not create another `*-assets` branch.
 
-Before either workflow below pushes, verify that the assets branch contains media only and that the staged GIF's checksum matches the verified local artifact.
-
-For an existing assets branch, work in a shallow single-branch scratch clone so the publication cannot touch your working tree:
+Work in a shallow scratch clone so the publication cannot touch the product working tree. Reuse `origin/gif-assets` when it exists; otherwise create the orphan branch once in that clone:
 
 ```sh
-git clone --branch <assets-branch> --single-branch --depth 1 <repo-url> /tmp/assets-checkout
-cp /absolute/path/to/demo.gif /tmp/assets-checkout/<name>.gif
-cd /tmp/assets-checkout
-git add <name>.gif
+git clone --no-checkout --filter=blob:none --depth 1 <repo-url> /tmp/gif-assets-checkout
+cd /tmp/gif-assets-checkout
+if git ls-remote --heads origin gif-assets | grep -q gif-assets; then
+  git fetch origin gif-assets --depth 1
+  git checkout gif-assets
+else
+  git checkout --orphan gif-assets
+  git rm -rf --ignore-unmatch .
+fi
+mkdir -p pr/<number>
+cp /absolute/path/to/demo.gif pr/<number>/<name>.gif
+git add pr/<number>/<name>.gif
 git commit -m "assets: <what it shows> gif (#<pr>)"
-git push origin <assets-branch>
+git push origin gif-assets
 ```
 
-For a new series, make a fresh shallow scratch clone (`git clone --depth 1 <repo-url> /tmp/assets-checkout`), create the orphan branch with `git switch --orphan <assets-branch>`, then add the GIF, commit, and push the same way.
-
-After pushing, use authenticated GitHub API or raw requests to confirm the remote path, byte size, checksum, `200` response, and `image/gif` content type. An anonymous `404` does not disprove a private-repository asset; authenticate the verification instead. This proves the repository-member review path, not public availability.
+Before that push, verify that `gif-assets` contains media only and that the staged GIF's checksum matches the verified local artifact. After pushing, use authenticated GitHub API or raw requests to confirm the remote path, byte size, checksum, `200` response, and `image/gif` content type. An anonymous `404` does not disprove a private-repository asset; authenticate the verification instead. This proves the repository-member review path, not public availability.
 
 Immediately before editing the pull-request body, re-read its live head and compare it with the commit recorded next to the GIF. Stop and re-record when it moved. After the edit, re-read the live head and require it to remain at that recorded commit. Separately, render the body through GitHub's Markdown API and confirm that the expected `<img>` is present.
 
 Embed the GIF in the pull request body with the raw blob URL; the `?raw=true` suffix is required, because the plain blob URL renders GitHub's file page instead of the image:
 
 ```markdown
-![<alt text>](https://github.com/<owner>/<repo>/blob/<assets-branch>/<name>.gif?raw=true)
+![<alt text>](https://github.com/<owner>/<repo>/blob/gif-assets/pr/<number>/<name>.gif?raw=true)
 ```
 
-Never delete or rewrite an assets branch, and never force-push it: merged pull request bodies reference its URLs forever. Append new commits only.
+Never rewrite or force-push `gif-assets`: merged pull request bodies reference its current blobs. Append new commits only. Historical `*-assets` series branches stay only while a live body still names them.

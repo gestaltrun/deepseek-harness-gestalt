@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-desktop/client'
-import type { DesktopBridge, UpdaterStatus } from '../src/protocol.ts'
+import type { DesktopBridge, DesktopSub2ApiSnapshot, UpdaterStatus } from '../src/protocol.ts'
 
 afterEach(() => {
   delete window.dshDesktop
@@ -46,13 +46,14 @@ describe('ui-desktop apply', () => {
     expect(inject).toEqual(['slots', 'locale'])
   })
 
-  it('occupies brand, drag, update, and Mobile Pairing Settings seats', async () => {
+  it('occupies brand, drag, update, Mobile Pairing, and Sub2API Settings seats', async () => {
     const b = await bench()
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     expect(b.slots.entries('sidebar.brand')).not.toHaveLength(0)
     expect(b.slots.entries('sidebar.chrome.drag')).not.toHaveLength(0)
     expect(b.slots.entries('sidebar.footer.action')).not.toHaveLength(0)
-    expect(b.slots.entries('settings.section').map(entry => entry.options.id)).toContain('mobile-pairing')
+    expect(b.slots.entries('settings.section').map(entry => entry.options.id))
+      .toEqual(['mobile-pairing', 'sub2api'])
   })
 
   it('registers native menu chrome only in the Desktop overlay document', async () => {
@@ -94,6 +95,11 @@ describe('ui-desktop apply', () => {
       pairingReject: vi.fn(),
       pairingRevoke: vi.fn(),
       onPairingSnapshot: vi.fn(() => () => {}),
+      sub2ApiGetSnapshot: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+      sub2ApiEnable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+      sub2ApiDisable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+      sub2ApiUninstall: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+      onSub2ApiSnapshot: vi.fn(() => () => {}),
       chromeOverlayShow: async () => {},
       chromeOverlayHide: async () => {},
       chromeOverlayGetState: async () => null,
@@ -127,6 +133,8 @@ describe('ui-desktop apply', () => {
     expect(desktop.pairingGetSnapshot).toHaveBeenCalledOnce()
     expect(desktop.onPairingSnapshot).toHaveBeenCalledOnce()
     expect(b.ctx.get('projectMembershipClient')).toBe(desktop.projectMembership)
+    expect(desktop.sub2ApiGetSnapshot).toHaveBeenCalledOnce()
+    expect(desktop.onSub2ApiSnapshot).toHaveBeenCalledOnce()
     const brand = b.slots.entries('sidebar.brand')[0]
     expect(brand?.select?.({} as never)).toEqual({})
     const footer = b.slots.entries('sidebar.footer.action').find(entry => entry.options.id === 'desktop-update')
@@ -134,6 +142,9 @@ describe('ui-desktop apply', () => {
     const pairing = b.slots.entries('settings.section').find(entry => entry.options.id === 'mobile-pairing')
     expect((pairing?.options.label as (() => string) | undefined)?.()).toBe('Mobile pairing')
     expect((pairing?.inject as () => { hooks: { pairing: unknown } } | undefined)?.()?.hooks.pairing).toBeDefined()
+    const sub2api = b.slots.entries('settings.section').find(entry => entry.options.id === 'sub2api')
+    expect((sub2api?.options.label as (() => string) | undefined)?.()).toBe('Account pool')
+    expect((sub2api?.inject as () => { hooks: { sub2api: unknown } } | undefined)?.()?.hooks.sub2api).toBeDefined()
     await Promise.resolve()
     await Promise.resolve()
     await fiber.dispose()

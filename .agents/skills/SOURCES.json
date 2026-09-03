@@ -11,8 +11,18 @@
       "localChanges": [
         "resolve and validate the DSH profile for every Task Space operation path",
         "require manual installation through the signed macOS application flow",
-        "align GitHub learning manifests with their tool results"
+        "align GitHub learning manifests with their tool results",
+        "reuse one DSH task space per user goal through .agents/local/runtime-memo.json"
       ]
+    },
+    {
+      "name": "implement-spec",
+      "path": ".agents/skills/implement-spec",
+      "source": "https://github.com/mattpocock/skills",
+      "sourcePath": "skills/in-progress/implement-spec",
+      "revision": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "license": "MIT",
+      "localChanges": []
     },
     {
       "name": "retro",
@@ -22,7 +32,7 @@
       "revision": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
       "license": "MIT",
       "localChanges": [
-        "use the Codex skill invocation policy and DeepSeek Harness standards sources"
+        "point Files and review steps at AGENTS.md, docs/, and dsh-code-review"
       ]
     },
     {

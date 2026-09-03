@@ -22,7 +22,13 @@ git submodule update --init --recursive
 
 `git clone --recurse-submodules` initializes every child in one step. CI checkouts that need plugin source set `submodules: recursive` on `actions/checkout`.
 
-Advance a pin in the same change that needs the new revision:
+A checkout that leaves `plugins/dsh-sub2api-sidecar/` empty has the gitlink but not the child tree. Initialize it before reading sidecar source:
+
+```sh
+git submodule update --init --recursive plugins/dsh-sub2api-sidecar
+```
+
+Advance a pin in the same change that needs the new revision. Check out the exact commit, never a floating branch name:
 
 ```sh
 git -C plugins/dsh-sub2api-sidecar fetch origin
@@ -30,7 +36,7 @@ git -C plugins/dsh-sub2api-sidecar checkout <sha>
 git add plugins/dsh-sub2api-sidecar
 ```
 
-The recorded SHA is the product pin. A floating branch name is not.
+The recorded SHA is the product pin. The current pin is sidecar `v0.1.25` (`8c85bb6c37338795be0c838ed05cd8fc96c1f55d`).
 
 ## Constraints
 

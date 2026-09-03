@@ -1,0 +1,5 @@
+- heading "Sub2API 账号池" [level=2]
+- paragraph: 启用后，Desktop 在本机监督一个 Sub2API 组件：把上游平台账号接入本地账号池，并把 Composite 推理端点注册为本地提供方。组件只在 Desktop 运行，浏览器 dsh web 没有此入口。
+- alert: Sub2API 组件下载源未配置。请使用包含 sub2api-sources.json 的 Desktop 发行版，或通过 DSH_DESKTOP_SUB2API_SOURCES 指向经批准的发布源。
+- button "重试"
+- button "卸载"

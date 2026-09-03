@@ -31,6 +31,29 @@ export interface RunningWebHost {
   readonly url: string
 }
 
+const SENSITIVE_ENVIRONMENT_NAME = /(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)/iu
+
+/** Remove inherited or supplied credential values from child diagnostics. */
+export function redactWebHostDiagnostic(output: string, environment: NodeJS.ProcessEnv): string {
+  let redacted = output
+  const secrets = Object.entries(environment)
+    .flatMap(([name, value]) => (
+      SENSITIVE_ENVIRONMENT_NAME.test(name) && value !== undefined && value.length > 0 ? [value] : []
+    ))
+    .sort((left, right) => right.length - left.length)
+  for (const secret of new Set(secrets)) redacted = redacted.replaceAll(secret, '[REDACTED]')
+  return redacted
+    .replaceAll(/([A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)[A-Z0-9_]*\s*[:=]\s*)[^\s,;]+/giu, '$1[REDACTED]')
+    .replaceAll(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/giu, '$1[REDACTED]@')
+}
+
+/** Return a bounded credential-free child diagnostic. */
+export function webHostDiagnosticSummary(output: string, environment: NodeJS.ProcessEnv): string {
+  const redacted = redactWebHostDiagnostic(output.trim(), environment)
+  if (redacted.length <= 800) return redacted
+  return `${redacted.slice(0, 398)}\n…\n${redacted.slice(-398)}`
+}
+
 /**
  * Spawn `dsh web` and resolve when it prints the loopback URL.
  * @param command - node, args, cwd.
@@ -42,9 +65,10 @@ export function spawnWebHost(
   timeoutMs = 30_000,
 ): Promise<RunningWebHost> {
   return new Promise((resolve, reject) => {
+    const environment = { ...process.env, ...command.env }
     const child = spawn(command.node, [...command.args], {
       cwd: command.cwd,
-      env: { ...process.env, ...command.env },
+      env: environment,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const exited = new Promise<void>((resolveExit) => {
@@ -78,7 +102,11 @@ export function spawnWebHost(
     }
     command.signal?.addEventListener('abort', onAbort, { once: true })
     const timer = setTimeout(() => {
-      terminateBeforeReady(new Error(`dsh web did not print a loopback URL within ${String(timeoutMs)}ms`))
+      const tail = webHostDiagnosticSummary(buffer, environment)
+      terminateBeforeReady(new Error(
+        `dsh web did not print a loopback URL within ${String(timeoutMs)}ms`
+        + (tail.length === 0 ? '' : `\n${tail}`),
+      ))
     }, timeoutMs)
     if (command.signal?.aborted === true) onAbort()
     const onData = (chunk: Buffer | string): void => {
@@ -101,7 +129,7 @@ export function spawnWebHost(
       if (settled) return
       settled = true
       clearTimeout(timer)
-      const tail = buffer.trim().slice(-800)
+      const tail = webHostDiagnosticSummary(buffer, environment)
       reject(new Error(
         'dsh web exited before announcing a URL (code ' + String(code) + ', signal ' + String(signal) + ')'
         + (tail.length === 0 ? '' : '\n' + tail),

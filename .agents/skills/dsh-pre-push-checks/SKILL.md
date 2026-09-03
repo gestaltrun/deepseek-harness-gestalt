@@ -33,7 +33,6 @@ There is no universal local baseline beyond the hooks. Every behavior change nee
 - **Model-, editor-, CLI-, or terminal-visible output:** run the focused keyless snapshot or real runnable-example scenario that owns the output.
 - **Package manifests, public exports, build configuration, worker/bin entries, or built runtime paths:** run `pnpm run build`, the relevant hygiene checks, and the owning built-artifact smoke.
 - **Real provider or agent behavior:** run the relevant `pnpm run test:e2e` target when credentials are available; never print secrets.
-- **Ordinary product pull requests:** run `pnpm product-release:validate --base <verified-base-ref> --head HEAD`; resolve an under-reported Desktop, Mobile, or Platform unit instead of relying on workflow path filters.
 
 Do not manually repeat a passing check merely because commit or push follows. In particular, do not run typecheck immediately before pushing solely to duplicate the pre-push hook.
 

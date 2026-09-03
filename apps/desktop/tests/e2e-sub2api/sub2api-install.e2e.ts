@@ -1,0 +1,292 @@
+/** Release-backed Electron flow: Settings offer, installer, Web Host restart, embedded console. */
+import { browser, expect } from '@wdio/globals'
+import {
+  captureAccountWorkspaceEvidence, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
+  clickAccountConsoleRowAction, clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
+  connectTemporaryWorkspace, expandProviderSettings, fillTopAccountDialogInput, fillTopAccountDialogProviderCredential,
+  gatewayModelIds, gatewayModelProfile, mainWindowSnapshot,
+  openProviderEditor,
+  openSettings, overlayAccountConsoleSnapshot, overlayAccountWorkspaceLayout,
+  overlayAccountSelectOptions, overlayAccountWorkspaceUi, overlayProviderInputValues, overlayText, overlayUrl, recordOwnedProcesses,
+  providerModelIds, providerModelProfile, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, syncRealProviderAccount,
+  topAccountDialogButtonEnabled, verifyCompositeModelRoute, waitForAccountConsoleText, waitForSessionSurface,
+  waitForTopAccountDialog,
+} from './helpers.ts'
+
+async function disableAndReEnable(cycle: number): Promise<void> {
+  await clickOverlayButton(['停用', 'Disable'])
+  await browser.waitUntil(async () => {
+    const current = await sub2apiSnapshot()
+    return (current?.state === 'installed' && !current.enabled) || current?.state === 'error'
+  }, { timeout: 120_000, interval: 1_000, timeoutMsg: `Sub2API cycle ${String(cycle)} did not disable after the Host replacement` })
+  const disabled = await sub2apiSnapshot()
+  if (disabled?.state === 'error') throw new Error(`Sub2API cycle ${String(cycle)} disable failed: ${String(disabled.error)}`)
+  expect(disabled).toMatchObject({ state: 'installed', enabled: false })
+  expect(await overlayText()).toMatch(/已停用|Disabled/u)
+
+  await clickOverlayButton(['启用', 'Enable'])
+  await browser.waitUntil(async () => {
+    const current = await sub2apiSnapshot()
+    return current?.state === 'running' || current?.state === 'error'
+  }, { timeout: 240_000, interval: 1_000, timeoutMsg: `Sub2API cycle ${String(cycle)} did not re-enable after the Host replacement` })
+  const reenabled = await sub2apiSnapshot()
+  if (reenabled?.state === 'error') throw new Error(`Sub2API cycle ${String(cycle)} re-enable failed: ${String(reenabled.error)}`)
+  expect(reenabled).toMatchObject({ state: 'running', enabled: true })
+  await waitForAccountConsoleText(
+    /添加账号|Create Account/u,
+    `Native Sub2API account workspace did not return after re-enable cycle ${String(cycle)}`,
+    60_000,
+  )
+  await recordOwnedProcesses()
+}
+
+describe('Sub2API Desktop installation', () => {
+  it('installs the release, opens the console, selects Sub2API, and receives a real reply', async () => {
+    await waitForSessionSurface()
+    await recordReleaseChecksums()
+    await openSettings()
+    await clickOverlayButton(['账号池', 'Account pool'])
+    expect(await overlayText()).toMatch(/Sub2API/u)
+    const initial = await sub2apiSnapshot()
+    if (initial?.state === 'error') throw new Error(`Sub2API initial state failed: ${String(initial.error)}`)
+    expect(initial).toMatchObject({ state: 'missing', enabled: true })
+
+    await clickOverlayButton(['下载并启用', 'Download and enable'])
+    await browser.waitUntil(async () => {
+      const snapshot = await sub2apiSnapshot()
+      return snapshot?.state === 'running' || snapshot?.state === 'error'
+    }, {
+      timeout: 720_000,
+      interval: 1_000,
+      timeoutMsg: 'Sub2API did not reach a terminal startup state',
+    })
+    const snapshot = await sub2apiSnapshot()
+    if (snapshot?.state === 'error') throw new Error(`Sub2API startup failed: ${String(snapshot.error)}`)
+    expect(snapshot).toMatchObject({ state: 'running', enabled: true })
+    await waitForAccountConsoleText(
+      /添加账号|Create Account/u,
+      'Settings did not render the native Sub2API account workspace by default',
+      60_000,
+    )
+    await recordOwnedProcesses()
+
+    await disableAndReEnable(1)
+    await disableAndReEnable(2)
+    const hostSurface = await mainWindowSnapshot()
+    const hostOrigin = new URL(hostSurface.url).origin
+
+    const accountName = 'dsh-electron-e2e-zai'
+    await clickAccountConsoleButton(['添加账号', 'Create Account'])
+    await fillTopAccountDialogInput(['账号名称', 'Account Name'], accountName)
+    await clickTopAccountDialogButton(['Zhipu GLM'])
+    await clickTopAccountDialogButton(['Coding Plan'])
+    await clickTopAccountDialogButton(['Chat Completions'])
+    await fillTopAccountDialogInput(['Base URL'], 'https://open.bigmodel.cn/api/coding/paas/v4')
+    await fillTopAccountDialogProviderCredential(['API Key'])
+    await clickTopAccountDialogButton(['同步上游支持的模型', 'Sync upstream supported models'])
+    await browser.waitUntil(async () => await topAccountDialogButtonEnabled([
+      '同步上游支持的模型', 'Sync upstream supported models',
+    ]), {
+      timeout: 60_000,
+      interval: 500,
+      timeoutMsg: 'Native account form did not finish syncing the upstream-supported model list',
+    })
+    await clickTopAccountDialogButton(['创建', 'Create'])
+    await waitForAccountConsoleText(
+      accountName,
+      'Embedded account form did not save the real provider account',
+      60_000,
+    )
+    const { targetModel, supportedModels } = await syncRealProviderAccount(hostOrigin, accountName)
+
+    await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
+    await waitForAccountConsoleText(
+      /已保存路由|Saved Routes/u,
+      'Composite route dialog did not open inside the account workspace',
+    )
+    await fillTopAccountDialogInput(['公开模型', 'Public Model'], targetModel)
+    await clickAccountConsoleFieldSelector(['端点', 'Endpoint'])
+    await clickAccountConsoleOption(['Chat Completions'])
+    await clickAccountConsoleFieldSelector(['目标平台', 'Target Platform'])
+    await clickAccountConsoleOption(['Zhipu GLM'])
+    await fillTopAccountDialogInput(['上游模型', 'Upstream Model'], targetModel)
+    await clickTopAccountDialogButton(['创建', 'Create'])
+    await waitForAccountConsoleText(
+      targetModel,
+      'Embedded Composite form did not save the real model route',
+    )
+    await verifyCompositeModelRoute(hostOrigin, targetModel)
+    await clickTopAccountDialogButton(['关闭', 'Close'])
+
+    try {
+      await browser.waitUntil(async () => {
+        const model = await gatewayModelProfile(targetModel)
+        return model?.contextWindow !== undefined
+          && model.maxTokens !== undefined
+          && model.input !== undefined
+          && model.reasoningEfforts !== undefined
+      }, {
+        timeout: 30_000,
+        interval: 500,
+        timeoutMsg: 'Release-backed Sub2API gateway did not project routed model capability metadata',
+      })
+    } catch {
+      throw new Error(
+        `Release-backed Sub2API gateway capability profile: ${JSON.stringify(await gatewayModelProfile(targetModel))}`,
+      )
+    }
+    const gatewayModels = await gatewayModelIds()
+    expect(supportedModels.every(modelId => gatewayModels.includes(modelId))).toBe(true)
+
+    await openSettings()
+    expect(new URL(await overlayUrl()).origin).toBe(new URL(hostSurface.url).origin)
+    await clickOverlayButton(['模型', 'Models'])
+    await browser.waitUntil(async () => {
+      const text = await overlayText()
+      return /添加提供方|Add provider/u.test(text)
+        || /加载提供方目录失败|Loading the provider directory failed/u.test(text)
+    }, { timeout: 30_000, timeoutMsg: 'Models Settings did not settle after the Web Host replacement' })
+    const modelsText = await overlayText()
+    expect(modelsText).toMatch(/添加提供方|Add provider/u)
+    expect(modelsText).not.toMatch(/加载提供方目录失败|Loading the provider directory failed/u)
+    await openProviderEditor(['Sub2API (sub2api)', 'Sub2API'])
+    await expandProviderSettings(['自定义设置', 'Customized settings'])
+    await browser.waitUntil(async () => (await overlayProviderInputValues()).includes(targetModel), {
+      timeout: 30_000,
+      interval: 500,
+      timeoutMsg: 'Models Settings did not receive the live Sub2API account catalog',
+    })
+    await browser.waitUntil(async () => {
+      const model = await providerModelProfile(targetModel)
+      return model?.contextWindow !== undefined
+        && model.maxTokens !== undefined
+        && model.input !== undefined
+        && model.reasoningEfforts !== undefined
+    }, {
+      timeout: 30_000,
+      interval: 500,
+      timeoutMsg: 'Sub2API provider did not receive live model capability metadata',
+    })
+    const providerModel = await providerModelProfile(targetModel)
+    expect(await providerModelIds()).toEqual(supportedModels)
+    expect(providerModel?.contextWindow).toBeGreaterThan(0)
+    expect(providerModel?.maxTokens).toBeGreaterThan(0)
+    expect(providerModel?.input).toContain('text')
+    if (providerModel?.reasoningEfforts !== false) {
+      expect(Object.keys(providerModel?.reasoningEfforts ?? {})).toContain(providerModel?.defaultReasoningLevel)
+    }
+
+    await clickOverlayButton(['账号池', 'Account pool'])
+    await waitForAccountConsoleText(
+      /添加账号|Create Account/u,
+      'Native account workspace did not finish rendering after returning from provider settings',
+      30_000,
+    )
+    const consoleWindow = await overlayAccountConsoleSnapshot()
+    // The sidecar shim loads through the host prefix. The upstream router may
+    // retain that route or expose its absolute-base inner route after boot.
+    const consoleUrl = new URL(consoleWindow.url)
+    expect([
+      '/plugins/dsh-sub2api/ui/admin/accounts',
+      '/admin/accounts',
+    ]).toContain(consoleUrl.pathname)
+    expect(consoleUrl.searchParams.get('embed')).toBe('desktop')
+    expect(consoleWindow.text).toMatch(/添加账号|Create Account/u)
+    expect(consoleWindow.text).toMatch(/Composite 路由|Composite Routes/u)
+    const workspaceUi = await overlayAccountWorkspaceUi()
+    expect(workspaceUi.text).not.toMatch(
+      /全部平台|All Platforms|全部类型|All Types|全部状态|All Status|全部Privacy|All Privacy/u,
+    )
+    expect(workspaceUi.text).not.toMatch(/全部分组|All Groups|自动刷新|Auto Refresh|更多操作|More Actions|批量更新|Batch Update/u)
+    expect(workspaceUi.filterSearchCount).toBe(0)
+    expect(workspaceUi.actionButtonCount).toBe(3)
+    expect(workspaceUi.actionRightGap ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(1)
+    expect(workspaceUi.pageHeight ?? 0).toBeGreaterThanOrEqual(workspaceUi.viewportHeight ?? 1)
+    expect(workspaceUi.pageBackgroundColor).toBe('rgb(36, 36, 36)')
+    expect(workspaceUi.tableBackgroundColor).toBe('rgb(43, 43, 43)')
+    await captureAccountWorkspaceEvidence()
+    expect([
+      [
+        '名称', '账号ID', '平台/类型', '容量', '状态', '调度', '今日统计', '用量窗口',
+        '代理', '优先级', '调度权值', '最近使用', '创建时间', '过期时间', '备注', '操作',
+      ],
+      [
+        'NAME', 'ACCOUNT ID', 'PLATFORM/TYPE', 'CAPACITY', 'STATUS', 'SCHEDULABLE',
+        'TODAY STATS', 'USAGE WINDOWS', 'PROXY', 'PRIORITY', 'SCHEDULER SCORE',
+        'LAST USED', 'CREATED', 'EXPIRES AT', 'NOTES', 'ACTIONS',
+      ],
+    ]).toContainEqual(workspaceUi.headers)
+    expect((await mainWindowSnapshot()).url).toBe(hostSurface.url)
+    const layout = await overlayAccountWorkspaceLayout()
+    expect(layout.borderTopWidth).toBe('0px')
+    expect(layout.frameHeight + 1).toBeGreaterThanOrEqual(layout.contentHeight)
+    expect(layout.settingsOverflowY).toBe('auto')
+    expect((layout.tableClientHeight ?? 0) + 1).toBeGreaterThanOrEqual(layout.tableScrollHeight ?? 1)
+
+    await clickAccountConsoleButton(['添加账号', 'Create Account'])
+    await waitForAccountConsoleText(/代理|Proxy/u, 'Native add-account dialog did not open')
+    expect((await overlayAccountConsoleSnapshot()).text).not.toMatch(
+      /池模式|Pool Mode|账号计费倍率|Billing Rate Multiplier|自动探测上游声明倍率|Automatically probe upstream declared rate|配额控制|Quota Control/u,
+    )
+    await clickTopAccountDialogButton(['Anthropic'])
+    await clickAccountConsoleButton(['下一步', 'Next'])
+    await waitForAccountConsoleText(/代理|Proxy/u, 'Native account flow did not reach the authorization form')
+    await clickAccountConsoleFieldSelector(['代理', 'Proxy'])
+    await waitForAccountConsoleText(
+      /代理管理|Proxy Management|IP管理|IP Management/u,
+      'Proxy selector did not expose the integrated IP management entry',
+    )
+    await clickAccountConsoleSelector('.select-manage')
+    await waitForAccountConsoleText(
+      /添加代理|Create Proxy/u,
+      'Integrated IP management did not open inside the account form',
+    )
+    await clickAccountConsoleButton(['添加代理', 'Create Proxy'])
+    const createProxyDialog = await waitForTopAccountDialog(
+      ['添加代理', 'Create Proxy'],
+      'Create Proxy dialog did not become the topmost integrated IP-management surface',
+    )
+    expect(createProxyDialog?.zIndex).toBe('80')
+
+    const proxyName = 'dsh-e2e-proxy'
+    await fillTopAccountDialogInput(['名称', 'Name'], proxyName)
+    await fillTopAccountDialogInput(['主机', 'Host'], '127.0.0.1')
+    await fillTopAccountDialogInput(['端口', 'Port'], '9')
+    await clickTopAccountDialogButton(['创建', 'Create'])
+    await waitForAccountConsoleText(proxyName, 'New proxy did not appear in integrated IP management')
+
+    await clickAccountConsoleRowAction(proxyName, ['编辑', 'Edit'])
+    const editProxyDialog = await waitForTopAccountDialog(
+      ['编辑代理', 'Edit Proxy'],
+      'Edit Proxy dialog did not become the topmost integrated IP-management surface',
+    )
+    expect(editProxyDialog?.zIndex).toBe('80')
+    await clickTopAccountDialogButton(['取消', 'Cancel'])
+
+    await clickAccountConsoleRowAction(proxyName, ['删除', 'Delete'])
+    const deleteProxyDialog = await waitForTopAccountDialog(
+      ['删除代理', 'Delete Proxy'],
+      'Delete Proxy confirmation did not become the topmost integrated IP-management surface',
+    )
+    expect(deleteProxyDialog?.zIndex).toBe('80')
+    await clickTopAccountDialogButton(['取消', 'Cancel'])
+
+    await clickAccountConsoleButton(['返回', 'Back'])
+    await clickAccountConsoleFieldSelector(['代理', 'Proxy'])
+    await browser.waitUntil(async () => (await overlayAccountSelectOptions()).some(option => option.includes(proxyName)), {
+      timeout: 15_000,
+      timeoutMsg: 'Account form did not refresh the proxy catalog after returning from IP management',
+    })
+    expect((await overlayAccountSelectOptions()).some(option => option.includes(proxyName))).toBe(true)
+    await waitForSessionSurface(hostSurface.url)
+    await connectTemporaryWorkspace()
+    const expected = 'DSH445_MODEL_OK_7F3A'
+    await selectModelAndSend(
+      targetModel,
+      `Reply with exactly ${expected} and no other text.`,
+      expected,
+      hostSurface.url,
+    )
+    await recordOwnedProcesses()
+  })
+})

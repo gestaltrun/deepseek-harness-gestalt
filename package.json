@@ -180,6 +180,7 @@
     "dev:web": "tsx scripts/dev-web.ts --poll",
     "gestalt:dev": "pnpm --filter @deepseek-ai/dsh-desktop dev",
     "test:e2e-project-members-electron": "pnpm --filter @deepseek-ai/dsh-desktop test:e2e-project-members-electron",
+    "test:e2e-sub2api": "pnpm --filter @deepseek-ai/dsh-desktop test:e2e-sub2api",
     "gestalt:smoke": "pnpm --filter @deepseek-ai/dsh-client-ui-desktop bundle && pnpm --filter @deepseek-ai/dsh-desktop exec node scripts/build-main.mjs tests/fixtures/operated-platform.json && DSH_DESKTOP_SMOKE=1 vitest run apps/desktop/tests/electron-smoke.spec.ts",
     "gestalt:smoke:packaged": "DSH_DESKTOP_SMOKE=1 vitest run apps/desktop/tests/electron-smoke-packaged.spec.ts",
     "postinstall": "node scripts/install-lefthook.mjs"

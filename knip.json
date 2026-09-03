@@ -8,11 +8,14 @@
     "gh",
     "icacls",
     "initdb",
+    "ipcrm",
+    "ipcs",
     "jar",
     "javac",
     "keytool",
     "musl-gcc",
     "openssl",
+    "ps",
     "postgres",
     "python3",
     "postgres",
@@ -738,7 +741,8 @@
         "tests/member-question-e2e/wdio.conf.ts",
         "tests/member-question-e2e/electron.e2e.ts",
         "tests/member-question-e2e/host-plugin.ts",
-        "tests/member-question-e2e/*.snapshot.ts"
+        "tests/member-question-e2e/*.snapshot.ts",
+        "tests/e2e-sub2api/**/*.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -749,7 +753,9 @@
         "@wdio/cli",
         "@wdio/electron-service",
         "@wdio/local-runner",
-        "@wdio/spec-reporter"
+        "@wdio/mocha-framework",
+        "@wdio/spec-reporter",
+        "@wdio/types"
       ]
     },
     "apps/platform": {

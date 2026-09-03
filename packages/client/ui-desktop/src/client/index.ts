@@ -12,17 +12,21 @@ import { BrandSeat } from './BrandSeat.tsx'
 import { DragStrip } from './DragStrip.tsx'
 import { UpdateControl } from './UpdateControl.tsx'
 import { AccountControl } from './AccountControl.tsx'
+import { Sub2ApiControl } from './Sub2ApiControl.tsx'
 import { DesktopChromeOverlay } from './DesktopChromeOverlay.tsx'
 import { bindDesktopUpdater, createUpdaterSource } from './status-source.ts'
 import { bindDesktopAccount, createDesktopAccountSource } from './account-source.ts'
 import { bindDesktopPairing, createDesktopPairingSource } from './pairing-source.ts'
+import { bindDesktopSub2Api, createDesktopSub2ApiSource } from './sub2api-source.ts'
 import { en, zh, type DesktopKey } from './locales.ts'
 
-export type { DesktopBridge, UpdaterPhase, UpdaterStatus } from '../protocol.ts'
+export type { DesktopBridge, Sub2ApiPhase, DesktopSub2ApiSnapshot, UpdaterPhase, UpdaterStatus } from '../protocol.ts'
 export type { DesktopKey } from './locales.ts'
 export type { UpdateControlProps } from './UpdateControl.tsx'
+export type { Sub2ApiControlProps } from './Sub2ApiControl.tsx'
 export { bindDesktopUpdater, createUpdaterSource, INITIAL_UPDATER_STATUS } from './status-source.ts'
 export { bindDesktopAccount, createDesktopAccountSource, INITIAL_ACCOUNT_SNAPSHOT } from './account-source.ts'
+export { bindDesktopSub2Api, createDesktopSub2ApiSource, INITIAL_SUB2API_SNAPSHOT } from './sub2api-source.ts'
 export type { AccountControlProps } from './AccountControl.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -48,6 +52,7 @@ export function apply(ctx: ClientContext): void {
   const updater = createUpdaterSource()
   const account = createDesktopAccountSource()
   const pairing = createDesktopPairingSource()
+  const sub2api = createDesktopSub2ApiSource()
   /* v8 ignore next -- the client half always has window */
   const desktop = typeof window === 'undefined' ? undefined : window.dshDesktop
   if (desktop !== undefined) {
@@ -57,6 +62,7 @@ export function apply(ctx: ClientContext): void {
     if (desktop.projectMembership !== undefined) {
       ctx.provide('projectMembershipClient', desktop.projectMembership)
     }
+    ctx.effect(() => bindDesktopSub2Api(sub2api, desktop), 'ui-desktop: sub2api status')
   }
 
   ctx.slots.inject('sidebar.brand', () => ctx.slots.register(
@@ -77,6 +83,17 @@ export function apply(ctx: ClientContext): void {
       inject: () => ({ hooks: { account, pairing } }),
     },
     AccountControl,
+  ))
+  ctx.slots.inject('settings.section', () => ctx.slots.register(
+    {
+      name: 'settings.section',
+      id: 'sub2api',
+      order: 51,
+      label: () => ctx.locale.bind(NS)('sub2api.settingsNav'),
+      locale: NS,
+      inject: () => ({ hooks: { sub2api } }),
+    },
+    Sub2ApiControl,
   ))
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register(
     {

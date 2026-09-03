@@ -36,6 +36,7 @@ describe('THIRD_PARTY_NOTICES.md', () => {
 
     expect(skills.map(skill => skill.name)).toEqual([
       'ego-browser',
+      'implement-spec',
       'retro',
       'show-me',
       'skill-doctor',

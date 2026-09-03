@@ -22,7 +22,13 @@ git submodule update --init --recursive
 
 `git clone --recurse-submodules` 一次初始化全部子模块。需要插件源码的 CI checkout 在 `actions/checkout` 上设置 `submodules: recursive`。
 
-在需要新修订的同一次变更中前移钉住的 SHA：
+若 checkout 后 `plugins/dsh-sub2api-sidecar/` 仍为空，说明只有 gitlink、没有子树。阅读 sidecar 源码前先初始化：
+
+```sh
+git submodule update --init --recursive plugins/dsh-sub2api-sidecar
+```
+
+在需要新修订的同一次变更中前移钉住的 SHA。检出精确 commit，不要用浮动分支名：
 
 ```sh
 git -C plugins/dsh-sub2api-sidecar fetch origin
@@ -30,7 +36,7 @@ git -C plugins/dsh-sub2api-sidecar checkout <sha>
 git add plugins/dsh-sub2api-sidecar
 ```
 
-记录的 SHA 才是产品钉住点。浮动分支名不是。
+记录的 SHA 才是产品钉住点。当前钉住 sidecar `v0.1.25`（`8c85bb6c37338795be0c838ed05cd8fc96c1f55d`）。
 
 ## 约束
 

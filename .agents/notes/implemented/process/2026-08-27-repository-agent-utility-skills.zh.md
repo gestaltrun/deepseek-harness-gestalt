@@ -10,9 +10,9 @@ Status: implemented
 
 ## Decision
 
-仓库在 `.agents/skills` 下保存 `show-me`、`skill-doctor`、`retro`、`unslop` 和 `ego-browser`。这些是仓库智能体工作流，不会增加 DeepSeek Harness 运行时包，也不会改变已发布的 Bundle。[`.agents/skills/SOURCES.json`](../../../skills/SOURCES.json) 会固定各自的上游来源并记录本地适配，每个 Skill 目录则保留对应上游的 MIT 声明。生成的[第三方声明](../../../../THIRD_PARTY_NOTICES.md)会披露同一组记录。
+仓库在 `.agents/skills` 下保存 `show-me`、`skill-doctor`、`retro`、`implement-spec`、`unslop`、`ego-browser` 和 `dsh-desktop-test-instance`。这些是仓库智能体工作流，不会增加 DeepSeek Harness 运行时包，也不会改变已发布的 Bundle。[`.agents/skills/SOURCES.json`](../../../skills/SOURCES.json) 会固定各自的上游来源并记录本地适配，每个上游 Skill 目录则保留对应上游的 MIT 声明。生成的[第三方声明](../../../../THIRD_PARTY_NOTICES.md)会披露同一组记录。
 
-仓库内的 `ego-browser` 要求使用名为 `DSH` 的 ego Profile。其 helper 会在创建、复用、claim、takeover 或 completion 前通过 `listProfiles()` 解析该 Profile；创建时将返回的 ID 传给 `globalThis.ego.createTaskSpace(name, profileId)`；遇到属于其他 Profile 的同名 Task Space 时则拒绝继续。如果该名称不存在或不唯一，helper 会失败。安装由用户自行下载并经过 macOS 信任流程；Skill 不会下载安装器、替换应用、删除 quarantine 元数据，也不会以 root 身份调用安装器。
+仓库内的 `ego-browser` 要求使用名为 `DSH` 的 ego Profile。其 helper 会在创建、复用、claim、takeover 或 completion 前通过 `listProfiles()` 解析该 Profile；创建时将返回的 ID 传给 `globalThis.ego.createTaskSpace(name, profileId)`；遇到属于其他 Profile 的同名 Task Space 时则拒绝继续。如果该名称不存在或不唯一，helper 会失败。同一用户目标通过 gitignore 的[运行时备忘](2026-09-02-desktop-test-instance-and-runtime-memo.zh.md)复用一个 DSH Task Space。安装由用户自行下载并经过 macOS 信任流程；Skill 不会下载安装器、替换应用、删除 quarantine 元数据，也不会以 root 身份调用安装器。
 
 解释器生成的缓存和本地技能报告不进入版本控制。`skill-doctor` 使用自包含 HTML 渲染建议 diff，不会提交第三方 JavaScript Bundle。
 
@@ -32,4 +32,4 @@ Status: implemented
 
 ## Consequences
 
-在本仓库中运行的智能体会获得相同的五个工作流。浏览器操作会在 Profile 配置错误时停止，不会静默使用其他账号。以后更新上游 Skill 时，必须刷新 `SOURCES.json`、保留许可证，并保留或有意修订仓库适配。
+在本仓库中运行的智能体会获得相同的共享工作流。浏览器操作会在 Profile 配置错误时停止，不会静默使用其他账号。以后更新上游 Skill 时，必须刷新 `SOURCES.json`、保留许可证，并保留或有意修订仓库适配。

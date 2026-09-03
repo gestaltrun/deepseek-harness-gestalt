@@ -311,7 +311,7 @@ const server = http.createServer((req, res) => {
         return
       }
       if (req.method === 'GET' && req.url === '/__test/pid') {
-        reply(res, undefined, { pid: process.pid })
+        reply(res, undefined, { pid: process.pid, ownerToken: knobs.ownerToken })
         return
       }
       if (req.method === 'POST' && req.url === '/__test/set-devices') {

@@ -1,0 +1,194 @@
+/** Full built Desktop Host journey for the singleton phone tab. */
+import { browser, expect } from '@wdio/globals'
+import {
+  assertPhoneDevicesSettingsSection, assertStartupEvidence, fakeCounters, openPhoneTabFromPlusMenu,
+  clickSurfaceButton, openSession, phoneTabTitles, recordOwnedProcesses, saveWindowEvidence,
+  switchToSessionSurface, waitForFakeIo, writeArtifact,
+} from './helpers.ts'
+
+describe('Desktop phone tab live chain', () => {
+  it('renders a 390x844 H264 picture and forwards exact tap and Home io', async () => {
+    const startup = await assertStartupEvidence()
+    await recordOwnedProcesses(startup.hostPid, true)
+    await openSession()
+    await openPhoneTabFromPlusMenu()
+
+    const android = browser.$('button=Android')
+    await android.waitForDisplayed({ timeout: 20_000 })
+    await browser.$('div*=Pixel_6_API_35').waitForDisplayed({ timeout: 30_000 })
+    await expect(browser.$('div*=SM-S9310')).toBeDisplayed()
+    await expect(browser.$('section[aria-label="模拟器"]')).toBeDisplayed()
+    await expect(browser.$('section[aria-label="USB 真机"]')).toBeDisplayed()
+    await expect(browser.$('div*=Offline Pixel')).not.toBeExisting()
+    const picker = await browser.execute(() => ({
+      text: document.body.innerText,
+      alerts: [...document.querySelectorAll<HTMLElement>('[role="alert"]')].map(element => element.innerText),
+    }))
+    await writeArtifact('phone-picker.json', picker)
+    expect(picker.text).toContain('真机未授权调试')
+    await saveWindowEvidence('phone-picker-window')
+
+    await clickSurfaceButton('iOS')
+    await expect(browser.$('div*=iPhone 16')).toBeExisting()
+    await clickSurfaceButton('Android')
+    await clickSurfaceButton('打开')
+
+    const screen = browser.$('div[role="application"]')
+    await screen.waitForExist({ timeout: 30_000 })
+    await expect(browser.$('[aria-label="当前画面编码 H264 · 30 fps"]')).toBeExisting()
+    const live = browser.$('canvas[aria-label="Pixel_6_API_35 实时画面"]')
+    await live.waitForExist({ timeout: 30_000 })
+    const lastPicture = await waitForDecodedPicture('Pixel_6_API_35')
+    const transport = await browser.execute(async () => {
+      const resource = performance.getEntriesByType('resource').find((entry) => {
+        const url = new URL(entry.name)
+        return url.pathname.startsWith('/phone/stream/') && url.pathname.endsWith('/h264')
+      })
+      if (resource === undefined) return undefined
+      const url = new URL(resource.name)
+      const response = await fetch(url)
+      const body = new Uint8Array(await response.arrayBuffer())
+      return {
+        path: url.pathname,
+        status: response.status,
+        contentType: response.headers.get('content-type'),
+        bytes: body.length,
+        annexB: body.length >= 4 && body[0] === 0 && body[1] === 0
+          && (body[2] === 1 || (body[2] === 0 && body[3] === 1)),
+      }
+    })
+    await writeArtifact('h264-transport.json', transport)
+    const visibility = await browser.execute(() => ({
+      canvasPresent: document.querySelector('canvas[aria-label="Pixel_6_API_35 实时画面"]') !== null,
+      text: document.body.innerText,
+    }))
+    await writeArtifact('h264-visibility.json', { lastPicture, ...visibility })
+    await saveWindowEvidence('phone-h264-visibility-window')
+    expect(transport).toMatchObject({ status: 200, contentType: 'video/h264', annexB: true })
+    expect(transport?.bytes ?? 0).toBeGreaterThan(0)
+    expect(lastPicture?.width ?? 0).toBe(390)
+    expect(lastPicture?.height ?? 0).toBe(844)
+    expect(lastPicture?.nonTransparentPixels ?? 0).toBeGreaterThan(0)
+    expect(lastPicture?.display).toBe('block')
+    expect(lastPicture?.visibility).toBe('visible')
+    expect(lastPicture?.opacity).toBe(1)
+    expect(lastPicture.renderedWidth).toBeGreaterThan(0)
+    expect(lastPicture.renderedHeight).toBeGreaterThan(0)
+    await saveWindowEvidence('phone-live-h264-window')
+
+    await clickSurfaceButton('切换设备：Pixel_6_API_35')
+    const menuItems = await browser.$$('[role="menu"] [role="menuitem"]').getElements()
+    const names = await menuItems.map(async item => await item.getText())
+    expect(names.some(name => name.includes('Pixel_6_API_35'))).toBe(true)
+    expect(names.some(name => name.includes('SM-S9310'))).toBe(true)
+    expect(names.some(name => name.includes('iPhone 16'))).toBe(true)
+    expect(names.some(name => name.includes('Offline Pixel'))).toBe(false)
+    expect(names.some(name => name.includes('Unauthorized Android'))).toBe(false)
+    await clickSurfaceButton('iPhone 16切换')
+    await browser.$('button[aria-label="切换设备：iPhone 16"]').waitForExist({ timeout: 30_000 })
+    expect(await phoneTabTitles()).toEqual(['手机·iPhone 16'])
+    await waitForDecodedPicture('iPhone 16')
+    await saveWindowEvidence('phone-iphone-window')
+    await clickSurfaceButton('切换设备：iPhone 16')
+    await clickSurfaceButton('Pixel_6_API_35切换')
+    await browser.$('button[aria-label="切换设备：Pixel_6_API_35"]').waitForExist({ timeout: 30_000 })
+    expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
+    await waitForDecodedPicture('Pixel_6_API_35')
+    await saveWindowEvidence('phone-pixel-return-window')
+
+    const captureResources = await browser.execute(() => performance.getEntriesByType('resource')
+      .map(entry => new URL(entry.name))
+      .filter(url => url.pathname.startsWith('/phone/stream/'))
+      .map(url => ({ path: url.pathname })))
+    await writeArtifact('phone-capture-resources.json', captureResources)
+    expect(captureResources.length).toBeGreaterThan(0)
+    expect(captureResources.every(resource => resource.path.endsWith('/h264'))).toBe(true)
+    expect(captureResources.some(resource => resource.path.endsWith('/mjpeg'))).toBe(false)
+
+    const beforeTap = await fakeCounters()
+    await browser.execute(() => {
+      const target = document.querySelector<HTMLDivElement>('div[role="application"]')
+      const canvas = target?.querySelector<HTMLCanvasElement>('canvas')
+      if (target === null || target === undefined || canvas === null || canvas === undefined) {
+        throw new Error('phone surface and canvas are required')
+      }
+      target.addEventListener('pointerdown', (event) => {
+        const rect = target.getBoundingClientRect()
+        const u = (event.clientX - rect.left) / rect.width
+        const v = (event.clientY - rect.top) / rect.height
+        Object.assign(window, {
+          __DSH_PHONE_E2E_POINTER__: {
+            u, v, x: Math.round(u * canvas.width), y: Math.round(v * canvas.height),
+          },
+        })
+      }, { capture: true, once: true })
+    })
+    await screen.click()
+    const afterTap = await waitForFakeIo(counters => counters.io.length === beforeTap.io.length + 1)
+    const pointer = await browser.execute(() => (
+      window as typeof window & {
+        __DSH_PHONE_E2E_POINTER__?: { readonly u: number; readonly v: number; readonly x: number; readonly y: number }
+      }
+    ).__DSH_PHONE_E2E_POINTER__)
+    if (pointer === undefined) throw new Error('phone surface did not receive pointerdown')
+    expect(pointer.u).toBeGreaterThan(0.49)
+    expect(pointer.u).toBeLessThan(0.51)
+    expect(pointer.v).toBeGreaterThan(0.49)
+    expect(pointer.v).toBeLessThan(0.51)
+    expect(afterTap.io.at(-1)).toMatchObject({
+      method: 'device.io.tap',
+      params: { deviceId: 'emulator-5554', x: pointer.x, y: pointer.y },
+    })
+
+    const beforeHome = afterTap.io.length
+    await browser.$('button[aria-label="主屏幕"]').click()
+    const afterHome = await waitForFakeIo(counters => counters.io.length === beforeHome + 1)
+    expect(afterHome.io.at(-1)).toMatchObject({
+      method: 'device.io.button',
+      params: { deviceId: 'emulator-5554', button: 'HOME' },
+    })
+
+    await assertPhoneDevicesSettingsSection()
+    await switchToSessionSurface()
+    await saveWindowEvidence('phone-complete-window')
+  })
+})
+
+async function waitForDecodedPicture(label: string): Promise<NonNullable<Awaited<ReturnType<typeof readPicture>>>> {
+  let picture: Awaited<ReturnType<typeof readPicture>>
+  await browser.waitUntil(async () => {
+    picture = await readPicture(label)
+    return picture?.width === 390 && picture.height === 844 && picture.nonTransparentPixels > 0
+  }, { timeout: 10_000, interval: 250, timeoutMsg: `${label} did not paint a decoded 390x844 picture` })
+  if (picture === undefined) throw new Error(`${label} decoded picture disappeared after readiness`)
+  return picture
+}
+
+async function readPicture(label: string) {
+  return await browser.execute((name: string) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(`canvas[aria-label="${name} 实时画面"]`)
+    if (canvas === null) return undefined
+    const style = getComputedStyle(canvas)
+    const rect = canvas.getBoundingClientRect()
+    const context = canvas.getContext('2d')
+    const sampleWidth = Math.min(canvas.width, 32)
+    const sampleHeight = Math.min(canvas.height, 32)
+    const pixels = context === null || sampleWidth === 0 || sampleHeight === 0
+      ? new Uint8ClampedArray()
+      : context.getImageData(0, 0, sampleWidth, sampleHeight).data
+    let nonTransparentPixels = 0
+    for (let offset = 3; offset < pixels.length; offset += 4) {
+      if (pixels[offset] !== 0) nonTransparentPixels += 1
+    }
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      nonTransparentPixels,
+      renderedWidth: rect.width,
+      renderedHeight: rect.height,
+      display: style.display,
+      visibility: style.visibility,
+      opacity: Number(style.opacity),
+    }
+  }, label)
+}

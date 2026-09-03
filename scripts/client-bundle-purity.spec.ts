@@ -34,6 +34,20 @@ describe('client bundle build faces', () => {
     expect(artifact?.entry).toEqual({ client: 'lib/types/client/index.js' })
   })
 
+  it('uses a package-declared TSX entry in development', () => {
+    const bundle = clientBundle(
+      '@deepseek-ai/dsh-client-test',
+      ['lib/types/index.js'],
+      { clientSourceEntry: 'src/client/index.tsx' },
+    )
+    const development = bundle({ env: {} }).find(config => config.platform === 'browser')
+    const artifact = bundle({ env: { DSH_BUILD_FACE: 'client' } })
+      .find(config => config.platform === 'browser')
+
+    expect(development?.entry).toEqual({ client: 'src/client/index.tsx' })
+    expect(artifact?.entry).toEqual({ client: 'lib/types/client/index.js' })
+  })
+
   it('publishes the loader factory as CommonJS with an explicit CommonJS extension', () => {
     const artifact = clientConfigs()[0]
 

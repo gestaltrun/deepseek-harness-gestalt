@@ -31,6 +31,14 @@ function buildFixture(environment: Record<string, string>): string {
   roots.push(root)
   write(join(root, 'apps/web/dist/index.html'), '<main></main>')
   write(join(root, 'packages/client/example/lib/client.cjs'), 'module.exports = {}\n')
+  write(join(root, 'packages/client/example/lib/client.cjs.map'), `${JSON.stringify({
+    version: 3,
+    file: 'client.cjs',
+    sources: [],
+    sourcesContent: [],
+    names: [],
+    mappings: '',
+  })}\n`)
   writeClientBuildRecord(root, environment)
   return root
 }

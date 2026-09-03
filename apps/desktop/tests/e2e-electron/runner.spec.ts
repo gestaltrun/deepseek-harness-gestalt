@@ -111,11 +111,10 @@ describe('Desktop Electron runner ownership', () => {
   it('returns only after stdout and stderr are fully persisted', async () => {
     const root = await temporaryRoot()
     const logFile = join(root, 'child.log')
-    const child = [
-      "const { spawn } = require('node:child_process')",
-      "spawn(process.execPath, ['-e', `setTimeout(() => { process.stdout.write('late stdout'); process.stderr.write('late stderr') }, 250)`], { stdio: ['ignore', 'inherit', 'inherit'] }).unref()",
-    ].join(';')
-    const code = await runLogged(process.execPath, ['-e', child], {
+    const code = await runLogged(process.execPath, [
+      '-e',
+      "setTimeout(() => { process.stdout.write('late stdout'); process.stderr.write('late stderr') }, 250)",
+    ], {
       cwd: root,
       env: process.env,
       logFile,
@@ -127,6 +126,25 @@ describe('Desktop Electron runner ownership', () => {
     const logged = await readFile(logFile, 'utf8')
     expect(logged).toContain('late stdout')
     expect(logged).toContain('late stderr')
+  })
+
+  it.skipIf(process.platform === 'win32')('waits for inherited descendant pipes to close', async () => {
+    const root = await temporaryRoot()
+    const logFile = join(root, 'descendant.log')
+    const parent = [
+      "const { spawn } = require('node:child_process')",
+      "spawn(process.execPath, ['-e', `setTimeout(() => process.stdout.write('descendant output'), 250)`], { stdio: ['ignore', 'inherit', 'inherit'] }).unref()",
+    ].join(';')
+    const code = await runLogged(process.execPath, ['-e', parent], {
+      cwd: root,
+      env: process.env,
+      logFile,
+      stdout: discard(),
+      stderr: discard(),
+    })
+
+    expect(code).toBe(0)
+    expect(await readFile(logFile, 'utf8')).toContain('descendant output')
   })
 
   it('settles every cleanup step and retains every independent failure', async () => {

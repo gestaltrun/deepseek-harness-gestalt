@@ -9,8 +9,7 @@
     "types": ["node"]
   },
   "include": ["src", "tests", "scripts"],
-  "exclude": ["tests/member-question-e2e"],
-  "exclude": ["tests/e2e-sub2api", "scripts/run-e2e-sub2api.mjs"],
+  "exclude": ["tests/member-question-e2e", "tests/e2e-sub2api", "scripts/run-e2e-sub2api.mjs"],
   "references": [
     { "path": "../../packages/attachment/attachment" },
     { "path": "../../packages/attachment/attachment-local" },

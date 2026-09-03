@@ -1699,9 +1699,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>',
-        description: 'Resolve the current Account\'s Project membership for one normalized Git remote.',
-        parameters: [{ name: 'normalizedRemoteUrl', description: 'canonical Workspace origin remote.' }],
-        returns: 'authorized Project context, or no value when this Account has no membership.',
+        description: 'Resolve the current Account\'s Project membership for one normalized remote.',
+        parameters: [{ name: 'normalizedRemoteUrl', description: 'canonical Workspace origin or `local://workspace/<id>` sentinel.' }],
+        returns: 'authorized Project context, or no value when this Account has no membership. HTTP 204 and HTTP 404 are both unbound; other non-OK answers reject.',
       },
       {
         signature: 'roster(projectId: ProjectId): Promise<RosterReadView>',

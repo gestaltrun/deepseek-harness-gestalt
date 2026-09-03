@@ -38,6 +38,7 @@ import type { SessionRemotes } from './remotes.ts'
 import type { SessionListPhase, SessionSearchResultItem, SubagentCatalogSnapshot } from './manager.ts'
 import type { PendingInteractionStatus } from './pending.ts'
 import { SessionProvideChannel } from './provide.ts'
+import type { ReceivingQuestionBookOptions } from './receiving.ts'
 import type { Session } from './session.ts'
 
 /** Session list row projected from the host list RPC plus live stream increments. */
@@ -201,8 +202,8 @@ interface ScopeRecord {
   fiber: Fiber
   ctx: AgentContext
   binding: SessionBinding
-  /** The concrete Session for runtime-internal entry points (staging open()); the binding carries only the outward face. */
-  session: Session
+  /** Host-owned runtime internals; absent for renderer-only receiving faces. */
+  hostSession?: Session
   /** Render-layer standard-props bundle (identity-stable per scope; the renderer's per-info caches key off it). */
   provideInfo: SessionProvideInfo
 }
@@ -280,12 +281,14 @@ export class SessionRuntime implements ISessions {
    * @param api - wire client shared with every Session.
    * @param remote - generated Remote namespaces shared with every Session.
    * @param conversationRuntime - same-pass registry instances, when runtime apply owns them.
+   * @param receiving - optional Client Installation identity.
    */
   constructor(
     private readonly rootCtx: Context,
     private readonly api: IApiClient,
     remote: SessionRemotes,
     conversationRuntime?: ConversationRuntime,
+    receiving?: ReceivingQuestionBookOptions,
   ) {
     this.selection = createSnapshotStore<SessionSelection>(
       {},
@@ -305,6 +308,7 @@ export class SessionRuntime implements ISessions {
       restored.subagentAddress,
       conversation,
       sessionId => this.admissionAdapters.find(adapter => adapter.handles(sessionId)),
+      receiving,
     )
     this.list = createSnapshotStore<SessionListState>({
       ids: [], byId: {}, current: undefined, phase: 'pending',
@@ -353,6 +357,10 @@ export class SessionRuntime implements ISessions {
       }, 'sessions: conversation registry rebuild')
     }
     rootCtx.reflect.provide('sessions', this, undefined)
+    rootCtx.effect(
+      () => () => { this.manager.dispose() },
+      'sessions: runtime-owned timers',
+    )
   }
 
   /**
@@ -428,8 +436,8 @@ export class SessionRuntime implements ISessions {
   openForRender(sessionId: SessionId): void {
     if (this.manager.isProvisional(sessionId)) return
     const record = this.resolve(sessionId)
-    if (record === undefined) return
-    void record.session.open()
+    if (record?.hostSession === undefined) return
+    void record.hostSession.open()
     void this.manager.refreshSubagents(sessionId)
   }
 
@@ -447,6 +455,8 @@ export class SessionRuntime implements ISessions {
 
   /** Resolve model operations without bypassing feature-owned Session routing. */
   modelRoute(sessionId: SessionId): SessionModelRoute | undefined {
+    if (this.manager.receiving.face(sessionId) !== undefined
+      && !this.manager.receiving.isMaterialized(sessionId)) return undefined
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     const featureRoute = admission?.modelRoute?.(sessionId)
     if (admission !== undefined) return featureRoute
@@ -466,6 +476,8 @@ export class SessionRuntime implements ISessions {
 
   /** Resolve the identity whose ordinary command routes may serve this Session. */
   commandCatalogSessionId(sessionId: SessionId): SessionId | undefined {
+    if (this.manager.receiving.face(sessionId) !== undefined
+      && !this.manager.receiving.isMaterialized(sessionId)) return undefined
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     if (admission !== undefined) return admission.commandCatalogSessionId?.(sessionId)
     if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
@@ -474,6 +486,8 @@ export class SessionRuntime implements ISessions {
 
   /** Resolve the catalog identity whose skills apply to this Session. */
   skillCatalogSessionId(sessionId: SessionId): SessionId | undefined {
+    if (this.manager.receiving.face(sessionId) !== undefined
+      && !this.manager.receiving.isMaterialized(sessionId)) return undefined
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     if (admission !== undefined) return admission.skillCatalogSessionId?.(sessionId)
     if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
@@ -695,8 +709,8 @@ export class SessionRuntime implements ISessions {
     /* v8 ignore next 3 -- defensive: current is always a listed id (open()
      * validates and the projection masks absent selections), so resolve
      * cannot miss; kept so a future current writer cannot crash the notify. */
-    if (record !== undefined) {
-      void record.session.open()
+    if (record?.hostSession !== undefined) {
+      void record.hostSession.open()
       void this.manager.refreshSubagents(current)
     }
   }
@@ -712,16 +726,24 @@ export class SessionRuntime implements ISessions {
     if (existing !== undefined) return existing
     if (!this.eligible(id)) return undefined
     const { fiber, ctx } = createScope(this.rootCtx, id)
-    const session = this.manager.get(id)
-    // The Session owns its scoped dispatch point (host Agent.loopCtx mirror);
-    // mint and bind are one step so a live scope record implies a bound actx.
-    session.bindScope(ctx)
-    const binding: SessionBinding = { sessionId: id, session, ctx }
+    const receivingFace = this.manager.receiving.face(id)
+    const hostSession = receivingFace === undefined
+      || (this.manager.receiving.isMaterialized(id) && this.manager.isHostListed(id))
+      ? this.manager.get(id)
+      : undefined
+    if (receivingFace !== undefined && hostSession !== undefined) {
+      this.manager.receiving.bindHost(id, hostSession)
+    }
+    const face = receivingFace ?? hostSession
+    if (face === undefined) return undefined
+    // Only a Host Session owns the scoped dispatch point and history window.
+    hostSession?.bindScope(ctx)
+    const binding: SessionBinding = { sessionId: id, session: face, ctx }
     const record: ScopeRecord = {
       fiber,
       ctx,
       binding,
-      session,
+      ...(hostSession === undefined ? {} : { hostSession }),
       // Sources are bare observables; React binds selector hooks at its own boundary.
       provideInfo: this.provideChannel.materializeInfo(binding),
     }
@@ -809,6 +831,19 @@ export class SessionRuntime implements ISessions {
         ...(currentAddress === undefined ? {} : { subagentAddress: currentAddress }),
       })
     }
+    for (const [id, record] of this.scopes) {
+      if (record.hostSession !== undefined
+        || !this.manager.receiving.isMaterialized(id)
+        || !this.manager.isHostListed(id)) continue
+      const host = this.manager.get(id)
+      host.bindScope(record.ctx)
+      this.manager.receiving.bindHost(id, host)
+      record.hostSession = host
+      if (id === current) {
+        void host.open()
+        void this.manager.refreshSubagents(id)
+      }
+    }
     this.list.set({ ids, byId, current, phase, subagentsByParent, jobsBySession, currentAddress })
     this.pruneScopes()
   }
@@ -836,13 +871,13 @@ export class SessionRuntime implements ISessions {
    */
   private dropScope(id: SessionId, record: ScopeRecord): void {
     void record.fiber.dispose()
-    // Release the Session's dispatch point with the scope it belongs to (a
-    // surviving instance — the live Intent — rebinds when resolve re-mints).
-    record.session.unbindScope()
+    // Release Host-only dispatch and instance state. Renderer-only receiving
+    // faces stay owned by their book while their list row exists.
+    record.hostSession?.unbindScope()
     // Optional lookup: slots and sessions are sibling services with no
     // declared dependency; a slots-less boot (object-layer tests) skips.
     this.rootCtx.get('slots')?.pruneStoreScope(id)
-    this.manager.drop(id)
+    if (record.hostSession !== undefined) this.manager.drop(id)
   }
 
   /** Run deferred teardowns whose session is no longer staged (called when the stage moves). */

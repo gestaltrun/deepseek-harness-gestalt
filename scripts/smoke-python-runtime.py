@@ -86,6 +86,45 @@ export function apply(ctx) {
   })
 }
 """
+SNAPSHOT_MEMBER_QUESTION_PLUGIN = """\
+export const inject = ['agents', 'sessions']
+export function apply(ctx) {
+  const injected = new WeakSet()
+  ctx.root.on('agent/pre-step', ({ agent }, next) => {
+    const session = agent.session
+    if (session.header.parentSession !== undefined || injected.has(session)) return next()
+    injected.add(session)
+    session.append('member-question/received', {
+      questionId: 'python-sdk-question',
+      projectId: 'python-sdk-project',
+      originSessionId: 'python-sdk-origin',
+      arrivedAt: 100,
+      expiresAt: 200,
+      origin: {
+        projectName: 'Python SDK Project',
+        originSessionTitle: 'Python SDK Origin',
+        askerAccountId: 'python-sdk-account',
+        askerRole: 'member',
+        askerDisplayName: 'Python SDK Member',
+        askerAvatarUrl: ''
+      },
+      background: 'Python SDK event projection.',
+      questions: [{ id: 'decision', question: 'Proceed?' }],
+      references: [{ path: 'README.md', reason: 'Python SDK fixture' }]
+    }, { ignorable: true })
+    session.append('member-question/settled', {
+      type: 'member-question-settled',
+      operationId: 'python-sdk-operation',
+      questionId: 'python-sdk-question',
+      outcome: 'declined',
+      settledByInstallationId: 'python-sdk-installation',
+      settledByDeviceName: 'Python SDK Device',
+      settledAt: 150
+    }, { ignorable: true })
+    return next()
+  })
+}
+"""
 SNAPSHOT_WORKFLOW_SCRIPT = (
     "phase('Delegate')\n"
     f"const reply = await agent('{SNAPSHOT_WORKFLOW_CHILD_PROMPT}', {{ label: 'workflow-child' }})\n"
@@ -907,10 +946,13 @@ def smoke_sdk_snapshot(base_url: str, executable: Path, update_snapshots: bool) 
         sessions = root / "sessions"
         cordis = root / "cordis.yml"
         deferred_plugin = root / "deferred-sdk-tool.mjs"
+        member_question_plugin = root / "member-question-events.mjs"
         deferred_plugin.write_text(SNAPSHOT_DEFERRED_PLUGIN)
+        member_question_plugin.write_text(SNAPSHOT_MEMBER_QUESTION_PLUGIN)
         cordis.write_text(
             CUSTOM_CORDIS
             + "- id: deferred-sdk-tool\n  name: './deferred-sdk-tool.mjs'\n"
+            + "- id: member-question-events\n  name: './member-question-events.mjs'\n"
         )
         with DeepSeekHarness(
             provider="deepseek-official",
@@ -931,6 +973,16 @@ def smoke_sdk_snapshot(base_url: str, executable: Path, update_snapshots: bool) 
             raise AssertionError(f"advanced snapshot emitted unexpected subagent lifecycle: {methods}")
         if not any(event.get("type") == "tool/code-dispatch" for event in result.events):
             raise AssertionError("advanced snapshot emitted no tool/code-dispatch event")
+        member_question_events = [
+            event for event in result.events
+            if event.get("type") in {"member-question/received", "member-question/settled"}
+        ]
+        if [event.get("type") for event in member_question_events] != [
+            "member-question/received", "member-question/settled",
+        ]:
+            raise AssertionError(
+                f"advanced snapshot emitted unexpected member-question events: {member_question_events}"
+            )
 
         logs = read_session_logs(sessions)
         child_ids = snapshot_child_ids(result)

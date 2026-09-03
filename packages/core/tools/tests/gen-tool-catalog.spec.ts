@@ -35,7 +35,7 @@ describe('gen-tool-catalog collectToolCatalog', () => {
       'device_observe', 'device_open', 'device_screenshot', 'edit', 'exit_plan_mode', 'followup_task',
       'get_goal', 'glob', 'grep',
       'interrupt_agent', 'interrupt_agent', 'job_kill', 'job_list', 'job_output',
-      'list_agents', 'list_agents', 'lsp', 'pwsh', 'pwsh', 'ralph',
+      'list_agents', 'list_agents', 'lsp', 'project_members', 'pwsh', 'pwsh', 'ralph',
       'read', 'read_image', 'report', 'run_code', 'schedule_create', 'schedule_delete',
       'schedule_list', 'send_message', 'send_message', 'session_event_read', 'session_event_search',
       'session_event_trace', 'session_search', 'session_trace', 'skill', 'spawn_teammate',

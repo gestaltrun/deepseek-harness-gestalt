@@ -5,11 +5,12 @@ import type {
   InjectFace, MaybeSnapshotSelectorHook, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
   SlotHookFactory, SnapshotSelectorHook,
 } from '@deepseek-ai/dsh-client-ui-slots'
-import type {
-  CommandNode, CompactionSummaryNode, ConversationSnapshot, ConversationTurnDataMap,
+import type { CommandNode, CompactionSummaryNode, ConversationSnapshot, ConversationTurnDataMap,
   ObservableSnapshot, PendingInteraction, PendingWait, SessionId, ToolCallBlock,
   TurnLocation, WorkspaceId,
 } from '@deepseek-ai/dsh-client-runtime/client'
+import type { DetailsDocumentFocus } from './views.ts'
+export type { DetailsDocumentFocus } from './views.ts'
 import type { MarkdownFileMentions } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MessageId } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -183,6 +184,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * instead; this one is the whole panel.
      */
     'conversation.details.tool': { kind: 'single'; scope: 'session'; owner: DetailsToolOwnerProps }
+    /**
+     * The body of the details panel while a document is focused (the
+     * document-focus linkage channel wrote one): one occupant, so taking it
+     * means rendering every focused document yourself. Unoccupied, the panel
+     * renders the three-way dispatch fallback — `.md`/`.markdown` bodies as
+     * Markdown, `.html`/`.htm` bodies as the sandboxed restricted preview,
+     * and every other extension as a bare file tab.
+     */
+    'conversation.details.document': { kind: 'single'; scope: 'session'; owner: DetailsDocumentOwnerProps }
     /**
      * The composer takeover chain: entries are selector-routed replacements
      * of the default InputBar. Declared by this package's 'conversation'
@@ -407,7 +417,25 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Prose file-mention provider (ui-deliverables); reach via ctx.get — optional. */
     chatFileMentions: ChatFileMentions
+    /** Document-focus writer (ui-conversation); reach via ctx.get — optional. */
+    detailsFocus: DetailsFocus
   }
+}
+
+/**
+ * Document-focus face over the details panel: how a plugin that cannot reach
+ * the chat store focuses a document — the write lands in the caller scope's
+ * chat store and the details panel opens. Reached via `ctx.get('detailsFocus')`
+ * (optional-service convention): an absent service — ui-conversation composed
+ * out of cordis.yml — turns the linkage off and the click is a no-op.
+ */
+export interface DetailsFocus {
+  /**
+   * Focus one document in the caller scope's details panel.
+   * @param sessionId - session whose panel receives the focus.
+   * @param document - the focused document.
+   */
+  focus(sessionId: SessionId, document: DetailsDocumentFocus): void
 }
 
 /**
@@ -478,6 +506,12 @@ export interface DetailsToolOwnerProps {
   block: ToolCallBlock
   /** Session workspace root for card cwd and relative-path display. */
   cwd?: string | undefined
+}
+
+/** Owner currency of the details panel's focused-document renderer. */
+export interface DetailsDocumentOwnerProps {
+  /** The focused document (identity, provenance, and optional inline body). */
+  document: DetailsDocumentFocus
 }
 
 /**
@@ -856,8 +890,8 @@ export interface DetailsInjected {
   closeDetails: () => void
 }
 
-/** Full details-slot props: selection store, Tool output seat, injected close callback, and locale. */
-export type DetailsSlotProps = PropsRuntime<'details'> & PropsRenderSlots<'conversation.details.tool'>
+/** Full details-slot props: selection store, Tool output and document seats, injected close callback, and locale. */
+export type DetailsSlotProps = PropsRuntime<'details'> & PropsRenderSlots<'conversation.details.tool' | 'conversation.details.document'>
   & PropsStore<ChatStore> & DetailsInjected & PropsLocale<'conversation'>
 
 /** Owner share common to the hero / New-Session Workspace pickers. */

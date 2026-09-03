@@ -8,6 +8,13 @@
     - id: ui-desktop
       name: '@deepseek-ai/dsh-client-ui-desktop'
 
+    - id: project-membership-desktop
+      name: '@deepseek-ai/dsh-project-membership-desktop'
+      disabled: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN == null && process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE == null
+      config:
+        baseUrl: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN
+        tokenFile: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE
+
 # Phone fleet: Desktop always composes environment, stable fleet, stream, and
 # tool Consumers. The explicit executable env remains the operator override;
 # otherwise the environment selects managed current before system discovery.

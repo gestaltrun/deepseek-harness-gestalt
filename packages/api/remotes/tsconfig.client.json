@@ -12,6 +12,9 @@
   ],
   "references": [
     {
+      "path": "../../interaction/member-question-receiver"
+    },
+    {
       "path": "../../../vendor/cordis"
     },
     {

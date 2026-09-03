@@ -34,10 +34,34 @@ export const REMOTE_PROTOCOL_LIMITS = {
   interactionSelections: 8,
   /** Maximum UTF-8 bytes in one interaction string. */
   interactionStringBytes: 4 * 1_024,
+  /** Maximum Unicode code points in one member-question originating Session title. */
+  memberQuestionOriginSessionTitleCodePoints: 200,
+  /** Maximum Unicode code points in one member-question asker display name. */
+  memberQuestionAskerDisplayNameCodePoints: 80,
+  /** Maximum Unicode code points in one member-question asker avatar URL. */
+  memberQuestionAskerAvatarUrlCodePoints: 300,
+  /** Maximum Unicode code points in one agent-authored member-question background. */
+  memberQuestionBackgroundCodePoints: 600,
+  /** Maximum Unicode code points in one member-question reference path. */
+  memberQuestionReferencePathCodePoints: 512,
+  /** Maximum Unicode code points in one member-question reference reason. */
+  memberQuestionReferenceReasonCodePoints: 100,
+  /** Maximum Unicode code points in one user-facing settling Installation name. */
+  memberQuestionSettledByDeviceNameCodePoints: 128,
+  /** Maximum referenced documents in one member question. */
+  memberQuestionReferences: 8,
+  /** Maximum selectable options in one member question. */
+  memberQuestionOptions: 8,
   /** Maximum decoded bytes in one historical image result chunk. */
   imageChunkBytes: 32 * 1_024,
   /** Maximum chunks in one historical image result. */
   imageChunks: 512,
+  /** Maximum decoded bytes in one document transfer chunk. */
+  documentTransferChunkBytes: 32 * 1_024,
+  /** Maximum chunks in one document transfer. */
+  documentTransferChunks: 64,
+  /** Maximum cumulative decoded bytes reassembled from one document transfer. */
+  documentTransferTotalBytes: 8 * 1_024 * 1_024,
   /** Maximum UTF-16 code units in one authoritative Session search query. */
   sessionSearchQueryCharacters: 500,
   /** Maximum Session/snippet pairs in one authoritative search result. */

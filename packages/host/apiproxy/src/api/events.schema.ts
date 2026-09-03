@@ -15,6 +15,7 @@ import {
 } from './sessions.schema.ts'
 import { taskViewSchema } from './jobs.schema.ts'
 import { workspaceIdSchema, workspaceViewSchema } from './workspace.schema.ts'
+import { memberQuestionSnapshotValueSchema } from './member-questions.schema.ts'
 
 /** Question fields validated strictly against core dsh-user-questions. */
 export const askUserQuestionItemSchema = z.object({
@@ -25,9 +26,38 @@ export const askUserQuestionItemSchema = z.object({
   options: z.array(z.object({ label: z.string(), description: z.string().optional() })).optional(),
   multiSelect: z.boolean().optional(),
   // Presentation intent: a tagged union on the wire, so an unknown tag is a
-  // rejected frame rather than a silently generic render.
+  // rejected frame rather than a silently generic render. The member-question
+  // variant carries its whole Decision Brief (origin identity, background,
+  // material references, expiry instant) with the same bounds the Companion
+  // codec (T4) and the sender payload (T5) already enforce upstream — every
+  // field is required here, so an incomplete brief fails loud at the frame.
   intent: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('plan-review'), approve: z.string() }),
+    z.object({
+      kind: z.literal('member-question'),
+      questionId: z.string().min(1),
+      originSessionId: z.string().min(1),
+      toProjectMember: z.string().min(1),
+      origin: z.object({
+        projectName: z.string().min(1),
+        originSessionTitle: z.string().min(1),
+        askerAccountId: z.string().min(1),
+        askerRole: z.union([z.literal('owner'), z.literal('admin'), z.literal('member')]),
+        askerDisplayName: z.string().min(1),
+        askerAvatarUrl: z.string().min(1),
+      }),
+      background: z.string(),
+      references: z.array(z.object({
+        path: z.string().min(1),
+        reason: z.string(),
+        cachedPath: z.string().min(1).optional(),
+        // Inline document body for the renderable kinds (.md/.html); absent
+        // when the Files viewer reads the receiver-owned cache path.
+        content: z.string().optional(),
+      })),
+      // oxlint-disable-next-line typescript/no-deprecated -- Zod's default v3-compatible export accepts infinite numbers.
+      expiresAt: z.number().finite(),
+    }),
   ]).optional(),
 }) satisfies z.ZodType<Wire<AskUserQuestionItem>>
 
@@ -68,6 +98,11 @@ export const muxFrameSchema = z.discriminatedUnion('type', [
 
 /** HostFrame union (payload slot of a host-stream ServerRequest). */
 export const hostFrameSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('host/member-question-snapshot'),
+    snapshot: memberQuestionSnapshotValueSchema,
+    currentInstallationId: z.string().min(1).optional(),
+  }),
   z.object({
     type: z.literal('host/session-added'),
     sessionId: sessionIdSchema,

@@ -1,0 +1,14 @@
+- name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: '127.0.0.1'
+    port: 0
+- id: member-presence-close-keyless-provider
+  name: './src/provider.ts'
+- name: '@deepseek-ai/dsh-project-membership-http'
+  config:
+    origins:
+      - 'https://platform.dev.example.com'
+    presenceHeartbeatIntervalMs: 10000
+    presenceTtlMs: 90000
+- id: member-presence-close-keyless-scenario
+  name: './start.ts'

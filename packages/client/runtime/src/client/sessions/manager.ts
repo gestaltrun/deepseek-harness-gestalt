@@ -20,6 +20,7 @@ import type { PendingInteractionStatus } from './pending.ts'
 import type {} from '@deepseek-ai/dsh-session-title/client'
 import { Notifier } from './notifier.ts'
 import { ProjectionValueStore } from './projection-store.ts'
+import { ReceivingQuestionBook, type ReceivingQuestionBookOptions } from './receiving.ts'
 import { Session } from './session.ts'
 import type { SessionRemotes } from './remotes.ts'
 import type { SessionAdmissionAdapter } from '../contract/sessions.ts'
@@ -150,6 +151,11 @@ export class SessionManager {
    * is stored as an absent key, so absence and `[]` are one representation.
    */
   private readonly jobsBySession = new Map<SessionId, readonly JobView[]>()
+  /**
+   * Host member-question snapshots projected into renderer-only receiving
+   * Sessions under their persisted Host identities.
+   */
+  readonly receiving: ReceivingQuestionBook
 
   private selected: SessionId | undefined
 
@@ -166,6 +172,7 @@ export class SessionManager {
   /**
    * @param api - shared wire client.
    * @param restoredSelection - persisted real-Session selection candidate.
+   * @param receiving - optional Client Installation identity.
    */
   constructor(
     private readonly api: IApiClient,
@@ -174,21 +181,30 @@ export class SessionManager {
     restoredAddress?: SubagentAddress,
     private readonly conversation?: ConversationRuntime,
     private readonly admissionFor?: (sessionId: SessionId) => SessionAdmissionAdapter | undefined,
+    receiving?: ReceivingQuestionBookOptions,
   ) {
     this.selected = restoredSelection
     if (restoredAddress !== undefined) this.addresses.set(restoredAddress.childSessionId, restoredAddress)
+    this.receiving = new ReceivingQuestionBook(
+      this.api,
+      { ...receiving, onChange: () => { this.notifier.markDirty() } },
+    )
     this.listSnapshotCache = this.buildListSnapshot()
   }
 
   // ---- Selection ----
 
   /**
-   * Select a listed Session or a retained catalog-addressed child.
-   * @param sessionId - listed or catalog-addressed Session id.
+   * Select a listed Session, a retained catalog-addressed child, or a
+   * renderer-only receiving Session face.
+   * @param sessionId - listed, catalog-addressed, or receiving session id.
    */
   select(sessionId: SessionId): void {
     const address = this.navigationAddress(sessionId)
-    if (!this.summaries.some(summary => summary.sessionId === sessionId) && address === undefined) {
+    // A receiving session is a merged list row with no host Session behind it;
+    // selecting it must work so its Decision Brief and document focus render.
+    const isReceiving = this.receiving.face(sessionId) !== undefined
+    if (!this.summaries.some(summary => summary.sessionId === sessionId) && address === undefined && !isReceiving) {
       throw new Error(`sessions.select: unknown session ${sessionId}`)
     }
     if (address !== undefined) this.addresses.set(sessionId, address)
@@ -201,7 +217,7 @@ export class SessionManager {
     this.selected = sessionId
     // Looking at the session consumes its completion reminder (dot clears).
     this.completedNotifications.delete(sessionId)
-    void this.refreshSubagents(sessionId)
+    if (!isReceiving) void this.refreshSubagents(sessionId)
     this.notifier.notifyNow()
   }
 
@@ -367,6 +383,15 @@ export class SessionManager {
    */
   isProvisional(sessionId: SessionId): boolean {
     return this.provisionalSummaries.has(sessionId)
+  }
+
+  /**
+   * Whether the Host session baseline contains this exact ordinary Session.
+   * @param sessionId - candidate Session identity.
+   * @returns true when the current Host baseline lists the Session.
+   */
+  isHostListed(sessionId: SessionId): boolean {
+    return this.summaries.some(summary => summary.sessionId === sessionId)
   }
 
   /** Rebuild every resident Session after one coalesced registry transaction. */
@@ -812,13 +837,18 @@ export class SessionManager {
       // backfills it from history.
       switch (frame.type) {
         case 'approval/requested':
-        case 'question/requested':
         case 'session/queue': {
           const buffer = this.pendingBuffers.get(frame.sessionId) ?? []
-          const key = frame.type === 'approval/requested'
-            ? `a:${frame.approvalId}`
-            : frame.type === 'question/requested' ? `q:${envelope.rpcId}` : 'queue'
+          const key = frame.type === 'approval/requested' ? `a:${frame.approvalId}` : 'queue'
           const prior = buffer.findIndex(item => bufferedRequestKey(item) === key)
+          if (prior === -1) buffer.push(envelope)
+          else buffer[prior] = envelope
+          this.pendingBuffers.set(frame.sessionId, buffer)
+          return
+        }
+        case 'question/requested': {
+          const buffer = this.pendingBuffers.get(frame.sessionId) ?? []
+          const prior = buffer.findIndex(item => bufferedRequestKey(item) === `q:${envelope.rpcId}`)
           if (prior === -1) buffer.push(envelope)
           else buffer[prior] = envelope
           this.pendingBuffers.set(frame.sessionId, buffer)
@@ -850,6 +880,14 @@ export class SessionManager {
   handleHostEnvelope(envelope: RpcRequest<HostFrame>): void {
     const frame = envelope.payload
     switch (frame.type) {
+      case 'host/member-question-snapshot': {
+        this.receiving.applySnapshot(frame.snapshot, frame.currentInstallationId)
+        for (const row of this.receiving.rows()) {
+          if (row.active === undefined) this.pendingInteractions.delete(row.sessionId)
+          else this.trackPending(row.sessionId, `q:${row.active.questionId}`, 'question')
+        }
+        return
+      }
       case 'host/session-added': {
         this.provisionalSummaries.delete(frame.sessionId)
         this.mergeSummary({
@@ -941,6 +979,7 @@ export class SessionManager {
    * request with its live rpcId.
   */
   handleDisconnected(): void {
+    this.receiving.handleDisconnected()
     if (this.pendingInteractions.size > 0) {
       this.pendingInteractions.clear()
       this.notifier.markDirty()
@@ -954,12 +993,21 @@ export class SessionManager {
     }
   }
 
+  /** Cancel manager-owned timers when the client runtime fiber collapses. */
+  dispose(): void {
+    this.receiving.dispose()
+    for (const timer of this.catalogDebounce.values()) clearTimeout(timer)
+    this.catalogDebounce.clear()
+  }
+
   /** After each connection generation: refresh the session baseline and rebuild opened windows. */
   handleConnected(): void {
     void this.refreshList()
     const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
-    if (this.selected !== undefined) void this.refreshSubagents(this.selected)
+    if (this.selected !== undefined && this.receiving.face(this.selected) === undefined) {
+      void this.refreshSubagents(this.selected)
+    }
     for (const parentSessionId of this.openCatalogs) void this.refreshSubagents(parentSessionId)
     for (const session of this.sessions.values()) void session.resync()
   }
@@ -1074,18 +1122,45 @@ export class SessionManager {
   }
 
   private buildListSnapshot(): SessionListSnapshot {
-    const merged: TitledSessionSummary[] = this.summaries.map((summary) => {
-      // List rows read the generic 'title' projection key (host-computed unit
-      // value; there is no dedicated title frame).
-      const projectionStore = this.projectionStores.get(summary.sessionId)
-      const title = projectionStore?.get('title')
-      const projectionValues = projectionStore?.values()
-      return {
-        ...summary,
-        ...(typeof title === 'string' && title !== '' ? { title } : {}),
-        ...(projectionValues === undefined ? {} : { projectionValues }),
-      }
-    })
+    // A complete Host snapshot can retire a card without a mux resolved
+    // frame, so pending dots reconcile against the current receiver row.
+    for (const row of this.receiving.rows()) {
+      if (row.active !== undefined) continue
+      this.pendingInteractions.delete(row.sessionId)
+    }
+    // Materialized receiving Sessions already appear in session.list after
+    // Workspace attach. Keep only Host-unlisted rows so grouping follows the
+    // invitation-bound Workspace instead of Ungrouped.
+    const listed = new Set(this.summaries.map(summary => summary.sessionId))
+    const receivingById = new Map(this.receiving.rows().map(row => [row.sessionId, row]))
+    const receivingRows: TitledSessionSummary[] = this.receiving.rows()
+      .filter(row => !listed.has(row.sessionId))
+      .map(row => ({
+        sessionId: row.sessionId,
+        updatedAt: row.updatedAt,
+        running: false,
+        blank: false,
+        title: row.title,
+      }))
+    const merged: TitledSessionSummary[] = [
+      ...receivingRows,
+      ...this.summaries.map((summary) => {
+        // List rows read the generic 'title' projection key (host-computed unit
+        // value; there is no dedicated title frame).
+        const projectionStore = this.projectionStores.get(summary.sessionId)
+        const title = projectionStore?.get('title')
+        const projectionValues = projectionStore?.values()
+        const receiving = receivingById.get(summary.sessionId)
+        const listedTitle = receiving?.title
+          ?? (typeof title === 'string' && title !== '' ? title : undefined)
+        return {
+          ...summary,
+          ...(receiving === undefined ? {} : { blank: false }),
+          ...(listedTitle === undefined ? {} : { title: listedTitle }),
+          ...(projectionValues === undefined ? {} : { projectionValues }),
+        }
+      }),
+    ]
     const pendingInteractions = new Map<SessionId, PendingInteractionStatus>()
     for (const [sessionId, interactions] of this.pendingInteractions) {
       const statuses = [...interactions.values()]

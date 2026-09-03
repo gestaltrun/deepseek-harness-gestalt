@@ -1,0 +1,16 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../lib/member-question-e2e-types",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "rewriteRelativeImportExtensions": false,
+    "paths": {},
+    "lib": ["ES2023", "DOM"],
+    "types": ["node", "@wdio/globals/types", "@wdio/mocha-framework", "@wdio/native-types"]
+  },
+  "include": ["./**/*.ts"]
+}

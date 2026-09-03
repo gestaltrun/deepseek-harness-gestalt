@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-02-member-presence-last-window-offline.md
+2026-09-02-member-presence-last-window-offline.md: c0a55aa25bea97af7a3da974b3cd71640644a065
+2026-09-02-member-presence-last-window-offline.zh.md: 12413906c9b93b834e5bc6c7c2909c05c120f61c

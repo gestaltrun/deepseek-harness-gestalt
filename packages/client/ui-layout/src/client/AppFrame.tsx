@@ -36,12 +36,17 @@ function CenterColumn(props: { children?: ReactNode }) {
   return <div className={css.centerCol}>{props.children}</div>
 }
 
-/** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
-function DetailsColumn(props: { children?: ReactNode; overlayWidth: number }) {
+/** Details column grid item; width 0 keeps the subtree mounted (never unmount on close).
+ * The persistent element carries the panel's open state as `aria-expanded` —
+ * the observable linkage channel other surfaces (the folded composite card)
+ * watch instead of reaching into the layout store. */
+function DetailsColumn(props: { children?: ReactNode; overlayWidth: number; expanded: boolean }) {
   return (
     <div
       className={css.detailsCol}
+      data-details-panel
       data-overlay={props.overlayWidth > 0 || undefined}
+      aria-expanded={props.expanded}
       style={props.overlayWidth > 0 ? { width: props.overlayWidth } : undefined}
     >
       {props.children}
@@ -233,7 +238,7 @@ export function AppFrame({
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
         <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn overlayWidth={overlayWidth}>{renderSlot('details', {})}</DetailsColumn>
+        <DetailsColumn overlayWidth={overlayWidth} expanded={detailsVisible}>{renderSlot('details', {})}</DetailsColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}

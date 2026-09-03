@@ -70,6 +70,16 @@ export interface PlatformAccountView {
   avatarUrl: string
 }
 
+/** Public identity of one account: the three fields any member-facing surface may display. */
+export interface PublicAccountIdentity {
+  /** Environment-namespaced Platform Account id owning the identity. */
+  readonly id: PlatformAccountId
+  /** Current public GitHub login, refreshed at successful sign-in. */
+  readonly githubLogin: string
+  /** Current public avatar URL, refreshed at successful sign-in. */
+  readonly avatarUrl: string
+}
+
 /** Account and Installation identity authenticated by one Account Session proof. */
 export interface AuthenticatedInstallationView {
   /** Platform Account authorized by the current Installation session. */

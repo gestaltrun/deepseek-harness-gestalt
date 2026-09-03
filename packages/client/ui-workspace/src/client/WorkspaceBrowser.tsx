@@ -24,6 +24,9 @@ import { deriveFlat, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from './
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './rows/Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from './stores.ts'
 import { WorkspacePickFlow } from './WorkspacePicker.tsx'
+import { InviteWizardModal, WorkspaceSettingsModal, type WizardWorkspace } from './WorkspaceSettings.tsx'
+import type { WorkspacePendingInvitation } from './contract/slots.ts'
+import { workspaceLabel } from './tree.ts'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -37,6 +40,18 @@ const SEARCH_DEBOUNCE_MS = 250
 const SEARCH_QUERY_MAX_CODE_UNITS = 500
 /** Session rows visible per Workspace before the local overflow control. */
 const COLLAPSED_SESSION_LIMIT = 5
+/** Milliseconds between pending-invitation polls while a membership gateway is composed. */
+const INVITE_POLL_MS = 15_000
+
+/**
+ * Wizard radios use the checkout basename so a Host parent-folder title such
+ * as `IdeaProjects` cannot masquerade as the Workspace itself.
+ * @param workspace - listed Workspace row.
+ */
+function wizardWorkspaceTitle(workspace: WorkspaceView): string {
+  const fromPath = workspaceLabel(workspace.path)
+  return fromPath === '' || fromPath === workspace.path ? workspace.title : fromPath
+}
 
 /** Keep controlled input and RPC payload inside the session.search wire contract. */
 function sanitizeSearchQuery(value: string): string {
@@ -235,6 +250,8 @@ type SessionTreeProps = Pick<
   setSessionOrder: (accountKey: string, order: string[]) => void
   /** Registry-global archive set (hidden rows). */
   archivedSessionIds: readonly SessionNode['id'][]
+  /** Open the browser-owned settings modal for a real Workspace group. */
+  onSettingsRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned rename dialog for a real Workspace group. */
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
@@ -250,7 +267,7 @@ type SessionTreeProps = Pick<
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
 function SessionTree({
   useSessions, startSession, open, forkSession, workspaces, archivedSessionIds,
-  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
+  onSettingsRequest, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
@@ -282,6 +299,28 @@ function SessionTree({
     const accounted = new Set(workspaces.flatMap(workspace => workspace.sessionIds))
     return list.ids.filter(id => list.byId[id] !== undefined && !accounted.has(id))
   }, [list, workspaces])
+  const pendingUngroupedSessionIds = useMemo(
+    () => ungroupedSessionIds.filter(id => list.byId[id]?.pendingInteraction !== undefined),
+    [list, ungroupedSessionIds],
+  )
+  const pendingWorkspaceKeys = useMemo(() => {
+    const keys: string[] = []
+    for (const workspace of workspaces) {
+      if (workspace.sessionIds.some(id => list.byId[id]?.pendingInteraction !== undefined)) {
+        keys.push(workspace.workspaceId)
+      }
+    }
+    if (pendingUngroupedSessionIds.length > 0) keys.push(UNGROUPED_KEY)
+    return keys
+  }, [list, pendingUngroupedSessionIds, workspaces])
+  const observedPendingGroups = useRef(new Set<string>())
+  useEffect(() => {
+    const next = new Set(pendingWorkspaceKeys)
+    for (const key of pendingWorkspaceKeys) {
+      if (!observedPendingGroups.current.has(key)) setGroupExpanded(key, true)
+    }
+    observedPendingGroups.current = next
+  }, [pendingWorkspaceKeys, setGroupExpanded])
   useEffect(() => {
     if (list.phase !== 'ready') return
     const switchedToUpdated = previousOrderBy.current !== 'updated' && orderBy === 'updated'
@@ -470,6 +509,10 @@ function SessionTree({
                 actions={group.workspaceId === undefined
                   ? undefined
                   : {
+                    settings: () => {
+                    /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                      if (group.workspaceId !== undefined) onSettingsRequest(group.workspaceId, group.label)
+                    },
                     rename: () => {
                     /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
                       if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
@@ -742,6 +785,7 @@ function SearchResults({
  * @returns the region element tree.
  */
 export function WorkspaceBrowser({
+  projectMembership,
   wide,
   expandSidebar,
   useSessions,
@@ -767,6 +811,10 @@ export function WorkspaceBrowser({
 }: WorkspaceBrowserProps) {
   const home = useHostDescription(description => description?.home)
   const workspaces = useWorkspaces(state => state.items)
+  const wizardWorkspaces = useMemo(() => workspaces.map((workspace): WizardWorkspace => ({
+    workspaceId: workspace.workspaceId,
+    title: wizardWorkspaceTitle(workspace),
+  })), [workspaces])
   const workspacePhase = useWorkspaces(state => state.phase)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
   // Live occupancy of this surface's directory-flow hole (the same source the
@@ -828,6 +876,43 @@ export function WorkspaceBrowser({
   const [wsPickerOpen, setWsPickerOpen] = useState(false)
   const wsPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
+
+  // Settings modal (browser-owned so it outlives row unmounts during collapse).
+  const [settingsTarget, setSettingsTarget] = useState<{
+    workspaceId: WorkspaceId
+    title: string
+    path?: string
+  } | null>(null)
+
+  // Invite wizard source: the pending-invitation poll. Closing the wizard
+  // decides nothing, so the invitation cools down for one poll interval and
+  // is offered again while it is still pending. Ids that just failed as
+  // not-pending stay suppressed so a retracted invitation cannot reopen.
+  const [wizardInvitation, setWizardInvitation] = useState<WorkspacePendingInvitation | null>(null)
+  const wizardCoolUntil = useRef(0)
+  const dismissedInvitationIds = useRef(new Set<string>())
+  useEffect(() => {
+    if (projectMembership === undefined) return
+    let disposed = false
+    const poll = () => {
+      if (disposed) return
+      projectMembership.pendingInvitations().then((rows) => {
+        if (disposed) return
+        const next = rows.find(row => !dismissedInvitationIds.current.has(row.invitationId))
+        if (next === undefined) return
+        if (wizardInvitation !== null || Date.now() < wizardCoolUntil.current) return
+        setWizardInvitation(next)
+      }).catch(() => {
+        // Poll failures are non-fatal: the next tick retries.
+      })
+    }
+    poll()
+    const timer = window.setInterval(poll, INVITE_POLL_MS)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [projectMembership, wizardInvitation])
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.
@@ -1189,6 +1274,12 @@ export function WorkspaceBrowser({
                 orderBy={orderBy}
                 home={home}
                 t={t}
+                onSettingsRequest={(workspaceId, title) => {
+                  const path = workspaces.find(item => item.workspaceId === workspaceId)?.path
+                  setSettingsTarget(path === undefined
+                    ? { workspaceId, title }
+                    : { workspaceId, title, path })
+                }}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })
                   setRenameDraft(currentTitle)
@@ -1201,6 +1292,32 @@ export function WorkspaceBrowser({
               />
             ))}
       </div>
+
+      {settingsTarget !== null && projectMembership !== undefined && (
+        <WorkspaceSettingsModal
+          workspaceId={settingsTarget.workspaceId}
+          workspaceTitle={settingsTarget.title}
+          {...(settingsTarget.path === undefined ? {} : { workspacePath: settingsTarget.path })}
+          gateway={projectMembership}
+          onClose={() => { setSettingsTarget(null) }}
+          t={t}
+        />
+      )}
+      {wizardInvitation !== null && projectMembership !== undefined && (
+        <InviteWizardModal
+          invitation={wizardInvitation}
+          workspaces={wizardWorkspaces}
+          gateway={projectMembership}
+          onClose={() => {
+            wizardCoolUntil.current = Date.now() + INVITE_POLL_MS
+            setWizardInvitation(null)
+          }}
+          onInvitationGone={(invitationId) => {
+            dismissedInvitationIds.current.add(invitationId)
+          }}
+          t={t}
+        />
+      )}
 
       <Modal
         open={renameTarget !== null}

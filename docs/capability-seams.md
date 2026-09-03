@@ -72,6 +72,18 @@ flowchart LR
   pkg_platform_account_core["platform-account-core"]
   pkg_platform_account_http["platform-account-http"]
   pkg_platform_account_client["platform-account-client"]
+  pkg_project_membership_http["project-membership-http"]
+  pkg_project_membership["project-membership"]
+  svc_projectMembership["ctx.projectMembership<br/>Project membership collaboration seam"]
+  pkg_project_membership_core["project-membership-core"]
+  pkg_tool_project_members["tool-project-members"]
+  pkg_project_membership_client["project-membership-client"]
+  svc_projectMembershipClient["ctx.projectMembershipClient<br/>Authenticated Project Membership client"]
+  pkg_ui_desktop["ui-desktop"]
+  pkg_ui_workspace["ui-workspace"]
+  pkg_project_membership_desktop["project-membership-desktop"]
+  svc_desktopProjectMembership["ctx.desktopProjectMembership<br/>Desktop agent Project Membership reads"]
+  pkg_tool_ask_user["tool-ask-user"]
   pkg_remote_access["remote-access"]
   svc_remoteAccess["ctx.remoteAccess<br/>Personal Pairing lifecycle seam"]
   pkg_remote_access_http["remote-access-http"]
@@ -99,13 +111,17 @@ flowchart LR
   svc_tools["ctx.tools<br/>Tool registry and guarded execution pipeline"]
   pkg_agent_tool_eligibility["agent-tool-eligibility"]
   pkg_tools_eligibility["tools-eligibility"]
-  pkg_tool_ask_user["tool-ask-user"]
   pkg_tool_cordis["tool-cordis"]
   pkg_tool_skill["tool-skill"]
   pkg_tool_subagent["tool-subagent"]
   pkg_tool_todo["tool-todo"]
   pkg_user_questions["user-questions"]
   svc_userQuestions["ctx.userQuestions<br/>Human question/answer seam"]
+  pkg_member_question_sender["member-question-sender"]
+  svc_memberQuestionSender["ctx.memberQuestionSender<br/>Member-question sender seam"]
+  pkg_member_question_receiver["member-question-receiver"]
+  svc_memberQuestionReceiver["ctx.memberQuestionReceiver<br/>Member-question receiver seam"]
+  svc_memberQuestionWorkspaceBinding["ctx.memberQuestionWorkspaceBinding<br/>Member-question local Workspace binding"]
   pkg_plan_mode["plan-mode"]
   svc_planMode["ctx.planMode<br/>Plan collaboration state"]
   pkg_agent_presets["agent-presets"]
@@ -284,6 +300,9 @@ flowchart LR
   pkg_llm_replay --> svc_llm
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
+  pkg_member_question_receiver --> svc_memberQuestionReceiver
+  pkg_member_question_receiver --> svc_memberQuestionWorkspaceBinding
+  pkg_member_question_sender --> svc_memberQuestionSender
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
   pkg_permission_presets --> svc_permissionPresets
@@ -293,6 +312,10 @@ flowchart LR
   pkg_plan_mode --> svc_planMode
   pkg_platform_account --> svc_platformAccount
   pkg_platform_account_core --> svc_platformAccount
+  pkg_project_membership --> svc_projectMembership
+  pkg_project_membership_client --> svc_projectMembershipClient
+  pkg_project_membership_core --> svc_projectMembership
+  pkg_project_membership_desktop --> svc_desktopProjectMembership
   pkg_pwsh_local --> svc_shell
   pkg_remote_access --> svc_remoteAccess
   pkg_remote_access --> svc_remoteRelay
@@ -379,6 +402,8 @@ flowchart LR
   svc_credentials --> pkg_apiproxy
   svc_credentials --> pkg_llm_deepseek
   svc_credentials --> pkg_llm_pi_ai
+  svc_desktopProjectMembership --> pkg_tool_ask_user
+  svc_desktopProjectMembership --> pkg_tool_project_members
   svc_directoryPicker --> pkg_apiproxy
   svc_dynamicCordisRunner --> pkg_tool_cordis
   svc_e2b --> pkg_fs_e2b
@@ -395,12 +420,20 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_memberQuestionReceiver --> pkg_member_question_receiver
+  svc_memberQuestionSender --> pkg_tool_ask_user
+  svc_memberQuestionWorkspaceBinding --> pkg_apiproxy
   svc_phoneDevices --> pkg_phone_environment
   svc_phoneDevices --> pkg_phone_stream
   svc_phoneDevices --> pkg_tool_phone
   svc_phoneEnvironment --> pkg_client_ui_phone
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
+  svc_platformAccount --> pkg_project_membership_http
+  svc_projectMembership --> pkg_project_membership_http
+  svc_projectMembership --> pkg_tool_project_members
+  svc_projectMembershipClient --> pkg_ui_desktop
+  svc_projectMembershipClient --> pkg_ui_workspace
   svc_remoteAccess --> pkg_remote_access_http
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
@@ -507,7 +540,10 @@ flowchart LR
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |
-| `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client) | - | Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials. |
+| `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client), [`project-membership-http`](../packages/platform/project-membership-http) | - | Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials. |
+| `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | [`project-membership-http`](../packages/platform/project-membership-http), [`tool-project-members`](../packages/interaction/tool-project-members) | - | Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation, and the model-facing roster tool reads one project's full roster through the same service. |
+| `ctx.projectMembershipClient` | `core` | [`project-membership-client`](../packages/platform/project-membership-client) | - | `ui-desktop`, `ui-workspace` | - | Carries current-installation membership operations into Desktop UI composition; the Desktop provider obtains a fresh Account presentation for every call, while renderer consumers receive no credentials. |
+| `ctx.desktopProjectMembership` | `core` | [`project-membership-desktop`](../packages/platform/project-membership-desktop) | - | [`tool-project-members`](../packages/interaction/tool-project-members), [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | Validates the token-protected Desktop loopback projection and supplies authenticated Account, Workspace Project, roster, and eligible member-question route reads to agent-preset tools without exposing Platform credentials. |
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | The HTTP consumer exposes endpoint-owned mailbox operations through one validated transport for Desktop Settings and Mobile; Platform receives routing metadata, opaque handshake messages, credential digests, and sealed authority only. |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | Owns credential-authenticated live attachments and ciphertext-only forwarding; an expiring Redis directory and direct Pub/Sub coordinate non-sticky Platform Instances without an offline queue. |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | Retains endpoint-encrypted ciphertext and metadata only, issues single-use expiring capabilities scoped to one Personal Pairing, and removes blob plus capability on consume, expiry, or revocation. |
@@ -519,6 +555,9 @@ flowchart LR
 | `ctx.systemPrompt` | `core` | [`system-prompt`](../packages/core/system-prompt) | - | [`agent-loop`](../packages/core/agent-loop), [`tools`](../packages/core/tools), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-web`](../packages/web/tool-web) | - | Collects prompt sections and model-facing tool schemas for each step. |
 | `ctx.tools` | `core` | [`tools`](../packages/core/tools) | - | [`agent-loop`](../packages/core/agent-loop), [`agent-tool-eligibility`](../packages/core/agent-tool-eligibility), [`tools-eligibility`](../packages/core/tools-eligibility), [`tool-ask-user`](../packages/interaction/tool-ask-user), [`tool-bash`](../packages/shell/tool-bash), [`tool-cordis`](../packages/extensions/tool-cordis), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-skill`](../packages/skill/tool-skill), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-todo`](../packages/todo/tool-todo), [`tool-web`](../packages/web/tool-web) | - | Registers capabilities, owns Code Mode transport, and routes calls through pre-policy, monotonic guards, around dispatch, post-policy, and final-result observation. |
 | `ctx.userQuestions` | `seam` | [`user-questions`](../packages/interaction/user-questions) | - | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise. |
+| `ctx.memberQuestionSender` | `seam` | [`member-question-sender`](../packages/interaction/member-question-sender) | [`member-question-sender`](../packages/interaction/member-question-sender) | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | Encodes a Companion member-question operation through the T4 codec and delivers the bytes through an injected adapter; peer credentials are retrieved through a B-side project-peer grant lookup. |
+| `ctx.memberQuestionReceiver` | `seam` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | Persists authenticated arrivals, Host Session materialization, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer. |
+| `ctx.memberQuestionWorkspaceBinding` | `core` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | `apiproxy` | - | Resolves an authenticated receiver Account and cloud Project to one existing local Workspace; the API Proxy otherwise derives the same association from project membership. |
 | `ctx.planMode` | `core` | [`plan-mode`](../packages/plan/plan-mode) | - | - | - | Folds logged plan/mode state, flushes user selections at turn boundaries, renders deployment-owned guidance, registers /plan, and keeps the plan-exit schema stable across transitions. |
 | `ctx.agentPresets` | `core` | [`agent-presets`](../packages/preset/agent-presets) | - | - | - | Discovers preset directories over trusted and user-authored roots and mounts one preset cordis.yml under an agent scope during creation, rejecting a row that never activates or that publishes into the root service realm. |
 | `ctx.commands` | `core` | [`commands`](../packages/interaction/commands) | - | - | - | Plugins register direct human commands without sending invocations to the model. |

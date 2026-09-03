@@ -55,6 +55,21 @@ describe('deriveGroups', () => {
     expect(groups[1]!.sessions.map(session => session.id)).toEqual([sid('loose')])
   })
 
+  it('places a Host-attached receiving Session under the bound Workspace, not Ungrouped', () => {
+    const receiving = { ...summary('receiving', 10), pendingInteraction: 'question' as const }
+    const groups = deriveGroups(
+      list(receiving),
+      [workspace('bound', ['receiving'])],
+      noArchive,
+      view(['bound']),
+    )
+    expect(groups.map(group => group.key)).toEqual(['bound'])
+    expect(groups[0]!.workspaceId).toEqual(wid('bound'))
+    expect(groups[0]!.label).toBe('bound')
+    expect(groups[0]!.sessions.map(session => session.id)).toEqual([sid('receiving')])
+    expect(groups.some(group => group.key === UNGROUPED_KEY)).toBe(false)
+  })
+
   it('applies stored Ungrouped order and appends new loose Sessions by recency', () => {
     const sessions = list(summary('one', 3), summary('two', 2), summary('new', 4))
     const groups = deriveGroups(

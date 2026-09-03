@@ -20,6 +20,8 @@ Major 4 adds `observe-session` and unsolicited `session-live` replacements. One 
 
 A conversation projection echoes the optional exclusive `beforeSeq` from its history request. An absent cursor replaces the tail; a present cursor identifies an older page that Mobile continuity-checks and prepends.
 
+Major 4 also carries member-directed questions exchanged between the paired installations of two Platform accounts. The `member-question` operation carries the branded question, cloud-project, and originating Session ids; the absolute `expiresAt` epoch; the bounded Decision Brief origin (project name, originating Session title, asker account, role, display name, avatar URL); the agent-authored background; one question batch reusing the user-questions item fields; and up to eight referenced document paths with reasons. The `member-question-settled` result commits one globally idempotent outcome — `answered` with the echoing answer batch, `declined`, `expired`, `withdrawn`, or `superseded` — at the absolute `settledAt` epoch. Answered and declined results require the settling `InstallationId` and user-facing device name; system-owned expiry, withdrawal, and supersession forbid those claimant fields. The `member-question-state` projection applies the same terminal metadata rules so every receiver can distinguish the winning Installation from a system terminal. Every member-question carrier requires application major 4 and rejects missing, unknown, or legacy fields. Referenced documents of any file type travel as `document-chunk` operation frames: each frame carries the branded transfer id, the correlated question id, a zero-based index, the declared chunk total of at most 64, and at most 32 KiB of canonical base64url bytes, so one frame fits the application ceiling. The `document-transfer-state` projection reports `{transferId, received, total}` transfer progress. The codec validates each frame independently — exact fields, index below total, chunk byte ceiling, canonical base64url — and reassembly is a consumer duty that validates ordering and the cumulative 8 MiB decoded-byte budget. `deriveMemberQuestionDocumentTransferId(questionId, referenceIndex)` is the protocol-native transfer identity for one reference position, so encrypted frames need not carry document paths.
+
 ## Endpoint attachment cipher
 
 `deriveCompanionAttachmentKey`, `sealCompanionAttachment`, `openCompanionAttachment`, and `hashCompanionCiphertext` implement the endpoint side of encrypted attachment transfer with HKDF-SHA-256 key derivation and AES-256-GCM. The sealed payload is `iv(12) ‖ ciphertext ‖ tag(16)` (`COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES` = 28). Both endpoints link these functions; the Platform blob store receives only `sealCompanionAttachment` output and its SHA-256 and never derives the key. Key material is supplied by the Personal Pairing layer. The 100 MiB blob ceiling is a ciphertext limit; Mobile rejects plaintext that cannot fit after this overhead.
@@ -42,9 +44,21 @@ A conversation projection echoes the optional exclusive `beforeSeq` from its his
 | Pending live Session replacements | 32 distinct Sessions |
 | Historical image chunk | 32,768 decoded bytes |
 | Historical image result | 512 chunks |
+| Document transfer chunk | 32,768 decoded bytes |
+| Document transfer | 64 chunks |
+| Document transfer reassembled bytes | 8,388,608 decoded bytes (8 MiB) |
 | Session search query | 500 UTF-16 code units |
 | Session search result | 20 unique Sessions |
 | Session search snippet | 240 Unicode code points |
+| Member question origin Session title | 200 Unicode code points |
+| Member question asker display name | 80 Unicode code points |
+| Member question asker avatar URL | 300 Unicode code points |
+| Member question background | 600 Unicode code points |
+| Member question reference path | 512 Unicode code points |
+| Member question reference reason | 100 Unicode code points |
+| Member question settling device name | 128 Unicode code points |
+| Member question references | 8 |
+| Member question options | 8 |
 | Host failure message | 4,096 UTF-8 bytes |
 | Retained attachment blob | 104,857,600 ciphertext bytes (100 MiB) |
 | Attachment capability lifetime | 900,000 ms (15 minutes) |

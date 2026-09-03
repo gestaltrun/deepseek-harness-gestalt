@@ -14,7 +14,7 @@ The mobile device dock (#355) needs a model-facing Consumer over `ctx.phoneDevic
 
 `device_act` accepts exactly one closed `tap` / `swipe` / `type` / `button` action and forwards it onto `phoneDevices.io` (`tap`, `gesture`, `text`, `button`). There is no shell, `adb`, or free-form command parameter. `device_act`, `device_open`, and `device_close` listen on `tools/pre-execute` and, after earlier listeners return `allow`, replace that with `ask`. A prior deny or ask is left unchanged. Approval `allowed-once` runs the fleet call once; rejection never reaches `boot` / `shutdown` / `io`.
 
-Fleet failures that already carry a `PhoneDevicesError` code are rethrown as `HarnessError` with that same code. Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` still requires an injected PNG method; live MJPEG/H264 capture stays on `dsh-phone-stream`. The Consumer is not composed into shipped Desktop/headless presets in this ticket; discovery reconstruction is proven through `systemPrompt.assemble` in package tests.
+Fleet failures that already carry a `PhoneDevicesError` code are rethrown as `HarnessError` with that same code. Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` calls `phoneDevices.screenshot`, which returns `{ mediaType: 'image/png', data }` as canonical base64; `PHONE_UNSUPPORTED` remains only when an injected test fleet omits that method. Live MJPEG/H264 capture stays on `dsh-phone-stream`. The Consumer is not composed into shipped Desktop/headless presets; discovery reconstruction is proven through `systemPrompt.assemble` in package tests.
 
 ## Alternatives considered
 
@@ -28,4 +28,4 @@ Fleet failures that already carry a `PhoneDevicesError` code are rethrown as `Ha
 
 ## Consequences
 
-The model can discover a six-tool phone vocabulary without paying its schema cost on the first request, and consequential mutations default to one-shot approval. Operators inherit the fleet's install prerequisite. `device_screenshot` still has no PNG method on the current Service, so live capture stays on the signed stream Consumer. GUI chrome and preset composition remain later tickets.
+The model can discover a six-tool phone vocabulary without paying its schema cost on the first request, and consequential mutations default to one-shot approval. Operators inherit the fleet's install prerequisite. `PhoneDevices.screenshot` captures one PNG still through `mobilecli screenshot --format png`, so `device_screenshot` returns `image/png` against the live Service. GUI chrome and preset composition remain later tickets.

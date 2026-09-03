@@ -46,6 +46,14 @@ export interface FakeKnobs {
   ignoreTerm?: boolean
   /** One-shot `agent` CLI behavior; state lives in a sibling state file. */
   agent?: FakeAgentKnobs
+  /** One-shot `screenshot` CLI behavior. */
+  screenshot?: {
+    delayMs?: number
+    failText?: string
+    failExitCode?: number
+    output?: 'png' | 'missing' | 'not-png'
+    ignoreTerm?: boolean
+  }
   /** Makes the named RPC method answer this JSON-RPC error verbatim. */
   failArm?: { method: string; code?: number; message: string }
   /** Wraps the devices.list result in the real mobilecli 1.0.5 `{ devices: [...] }` envelope. */
@@ -80,6 +88,8 @@ export interface StagedFake {
   setLaunchDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
   /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
   setAgent(agent: FakeAgentKnobs): Promise<void>
+  /** Rewrite the `screenshot` behavior knobs the next CLI invocation reads. */
+  setScreenshot(screenshot: NonNullable<FakeKnobs['screenshot']>): Promise<void>
   /** Read the persistent agent state the fake CLI invocations record. */
   agentState(): Promise<FakeAgentState>
   counters(): Promise<{
@@ -232,6 +242,10 @@ export async function stageFake(
       async setAgent(agent): Promise<void> {
         const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
         await writeFile(configPath, JSON.stringify({ ...current, agent }))
+      },
+      async setScreenshot(screenshot): Promise<void> {
+        const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+        await writeFile(configPath, JSON.stringify({ ...current, screenshot }))
       },
       async agentState(): Promise<FakeAgentState> {
         try {
@@ -453,6 +467,24 @@ export function assertRecognizableH264Picture(payload: Buffer): void {
       throw new Error(`IDR luma at ${String(x)},${String(y)} is ${String(actual)}, expected ${String(expected)}`)
     }
   }
+}
+
+/** PNG signature used to prove screenshot bytes are a still PNG, not JPEG. */
+export const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+/**
+ * Read IHDR pixel dimensions from a complete PNG payload.
+ * @param payload - One complete PNG file.
+ * @returns the IHDR width and height in pixels.
+ */
+export function pngDimensions(payload: Buffer): { width: number; height: number } {
+  if (payload.length < 24 || !payload.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    throw new Error('payload is not a PNG')
+  }
+  if (payload.subarray(12, 16).toString('ascii') !== 'IHDR') {
+    throw new Error('PNG payload carries no IHDR chunk')
+  }
+  return { width: payload.readUInt32BE(16), height: payload.readUInt32BE(20) }
 }
 
 /**

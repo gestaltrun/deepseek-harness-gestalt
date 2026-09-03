@@ -240,6 +240,23 @@ describe('deferred phone device Consumer', () => {
     expect(fleet.boots).toEqual([])
     expect(fleet.shutdowns).toEqual([])
     expect(fleet.ioCalls).toEqual([])
+    expect(fleet.screenshots).toEqual([ANDROID_ID])
+  })
+
+  it('returns image/png from device_screenshot when the injected fleet exposes screenshot', async () => {
+    const fleet = fakeFleet()
+    const { ctx } = await harness(fleet)
+    const shot = await ctx.tools.execute({
+      callId: CallId('shot-png'),
+      name: 'device_screenshot',
+      arguments: { deviceId: 'emulator-5554' },
+      signal,
+    })
+    expect(shot).toMatchObject({
+      isError: false,
+      value: { deviceId: 'emulator-5554', mediaType: 'image/png', data: PNG_1X1 },
+    })
+    expect(fleet.screenshots).toEqual([ANDROID_ID])
   })
 
   it('asks before a consequential act, runs once when allowed, and leaves the device untouched when rejected', async () => {

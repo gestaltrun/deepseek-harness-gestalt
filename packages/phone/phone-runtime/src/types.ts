@@ -86,6 +86,14 @@ export interface PhoneCaptureStream {
   readonly body: ReadableStream<Uint8Array>
 }
 
+/** One still PNG captured from a listed device. */
+export interface PhoneScreenshot {
+  /** Always PNG; the still comes from `mobilecli screenshot --format png`. */
+  readonly mediaType: 'image/png'
+  /** Canonical base64 of the PNG file bytes. */
+  readonly data: string
+}
+
 /** Closed error-code union carried by {@link PhoneDevicesError}. */
 export type PhoneErrorCode =
   | 'PHONE_DISPOSED'

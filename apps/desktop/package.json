@@ -95,6 +95,7 @@
       "out/main.mjs",
       "out/preload.cjs",
       "out/operated-platform.json",
+      "out/boot.html",
       "cordis.patch.yml",
       "package.json"
     ],

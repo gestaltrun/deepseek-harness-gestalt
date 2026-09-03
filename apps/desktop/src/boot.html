@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>DeepSeek Gestalt</title>
+    <style>
+      :root {
+        --bg: #f9fafb;
+        --ink: #0f1115;
+        --spark: #4176e6;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #151517;
+          --ink: #f9fafb;
+          --spark: #5686fe;
+        }
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -webkit-app-region: drag;
+      }
+      .stage {
+        height: 100%;
+        display: grid;
+        place-items: center;
+      }
+      .mark {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+      }
+      .spark {
+        width: 7px;
+        height: 7px;
+        background: var(--spark);
+        transform: rotate(45deg);
+        animation: pulse 2.6s ease-in-out infinite;
+      }
+      .wordmark {
+        display: flex;
+        gap: 0.08em;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.34em;
+        line-height: 1;
+        padding-left: 0.34em;
+      }
+      .wordmark span {
+        display: inline-block;
+        animation: letter 2.6s ease-in-out infinite;
+      }
+      .wordmark span:nth-child(1) { animation-delay: 0ms; }
+      .wordmark span:nth-child(2) { animation-delay: 70ms; }
+      .wordmark span:nth-child(3) { animation-delay: 140ms; }
+      .wordmark span:nth-child(4) { animation-delay: 210ms; }
+      .wordmark span:nth-child(5) { animation-delay: 280ms; }
+      .wordmark span:nth-child(6) { animation-delay: 350ms; }
+      .wordmark span:nth-child(7) { animation-delay: 420ms; }
+      .rule {
+        width: 64px;
+        height: 1px;
+        background: var(--ink);
+        transform: scaleX(0.18);
+        transform-origin: center;
+        opacity: 0.28;
+        animation: rule 2.6s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        50% { transform: rotate(45deg) scale(0.62); opacity: 0.55; }
+      }
+      @keyframes letter {
+        0%, 100% { opacity: 0.22; }
+        35%, 55% { opacity: 1; }
+      }
+      @keyframes rule {
+        35%, 55% { transform: scaleX(1); opacity: 1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spark,
+        .wordmark span,
+        .rule {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+        .spark { transform: rotate(45deg); }
+        .rule { transform: scaleX(1); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <div class="mark" role="img" aria-label="DeepSeek Gestalt">
+        <div class="spark"></div>
+        <div class="wordmark">
+          <span>G</span><span>E</span><span>S</span><span>T</span><span>A</span><span>L</span><span>T</span>
+        </div>
+        <div class="rule"></div>
+      </div>
+    </div>
+  </body>
+</html>

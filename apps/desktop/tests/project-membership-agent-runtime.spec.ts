@@ -149,6 +149,38 @@ describe('Desktop Project Membership agent runtime', () => {
       body: { error: 'Desktop Project Membership account changed during the request' },
     })
   })
+
+  it('looks up a Git-less Workspace through the local://workspace sentinel', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-desktop-project-members-agent-'))
+    const projectByRemote = vi.fn().mockResolvedValue({
+      id: 'project-local', name: 'Local', boundRemoteUrl: 'local://workspace/ws-local', createdAt: 1,
+      receivingAccountId: 'account-a',
+    })
+    const membership = { projectByRemote } as unknown as ProjectMembershipClient
+    const account = {
+      getSnapshot: () => ({
+        status: 'signed-in' as const,
+        privacyAccepted: true,
+        account: { id: 'account-a', githubId: 101, githubLogin: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
+      }),
+    } as DesktopAccountActions
+    runtime = await startDesktopProjectMembershipAgentRuntime({
+      userData: root,
+      account: () => account,
+      membership: () => membership,
+      gitRemote: vi.fn().mockResolvedValue(undefined),
+    })
+    const token = (await readFile(runtime.tokenFile, 'utf8')).trim()
+    expect((await call(runtime.origin, token, '/v1/context', {
+      cwd: '/workspace/local', workspaceId: 'ws-local',
+    })).body).toMatchObject({ project: { id: 'project-local' } })
+    expect(projectByRemote).toHaveBeenCalledWith('local://workspace/ws-local')
+    expect((await call(runtime.origin, token, '/v1/context', { cwd: '/workspace/local' })).body)
+      .toEqual({ account: { id: 'account-a', githubId: 101, githubLogin: 'ada', avatarUrl: 'https://avatars.example/ada.png' } })
+    expect((await call(runtime.origin, token, '/v1/context', {
+      cwd: '/workspace/local', workspaceId: '',
+    })).body).toMatchObject({ error: 'workspaceId must be a non-empty string' })
+  })
 })
 
 async function call(origin: string, token: string, path: string, body: unknown): Promise<{ status: number; body: unknown }> {

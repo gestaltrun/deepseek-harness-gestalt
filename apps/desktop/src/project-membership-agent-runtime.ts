@@ -3,7 +3,9 @@ import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { isAbsolute, join } from 'node:path'
 import { chmod, lstat, mkdir, rm, writeFile } from 'node:fs/promises'
-import { normalizeGitRemoteUrl, type ProjectId, type ProjectMembershipClient } from '@deepseek-ai/dsh-project-membership-client'
+import {
+  localWorkspaceRemoteUrl, normalizeGitRemoteUrl, type ProjectId, type ProjectMembershipClient,
+} from '@deepseek-ai/dsh-project-membership-client'
 import type { DesktopAccountActions } from './platform-account.ts'
 
 const MAX_REQUEST_BYTES = 16 * 1_024
@@ -150,12 +152,19 @@ async function handleRequest(
       cwd,
       AbortSignal.any([lifecycleSignal, AbortSignal.timeout(10_000)]),
     )
-    if (remote === undefined) {
+    const workspaceId = optionalString(body, 'workspaceId')
+    let lookup: string | undefined
+    if (remote !== undefined) {
+      lookup = normalizeGitRemoteUrl(remote)
+    } else if (workspaceId !== undefined) {
+      lookup = localWorkspaceRemoteUrl(workspaceId)
+    }
+    if (lookup === undefined) {
       assertCurrentAccount(options, account.id)
       json(response, 200, { account })
       return
     }
-    const project = await membership.projectByRemote(normalizeGitRemoteUrl(remote))
+    const project = await membership.projectByRemote(lookup)
     assertCurrentAccount(options, account.id)
     json(response, 200, { account, ...(project === undefined ? {} : { project }) })
     return
@@ -208,6 +217,13 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
 
 function requiredString(body: Record<string, unknown>, field: string): string {
   const value = body[field]
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`${field} must be a non-empty string`)
+  return value
+}
+
+function optionalString(body: Record<string, unknown>, field: string): string | undefined {
+  const value = body[field]
+  if (value === undefined) return undefined
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${field} must be a non-empty string`)
   return value
 }

@@ -34,6 +34,8 @@ Desktop 的 Workspace settings 无法完成 Cloud Project 创建。云项目名�
 
 无 Git 创建通过 `local://workspace/<id>` 绑定本地 Workspace，重开时无需 origin 即可恢复。生产环境未绑定的 404 不再阻断对话框或擦除 origin。可见的 `--dsw-alias` 输入样式与更宽对话框让名称和 remote 可读。Platform 仍把 remote 视为跨 Git origin 与哨兵的唯一属性；两个 Workspace 不能共用同一哨兵 identity。
 
+Desktop agent 的 `/v1/context` 桥使用同一恢复路径：有 Git origin 时用 origin，否则用 Host Workspace identity 构造 `local://workspace/<id>`。否则 `project_members` 会在已绑定的无 Git Workspace 上回答 `PROJECT_UNBOUND`，模型就会去文件里找 project id。
+
 ## Testing
 
 - `packages/platform/project-membership-client/tests/membership-client.client.spec.ts` 钉住生产 404 为未绑定，并把 pending 204/404 钉为空列表。
@@ -41,6 +43,8 @@ Desktop 的 Workspace settings 无法完成 Cloud Project 创建。云项目名�
 - `packages/platform/project-membership/tests/remote-url.spec.ts` 钉住 `local://workspace/<id>`，并拒绝空 identity 或嵌套 identity。
 - `packages/client/ui-workspace/tests/apply.client.spec.ts` 钉住无 Git 创建与哨兵恢复。
 - `packages/client/ui-workspace/tests/workspace-settings.client.spec.tsx` 钉住只看名称的 `createBlocked`、独立 remote 加载，以及可见的无 Git 创建。
+- `apps/desktop/tests/project-membership-agent-runtime.spec.ts` 钉住无 Git `/v1/context` 经 `local://workspace/<id>` 查找。
+- `packages/platform/project-membership-desktop/tests/desktop-provider.spec.ts` 钉住把 Workspace identity 与 cwd 一起转发。
 
 ## Related
 

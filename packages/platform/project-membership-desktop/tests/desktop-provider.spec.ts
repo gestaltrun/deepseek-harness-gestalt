@@ -70,6 +70,27 @@ describe('Desktop Project Membership Web Host provider', () => {
       .resolves.toBeUndefined()
   })
 
+  it('forwards the Workspace identity when the cwd matches a registered Workspace', async () => {
+    root = await mkdtemp(join(tmpdir(), 'dsh-project-membership-desktop-ws-'))
+    const tokenFile = join(root, 'token')
+    await writeFile(tokenFile, 'secret\n')
+    const fetch = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => Response.json({
+      account: { id: 'account-a', githubLogin: 'ada', avatarUrl: 'https://avatars.example/ada.png' },
+      project: { id: 'project-local', name: 'Local', boundRemoteUrl: 'local://workspace/ws-local', createdAt: 1 },
+    }))
+    vi.stubGlobal('fetch', fetch)
+    ctx = new Context()
+    ctx.provide('workspaceRegistry', {
+      list: () => [{ id: 'ws-local', path: '/workspace/local' }],
+    } as never)
+    await ctx.plugin(DesktopProjectMembership, { baseUrl: 'http://127.0.0.1:4321', tokenFile })
+    await ctx.desktopProjectMembership.context({
+      session: { header: { cwd: '/workspace/local' } },
+    } as never)
+    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as { cwd: string; workspaceId?: string }
+    expect(body).toEqual({ cwd: '/workspace/local', workspaceId: 'ws-local' })
+  })
+
   it('aborts a pending loopback roster read through the supplied signal', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-project-membership-desktop-'))
     const tokenFile = join(root, 'token')

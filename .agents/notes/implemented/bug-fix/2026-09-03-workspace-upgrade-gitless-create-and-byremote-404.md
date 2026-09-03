@@ -34,6 +34,8 @@ Inputs use `--dsw-alias-border-l2`, `--dsw-alias-bg-layer-1`, and `--dsw-alias-b
 
 Git-less create binds the local Workspace through `local://workspace/<id>` and recovers on reopen without origin. Unbound production 404s no longer block the dialog or erase origin. Visible `--dsw-alias` input chrome and the wider dialog keep name and remote readable. Platform still treats a remote as unique across Git origins and sentinels; two Workspaces cannot share one sentinel identity.
 
+The Desktop agent `/v1/context` bridge uses the same recovery: Git origin when present, otherwise `local://workspace/<id>` from the Host Workspace identity. Without that, `project_members` answers `PROJECT_UNBOUND` on a Git-less bound Workspace and the model hunts files for a project id.
+
 ## Testing
 
 - `packages/platform/project-membership-client/tests/membership-client.client.spec.ts` pins production 404 as unbound and pending 204/404 as an empty list.
@@ -41,6 +43,8 @@ Git-less create binds the local Workspace through `local://workspace/<id>` and r
 - `packages/platform/project-membership/tests/remote-url.spec.ts` pins `local://workspace/<id>` and rejects empty or nested identities.
 - `packages/client/ui-workspace/tests/apply.client.spec.ts` pins Git-less create and sentinel recovery.
 - `packages/client/ui-workspace/tests/workspace-settings.client.spec.tsx` pins name-only `createBlocked`, independent remote load, and visible Git-less create.
+- `apps/desktop/tests/project-membership-agent-runtime.spec.ts` pins Git-less `/v1/context` lookup through `local://workspace/<id>`.
+- `packages/platform/project-membership-desktop/tests/desktop-provider.spec.ts` pins forwarding the Workspace identity with the cwd.
 
 ## Related
 

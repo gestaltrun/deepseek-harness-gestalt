@@ -94,7 +94,11 @@ export class DesktopProjectMembershipService extends Service {
   async context(agent?: Agent, signal?: AbortSignal): Promise<DesktopProjectMembershipContext | undefined> {
     const cwd = agent?.session.header.cwd
     if (cwd === undefined) return undefined
-    return parseContext(await this.request('/v1/context', { cwd }, signal))
+    const workspaceId = workspaceIdFor(this.ctx, cwd)
+    return parseContext(await this.request('/v1/context', {
+      cwd,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+    }, signal))
   }
 
   /**
@@ -216,6 +220,11 @@ function matchPublicLogin(
     if (login !== undefined && login.toLowerCase() === normalized) return member.accountId
   }
   return undefined
+}
+
+function workspaceIdFor(ctx: Context, cwd: string): string | undefined {
+  const registry = ctx.get('workspaceRegistry') as { list(): readonly { id: string; path: string }[] } | undefined
+  return registry?.list().find(workspace => workspace.path === cwd)?.id
 }
 
 function parseLoopbackOrigin(value: string): string {

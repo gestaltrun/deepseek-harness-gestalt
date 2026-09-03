@@ -50,6 +50,25 @@ describe('Desktop Platform HTTP system-Node helper', () => {
     expect(resolveProxy).toHaveBeenCalledWith(`${endpoint.origin}/v1/account/login-attempts`)
   })
 
+  it('reconstructs HTTP 204 without a Fetch body', async () => {
+    const endpoint = await httpsNoContentEndpoint()
+    const fetch = createDesktopSystemNodeFetch({
+      nodePath: process.execPath,
+      helperPath,
+      execArgv: ['--import', import.meta.resolve('tsx/esm')],
+      environment: { NODE_EXTRA_CA_CERTS: cert },
+      resolveProxy: async () => 'DIRECT',
+      timeoutMs: 5_000,
+    })
+
+    const response = await fetch(`${endpoint.origin}/v1/projects/presence/heartbeat`, {
+      method: 'POST',
+      redirect: 'error',
+    })
+    expect(response.status).toBe(204)
+    expect(await response.text()).toBe('')
+  })
+
   it('rejects redirects and unsupported bodies before sending credentials', async () => {
     const resolveProxy = vi.fn(async () => 'DIRECT')
     const fetch = createDesktopSystemNodeFetch({
@@ -66,6 +85,16 @@ describe('Desktop Platform HTTP system-Node helper', () => {
     expect(resolveProxy).not.toHaveBeenCalled()
   })
 })
+
+async function httpsNoContentEndpoint(): Promise<{ origin: string }> {
+  const server = createHttpsServer({ key: readFileSync(key), cert: readFileSync(cert) }, (_request, response) => {
+    response.writeHead(204)
+    response.end()
+  })
+  await listen(server, 'localhost')
+  cleanups.push(async () => { await close(server) })
+  return { origin: `https://localhost:${String(port(server))}` }
+}
 
 async function httpsEndpoint(): Promise<{
   origin: string

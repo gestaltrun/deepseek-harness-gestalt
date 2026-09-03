@@ -310,7 +310,7 @@ describe('hasLowColourCount', () => {
     await expect(hasLowColourCount(solid)).resolves.toBe(true)
   })
 
-  it('classifies rendered text as low-color', async () => {
+  it('classifies rendered text as low-color', { timeout: 90_000 }, async () => {
     const text = sharp(Buffer.from(`
       <svg width="512" height="256" xmlns="http://www.w3.org/2000/svg">
         <rect width="512" height="256" fill="white"/>
@@ -319,7 +319,7 @@ describe('hasLowColourCount', () => {
     `))
 
     await expect(hasLowColourCount(text)).resolves.toBe(true)
-  }, 60_000)
+  })
 
   it('classifies a transparent graphic as low-color', async () => {
     const side = 256

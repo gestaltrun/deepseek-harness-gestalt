@@ -92,7 +92,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-来源：[`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:408`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:414`](../packages/core/session/src/types.ts)
 
 ## 事件
 
@@ -517,6 +517,72 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src/types.ts)
+
+### `member-question/*`
+
+<a id="member-questionasked--log-only"></a>
+
+#### `member-question/asked` — log-only
+
+```ts persistence-catalog
+/**
+ * A routed member-question ask was delivered — log-only record of the
+ * already model-visible tool-call summary (not a surface event).
+ * `questionId` pairs it with the `member-question/outcome` that always
+ * follows.
+ */
+'member-question/asked': MemberQuestionAskedRecord
+```
+
+来源：[`packages/interaction/member-question-sender/src/index.ts:88`](../packages/interaction/member-question-sender/src/index.ts)
+
+<a id="member-questionoutcome--log-only"></a>
+
+#### `member-question/outcome` — log-only
+
+```ts persistence-catalog
+/**
+ * The terminal outcome of a prior `member-question/asked` (same
+ * `questionId`) — log-only record of the already model-visible tool
+ * result. Exactly one per ask.
+ */
+'member-question/outcome': MemberQuestionOutcomeRecord
+```
+
+来源：[`packages/interaction/member-question-sender/src/index.ts:94`](../packages/interaction/member-question-sender/src/index.ts)
+
+<a id="member-questionreceived--log-only"></a>
+
+#### `member-question/received` — log-only
+
+```ts persistence-catalog
+/** Bounded Decision Brief metadata received from another project member. */
+'member-question/received': {
+  questionId: MemberQuestionId
+  projectId: ProjectId
+  originSessionId: HostSessionId
+  arrivedAt: number
+  expiresAt: number
+  origin: CompanionMemberQuestionOperation['origin']
+  background: string
+  questions: CompanionMemberQuestionOperation['questions']
+  references: CompanionMemberQuestionOperation['references']
+  cachedReferences?: readonly MemberQuestionCachedReference[]
+}
+```
+
+来源：[`packages/interaction/member-question-receiver/src/types.ts:283`](../packages/interaction/member-question-receiver/src/types.ts)
+
+<a id="member-questionsettled--log-only"></a>
+
+#### `member-question/settled` — log-only
+
+```ts persistence-catalog
+/** Canonical terminal metadata for one received member question. */
+'member-question/settled': CompanionMemberQuestionSettledResult
+```
+
+来源：[`packages/interaction/member-question-receiver/src/types.ts:296`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

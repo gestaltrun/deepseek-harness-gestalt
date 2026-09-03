@@ -36,6 +36,7 @@ import AccountService, {
   type PlatformAccountView,
   type PlatformCapacityState,
   type PlatformEnvironment,
+  type PublicAccountIdentity,
   type SelectedPlatformEnvironment,
 } from '@deepseek-ai/dsh-platform-account'
 
@@ -255,6 +256,11 @@ export interface AccountBackend {
   getSession(id: AccountSessionId): Promise<SessionRecord | undefined>
   /** Read one Platform Account by id. */
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined>
+  /** Find current Account rows whose public GitHub login matches case-insensitively. */
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]>
   /** Atomically rotate the matching refresh token generation. */
   rotateRefresh(sessionId: AccountSessionId, expectedHash: string, replacementHash: string): Promise<SessionRecord | undefined>
   /** Revoke one session and report whether it was active. */
@@ -394,6 +400,16 @@ export class MemoryAccountBackend implements AccountBackend {
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined> {
     const account = this.accounts.get(id)
     return Promise.resolve(account === undefined ? undefined : structuredClone(account))
+  }
+
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]> {
+    return Promise.resolve([...this.accounts.values()]
+      .filter(account => account.identityNamespace === identityNamespace
+        && account.githubLogin.toLowerCase() === normalizedGithubLogin)
+      .map(account => structuredClone(account)))
   }
 
   rotateRefresh(
@@ -729,6 +745,32 @@ export class PlatformAccount extends AccountService {
       account: accountView(await this.requireAccount(payload.accountId)),
       installation,
     }
+  }
+
+  async publicIdentitiesByIds(
+    accountIds: readonly PlatformAccountId[],
+  ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>> {
+    const identities = new Map<PlatformAccountId, PublicAccountIdentity>()
+    for (const accountId of accountIds) {
+      const account = await this.backend.getAccount(accountId)
+      if (account !== undefined) {
+        identities.set(accountId, {
+          id: account.id,
+          githubLogin: account.githubLogin,
+          avatarUrl: account.avatarUrl,
+        })
+      }
+    }
+    return identities
+  }
+
+  async publicIdentityByGithubLogin(githubLogin: string): Promise<PublicAccountIdentity | undefined> {
+    const normalized = githubLogin.trim().toLowerCase()
+    if (normalized === '') return undefined
+    const accounts = await this.backend.findAccountsByGithubLogin(this.environment.identityNamespace, normalized)
+    const [account] = accounts
+    if (account === undefined || accounts.length !== 1) return undefined
+    return { id: account.id, githubLogin: account.githubLogin, avatarUrl: account.avatarUrl }
   }
 
   async signOut(input: { accessToken: string; proof: AccountProof }): Promise<void> {

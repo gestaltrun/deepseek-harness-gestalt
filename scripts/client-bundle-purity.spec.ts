@@ -80,6 +80,9 @@ describe('client bundle purity gate', () => {
     expect(resolveId('@deepseek-ai/dsh-browser-workspace/client')).toBeNull()
     expect(resolveId('@deepseek-ai/dsh-session/surface')).toBeNull()
     expect(resolveId('@deepseek-ai/dsh-brand')).toBeNull()
+    expect(resolveId('@deepseek-ai/dsh-project-membership/remote-url')).toBeNull()
+    expect(resolveId('@deepseek-ai/dsh-project-membership/invite-role')).toBeNull()
+    expect(() => resolveId('@deepseek-ai/dsh-project-membership')).toThrow(/purity/)
     expect(() => resolveId('@deepseek-ai/dsh-browser-workspace')).toThrow(/purity/)
   })
 

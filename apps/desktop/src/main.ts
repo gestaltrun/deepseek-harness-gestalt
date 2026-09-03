@@ -14,6 +14,9 @@ import {
 import {
   ACCOUNT_ACCEPT_PRIVACY, ACCOUNT_BEGIN_LOGIN, ACCOUNT_GET_SNAPSHOT,
   ACCOUNT_SIGN_OUT, ACCOUNT_SNAPSHOT_CHANGED,
+  PROJECT_MEMBERSHIP_BY_REMOTE, PROJECT_MEMBERSHIP_CHANGE_ROLE, PROJECT_MEMBERSHIP_CREATE, PROJECT_MEMBERSHIP_DECIDE,
+  PROJECT_MEMBERSHIP_INVITE, PROJECT_MEMBERSHIP_ISSUED, PROJECT_MEMBERSHIP_PENDING, PROJECT_MEMBERSHIP_REMOVE,
+  PROJECT_MEMBERSHIP_RETRACT, PROJECT_MEMBERSHIP_ROSTER, PROJECT_MEMBERSHIP_SET_TAGS,
   PAIRING_CANCEL_CHALLENGE, PAIRING_CONFIRM, PAIRING_CREATE_CHALLENGE,
   BROWSER_CONCEAL, BROWSER_PRESENT,
   CHROME_OVERLAY_GET_STATE, CHROME_OVERLAY_HIDE, CHROME_OVERLAY_RESULT,
@@ -93,8 +96,27 @@ import { downloadCompanionAttachment } from './companion-attachments.ts'
 import { projectDesktopRendererEvent } from './renderer-projection.ts'
 import { connectDesktopRelayNodeHelper } from './relay-node-helper.ts'
 import { createDesktopSystemNodeFetch } from './system-node-fetch-helper.ts'
+import {
+  createDesktopProjectMembershipClient,
+  createDesktopProjectMembershipPresence,
+  parseInvitationDecision,
+  parseInvitationId,
+  parseMembershipId,
+  parseMembershipRole,
+  parseMembershipTags,
+  parseProjectCreation,
+  parseProjectId,
+  parseProjectInvitation,
+  parseProjectRemote,
+} from './project-membership.ts'
+import {
+  startDesktopProjectMembershipAgentRuntime,
+  type DesktopProjectMembershipAgentRuntime,
+} from './project-membership-agent-runtime.ts'
+import { applyDesktopE2EProfile, resolveDesktopNetworkProxy } from './e2e-profile.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
+applyDesktopE2EProfile({ packaged: app.isPackaged, argv: process.argv, environment: process.env })
 let systemFetch: typeof globalThis.fetch
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
@@ -107,6 +129,7 @@ function smokeLog(line: string): void {
 
 let host: RunningWebHost | undefined
 let browserRuntime: DesktopBrowserRuntime | undefined
+let projectMembershipAgentRuntime: DesktopProjectMembershipAgentRuntime | undefined
 let window: BrowserWindow | undefined
 let overlayView: WebContentsView | undefined
 let overlayOpen: ReturnType<typeof parseChromeOverlayShow>
@@ -135,6 +158,7 @@ const companionProduct = new DesktopCompanionProductOwner({
 let uninstallCompanionHost: (() => void) | undefined
 let companionHostReady = false
 let companionHostGeneration = 0
+let projectMembershipPresence: import('./project-membership.ts').DesktopProjectMembershipPresence | undefined
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -190,14 +214,29 @@ async function boot(): Promise<void> {
   systemFetch = createDesktopSystemNodeFetch({
     nodePath: relayRuntime.node,
     helperPath: relayRuntime.fetchHelper,
-    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    resolveProxy: async url => await resolveDesktopNetworkProxy({
+      packaged: app.isPackaged,
+      environment: process.env,
+      url,
+      resolve: async target => await session.defaultSession.resolveProxy(target),
+    }),
     timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
   })
   account = createDesktopAccount(accountEnvironment)
+  projectMembershipPresence = createDesktopProjectMembershipPresence({
+    account: () => account,
+    environment: accountEnvironment,
+    fetch: systemFetch,
+  })
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
-    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    resolveProxy: async url => await resolveDesktopNetworkProxy({
+      packaged: app.isPackaged,
+      environment: process.env,
+      url,
+      resolve: async target => await session.defaultSession.resolveProxy(target),
+    }),
     connectWithProxy: async (url, signal, limits, proxyUrl) => await connectDesktopRelayNodeHelper({
       nodePath: relayRuntime.node,
       helperPath: relayRuntime.relayHelper,
@@ -246,6 +285,7 @@ async function boot(): Promise<void> {
   if (accountReady) smokeLog('account ready')
   pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
   accountSignedIn = account.getSnapshot().status === 'signed-in'
+  projectMembershipPresence.setSignedIn(accountSignedIn)
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   sub2api = await createDesktopSub2Api({
@@ -415,7 +455,10 @@ function createWindow(): BrowserWindow {
     if (shuttingDown || closing) return
     event.preventDefault()
     closing = true
-    void pairing.deactivate('window-close').then(
+    void Promise.all([
+      pairing.deactivate('window-close'),
+      projectMembershipPresence?.closeWindow() ?? Promise.resolve(),
+    ]).then(
       () => {
         smokeLog(`relay window-close ${JSON.stringify(pairing.getRelayState())}`)
         target.destroy()
@@ -475,6 +518,17 @@ async function startHost(timeoutMs?: number): Promise<RunningWebHost> {
     throw new Error('Desktop Host needs a real Node executable; set DSH_NODE or run via pnpm gestalt:dev')
   }
   browserRuntime ??= await startDesktopBrowserRuntime(app.getPath('userData'))
+  projectMembershipAgentRuntime ??= await startDesktopProjectMembershipAgentRuntime({
+    userData: app.getPath('userData'),
+    account: () => account,
+    membership: (expectedAccountId, signal) => createDesktopProjectMembershipClient({
+      account: () => account,
+      environment: accountEnvironment,
+      fetch: systemFetch,
+      expectedAccountId,
+      signal,
+    }),
+  })
   const pending = spawnWebHost({
     node: paths.node,
     args: paths.args,
@@ -483,6 +537,8 @@ async function startHost(timeoutMs?: number): Promise<RunningWebHost> {
       DSH_DESKTOP: '1',
       DSH_ELECTRON_BROWSER_ORIGIN: browserRuntime.origin,
       DSH_ELECTRON_BROWSER_TOKEN_FILE: browserRuntime.tokenFile,
+      DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN: projectMembershipAgentRuntime.origin,
+      DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE: projectMembershipAgentRuntime.tokenFile,
     },
     signal: hostStartController.signal,
   }, timeoutMs)
@@ -728,6 +784,11 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   stopSub2ApiEvents = undefined
   sub2api?.dispose()
   sub2api = undefined
+  const presence = projectMembershipPresence
+  projectMembershipPresence = undefined
+  const presenceDisposal = presence === undefined
+    ? Promise.resolve()
+    : presence.closeWindow().then(async () => { await presence.dispose() })
   const ownerDisposal = disposeDesktopOwners(account, pairing)
   hostStartController.abort()
   const starting = pendingHost
@@ -736,14 +797,16 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   host = undefined
   void (async () => {
     try {
-      await ownerDisposal
+      await Promise.all([ownerDisposal, presenceDisposal])
       smokeLog(`relay quit ${JSON.stringify(pairing.getRelayState())}`)
       const started = await starting?.catch(() => undefined)
       if (started !== running) await started?.stop()
       await running?.stop()
       const runtime = browserRuntime
       browserRuntime = undefined
-      await runtime?.dispose()
+      const membershipRuntime = projectMembershipAgentRuntime
+      projectMembershipAgentRuntime = undefined
+      await Promise.all([runtime?.dispose(), membershipRuntime?.dispose()])
       if (mode === 'exit') app.exit(exitCode)
     } catch (error) {
       console.error('dsh desktop: shutdown failed', error)
@@ -781,6 +844,11 @@ async function startPairingForCurrentDesktop(): Promise<void> {
 }
 
 function installIpc(): void {
+  const projectMembership = createDesktopProjectMembershipClient({
+    account: () => account,
+    environment: accountEnvironment,
+    fetch: systemFetch,
+  })
   ipcMain.handle(UPDATER_GET_STATUS, () => updater?.state() ?? { state: 'disabled', lastCheckedAt: null })
   ipcMain.on(UPDATER_CHECK_NOW, () => { updater?.checkForUpdates() })
   ipcMain.on(UPDATER_DOWNLOAD_NOW, () => { updater?.download() })
@@ -805,6 +873,33 @@ function installIpc(): void {
     await pairing.deactivate('mobile-access-disabled')
     return snapshot
   })
+  ipcMain.handle(PROJECT_MEMBERSHIP_CREATE, (_event, raw: unknown) =>
+    projectMembership.createProject(parseProjectCreation(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_BY_REMOTE, (_event, raw: unknown) =>
+    projectMembership.projectByRemote(parseProjectRemote(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_ROSTER, (_event, raw: unknown) =>
+    projectMembership.roster(parseProjectId(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_INVITE, (_event, raw: unknown) =>
+    projectMembership.invite(parseProjectInvitation(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_DECIDE, (_event, raw: unknown) => {
+    const request = parseInvitationDecision(raw)
+    return projectMembership.decideInvitation(request.invitationId, request.input)
+  })
+  ipcMain.handle(PROJECT_MEMBERSHIP_RETRACT, (_event, raw: unknown) =>
+    projectMembership.retractInvitation(parseInvitationId(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_PENDING, () => projectMembership.pendingInvitations())
+  ipcMain.handle(PROJECT_MEMBERSHIP_ISSUED, (_event, raw: unknown) =>
+    projectMembership.issuedInvitations(parseProjectId(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_CHANGE_ROLE, (_event, raw: unknown) => {
+    const request = parseMembershipRole(raw)
+    return projectMembership.changeRole(request.membershipId, request.role)
+  })
+  ipcMain.handle(PROJECT_MEMBERSHIP_SET_TAGS, (_event, raw: unknown) => {
+    const request = parseMembershipTags(raw)
+    return projectMembership.setMemberTags(request.membershipId, request.tags)
+  })
+  ipcMain.handle(PROJECT_MEMBERSHIP_REMOVE, (_event, raw: unknown) =>
+    projectMembership.removeMember(parseMembershipId(raw)))
   ipcMain.handle(PAIRING_GET_SNAPSHOT, () => pairing.getSnapshot())
   ipcMain.handle(PAIRING_SET_ENABLED, (_event, enabled: unknown) => setPairingEnabledFromIpc(pairing, enabled))
   ipcMain.handle(PAIRING_CREATE_CHALLENGE, () => pairing.createChallenge())
@@ -953,6 +1048,7 @@ function pushAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnap
 function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
   pushAccountSnapshot(snapshot)
   const signedIn = snapshot.status === 'signed-in'
+  projectMembershipPresence?.setSignedIn(signedIn)
   if (signedIn && !accountSignedIn) {
     accountSignedIn = true
     void startPairingForCurrentDesktop()
@@ -995,7 +1091,18 @@ function createDesktopAccount(environment: SelectedPlatformEnvironment): Desktop
     transport,
     store,
     presentation: desktopInstallationPresentation({ hostname: hostname(), platform: process.platform }),
-    systemBrowser: { open: async (url) => { await shell.openExternal(url) } },
+    systemBrowser: {
+      open: async (url) => {
+        if (!app.isPackaged && process.env.DSH_DESKTOP_E2E_AUTO_AUTHORIZE === '1') {
+          const response = await systemFetch(url)
+          if (!response.ok) {
+            throw new Error(`Desktop E2E authorization callback failed with HTTP ${String(response.status)}`)
+          }
+          return
+        }
+        await shell.openExternal(url)
+      },
+    },
   })
 }
 

@@ -56,9 +56,16 @@ describe('apply', () => {
     expect(entry.inject).toBeUndefined()
     expect(entry.locale).toBe('question')
     // The selector narrows the chain currency: question wait in → that wait; none → null.
-    const select = entry.select as (owner: { interactions: readonly { kind: string }[] }) => unknown
-    const question = { kind: 'question' }
+    const select = entry.select as (owner: { interactions: readonly {
+      kind: string
+      payload?: { questions: readonly { intent?: { kind: string } }[] }
+    }[] }) => unknown
+    const question = { kind: 'question', payload: { questions: [{ }] } }
+    const memberQuestion = {
+      kind: 'question', payload: { questions: [{ intent: { kind: 'member-question' } }] },
+    }
     expect(select({ interactions: [{ kind: 'approval' }, question] })).toBe(question)
+    expect(select({ interactions: [memberQuestion] })).toBeNull()
     expect(select({ interactions: [{ kind: 'approval' }] })).toBeNull()
     expect(select({ interactions: [] })).toBeNull()
   })

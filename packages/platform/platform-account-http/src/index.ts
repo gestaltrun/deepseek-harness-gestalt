@@ -43,6 +43,18 @@ export const name = 'platform-account-http'
 /** Required Account behavior and HTTP route registry. */
 export const inject = ['platformAccount', 'webServer']
 
+/**
+ * Read one Account session presentation — the bearer access token plus the
+ * one-use installation proof — from request headers, exactly the presentation
+ * `ctx.platformAccount.current` and `currentInstallation` verify. Every HTTP
+ * consumer speaking for an Account session reads it through this function.
+ * @param req - request carrying the bearer and proof headers.
+ * @returns the verified-on-presentation session input for the Account service.
+ */
+export function accountSessionPresentation(req: IncomingMessage): { accessToken: string; proof: AccountProof } {
+  return { accessToken: bearer(req), proof: proofHeaders(req) }
+}
+
 /** Register the complete Account HTTP route set. */
 export function apply(ctx: Context, config: Config): void {
   const candidate: unknown = config
@@ -122,14 +134,11 @@ export function apply(ctx: Context, config: Config): void {
 
   route('/v1/account/session', async (req, res) => {
     if (req.method === 'GET') {
-      writeJson(res, 200, await ctx.platformAccount.current({
-        accessToken: bearer(req),
-        proof: proofHeaders(req),
-      }))
+      writeJson(res, 200, await ctx.platformAccount.current(accountSessionPresentation(req)))
       return
     }
     if (req.method === 'DELETE') {
-      await ctx.platformAccount.signOut({ accessToken: bearer(req), proof: proofHeaders(req) })
+      await ctx.platformAccount.signOut(accountSessionPresentation(req))
       res.writeHead(204, { 'cache-control': 'no-store' })
       res.end()
       return

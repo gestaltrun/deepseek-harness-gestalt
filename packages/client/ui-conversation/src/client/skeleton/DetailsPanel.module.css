@@ -92,3 +92,47 @@
 .code[data-error] {
   color: var(--dsw-alias-state-error-primary);
 }
+
+/* Restricted-preview banner: amber caution strip above the sandboxed iframe. */
+.restricted {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.12));
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-state-warning-primary, #b45309);
+}
+
+/* Sandboxed document frame: fills the remaining body height. */
+.frame {
+  display: block;
+  width: 100%;
+  height: 70vh;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-base);
+}
+
+/* Bare file tab: icon, file name, and provenance line — no actions. */
+.fileTab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 12px;
+}
+
+.fileIcon {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.fileFrom {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}

@@ -77,6 +77,20 @@ abstract current(input: { accessToken: string; proof: AccountProof }): Promise<P
 abstract currentInstallation(input: { accessToken: string proof: AccountProof }): Promise<AuthenticatedInstallationView>
 
 /**
+ * Read the public identity of many accounts in one batch.
+ * @param accountIds - accounts to resolve, typically one roster.
+ * @returns the public identity per known account; unknown accounts are absent.
+ */
+abstract publicIdentitiesByIds( accountIds: readonly PlatformAccountId[], ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>>
+
+/**
+ * Resolve one unambiguous current public GitHub login.
+ * @param githubLogin - case-insensitive public login entered by an operator.
+ * @returns the matching public Account identity, or undefined when absent or ambiguous.
+ */
+abstract publicIdentityByGithubLogin(githubLogin: string): Promise<PublicAccountIdentity | undefined>
+
+/**
  * Revoke only the current installation Account Session.
  * @param input - access token and installation proof.
  */

@@ -9,6 +9,7 @@ import type {
   PendingPairingId,
   PersonalPairingId,
 } from '@deepseek-ai/dsh-remote-access'
+import type { ProjectMembershipClient } from '@deepseek-ai/dsh-project-membership-client'
 
 /** IPC / preload channel for the current updater snapshot. */
 export const UPDATER_GET_STATUS = 'updater:getStatus'
@@ -36,6 +37,28 @@ export const ACCOUNT_BEGIN_LOGIN = 'account:beginLogin'
 export const ACCOUNT_SIGN_OUT = 'account:signOut'
 /** IPC event pushed for every current-installation Account transition. */
 export const ACCOUNT_SNAPSHOT_CHANGED = 'account:snapshot-changed'
+/** IPC / preload channel creating one Cloud Project. */
+export const PROJECT_MEMBERSHIP_CREATE = 'projectMembership:create'
+/** IPC / preload channel resolving the current Account's Project by Workspace remote. */
+export const PROJECT_MEMBERSHIP_BY_REMOTE = 'projectMembership:byRemote'
+/** IPC / preload channel reading one Project roster. */
+export const PROJECT_MEMBERSHIP_ROSTER = 'projectMembership:roster'
+/** IPC / preload channel inviting one public GitHub login. */
+export const PROJECT_MEMBERSHIP_INVITE = 'projectMembership:invite'
+/** IPC / preload channel deciding one pending invitation. */
+export const PROJECT_MEMBERSHIP_DECIDE = 'projectMembership:decide'
+/** IPC / preload channel retracting one issued invitation. */
+export const PROJECT_MEMBERSHIP_RETRACT = 'projectMembership:retract'
+/** IPC / preload channel reading invitations addressed to the current Account. */
+export const PROJECT_MEMBERSHIP_PENDING = 'projectMembership:pending'
+/** IPC / preload channel reading pending invitations issued from one Project. */
+export const PROJECT_MEMBERSHIP_ISSUED = 'projectMembership:issued'
+/** IPC / preload channel changing one member role. */
+export const PROJECT_MEMBERSHIP_CHANGE_ROLE = 'projectMembership:changeRole'
+/** IPC / preload channel replacing one member's function tags. */
+export const PROJECT_MEMBERSHIP_SET_TAGS = 'projectMembership:setTags'
+/** IPC / preload channel removing one Project member. */
+export const PROJECT_MEMBERSHIP_REMOVE = 'projectMembership:remove'
 /** IPC / preload channel for Mobile Access and Personal Pairing state. */
 export const PAIRING_GET_SNAPSHOT = 'pairing:getSnapshot'
 /** IPC / preload channel changing Settings-owned Mobile Access. */
@@ -273,6 +296,8 @@ export interface DesktopBridge {
   readonly accountSignOut: () => Promise<DesktopAccountSnapshot>
   /** Subscribe to current-installation Account transitions. */
   readonly onAccountSnapshot: (listener: (snapshot: DesktopAccountSnapshot) => void) => () => void
+  /** Authenticated Project Membership operations owned by the Desktop Host. */
+  readonly projectMembership?: ProjectMembershipClient
   /** Read Settings-owned Mobile Access and Personal Pairing state. */
   readonly pairingGetSnapshot: () => Promise<DesktopPairingSnapshot>
   /** Enable or disable Mobile Access for this Desktop Installation. */

@@ -1088,6 +1088,18 @@ describe('Session', () => {
     ])
     expect(marked.events[0]?.ignorable).toBe(true)
   })
+
+  it('marks an explicitly ignorable non-surface append without adding surface metadata', () => {
+    const session = Session.create(SessionId('ignorable-append'))
+    const event = session.append('turn/start', { turn: 1 }, { ignorable: true })
+    expect(event).toMatchObject({
+      type: 'turn/start',
+      ignorable: true,
+      data: { turn: 1 },
+    })
+    expect(event).not.toHaveProperty('surfaceOp')
+    expect(event).not.toHaveProperty('sourceEventSeqs')
+  })
 })
 
 

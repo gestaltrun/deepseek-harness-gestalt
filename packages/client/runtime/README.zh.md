@@ -22,6 +22,8 @@ Workspace 和 Session 列表各自具有单调的 `pending` → `ready` 基线�
 
 `ISessions.stageProvisional()` 插入一条由功能持有、仅存在于客户端且带调用方所给标题的 Session 摘要，使标准 Session slot 与列表分类器能在持久化 Session 出现前正确渲染它。列表刷新会保留该行，`openForRender()` 会跳过 Host 历史请求，释放暂存会移除该行。匹配的 `host/session-added` 发布会把同一 id 原子升级为普通持久化行；之后临时身份的 disposer 不会删除已发布 Session。
 
+成员提问接收 Session 在认证到达后把 Host 所有的 `ReceivingSessionId` 复用为普通 Host Session。`ReceivingQuestionBook` 只应用 revision 更高的完整 `host/member-question-snapshot` 帧，使用每条持久化 `ReceivingSessionId`，并通过一个 identity-stable 的对外 `SessionFace` 发布 pending wait 与 exceptional terminal record band。断连会保留最近的 Host 状态；重开的 stream 会重新建立 pending 与 terminal 行的基线，且不改变其 id。Client 绝不裁决 expiry、supersession、withdrawal 或 settlement，回答与拒绝动作会调用 `memberQuestion.settle`。snapshot 携带 `hostSessionId` 时，同一 face 会绑定到普通 Host Session；随后历史、模型所有的 route 与后续 human prompt 使用普通 Session 路径，sidebar row 不会被替换。本地回答会离开对话页脚；answered-elsewhere、expired、withdrawn、declined 与 superseded 终态仍作为 record band 保留。
+
 `SessionSummary.pendingInteraction` 将阻塞 Session 的实时用户操作分类为 `approval`、`plan-review` 或 `question`。`SessionManager` 依据稳定的请求标识跟踪可应答请求的 requested/resolved mux 帧，即使 `Session` 对象尚未实例化也不例外；实例化前的缓冲会保留每个仍有效的请求，替换回放产生的重复项，并移除已解决的请求，因此打开 Session 时，列表状态始终有一个对应的可应答 `PendingWait`。审批与问题并发时，第一个 pending 问题具有更高的呈现优先级，以匹配 composer 路由；只有满足 plan-review composer 二元呈现约束的请求才会保留独立的 `plan-review` 状态。该状态的作用域限定在连接代次内：断连时清除，mux 打开时的回放只恢复仍处于 pending 的请求。
 
 `WorkspaceRuntime.delete(workspaceId)` 在一元响应成功后从客户端投影中移除注册记录；对应的 `host/workspace-removed` 帧具有幂等性，并负责同步其他标签页。Session 状态与当前 Session selection 相互独立，因此 Workspace 消失后，其已纳入客户端投影的 Session 会立即投影到 Ungrouped 下。

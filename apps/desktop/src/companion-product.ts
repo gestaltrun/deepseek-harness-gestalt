@@ -375,7 +375,24 @@ export async function handleCompanionProductOperation(
       return await settleInteraction(operation, dependencies)
     case 'read-image':
       return await readImage(operation, dependencies)
+    case 'member-question':
+      return {
+        type: 'operation-failed', operationId: operation.operationId,
+        failure: {
+          kind: 'business', code: 'member-question-not-accepted',
+          message: 'This Desktop does not accept routed member questions yet',
+        },
+      }
+    case 'document-chunk':
+      return {
+        type: 'operation-failed', operationId: operation.operationId,
+        failure: {
+          kind: 'business', code: 'document-transfer-not-accepted',
+          message: 'This Desktop does not accept document transfers yet',
+        },
+      }
     default: {
+      /* v8 ignore next 2 -- CompanionOperation is closed and every member is handled above */
       const never: never = operation
       return never
     }

@@ -21,13 +21,14 @@
 | [session-query.md](session-query.zh.md) | 逻辑记录、有界精确事件读取、关系追踪、语义筛选器/文档与全文检索结果页 |
 | [feedback.md](feedback.zh.md) | 绑定生命周期的逐消息反馈记录、乐观版本、伴随记录持久化与 Host Remote 契约 |
 | [platform-account.md](platform-account.zh.md) | GitHub 公开身份、签名登录尝试、安装持有证明账号会话与跨实例失效 |
+| [project-membership.md](project-membership.zh.md) | 绑定 git remote 的云端项目、owner/admin/member 角色门、功能标签、原子邀请与工作区链接、roster 失效事件 |
 | [remote-protocol.md](remote-protocol.zh.md) | 独立 Relay Transport 与加密 Companion 协商、codec、品牌化 id、稳定错误和 wire 限制 |
 | [personal-pairing.md](personal-pairing.zh.md) | Settings-owned Mobile Access、同账号 Pairing Challenge、authentication words 与 Companion-only Device Principal |
 | [session-title.md](session-title.zh.md) | 持久标题快照、被引用的来源消息 seq 与异步提供方约定 |
 | [session-reference.md](session-reference.zh.md) | 结构化跨会话引用：`SessionReferenceInput`/`Candidate`、prepared 消息上下文、稳定错误分类 |
 | [system-prompt.md](system-prompt.zh.md) | 逐次组装的上下文、工具提供方结果、提示词段落与协作式组装 |
 | [tools.md](tools.zh.md) | `ToolDefinition` 完整字段、schema DSL、`ToolExecution`/`ToolResult`、工具展示 UI 类型，以及受保护的执行流水线 |
-| [user-questions.md](user-questions.zh.md) | UI 支持的人工问答 seam：`AskUserQuestionRequest`、answer/options 词汇、提供方 API、错误分类体系 |
+| [user-questions.md](user-questions.zh.md) | UI 支持的人工问答 seam：`AskUserQuestionRequest`、answer/options 词汇、提供方 API、错误分类体系，以及成员定向发送器 payload |
 | [approval.md](approval.zh.md) | 一次性用户审批 seam：`ApprovalRequest`、`ApprovalOutcome`、逐会话策略、审计事件和 answerer 约定 |
 | [attachment.md](attachment.zh.md) | 持久图片标识与元数据、校验输入、经校验读取，以及 `AttachmentStore` seam |
 | [shell.md](shell.zh.md) | bash 执行器 seam：`ShellExecRequest`/`Spec`、`ShellRunResult`、后台 `ShellProcess` 句柄 |

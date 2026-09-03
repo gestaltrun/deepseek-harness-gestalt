@@ -40,6 +40,8 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as SkillFileSystem from '@deepseek-ai/dsh-skill-filesystem'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolAskUser from '@deepseek-ai/dsh-tool-ask-user'
+import * as ToolProjectMembers from '@deepseek-ai/dsh-tool-project-members'
+import { ProjectMembershipService } from '@deepseek-ai/dsh-project-membership'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
 import * as ToolPwsh from '@deepseek-ai/dsh-tool-pwsh'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
@@ -93,6 +95,72 @@ class CatalogAttachmentStore extends AttachmentStore {
   override readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
     return Promise.reject(new Error('gen-tool-catalog: attachment reads are unreachable during schema harvest'))
   }
+}
+
+/**
+ * Membership seam marker that lets the roster tool's `projectMembership`
+ * inject resolve during schema harvest. Registration never reads a roster.
+ */
+class CatalogProjectMembership extends ProjectMembershipService {
+  override roster(): Promise<never> {
+    return Promise.reject(unreachable('roster reads'))
+  }
+
+  override createProject(): Promise<never> {
+    return Promise.reject(unreachable('project creation'))
+  }
+
+  override invite(): Promise<never> {
+    return Promise.reject(unreachable('invitations'))
+  }
+
+  override retractInvitation(): Promise<never> {
+    return Promise.reject(unreachable('invitation retraction'))
+  }
+
+  override acceptInvitation(): Promise<never> {
+    return Promise.reject(unreachable('invitation acceptance'))
+  }
+
+  override declineInvitation(): Promise<never> {
+    return Promise.reject(unreachable('invitation decline'))
+  }
+
+  override changeRole(): Promise<never> {
+    return Promise.reject(unreachable('role changes'))
+  }
+
+  override setMemberTags(): Promise<never> {
+    return Promise.reject(unreachable('tag edits'))
+  }
+
+  override removeMember(): Promise<never> {
+    return Promise.reject(unreachable('member removal'))
+  }
+
+  override pendingInvitationsFor(): Promise<never> {
+    return Promise.reject(unreachable('invitation enumeration'))
+  }
+
+  override pendingInvitationContextsFor(): Promise<never> {
+    return Promise.reject(unreachable('invitation context enumeration'))
+  }
+
+  override pendingInvitationsIssuedBy(): Promise<never> {
+    return Promise.reject(unreachable('issued invitation enumeration'))
+  }
+
+  override projectByRemote(): Promise<never> {
+    return Promise.reject(unreachable('remote lookups'))
+  }
+
+  override rosterVersion(): Promise<never> {
+    return Promise.reject(unreachable('roster version reads'))
+  }
+}
+
+function unreachable(operation: string): Error {
+  return new Error(`gen-tool-catalog: ${operation} are unreachable during schema harvest`)
 }
 
 const root = resolve(import.meta.dirname, '..')
@@ -194,13 +262,29 @@ const TOOL_PACKAGES: ToolPackage[] = [
     dir: 'tool-ask-user',
     source: 'packages/interaction/tool-ask-user/src/index.ts',
     requires: ['ctx.tools', 'ctx.userQuestions'],
-    writes: ['tool/call', 'tool/result after a UI/provider answers the question'],
+    writes: ['tool/call', 'tool/result after a UI/provider answers the question, or after member-question sender delivery'],
     async mount(ctx) {
       await ctx.plugin(UserQuestionService)
       await ctx.plugin(ToolAskUser)
     },
     note:
-      'ask_user_question pauses the tool call until the active UI provider returns a human answer.',
+      'ask_user_question pauses a local call until the active UI provider returns a human answer. `to_project_member` routes through `ctx.memberQuestionSender` instead. Runtime eligibility hides that parameter from assembled prompts unless the workspace is bound to a cloud project; the catalog records the static schema including the routing parameters because the sender is optional at harvest.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-project-members',
+    dir: 'tool-project-members',
+    source: 'packages/interaction/tool-project-members/src/index.ts',
+    requires: ['ctx.tools', 'ctx.projectMembership'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      // The tool registers from the seam alone; the injected provider faces
+      // (account, workspace binding, presence) are load-time Config and are
+      // absent in this default-config harvest.
+      await ctx.plugin(CatalogProjectMembership)
+      await ctx.plugin(ToolProjectMembers)
+    },
+    note:
+      'The tool reads the membership seam only and owns no permission decision. The composition injects the session-bound account, the workspace→project binding, and the presence/identity presentation through Config; without those faces the tool still registers and answers the stable `ACCOUNT_UNAVAILABLE` / `PROJECT_UNBOUND` errors at call time.',
   },
   {
     pkg: '@deepseek-ai/dsh-tools',

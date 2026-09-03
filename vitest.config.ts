@@ -231,6 +231,7 @@ export default defineConfig({
         'packages/platform/platform-account-core/src/invariant.ts',
         'packages/platform/platform-account-client/src/invariant.ts',
         'packages/platform/platform-account-http/src/invariant.ts',
+        'packages/platform/project-membership-http/src/invariant.ts',
         'packages/platform/remote-protocol/src/invariant.ts',
         'packages/platform/remote-access/src/invariant.ts',
         'packages/client/ui-primitives/src/DisclosureRow.tsx',

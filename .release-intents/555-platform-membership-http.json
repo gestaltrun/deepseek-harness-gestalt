@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "555-platform-membership-http",
+  "summary": {
+    "en": "Mount Project Membership HTTP in the production Platform image so Cloud Projects can create, invite, and heartbeat against gestaltrun.com.",
+    "zh": "生产 Platform 镜像挂载 Project Membership HTTP，使 Cloud Project 的创建、邀请和心跳可走 gestaltrun.com。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "patch"
+  },
+  "compatibilityExceptions": []
+}

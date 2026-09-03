@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "445-sub2api-p0",
+  "summary": {
+    "en": "Add one-click Sub2API sidecar installation and local subscription-to-API controls to Desktop Settings.",
+    "zh": "在桌面端设置中新增一键安装 Sub2API sidecar 和本地“订阅转 API”控制。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The lockfile additions belong only to the Desktop application; the Mobile production dependency closure is unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The lockfile additions belong only to the Desktop application; the Platform production dependency closure is unchanged."
+    }
+  ]
+}

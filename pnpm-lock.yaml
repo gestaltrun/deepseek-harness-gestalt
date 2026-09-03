@@ -467,6 +467,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-desktop':
         specifier: workspace:^
         version: link:../../packages/client/ui-desktop
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../packages/util/home-paths
       '@deepseek-ai/dsh-native-command':
         specifier: workspace:^
         version: link:../../packages/util/native-command
@@ -500,6 +503,12 @@ importers:
       https-proxy-agent:
         specifier: ^7.0.6
         version: 7.0.6
+      js-yaml:
+        specifier: ^4.2.0
+        version: 4.2.0
+      tar:
+        specifier: ^7.4.3
+        version: 7.5.22
       ws:
         specifier: ^8.21.0
         version: 8.21.0
@@ -507,9 +516,6 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../vendor/cordis
-      '@deepseek-ai/cordis-plugin-include':
-        specifier: workspace:^
-        version: link:../../vendor/include
       '@deepseek-ai/cordis-plugin-loader':
         specifier: workspace:^
         version: link:../../vendor/loader
@@ -597,6 +603,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
       '@types/jsdom':
         specifier: ^28.0.3
         version: 28.0.3
@@ -630,6 +639,9 @@ importers:
       '@wdio/spec-reporter':
         specifier: 9.31.2
         version: 9.31.2
+      '@wdio/types':
+        specifier: ^9.31.2
+        version: 9.31.2
       electron:
         specifier: 41.2.1
         version: 41.2.1(supports-color@8.1.1)
@@ -649,7 +661,7 @@ importers:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
       webdriverio:
-        specifier: 9.31.4
+        specifier: ^9.31.4
         version: 9.31.4
 
   apps/mobile:
@@ -27035,7 +27047,7 @@ snapshots:
   readable-stream@3.6.2:
     dependencies:
       inherits: 2.0.4
-      string_decoder: 1.1.1
+      string_decoder: 1.3.0
       util-deprecate: 1.0.2
 
   readable-stream@4.7.0:
@@ -28360,7 +28372,7 @@ snapshots:
       deepmerge-ts: 7.1.6
       https-proxy-agent: 7.0.6
       undici: 6.28.0
-      ws: 8.21.0
+      ws: 8.21.3
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer

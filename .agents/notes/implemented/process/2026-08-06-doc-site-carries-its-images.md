@@ -28,7 +28,7 @@ Canonical Markdown keeps writing ordinary repository-relative image paths, so th
 
 **Set `publicDir` outside `.generated` and reference site-absolute URLs.** Fewer moving parts in the projector, but every image reference would then be broken when the same Markdown is read in the repository, and canonical docs are read both ways.
 
-**Host images on the assets branch, as demo GIFs already are.** That branch exists to keep large binaries out of the main history, and its raw URLs have exactly the same visibility problem. It remains the right home for recordings; it does not solve this.
+**Host images on `gif-assets`, as demo GIFs already are.** That orphan branch exists to keep large binaries out of the main history, and its raw URLs have exactly the same visibility problem. It remains the right home for recordings; it does not solve this.
 
 **Wait for the repository to become public.** It would fix the symptom without making the site self-contained, and the site would silently depend on GitHub's availability and rate limits for every image.
 

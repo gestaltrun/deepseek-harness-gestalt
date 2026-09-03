@@ -65,12 +65,12 @@ allowBuilds:
   # Desktop ships NSIS, not Squirrel.Windows; electron-winstaller's lifecycle
   # is unused by the selected target.
   electron-winstaller: false
-  # core-js runtime modules are complete in the package; its postinstall only reports project metadata.
-  core-js: false
-  # WDIO's Electron service optionally pulls these browser drivers; Project
-  # Members Electron acceptance uses the Electron service, not them.
+  # WebdriverIO pulls these browser drivers; the Desktop Electron service uses
+  # Chromedriver via Electron, so their install scripts stay denied.
   edgedriver: false
   geckodriver: false
+  # core-js runtime modules are complete in the package; its postinstall only reports project metadata.
+  core-js: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole

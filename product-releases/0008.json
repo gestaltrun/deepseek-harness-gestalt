@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sequence": 8,
+  "intentIds": [
+    "445-sub2api-p0"
+  ],
+  "summaries": [
+    {
+      "en": "Add one-click Sub2API sidecar installation and local subscription-to-API controls to Desktop Settings.",
+      "zh": "在桌面端设置中新增一键安装 Sub2API sidecar 和本地“订阅转 API”控制。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": true,
+      "previousVersion": "0.1.12",
+      "version": "0.1.13",
+      "tag": "gestalt-v0.1.13",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Add one-click Sub2API sidecar installation and local subscription-to-API controls to Desktop Settings.",
+          "zh": "在桌面端设置中新增一键安装 Sub2API sidecar 和本地“订阅转 API”控制。"
+        }
+      ]
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.2"
+    }
+  }
+}

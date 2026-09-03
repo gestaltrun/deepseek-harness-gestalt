@@ -216,6 +216,12 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
     setActiveId(id)
     setOpen(true)
   }, [mode, openDesktop])
+  const selectOverlaySection = useCallback((id: string) => {
+    setActiveId(id)
+    void settingsDesktopBridge()?.chromeOverlayShow({
+      kind: 'settings', requestId: requestId.current, sectionId: id,
+    })
+  }, [])
 
   // The ledger tick keeps the nav rows fresh: registrants re-register with
   // freshly localized text on locale change, and the trigger/header/close
@@ -247,7 +253,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
         rows={rows}
         renderSlot={renderSlot}
         activeId={activeId}
-        onSelect={setActiveId}
+        onSelect={selectOverlaySection}
         onClose={close}
       />
     ) : null

@@ -19,7 +19,7 @@ import type { SettingsRootInjected } from '@deepseek-ai/dsh-client-ui-settings-g
 import { apply as applyDesktop, inject as desktopInject } from '@deepseek-ai/dsh-client-ui-desktop/client'
 import { AccountControl } from '../src/client/AccountControl.tsx'
 import type { AccountControlInjected } from '../src/client/AccountControl.tsx'
-import type { DesktopAccountSnapshot, DesktopBridge, DesktopPairingSnapshot } from '../src/protocol.ts'
+import type { DesktopAccountSnapshot, DesktopBridge, DesktopPairingSnapshot, DesktopSub2ApiSnapshot } from '../src/protocol.ts'
 
 usePinnedBrowserLanguages('zh-CN')
 
@@ -32,9 +32,10 @@ describe('Desktop Settings shell Mobile Access placement', () => {
   it('places Mobile Access only in the 手机配对 Settings section', async () => {
     const assembled = await assemble()
     const sections = assembled.slots.entries('settings.section')
-    expect(sections.map(entry => entry.options.id)).toEqual(['general', 'mobile-pairing'])
+    expect(sections.map(entry => entry.options.id)).toEqual(['general', 'mobile-pairing', 'sub2api'])
     expect(resolveSlotLabel(sections[0]!.options.label)).toBe('通用设置')
     expect(resolveSlotLabel(sections[1]!.options.label)).toBe('手机配对')
+    expect(resolveSlotLabel(sections[2]!.options.label)).toBe('账号池')
     expect(sections.find(entry => entry.options.id === 'mobile-pairing')?.component).toBe(AccountControl)
     expect(assembled.slots.entries('sidebar.brand').length).toBeGreaterThan(0)
     expect(assembled.slots.entries('sidebar.footer.action').map(entry => entry.options.id)).toContain('desktop-update')
@@ -228,6 +229,11 @@ function bridge(account: DesktopAccountSnapshot, pairing: DesktopPairingSnapshot
     pairingReject: vi.fn(),
     pairingRevoke: vi.fn(),
     onPairingSnapshot: vi.fn(() => () => {}),
+    sub2ApiGetSnapshot: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiEnable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiDisable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiUninstall: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    onSub2ApiSnapshot: vi.fn(() => () => {}),
     chromeOverlayShow: async () => {},
     chromeOverlayHide: async () => {},
     chromeOverlayGetState: async () => null,

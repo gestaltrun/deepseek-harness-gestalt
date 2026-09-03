@@ -98,7 +98,7 @@ async function awaitSnapshotRegistration(ctx: Context): Promise<boolean> {
   if (loader === undefined) return true
   if (![...loader.entries()].some(isSnapshotEntry)) return true
   while (true) {
-    if (ctx.fiber.uid === null) return false
+    if (!isContextActive(ctx)) return false
     if (ctx.settings.get(ns) !== undefined) return true
     const entries = [...loader.entries()]
     const snapshot = entries.find(isSnapshotEntry)
@@ -106,7 +106,7 @@ async function awaitSnapshotRegistration(ctx: Context): Promise<boolean> {
     if (snapshot.fiber?.state === FiberState.FAILED) await snapshot.fiber.await()
     if (snapshot.fiber !== undefined && snapshot.fiber.state !== FiberState.PENDING) {
       await snapshot.fiber.await()
-      return ctx.fiber.uid !== null
+      return isContextActive(ctx)
     }
     const lifecycle = nextSnapshotLifecycle(ctx)
     const current = [...loader.entries()].find(isSnapshotEntry)
@@ -121,6 +121,10 @@ async function awaitSnapshotRegistration(ctx: Context): Promise<boolean> {
     }
     if (!await lifecycle.promise) return false
   }
+}
+
+function isContextActive(ctx: Context): boolean {
+  return ctx.fiber.uid !== null
 }
 
 /**

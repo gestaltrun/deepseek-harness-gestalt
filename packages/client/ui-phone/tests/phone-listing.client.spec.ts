@@ -31,6 +31,16 @@ function stubFetch(status: number, body: unknown): { input: RequestInfo | URL; i
   return seen
 }
 
+async function rejectionOf(run: () => Promise<unknown>): Promise<PhoneStreamHttpError> {
+  try {
+    await run()
+  } catch (error: unknown) {
+    if (error instanceof PhoneStreamHttpError) return error
+    throw error
+  }
+  throw new Error('expected PhoneStreamHttpError')
+}
+
 describe('phone listing source', () => {
   it('starts empty and quiet before the first commit', () => {
     const source = createHttpPhoneListingSource()
@@ -76,15 +86,13 @@ describe('phone listing source', () => {
     const committed = source.snapshot()
 
     stubFetch(403, { error: { code: 'forbidden', message: 'forbidden' } })
-    const refused = await source.refresh().catch(error => error)
-    expect(refused).toBeInstanceOf(PhoneStreamHttpError)
+    const refused = await rejectionOf(() => source.refresh())
     expect(refused.status).toBe(403)
     expect(refused.code).toBe('forbidden')
     expect(refused.message).toBe('forbidden')
 
     stubFetch(200, { android: 'nope', ios: {} })
-    const malformed = await source.refresh().catch(error => error)
-    expect(malformed).toBeInstanceOf(PhoneStreamHttpError)
+    const malformed = await rejectionOf(() => source.refresh())
     expect(malformed.code).toBe('http')
 
     stubFetch(200, WIRE_LISTING)
@@ -163,8 +171,7 @@ describe('phone listing source', () => {
       },
     })
     const source = createHttpPhoneListingSource()
-    const unresolved = await source.refresh().catch(error => error)
-    expect(unresolved).toBeInstanceOf(PhoneStreamHttpError)
+    const unresolved = await rejectionOf(() => source.refresh())
     expect(unresolved.status).toBe(502)
     expect(unresolved.code).toBe('PHONE_UNRESOLVED')
     expect(unresolved.message).toContain('npm install -g mobilecli@latest')
@@ -175,15 +182,13 @@ describe('phone listing source', () => {
       throw new TypeError('load failed')
     }))
     const source = createHttpPhoneListingSource()
-    const network = await source.refresh().catch(error => error)
-    expect(network).toBeInstanceOf(PhoneStreamHttpError)
+    const network = await rejectionOf(() => source.refresh())
     expect(network.status).toBe(0)
 
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw 'socket reset'
     }))
-    const nonError = await source.refresh().catch(error => error)
-    expect(nonError).toBeInstanceOf(PhoneStreamHttpError)
+    const nonError = await rejectionOf(() => source.refresh())
     expect(nonError.message).toBe('socket reset')
   })
 

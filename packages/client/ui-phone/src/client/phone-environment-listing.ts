@@ -100,7 +100,7 @@ function viewFromListing(listing: PhoneListingSnapshot, platform: string): Phone
  */
 export function createListingPhoneEnvironmentSource(
   listing: PhoneListingSource,
-  platform: string = globalThis.navigator?.platform ?? '',
+  platform: string = globalThis.navigator.platform,
 ): PhoneEnvironmentSource {
   let phase: DetectPhase = 'idle'
   let lastError: PhoneEnvironmentError = PROBE_FAILED_ERROR

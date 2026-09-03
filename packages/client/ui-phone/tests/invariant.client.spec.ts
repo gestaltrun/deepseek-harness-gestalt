@@ -33,7 +33,7 @@ describe('ui-phone invariant companion', () => {
   it('proves mount and disposal symmetry on the installed package', async () => {
     // The happy round-trip inside the companion ran during registration;
     // assert the shared assertion itself on the same observation shape.
-    expect(() => assertPhoneTabSymmetry({ mounted: true, survivedDispose: false }, throwingFail))
+    expect(() => { assertPhoneTabSymmetry({ mounted: true, survivedDispose: false }, throwingFail) })
       .not.toThrow()
   })
 
@@ -73,15 +73,13 @@ describe('ui-phone invariant companion', () => {
   })
 
   it('settles disposal through the removal signal when the registry view lags one read', async () => {
-    const original = PhoneInvariant.RecordingSidebar.prototype.getTab
     let calls = 0
     vi.spyOn(PhoneInvariant.RecordingSidebar.prototype, 'getTab').mockImplementation(function (
       this: PhoneInvariant.RecordingSidebar,
       id,
     ) {
       calls += 1
-      if (calls === 2) return { id }
-      return original.call(this, id)
+      return calls <= 2 ? { id } : undefined
     })
     const ctx = new Context()
     await ctx.plugin(InvariantRegistry, { enabled: true })
@@ -89,12 +87,12 @@ describe('ui-phone invariant companion', () => {
   })
 
   it('rejects a missing post-activation registration', () => {
-    expect(() => assertPhoneTabSymmetry({ mounted: false, survivedDispose: false }, throwingFail))
+    expect(() => { assertPhoneTabSymmetry({ mounted: false, survivedDispose: false }, throwingFail) })
       .toThrow(/missing after the plugin fiber activated/)
   })
 
   it('rejects a registration leaking past disposal', () => {
-    expect(() => assertPhoneTabSymmetry({ mounted: true, survivedDispose: true }, throwingFail))
+    expect(() => { assertPhoneTabSymmetry({ mounted: true, survivedDispose: true }, throwingFail) })
       .toThrow(/leaked past plugin-fiber disposal/)
   })
 })

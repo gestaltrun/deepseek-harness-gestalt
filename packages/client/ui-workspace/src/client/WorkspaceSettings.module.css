@@ -197,6 +197,20 @@
   background: var(--dsw-alias-border-l2);
 }
 
+.memberAvatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  object-fit: cover;
+}
+
 .memberName {
   flex: 1;
   min-width: 0;

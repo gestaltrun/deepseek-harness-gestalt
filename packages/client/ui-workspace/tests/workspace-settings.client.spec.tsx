@@ -63,10 +63,10 @@ function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
       project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
       members: [{
         membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
-        role: 'owner', tags: [], presence: 'online',
+        avatarRef: 'https://avatars.example/octocat', role: 'owner', tags: [], presence: 'online',
       }, {
         membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
-        role: 'member', tags: ['triage'], presence: 'online',
+        avatarRef: 'https://avatars.example/mona', role: 'member', tags: ['triage'], presence: 'online',
       }],
     }),
     invite: vi.fn<ProjectMembershipGateway['invite']>()
@@ -198,6 +198,8 @@ describe('workspace settings and invite wizard (M4)', () => {
       expect(screen.getByText('Assembled')).toBeTruthy()
       const mona = screen.getByText('mona')
       expect(mona).toBeTruthy()
+      expect(document.querySelector('img[src="https://avatars.example/mona"]')).toBeTruthy()
+      expect(document.querySelector('img[src="https://avatars.example/octocat"]')).toBeTruthy()
       const online = screen.getAllByText('在线')
       expect(online.length).toBeGreaterThan(0)
       for (const label of online) {
@@ -297,10 +299,10 @@ describe('workspace settings and invite wizard (M4)', () => {
         project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
         members: [{
           membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
-          role: 'owner' as const, tags: [], presence: 'online' as const,
+          avatarRef: '', role: 'owner' as const, tags: [], presence: 'online' as const,
         }, {
           membershipId: 'membership-admin', accountId: 'account-admin', displayName: 'mona',
-          role: 'admin' as const, tags: [], presence: 'online' as const,
+          avatarRef: '', role: 'admin' as const, tags: [], presence: 'online' as const,
         }],
       })),
     })
@@ -634,15 +636,15 @@ describe('workspace settings and invite wizard (M4)', () => {
     const members = [
       {
         membershipId: 'membership-owner', accountId: 'account-owner', displayName: 'octocat',
-        role: 'owner' as const, tags: [], presence: 'online' as const,
+        avatarRef: '', role: 'owner' as const, tags: [], presence: 'online' as const,
       },
       {
         membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
-        role: 'member' as const, tags: ['triage'], presence: 'online' as const,
+        avatarRef: '', role: 'member' as const, tags: ['triage'], presence: 'online' as const,
       },
       {
         membershipId: 'membership-2', accountId: 'account-3', displayName: '',
-        role: 'admin' as const, tags: [], presence: 'offline' as const,
+        avatarRef: '', role: 'admin' as const, tags: [], presence: 'offline' as const,
       },
     ]
     const membership = gateway({
@@ -659,6 +661,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     />)
     await flush()
     expect(screen.getByText('account-3')).toBeTruthy()
+    expect(screen.getByText('AC')).toBeTruthy()
     expect(screen.getByText(t('members.offline'))).toBeTruthy()
 
     const login = screen.getByLabelText(t('members.inviteLogin'))

@@ -146,6 +146,7 @@ function projectMembershipGateway(
           membershipId: member.id,
           accountId: member.accountId,
           displayName: member.displayName,
+          avatarRef: member.avatarRef,
           role: member.role,
           tags: member.tags,
           presence: member.presence,

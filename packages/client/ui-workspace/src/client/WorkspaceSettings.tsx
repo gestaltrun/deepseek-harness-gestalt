@@ -2,7 +2,7 @@
  * Workspace settings modal (workspace row ⋯ → 工作区设置) and the invite
  * wizard. The settings body carries the workspace-upgrade block — cloud
  * project creation with a required name and optional Git remote plus member management
- * (display name, role, function tags, presence dot, removal, GitHub-login
+ * (avatar, display name, role, function tags, presence dot, removal, GitHub-login
  * invitations with a grantable-role picker, retractable pending rows). Every
  * action routes through the {@link ProjectMembershipGateway} the composition
  * adapts from the membership client transport. The invite wizard is a two-step
@@ -353,6 +353,7 @@ function MemberRowItem({ row, gateway, onAct, t }: {
   t: SettingsTranslate
 }) {
   const [tagsDraft, setTagsDraft] = useState(row.tags.join(', '))
+  const identity = row.displayName === '' ? row.accountId : row.displayName
   const commitTags = () => {
     const tags = tagsDraft.split(',').map(tag => tag.trim()).filter(tag => tag !== '')
     const unchanged = tags.length === row.tags.length && tags.every((tag, i) => tag === row.tags[i])
@@ -365,7 +366,10 @@ function MemberRowItem({ row, gateway, onAct, t }: {
         {row.presence === 'online' ? <StateDot state="done" /> : <span className={css.offlineDot} aria-hidden="true" />}
         <span className={css.visuallyHidden}>{row.presence === 'online' ? t('members.online') : t('members.offline')}</span>
       </span>
-      <span className={css.memberName}>{row.displayName === '' ? row.accountId : row.displayName}</span>
+      {row.avatarRef === ''
+        ? <span className={css.memberAvatar} aria-hidden="true">{identity.slice(0, 2).toUpperCase()}</span>
+        : <img className={css.memberAvatar} src={row.avatarRef} alt="" />}
+      <span className={css.memberName}>{identity}</span>
       <select
         className={css.roleSelect}
         aria-label={t('members.title')}

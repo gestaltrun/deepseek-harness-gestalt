@@ -51,6 +51,8 @@ export interface WorkspaceMemberRow {
   accountId: string
   /** Public GitHub login; empty when the Account plane does not know the account. */
   displayName: string
+  /** Public GitHub avatar URL; empty when the Account plane does not know the account. */
+  avatarRef: string
   role: WorkspaceProjectRole
   tags: readonly string[]
   presence: 'online' | 'offline'

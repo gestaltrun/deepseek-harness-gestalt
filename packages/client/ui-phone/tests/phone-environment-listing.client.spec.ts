@@ -22,7 +22,7 @@ const IOS_SIMULATOR: PhoneDeviceSummary = {
   id: 'iPhone-16', name: 'iPhone 16 Pro', channel: 'emulator', state: 'offline', online: false,
 }
 const IOS_USB: PhoneDeviceSummary = {
-  id: 'UDID-9', name: 'iPhone', channel: 'usb', state: 'offline', online: false,
+  id: 'UDID-9', name: 'iPhone', channel: 'usb', state: 'unauthorized', online: false,
 }
 
 function deferred() {
@@ -67,6 +67,7 @@ describe('createListingPhoneEnvironmentSource', () => {
     ])
     expect(view.devices[0]?.name).toBe('Pixel_6_API_35')
     expect(view.devices[2]?.meta).toContain('已停止')
+    expect(view.devices[3]?.meta).toBe('未授权 · UDID-9')
   })
 
   it('renders the Android wizard when a successful pull finds no Android emulator', async () => {

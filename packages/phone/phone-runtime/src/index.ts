@@ -298,14 +298,7 @@ export class PhoneDevices extends Service {
    * @returns the path accepted by spawn; callers run after {@link requireResolved}.
    */
   private get executable(): string {
-    /* v8 ignore next -- requireResolved already threw for the unresolved arm */
-    if (this.executablePath === undefined) {
-      throw this.resolutionFailure ?? new PhoneDevicesError(
-        'PHONE_UNRESOLVED',
-        'phone-runtime: the mobilecli executable was not resolved',
-      )
-    }
-    return this.executablePath
+    return this.executablePath as string
   }
 
   /** Reject work entering after teardown begins. */
@@ -810,22 +803,9 @@ function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
 }
 
 function ioParams(request: PhoneIoRequest): Record<string, unknown> {
-  switch (request.method) {
-    case 'tap':
-      return { deviceId: request.deviceId, x: request.x, y: request.y }
-    case 'gesture':
-      return { deviceId: request.deviceId, actions: request.actions }
-    case 'text':
-      return { deviceId: request.deviceId, text: request.text }
-    case 'button':
-      return { deviceId: request.deviceId, button: request.button }
-    /* v8 ignore start -- PhoneIoRequest is a closed union */
-    default: {
-      const exhaustive: never = request
-      throw new PhoneDevicesError('PHONE_PROTOCOL', `unhandled phone io method: ${String(exhaustive)}`)
-    }
-    /* v8 ignore stop */
-  }
+  const { method, ...params } = request
+  void method
+  return params
 }
 
 function tailOf(text: string): string {

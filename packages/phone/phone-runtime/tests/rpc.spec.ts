@@ -1,11 +1,15 @@
 import http from 'node:http'
 import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { PhoneDevicesError } from '../src/errors.ts'
 import { MobilecliRpc, normalizeOperationError } from '../src/rpc.ts'
 
 const httpServers: http.Server[] = []
 const sockets = new Set<import('node:net').Socket>()
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 afterAll(async () => {
   for (const socket of sockets) socket.destroy()
@@ -155,6 +159,40 @@ describe('MobilecliRpc.call', () => {
     const first = await reader.read()
     expect(Buffer.from(first.value ?? new Uint8Array()).subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x00, 0x01]))).toBe(true)
     await reader.cancel()
+  })
+
+  it('rejects a successful direct capture response without a body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, {
+      status: 200,
+      headers: { 'content-type': 'video/h264' },
+    })))
+    const error = await rejectionOf(() => new MobilecliRpc('http://127.0.0.1:12000').stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'avc' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_PROTOCOL')
+    expect(error.message).toContain('answered no capture body')
+  })
+
+  it('rejects a successful capture session response without a body', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { sessionUrl: '/capture/1' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: 200,
+        headers: { 'content-type': 'video/h264' },
+      }))
+    vi.stubGlobal('fetch', fetch)
+    const error = await rejectionOf(() => new MobilecliRpc('http://127.0.0.1:12000').stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'avc' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_PROTOCOL')
+    expect(error.message).toContain('session answered no body')
   })
 
   it('returns a streaming capture body without buffering the whole response', async () => {

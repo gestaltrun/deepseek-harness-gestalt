@@ -109,14 +109,15 @@ export function parsePhoneIoReply(data: string): PhoneIoReply | undefined {
     return undefined
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined
-  const record = parsed as { id?: unknown; result?: unknown; error?: { code?: unknown; message?: unknown } }
+  const record = parsed as { id?: unknown; result?: unknown; error?: unknown }
   if (typeof record.id !== 'number') return undefined
-  if (record.error !== undefined && typeof record.error === 'object' && record.error !== null) {
+  if (typeof record.error === 'object' && record.error !== null) {
+    const error = record.error as { code?: unknown; message?: unknown }
     return {
       id: record.id,
       ok: false,
-      code: typeof record.error.code === 'number' ? record.error.code : undefined,
-      message: typeof record.error.message === 'string' ? record.error.message : undefined,
+      code: typeof error.code === 'number' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
     }
   }
   return { id: record.id, ok: record.result !== undefined }
@@ -176,8 +177,8 @@ export type PhoneIoTarget = Pick<PhoneStreamSessionView, 'ioPath'>
  * @returns the socket handle the controller owns.
  */
 export function openPhoneIoSocket(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket {
-  const protocol = globalThis.location?.protocol === 'https:' ? 'wss' : 'ws'
-  const host = globalThis.location?.host ?? ''
+  const protocol = globalThis.location.protocol === 'https:' ? 'wss' : 'ws'
+  const host = globalThis.location.host
   const socket = new WebSocket(`${protocol}://${host}${target.ioPath}`)
   socket.onopen = () => { handlers.onOpen() }
   socket.onclose = () => { handlers.onClose() }

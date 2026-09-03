@@ -1737,7 +1737,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-stream/src/index.ts:58`](../packages/phone/phone-stream/src/index.ts)
+Source: [`packages/phone/phone-stream/src/index.ts:57`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 

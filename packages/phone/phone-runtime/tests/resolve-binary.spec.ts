@@ -64,6 +64,14 @@ describe('PATH discovery', () => {
     expect(found).toBe(wanted)
   })
 
+  it('deduplicates repeated PATH directories without changing search order', async () => {
+    const empty = await stageDir()
+    const real = await stageDir()
+    const wanted = await writeExecutable(real, 'mobilecli')
+    const found = resolveMobilecliExecutable({ env: { PATH: [empty, empty, real].join(delimiter) }, home: '' })
+    expect(found).toBe(wanted)
+  })
+
   it.skipIf(process.platform === 'win32')('skips non-executable and directory collisions under POSIX semantics', async () => {
     const dir = await stageDir()
     await writeFile(join(dir, 'mobilecli'), 'plain data')
@@ -241,5 +249,23 @@ describe('Windows candidate probing', () => {
     const dir = await stageDir()
     const exe = await writeExecutable(dir, 'customcli.cmd')
     expect(resolveMobilecliExecutable({ executablePath: exe, env: { PATH: dir }, isWindows: true })).toBe(exe)
+  })
+
+  it('searches the Windows roaming npm directory under the supplied home', async () => {
+    const home = await stageDir()
+    const roamingBin = join(home, 'AppData', 'Roaming', 'npm')
+    await mkdir(roamingBin, { recursive: true })
+    const wanted = await writeExecutable(roamingBin, 'mobilecli.cmd')
+    expect(resolveMobilecliExecutable({ env: { PATH: '/missing' }, home, isWindows: true })).toBe(wanted)
+  })
+
+  it('uses npm_config_prefix itself as the Windows npm bin directory', async () => {
+    const prefix = await stageDir()
+    const wanted = await writeExecutable(prefix, 'mobilecli.exe')
+    expect(resolveMobilecliExecutable({
+      env: { PATH: '/missing', npm_config_prefix: prefix },
+      home: '',
+      isWindows: true,
+    })).toBe(wanted)
   })
 })

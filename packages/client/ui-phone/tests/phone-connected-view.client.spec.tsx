@@ -192,8 +192,21 @@ describe('PhoneConnectedView chrome', () => {
     fireEvent.click(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' }))
     const menu = screen.getByRole('menu', { name: '切换设备' })
     expect(menu.textContent).toContain('当前')
+    fireEvent.click(screen.getByRole('menuitem', { name: /Pixel_6_API_35/ }))
+    expect(harness.onOpenDevice).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /SM-S9310/ }))
     expect(harness.onOpenDevice).toHaveBeenCalledWith('R3CN30', 'SM-S9310')
+  })
+
+  it('keeps the switcher open for unrelated keys and closes it on Escape', async () => {
+    await renderLive()
+    const trigger = screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })
+    fireEvent.click(trigger)
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    expect(screen.getByRole('menu', { name: '切换设备' })).toBeTruthy()
+    fireEvent.keyDown(trigger, { key: 'Escape' })
+    expect(screen.queryByRole('menu', { name: '切换设备' })).toBeNull()
   })
 
   it('lists only online devices in the switcher and keeps unauthorized off the menu', async () => {
@@ -339,6 +352,32 @@ describe('PhoneConnectedView touch and keys', () => {
     })
   })
 
+  it('drops stray pointer events and keeps sub-threshold travel as a tap', async () => {
+    const { gateway } = await withSurface()
+    fireEvent.pointerMove(frame(), { clientX: 10, clientY: 10 })
+    fireEvent.pointerUp(frame(), { clientX: 10, clientY: 10 })
+    expect(gateway.lastSocket!.sent).toEqual([])
+
+    fireEvent.pointerDown(frame(), { clientX: 50, clientY: 50 })
+    fireEvent.pointerMove(frame(), { clientX: 53, clientY: 54 })
+    fireEvent.pointerUp(frame(), { clientX: 60, clientY: 60 })
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 117, y: 127 },
+    })
+  })
+
+  it('maps a zero-size rendered frame to the safe zero coordinate', async () => {
+    const { gateway } = await renderLive()
+    stubRect(frame(), 0, 0)
+    fireEvent.pointerDown(frame(), { clientX: 50, clientY: 50 })
+    fireEvent.pointerUp(frame(), { clientX: 50, clientY: 50 })
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 0, y: 0 },
+    })
+  })
+
   it('types printable input and Enter as text and drops control keys', async () => {
     const { gateway } = await withSurface()
     fireEvent.keyDown(frame(), { key: 'a' })
@@ -381,6 +420,34 @@ describe('PhoneConnectedView toolbar', () => {
 })
 
 describe('PhoneConnectedView error and recovery arms', () => {
+  it('shows the refused and unavailable next-action copy', async () => {
+    renderView(true, new PhoneStreamHttpError(403, 'forbidden', 'forbidden'))
+    await step(() => {})
+    expect(screen.getByText('画面流被拒绝')).toBeTruthy()
+    expect(screen.getByText(/宿主拒绝了本次画面会话/)).toBeTruthy()
+    cleanup()
+
+    const gateway = new FakeGateway()
+    gateway.queueMint({ error: new TypeError('network down') })
+    render(
+      <PhoneConnectedView
+        serial="emulator-5554"
+        name="Pixel_6_API_35"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf(DEVICES))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway,
+          deviceId: serial,
+          retryLimit: 0,
+        })}
+      />,
+    )
+    await step(() => {})
+    expect(screen.getByText('无法连接设备画面')).toBeTruthy()
+    expect(screen.getByText(/画面服务暂时不可达/)).toBeTruthy()
+  })
+
   it('shows the offline card with the reconnect next action when mint 404s', async () => {
     const harness = renderView(true, new PhoneStreamHttpError(404, 'not-found', 'absent from the latest device listing'))
     await step(() => {})

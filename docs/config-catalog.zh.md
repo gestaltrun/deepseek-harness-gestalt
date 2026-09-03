@@ -1739,7 +1739,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-stream/src/index.ts:58`](../packages/phone/phone-stream/src/index.ts)
+来源：[`packages/phone/phone-stream/src/index.ts:57`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 

@@ -9,6 +9,16 @@ import {
   parsePhoneIoReply, PHONE_SESSION_PATH, PhoneStreamHttpError,
 } from '../src/client/phone-stream-client.ts'
 
+async function rejectionOf(run: () => Promise<unknown>): Promise<PhoneStreamHttpError> {
+  try {
+    await run()
+  } catch (error: unknown) {
+    if (error instanceof PhoneStreamHttpError) return error
+    throw error
+  }
+  throw new Error('expected PhoneStreamHttpError')
+}
+
 /** The io upgrade path the Host mints into every session. */
 const MINTED_IO_PATH = '/phone/ws/io'
 
@@ -72,29 +82,44 @@ describe('session minting', () => {
     expect(seen.init.body).toBe(JSON.stringify({ deviceId: 'emulator-5554', format: 'avc' }))
   })
 
+  it('uses the requested device when an otherwise valid response omits its echo', async () => {
+    await stubFetch(200, {
+      ioPath: '/phone/ws/io',
+      mjpeg: { url: '/phone/stream/fallback/mjpeg?token=a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/fallback/h264?token=a', expiresAt: 1234 },
+    })
+    expect((await mintPhoneSession('fallback-device')).deviceId).toBe('fallback-device')
+  })
+
   it('maps error payloads and malformed bodies onto the wire error', async () => {
     await stubFetch(404, { error: { code: 'not-found', message: 'absent from the listing' } })
-    const missing = await mintPhoneSession('gone').catch(error => error)
-    expect(missing).toBeInstanceOf(PhoneStreamHttpError)
+    const missing = await rejectionOf(() => mintPhoneSession('gone'))
     expect(missing.code).toBe('not-found')
 
     await stubFetch(500, 'not json')
-    const broken = await mintPhoneSession('x').catch(error => error)
-    expect(broken).toBeInstanceOf(PhoneStreamHttpError)
+    const broken = await rejectionOf(() => mintPhoneSession('x'))
     expect(broken.code).toBe('http')
 
     await stubFetch(200, { ioPath: 42 })
-    const malformed = await mintPhoneSession('x').catch(error => error)
-    expect(malformed).toBeInstanceOf(PhoneStreamHttpError)
+    await expect(mintPhoneSession('x')).rejects.toBeInstanceOf(PhoneStreamHttpError)
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 500 })))
+    const unparseable = await rejectionOf(() => mintPhoneSession('x'))
+    expect(unparseable.message).toBe('phone session mint failed with HTTP 500')
   })
 
   it('wraps network refusals as status-0 wire errors', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new TypeError('load failed')
     }))
-    const network = await mintPhoneSession('x').catch(error => error)
-    expect(network).toBeInstanceOf(PhoneStreamHttpError)
+    const network = await rejectionOf(() => mintPhoneSession('x'))
     expect(network.status).toBe(0)
+
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw 'socket reset'
+    }))
+    const nonError = await rejectionOf(() => mintPhoneSession('x'))
+    expect(nonError.message).toBe('socket reset')
   })
 })
 
@@ -161,5 +186,16 @@ describe('io socket wiring', () => {
     socket.send('tap')
     socket.close()
     expect(sent).toEqual(['tap'])
+  })
+
+  it('mints through the production gateway facade', async () => {
+    const body = {
+      deviceId: 'R3CN30',
+      ioPath: MINTED_IO_PATH,
+      mjpeg: { url: '/phone/stream/R3CN30/mjpeg?token=a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/R3CN30/h264?token=a', expiresAt: 1234 },
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })))
+    expect((await createHttpPhoneGateway().mintSession('R3CN30')).deviceId).toBe('R3CN30')
   })
 })

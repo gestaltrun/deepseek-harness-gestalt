@@ -180,6 +180,13 @@ describe('PhoneTab empty state', () => {
     expect(screen.getByText('无法读取设备清单')).toBeTruthy()
   })
 
+  it('uses the generic recovery copy when a listing failure has no message', async () => {
+    const source = new FakeListingSource()
+    source.scriptNext(Promise.reject('offline'))
+    await renderTab(true, source)
+    expect(screen.getByText('设备清单请求失败；请重新检测。')).toBeTruthy()
+  })
+
   it('renders the install command when the Host reports PHONE_UNRESOLVED', async () => {
     const source = new FakeListingSource()
     source.scriptNext(Promise.reject(new PhoneStreamHttpError(

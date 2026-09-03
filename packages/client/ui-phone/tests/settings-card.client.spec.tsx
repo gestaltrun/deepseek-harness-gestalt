@@ -19,7 +19,10 @@ import {
   ANDROID_LAUNCH_EMULATOR, IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
 } from '../src/client/phone-wizard-commands.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 function renderCard(view: PhoneEnvironmentView, rest: {
   enabled?: boolean
@@ -41,6 +44,12 @@ function renderCard(view: PhoneEnvironmentView, rest: {
 }
 
 describe('PhoneSettingsCard six states', () => {
+  it('fails loud if a future environment view reaches an unupdated renderer', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    expect(() => { renderCard({ kind: 'future' } as never) })
+      .toThrow(/unhandled phone environment view/)
+  })
+
   it('renders the default-off chrome without a probe body', () => {
     renderCard({ kind: 'off' }, { enabled: false })
     expect(screen.getByRole('heading', { name: '手机设备' })).toBeTruthy()

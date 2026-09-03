@@ -4,12 +4,22 @@ import { Context } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
+import type { RawData } from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
 import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
 const ANDROID = deviceId('emulator-5554')
+
+function parseWebSocketJson(data: RawData): unknown {
+  const bytes = Array.isArray(data)
+    ? Buffer.concat(data)
+    : data instanceof ArrayBuffer
+      ? Buffer.from(new Uint8Array(data))
+      : data
+  return JSON.parse(bytes.toString('utf8')) as unknown
+}
 
 const contexts: Context[] = []
 const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
@@ -25,7 +35,7 @@ async function mount(
 ): Promise<{ context: Context; origin: string }> {
   const fake = await stageFake({ devices, ...fakeKnobs })
   fakes.push(fake)
-  fake.claim()
+  await fake.claim()
   const context = new Context()
   contexts.push(context)
   await context.plugin(WebServer, { host: '127.0.0.1', port: 0 }).await()
@@ -83,7 +93,7 @@ async function rawRequest(options: {
       res.on('end', () => {
         resolve({
           status: res.statusCode ?? 0,
-          contentType: String(res.headers['content-type'] ?? ''),
+          contentType: res.headers['content-type'] ?? '',
           body: Buffer.concat(chunks),
         })
       })
@@ -120,7 +130,7 @@ function readFrame(origin: string, path: string, host: string): Promise<{
         req.destroy()
         resolve({
           status: res.statusCode ?? 0,
-          contentType: String(res.headers['content-type'] ?? ''),
+          contentType: res.headers['content-type'] ?? '',
           body,
         })
       }
@@ -270,12 +280,69 @@ describe('phone stream Host routes', () => {
     expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
   })
 
-  it('cancels the upstream capture when the browser disconnects mid-stream', async () => {
-    // A multi-frame body keeps the upstream open past the client teardown.
-    const { origin } = await mount([wireDevice('emulator-5554', 'android', 'emulator', 'online')], { streamFrameCount: 50 })
+  it('awaits and reports rejected upstream cancellation after a browser disconnect', async () => {
+    const { origin, context } = await mount()
     const host = new URL(origin).host
     const session = await mint(origin)
-    await readFrame(origin, session.mjpeg.url, host)
+    const cancellationStarted = Promise.withResolvers<undefined>()
+    const cancellationRelease = Promise.withResolvers<undefined>()
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation(() => undefined)
+    context.phoneDevices.startCapture = async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0x00, 0x00, 0x00, 0x01]))
+        },
+        async cancel() {
+          cancellationStarted.resolve(undefined)
+          await cancellationRelease.promise
+        },
+      }),
+    })
+    const url = new URL(origin)
+    await new Promise<void>((resolve, reject) => {
+      const req = httpRequest({
+        hostname: url.hostname,
+        port: url.port,
+        method: 'GET',
+        path: session.h264.url,
+        headers: { host },
+      }, (res) => {
+        res.once('data', () => {
+          res.destroy()
+          resolve()
+        })
+        res.once('error', (error) => {
+          if ((error as NodeJS.ErrnoException).code === 'ECONNRESET') resolve()
+          else reject(error)
+        })
+      })
+      req.once('error', reject)
+      req.end()
+    })
+    await cancellationStarted.promise
+    expect(warn).not.toHaveBeenCalled()
+    cancellationRelease.reject(new Error('capture cancellation failed'))
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.objectContaining({ message: 'capture cancellation failed' }))
+    })
+  })
+
+  it('closes the browser response when the upstream capture stream fails', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    context.phoneDevices.startCapture = async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error('capture stream failed'))
+        },
+      }),
+    })
+    const body = fetch(`${origin}${session.h264.url}`, { headers: { host } })
+      .then(async response => await response.arrayBuffer())
+    await expect(body).rejects.toThrow()
   })
 
   it('forwards tap JSON-RPC over the trusted WebSocket upgrade', async () => {
@@ -289,7 +356,7 @@ describe('phone stream Host routes', () => {
       socket.once('error', reject)
     })
     const reply = new Promise<unknown>((resolve) => {
-      socket.once('message', (data) => { resolve(JSON.parse(String(data))) })
+      socket.once('message', (data) => { resolve(parseWebSocketJson(data)) })
     })
     socket.send(JSON.stringify({
       jsonrpc: '2.0',
@@ -362,13 +429,15 @@ describe('phone stream Host routes', () => {
       socket.once('error', reject)
     })
     const next = (): Promise<unknown> => new Promise((resolve) => {
-      socket.once('message', (data) => { resolve(JSON.parse(String(data))) })
+      socket.once('message', (data) => { resolve(parseWebSocketJson(data)) })
     })
     socket.send('not-json')
     expect(await next()).toMatchObject({ error: { code: -32700 } })
     socket.send('null')
     expect(await next()).toMatchObject({ error: { code: -32600 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'swipe', params: { deviceId: 'emulator-5554' } }))
+    expect(await next()).toMatchObject({ error: { code: -32000 } })
+    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 13, method: 42, params: { deviceId: 'emulator-5554' } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tap', params: { deviceId: 'emulator-5554', x: 1 } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
@@ -403,6 +472,44 @@ describe('phone stream Host routes', () => {
       throw new Error('capture backend down')
     }
     expect((await rawRequest({ origin, path: session.mjpeg.url, host })).status).toBe(502)
+  })
+
+  it('normalizes a non-Error capture failure at the Host boundary', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    context.phoneDevices.startCapture = async () => {
+      throw 17
+    }
+    const response = await rawRequest({ origin, path: session.h264.url, host })
+    expect(response.status).toBe(502)
+    expect(response.body.toString('utf8')).toContain('17')
+  })
+
+  it('normalizes a non-Error IO failure at the WebSocket boundary', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    context.phoneDevices.io = async () => {
+      throw 'io failed'
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => { resolve() })
+      socket.once('error', reject)
+    })
+    const reply = new Promise<{ error?: { message?: string } }>((resolve) => {
+      socket.once('message', (data) => {
+        resolve(parseWebSocketJson(data) as { error?: { message?: string } })
+      })
+    })
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 12,
+      method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 1, y: 2 },
+    }))
+    expect((await reply).error?.message).toBe('io failed')
+    socket.close()
   })
 
   it('destroys an untrusted IO upgrade before protocol negotiation', async () => {

@@ -51,6 +51,39 @@ const DEVICE_GROUPS: readonly {
   { id: 'usb', title: 'USB 真机' },
 ]
 
+type PhoneEnvironmentKind = PhoneEnvironmentView['kind']
+
+const TITLES = {
+  off: '手机设备',
+  probing: '手机设备',
+  'android-wizard': '创建第一台 Android 模拟器',
+  'ios-wizard': 'iOS 环境差两步',
+  ready: '手机设备',
+  errors: '手机设备',
+} satisfies Record<PhoneEnvironmentKind, string>
+
+const DESCRIPTIONS = {
+  off: '把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。',
+  probing: '正在检测本机的调试工具与模拟器运行时，检测完成后按缺失项给出指引。',
+  'android-wizard': '需要 Android SDK 命令行工具；插件不会替你下载 SDK 二进制。依次执行以下命令（macOS / Linux）：',
+  'ios-wizard': '仅 macOS 可用；需要完整 Xcode。先补齐模拟器运行时，再创建一台 iPhone 模拟器。',
+  ready: '环境就绪。点击任一设备的「打开面板」在右侧查看实时画面，Agent 的 device_* 工具同时生效。',
+  errors: '启用后发现的问题列在这里，每条都带下一步动作；处理完条目自动消失。',
+} satisfies Record<PhoneEnvironmentKind, string>
+
+const FOOTERS = {
+  off: <p className={css.foot}>关闭时不注册任何 device_* 工具，也不监听 adb / mobilecli 进程；本机环境不受影响。</p>,
+  probing: null,
+  'android-wizard': <p className={css.foot}>完成后点右上角「重新检测」，AVD 出现在清单即可打开面板。USB 真机无需此步，打开 USB 调试并授权即可。</p>,
+  'ios-wizard': <p className={css.foot}>模拟器不需要 WDA；真机上的每次点击都有真实后果，涉及登录与支付的步骤请人工接管。</p>,
+  ready: <p className={css.foot}>停止的设备先用「启动」拉起再打开面板；清单变化会实时刷新，无需重启会话。</p>,
+  errors: null,
+} satisfies Record<PhoneEnvironmentKind, ReactNode>
+
+function assertNever(value: never): never {
+  throw new Error(`unhandled phone environment view: ${JSON.stringify(value)}`)
+}
+
 /**
  * Render the phone settings card for one environment view.
  * @param props - enable flag, environment view, and the card's callbacks.
@@ -96,42 +129,11 @@ export function PhoneSettingsCard(props: PhoneSettingsCardProps): ReactNode {
 }
 
 function titleOf(view: PhoneEnvironmentView): string {
-  switch (view.kind) {
-    case 'android-wizard': return '创建第一台 Android 模拟器'
-    case 'ios-wizard': return 'iOS 环境差两步'
-    case 'off':
-    case 'probing':
-    case 'ready':
-    case 'errors':
-      return '手机设备'
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
-  }
+  return TITLES[view.kind]
 }
 
 function descriptionOf(view: PhoneEnvironmentView): string {
-  switch (view.kind) {
-    case 'off':
-      return '把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。'
-    case 'probing':
-      return '正在检测本机的调试工具与模拟器运行时，检测完成后按缺失项给出指引。'
-    case 'android-wizard':
-      return '需要 Android SDK 命令行工具；插件不会替你下载 SDK 二进制。依次执行以下命令（macOS / Linux）：'
-    case 'ios-wizard':
-      return '仅 macOS 可用；需要完整 Xcode。先补齐模拟器运行时，再创建一台 iPhone 模拟器。'
-    case 'ready':
-      return '环境就绪。点击任一设备的「打开面板」在右侧查看实时画面，Agent 的 device_* 工具同时生效。'
-    case 'errors':
-      return '启用后发现的问题列在这里，每条都带下一步动作；处理完条目自动消失。'
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
-  }
+  return DESCRIPTIONS[view.kind]
 }
 
 function bodyOf(
@@ -151,33 +153,13 @@ function bodyOf(
       return <ReadyBody devices={view.devices} />
     case 'errors':
       return <ErrorsBody errors={view.errors} onNextAction={actions.onNextAction} />
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
+    default:
+      return assertNever(view)
   }
 }
 
 function footerOf(view: PhoneEnvironmentView): ReactNode {
-  switch (view.kind) {
-    case 'off':
-      return <p className={css.foot}>关闭时不注册任何 device_* 工具，也不监听 adb / mobilecli 进程；本机环境不受影响。</p>
-    case 'android-wizard':
-      return <p className={css.foot}>完成后点右上角「重新检测」，AVD 出现在清单即可打开面板。USB 真机无需此步，打开 USB 调试并授权即可。</p>
-    case 'ios-wizard':
-      return <p className={css.foot}>模拟器不需要 WDA；真机上的每次点击都有真实后果，涉及登录与支付的步骤请人工接管。</p>
-    case 'ready':
-      return <p className={css.foot}>停止的设备先用「启动」拉起再打开面板；清单变化会实时刷新，无需重启会话。</p>
-    case 'probing':
-    case 'errors':
-      return null
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
-  }
+  return FOOTERS[view.kind]
 }
 
 function ProbingBody({ checks }: { checks: readonly PhoneEnvironmentCheck[] }): ReactNode {

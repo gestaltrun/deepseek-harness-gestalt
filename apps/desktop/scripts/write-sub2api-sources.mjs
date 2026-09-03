@@ -70,7 +70,7 @@ function requireHttpsUrl(value, key, field) {
   let parsed
   try {
     parsed = new URL(value)
-  } catch {
+  } catch (_invalidUrl) {
     throw new TypeError(`Desktop Sub2API source catalog entry ${key} field ${field} is not an absolute URL: ${value}`)
   }
   if (parsed.protocol !== 'https:') {

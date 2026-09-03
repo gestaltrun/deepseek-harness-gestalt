@@ -1765,7 +1765,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-runtime/src/index.ts:109`](../packages/phone/phone-runtime/src/index.ts)
+Source: [`packages/phone/phone-runtime/src/index.ts:110`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 
@@ -3198,7 +3198,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/tool-phone/src/index.ts:23`](../packages/phone/tool-phone/src/index.ts)
+Source: [`packages/phone/tool-phone/src/index.ts:24`](../packages/phone/tool-phone/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

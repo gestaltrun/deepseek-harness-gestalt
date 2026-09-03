@@ -137,8 +137,48 @@ describe('Desktop phone tab live chain', () => {
         y: Math.round(pointer.y / 3),
       },
     })
+    expect(afterTap.scroll['8294A429-4C99-411F-A46D-0AD9499B7FDD'] ?? 0).toBe(0)
 
-    const beforeHome = afterTap.io.length
+    const beforeSwipe = afterTap.io.length
+    const beforeOffset = afterTap.scroll['8294A429-4C99-411F-A46D-0AD9499B7FDD'] ?? 0
+    await browser.execute(() => {
+      const target = document.querySelector<HTMLDivElement>('div[role="application"]')
+      if (target === null) throw new Error('phone surface is required')
+      const rect = target.getBoundingClientRect()
+      const originX = rect.left + rect.width * 0.5
+      const originY = rect.top + rect.height * 0.7
+      const releaseY = rect.top + rect.height * 0.3
+      target.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true, pointerId: 21, clientX: originX, clientY: originY,
+      }))
+      target.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true, pointerId: 21, clientX: originX, clientY: releaseY,
+      }))
+      target.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true, pointerId: 21, clientX: originX, clientY: releaseY,
+      }))
+    })
+    const afterSwipe = await waitForFakeIo(counters => counters.io.length === beforeSwipe + 1)
+    const swipe = afterSwipe.io.at(-1)
+    expect(swipe).toMatchObject({
+      method: 'device.io.gesture',
+      params: { deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD' },
+    })
+    const actions = swipe?.params?.actions ?? []
+    expect(actions).toEqual([
+      { type: 'pointerMove', x: expect.any(Number), y: expect.any(Number) },
+      { type: 'pointerDown' },
+      { type: 'pointerMove', x: expect.any(Number), y: expect.any(Number) },
+      { type: 'pause', duration: 150 },
+      { type: 'pointerUp' },
+    ])
+    const origin = actions[0] as { readonly y: number }
+    const destination = actions[2] as { readonly y: number }
+    expect(origin.y).not.toBe(destination.y)
+    const afterOffset = afterSwipe.scroll['8294A429-4C99-411F-A46D-0AD9499B7FDD'] ?? 0
+    expect(afterOffset).not.toBe(beforeOffset)
+
+    const beforeHome = afterSwipe.io.length
     await browser.$('button[aria-label="主屏幕"]').click()
     const afterHome = await waitForFakeIo(counters => counters.io.length === beforeHome + 1)
     expect(afterHome.io.at(-1)).toMatchObject({
@@ -162,7 +202,10 @@ describe('Desktop phone tab live chain', () => {
       params: { deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', button: 'HOME' },
     })
     await writeArtifact('ios-control-chain.json', {
-      encoding: 'MJPEG', gui: afterHome.io.slice(-2), agent: afterAgent.io.at(-1),
+      encoding: 'MJPEG',
+      gui: afterHome.io.slice(-3),
+      scroll: afterSwipe.scroll['8294A429-4C99-411F-A46D-0AD9499B7FDD'],
+      agent: afterAgent.io.at(-1),
     })
 
     await clickSurfaceButton('切换设备：iPhone 16')

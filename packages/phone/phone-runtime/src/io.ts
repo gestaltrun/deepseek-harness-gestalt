@@ -1,10 +1,16 @@
 /**
- * Input coordinate normalization for mobilecli device-control calls.
+ * Input coordinate normalization for mobilecli device-control calls, plus
+ * re-export of the browser-safe WDA swipe encoder.
  * @module @deepseek-ai/dsh-phone-runtime/io
  */
 
 import { PhoneDevicesError } from './errors.ts'
 import type { PhoneIoRequest } from './types.ts'
+
+export {
+  PHONE_SWIPE_MOVE_DURATION_MS,
+  phoneSwipeActions,
+} from './swipe.ts'
 
 /**
  * Parse the logical-point scale from mobilecli 1.0.5's `device.info` result.

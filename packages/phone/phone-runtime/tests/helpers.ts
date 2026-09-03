@@ -89,6 +89,7 @@ export interface StagedFake {
     infoCount: number
     io: unknown[]
     captures: Array<{ readonly deviceId: string; readonly format: string }>
+    scroll: Record<string, number>
   }>
   /** Resolves when the RPC endpoint answers or rejects when the fake is gone. */
   awaitOnline(timeoutMs?: number): Promise<void>
@@ -246,6 +247,7 @@ export async function stageFake(
         infoCount: number
         io: unknown[]
         captures: Array<{ readonly deviceId: string; readonly format: string }>
+        scroll: Record<string, number>
       }> {
         return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
           requests: number
@@ -254,6 +256,7 @@ export async function stageFake(
           infoCount: number
           io: unknown[]
           captures: Array<{ readonly deviceId: string; readonly format: string }>
+          scroll: Record<string, number>
         }
       },
       async awaitOnline(timeoutMs = 5_000): Promise<void> {

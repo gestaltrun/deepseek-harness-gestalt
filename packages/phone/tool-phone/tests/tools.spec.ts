@@ -303,8 +303,10 @@ describe('deferred phone device Consumer', () => {
         deviceId: ANDROID_ID,
         method: 'gesture',
         actions: [
-          { type: 'pointerDown', x: 1, y: 2 },
+          { type: 'pointerMove', x: 1, y: 2 },
+          { type: 'pointerDown' },
           { type: 'pointerMove', x: 3, y: 4 },
+          { type: 'pause', duration: 150 },
           { type: 'pointerUp' },
         ],
       },

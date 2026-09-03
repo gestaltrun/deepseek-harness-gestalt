@@ -8,7 +8,12 @@
  */
 import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  WheelEvent as ReactWheelEvent,
+} from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneListingSource } from './registry.ts'
 import { PhoneH264PlaybackOwner, PhoneH264Surface } from './PhoneH264Surface.tsx'
@@ -106,6 +111,14 @@ const FAILURE_COPY: Record<PhoneStreamFailureKind, {
 
 /** Pointer travel (px) below which a press still counts as a tap. */
 const DRAG_THRESHOLD_PX = 6
+/** Idle gap after which a trackpad wheel burst becomes one vertical swipe. */
+const WHEEL_BURST_IDLE_MS = 50
+/** Pixel travel of one `DOM_DELTA_LINE` wheel unit on the live frame. */
+const WHEEL_LINE_PX = 16
+/** Minimum normalized vertical travel of a coalesced wheel swipe. */
+const WHEEL_MIN_TRAVEL = 0.08
+/** Maximum normalized vertical travel of a coalesced wheel swipe. */
+const WHEEL_MAX_TRAVEL = 0.4
 
 /** The toolbar icon glyphs, drawn inline to stay on the primitives idiom. */
 function ChevronDown(): ReactNode {
@@ -189,6 +202,11 @@ export function PhoneConnectedView({
     readonly trail: Array<{ u: number; v: number }>
     dragging: boolean
   } | undefined>(undefined)
+  const wheel = useRef<{
+    deltaY: number
+    surfaceHeight: number
+    handle: ReturnType<typeof setTimeout>
+  } | undefined>(undefined)
 
   const releaseDrag = useCallback((): void => {
     const state = drag.current
@@ -198,13 +216,22 @@ export function PhoneConnectedView({
     }
   }, [])
 
+  const releaseWheel = useCallback((): void => {
+    if (wheel.current !== undefined) clearTimeout(wheel.current.handle)
+    wheel.current = undefined
+  }, [])
+
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
   useEffect(() => () => {
     releaseDrag()
+    releaseWheel()
     controller.dispose()
-  }, [controller, releaseDrag])
+  }, [controller, releaseDrag, releaseWheel])
   const liveStreamUrl = phase.kind === 'live' ? phase.streamUrl : undefined
-  useEffect(() => () => { releaseDrag() }, [liveStreamUrl, releaseDrag, visible])
+  useEffect(() => () => {
+    releaseDrag()
+    releaseWheel()
+  }, [liveStreamUrl, releaseDrag, releaseWheel, visible])
   useEffect(() => {
     // The dropdown needs the fleet even when this tab restored from layout
     // without the picker having pulled first; a failed pull keeps the
@@ -261,6 +288,27 @@ export function PhoneConnectedView({
     if (state === undefined || state.pointerId !== event.pointerId) return
     drag.current = undefined
     state.target.releasePointerCapture(event.pointerId)
+  }
+
+  const onWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+    if (event.deltaY === 0) return
+    event.preventDefault()
+    const surfaceHeight = event.currentTarget.getBoundingClientRect().height
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? WHEEL_LINE_PX
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? surfaceHeight : 1
+    const deltaY = (wheel.current?.deltaY ?? 0) + event.deltaY * unit
+    if (wheel.current !== undefined) clearTimeout(wheel.current.handle)
+    const handle = setTimeout(() => {
+      wheel.current = undefined
+      const travel = Math.min(WHEEL_MAX_TRAVEL, Math.max(WHEEL_MIN_TRAVEL, Math.abs(deltaY) / Math.max(1, surfaceHeight)))
+      const direction = Math.sign(deltaY)
+      controller.swipe([
+        { u: 0.5, v: 0.5 + direction * travel / 2 },
+        { u: 0.5, v: 0.5 - direction * travel / 2 },
+      ])
+    }, WHEEL_BURST_IDLE_MS)
+    wheel.current = { deltaY, surfaceHeight, handle }
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -322,13 +370,14 @@ export function PhoneConnectedView({
       return (
         <div
           role="application"
-          aria-label={`${name} 画面，点击发送触控，按住拖动为滑动，键入发送文本`}
+          aria-label={`${name} 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本`}
           tabIndex={0}
           className={css.screenFrame}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerCancel}
+          onWheel={onWheel}
           onKeyDown={onKeyDown}
         >
           {surface}
@@ -468,7 +517,7 @@ export function PhoneConnectedView({
           </svg>
         </button>
       </div>
-      <div className={css.hintline}>点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。</div>
+      <div className={css.hintline}>点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。</div>
     </div>
   )
 }

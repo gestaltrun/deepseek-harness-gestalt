@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
+import { phoneSwipeActions } from '@deepseek-ai/dsh-phone-runtime/swipe'
 import type { DeviceId, PhoneDeviceList, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
@@ -291,11 +292,10 @@ function ioRequestFrom(id: DeviceId, action: DeviceAction): PhoneIoRequest {
     return {
       deviceId: id,
       method: 'gesture',
-      actions: [
-        { type: 'pointerDown', x: action.x1, y: action.y1 },
-        { type: 'pointerMove', x: action.x2, y: action.y2 },
-        { type: 'pointerUp' },
-      ],
+      actions: phoneSwipeActions([
+        { x: action.x1, y: action.y1 },
+        { x: action.x2, y: action.y2 },
+      ]),
     }
   }
   if (action.kind === 'type') return { deviceId: id, method: 'text', text: action.text }

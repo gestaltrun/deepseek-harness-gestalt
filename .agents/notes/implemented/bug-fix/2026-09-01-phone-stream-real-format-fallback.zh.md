@@ -14,11 +14,11 @@ phone runtime 会验证每一条 `devices.list` 记录，再为每个 `(platform
 
 Host 把 H264 标为 Android 设备与 iOS 真机的首选格式。iOS Simulator 这个 mobilecli 设备类别会明确拒绝 AVC，因此 Host 把 MJPEG 标为其首选格式。Android H264 到达 renderer 前，runtime 会有界识别 SPS/PPS/IDR 前缀。无效或探测超时的 mobilecli AVC 先切到 Android 系统 `screenrecord --output-format=h264`；两条 H264 源都失败后才进入 renderer 的同 session MJPEG 策略。live IDR 的 slice header 完整后即可接纳，无需等待画面运动产生下一个 NAL 分隔符。devbar 只显示 live 编码，不展示 fallback 原因。Android 与 iOS 真机 session 都托管设备 agent 恢复；Android io 被拒绝后会检查 agent 并提供一键安装，OEM 要求的 USB 安装或调试安全确认仍在手机上完成。
 
-已连接画面在按下时捕获活动 pointer。它记录每个归一化 move，把松开位移也纳入拖动阈值判定，发送完整 `pointerDown` / `pointerMove`... / `pointerUp` 路径，并在完成或取消时释放捕获。隐藏 tab、更换设备/controller 或替换 live stream 也会释放并丢弃待发路径。取消与生命周期替换都不发送不完整 gesture。
+已连接画面在按下时捕获活动 pointer。它记录每个归一化 move，把松开位移也纳入拖动阈值判定，并把起点与松开交给 [iOS swipe 笔记](2026-09-02-phone-ios-wda-swipe-gesture.zh.md) 拥有的共享 WDA swipe 编码器。合并后的触控板滚动沿纵轴发送同一条 swipe。完成或取消时释放捕获。隐藏 tab、更换设备/controller 或替换 live stream 也会释放并丢弃待发路径。取消与生命周期替换都不发送不完整 gesture。
 
 ## 验证
 
-包测试固定 `(platform, id)` 去重、首行选择、跨平台歧义拒绝、设备类别首选格式、无需再次铸造或换 socket 的同 session 回退、陈旧回调拒绝、MJPEG natural 尺寸触控映射、完整的已捕获拖动路径、取消，以及只在 MJPEG 失败后重试。built Desktop fixture 覆盖重复清单输入、H264 HTTP 200 错误正文随后出现可见 390×844 MJPEG、另一台设备成功显示 390×844 H264、精确触控与 Home io，以及完整的进程、端口和临时根目录 teardown。fixture 仅是自动化证据；用户验收仍需在真实 Android 手机、iOS 真机与 iOS Simulator 上看到 live 画面并完成控制。
+包测试固定 `(platform, id)` 去重、首行选择、跨平台歧义拒绝、设备类别首选格式、无需再次铸造或换 socket 的同 session 回退、陈旧回调拒绝、MJPEG natural 尺寸触控映射、WDA 位移时长 swipe 编码、合并后的滚轮 swipe、取消，以及只在 MJPEG 失败后重试。built Desktop fixture 覆盖重复清单输入、H264 HTTP 200 错误正文随后出现可见 390×844 MJPEG、另一台设备成功显示 390×844 H264、精确触控与 Home io，以及完整的进程、端口和临时根目录 teardown。fixture 仅是自动化证据；用户验收仍需在真实 Android 手机、iOS 真机与 iOS Simulator 上看到 live 画面并完成控制。
 
 ## Alternatives considered
 

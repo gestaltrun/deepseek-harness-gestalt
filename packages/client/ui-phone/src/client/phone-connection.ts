@@ -9,6 +9,7 @@
  * without a browser.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
+import { phoneSwipeActions } from '@deepseek-ai/dsh-phone-runtime/swipe'
 import {
   encodePhoneIoFrame, isUnauthorizedMessage, parsePhoneIoReply, PhoneStreamHttpError,
   type PhoneAgentStatusView, type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
@@ -353,20 +354,22 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Send a drag as a `pointerDown`/`pointerMove`…/`pointerUp` gesture.
+   * Send a drag as the WDA gesture mobilecli's iOS converter consumes.
+   * Positioning `pointerMove` precedes `pointerDown`; pauses supply drag duration.
    * @param points - the drag path in normalized screen points.
    * @returns false when the path is empty, the surface unknown, or not live.
    */
   swipe(points: readonly PhoneScreenPoint[]): boolean {
     const surface = this.surface
-    if (surface === undefined || points.length === 0) return false
-    const mapped = points.map(point => devicePointOf(point, surface))
-    const actions = mapped.map((point, index) => ({
-      type: index === 0 ? 'pointerDown' : index === mapped.length - 1 ? 'pointerUp' : 'pointerMove',
-      x: point.x,
-      y: point.y,
-    }))
-    return this.send({ method: 'gesture', actions })
+    const origin = points[0]
+    const release = points[points.length - 1]
+    if (surface === undefined || origin === undefined || release === undefined) return false
+    const start = devicePointOf(origin, surface)
+    const end = devicePointOf(release, surface)
+    return this.send({
+      method: 'gesture',
+      actions: phoneSwipeActions([start, end]),
+    })
   }
 
   /**

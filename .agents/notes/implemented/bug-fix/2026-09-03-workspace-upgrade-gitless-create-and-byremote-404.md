@@ -10,7 +10,7 @@ Desktop Workspace settings could not complete Cloud Project create. The 云项�
 
 ## Decision
 
-`projectByRemote` treats HTTP 204 and production HTTP 404 as unbound. Other non-OK answers still reject. Workspace settings loads the current Account's Project and the local Git remote independently, so an unbound 404 cannot wipe a successfully read origin. `createBlocked` is name-only: Git remote is optional and read-only when present.
+`projectByRemote` treats HTTP 204 and production HTTP 404 as unbound. Other non-OK answers still reject. `pendingInvitations` treats HTTP 204 and production HTTP 404 as an empty list. Desktop's official-Node HTTPS helper reconstructs 204/205/304 with a null Fetch body so heartbeat and unbound `by-remote` do not throw `Invalid response status code 204`. Workspace settings loads the current Account's Project and the local Git remote independently, so an unbound 404 cannot wipe a successfully read origin. `createBlocked` is name-only: Git remote is optional and read-only when present.
 
 A Workspace without origin, or whose origin fails `normalizeGitRemoteUrl`, creates and recovers through `localWorkspaceRemoteUrl(workspaceId)`, the canonical Platform remote `local://workspace/<id>`. The identity stays case-exact; empty ids and ids containing `/`, `?`, or `#` remain `INVALID_REMOTE_URL`. Browser bundles import that constructor from `@deepseek-ai/dsh-project-membership/remote-url`. Create still persists the founder Account/Project/Workspace binding before the roster renders. Reopening settings on that exact Workspace recovers through origin when present, otherwise the sentinel.
 
@@ -36,7 +36,8 @@ Git-less create binds the local Workspace through `local://workspace/<id>` and r
 
 ## Testing
 
-- `packages/platform/project-membership-client/tests/membership-client.client.spec.ts` pins production 404 as unbound.
+- `packages/platform/project-membership-client/tests/membership-client.client.spec.ts` pins production 404 as unbound and pending 204/404 as an empty list.
+- `apps/desktop/tests/system-node-fetch-helper.spec.ts` reconstructs membership heartbeat HTTP 204 without a Fetch body.
 - `packages/platform/project-membership/tests/remote-url.spec.ts` pins `local://workspace/<id>` and rejects empty or nested identities.
 - `packages/client/ui-workspace/tests/apply.client.spec.ts` pins Git-less create and sentinel recovery.
 - `packages/client/ui-workspace/tests/workspace-settings.client.spec.tsx` pins name-only `createBlocked`, independent remote load, and visible Git-less create.

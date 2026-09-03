@@ -8,7 +8,8 @@
  * Error answers keep the domain envelope: non-OK responses reject with the
  * stable code and HTTP status, so a 403 role gate surfaces as
  * `ROLE_REQUIRED`/403 rather than a generic failure. `projectByRemote` treats
- * HTTP 204 and HTTP 404 as unbound.
+ * HTTP 204 and HTTP 404 as unbound. `pendingInvitations` treats HTTP 204 and
+ * HTTP 404 as an empty list.
  * @module @deepseek-ai/dsh-project-membership-client
  */
 
@@ -121,6 +122,12 @@ export interface ProjectMembershipTransport {
     input: InvitationDecisionInput,
   ): Promise<MemberView | undefined>
   retractInvitation(authorization: MembershipAuthorization, invitationId: InvitationId): Promise<void>
+  /**
+   * List trusted pending invitation cards for the current Account.
+   * @param authorization - current-installation Account session presentation.
+   * @returns trusted pending invitation cards. HTTP 204 and HTTP 404 are an
+   *   empty list; other non-OK answers reject.
+   */
   pendingInvitations(authorization: MembershipAuthorization): Promise<readonly PendingInvitationView[]>
   issuedInvitations(
     authorization: MembershipAuthorization,
@@ -183,7 +190,8 @@ export interface ProjectMembershipClient {
   retractInvitation(invitationId: InvitationId): Promise<void>
   /**
    * List trusted pending invitation cards for the current Account.
-   * @returns trusted pending invitation cards.
+   * @returns trusted pending invitation cards. HTTP 204 and HTTP 404 are an
+   *   empty list; other non-OK answers reject.
    */
   pendingInvitations(): Promise<readonly PendingInvitationView[]>
   /**
@@ -298,10 +306,15 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
   }
 
   async pendingInvitations(authorization: MembershipAuthorization): Promise<readonly PendingInvitationView[]> {
-    const rows = await this.json('/v1/projects/invitations/pending', {
-      method: 'GET', headers: authorization,
-    }, parseArray)
-    return rows.map(parsePendingInvitationView)
+    const response = await this.fetch(
+      `${this.origin}/v1/projects/invitations/pending`,
+      jsonRequest({ method: 'GET', headers: authorization }),
+    )
+    // Production Platform answers no pending rows with 404; the development
+    // HTTP consumer answers 200 []. Neither is a dialog-blocking failure.
+    if (response.status === 204 || response.status === 404) return []
+    if (!response.ok) throw await projectMembershipRequestError(response)
+    return parseArray(await response.json()).map(parsePendingInvitationView)
   }
 
   async issuedInvitations(

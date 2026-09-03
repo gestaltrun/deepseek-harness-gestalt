@@ -78,7 +78,7 @@ export function createDesktopSystemNodeFetch(options: DesktopSystemNodeFetchOpti
           Math.max(1, Math.floor(remainingMs / (candidates.length - index))),
           'request',
         )
-        return new Response(Uint8Array.from(response.body).buffer, {
+        return new Response(fetchBody(response.status, response.body), {
           status: response.status,
           statusText: response.statusText,
           headers: response.headers,
@@ -138,6 +138,13 @@ async function runCandidate(
     child.kill()
     await closed.promise
   }
+}
+
+function fetchBody(status: number, body: Uint8Array): ArrayBuffer | null {
+  // Fetch forbids a body on 204/205/304; membership heartbeat and unbound
+  // by-remote both answer 204 with an empty payload.
+  if (status === 204 || status === 205 || status === 304) return null
+  return Uint8Array.from(body).buffer
 }
 
 function parseUrl(input: RequestInfo | URL): URL {

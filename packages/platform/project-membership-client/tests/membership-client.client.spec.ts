@@ -169,6 +169,17 @@ describe('ProjectMembershipHttpTransport', () => {
     await expect(transport.projectByRemote(AUTH, 'https://github.com/o/missing')).resolves.toBeUndefined()
   })
 
+  it('resolves pending invitation 204 and production 404 to an empty list', async () => {
+    const empty = wire({
+      'GET /v1/projects/invitations/pending': { status: 204 },
+    })
+    await expect(empty.transport.pendingInvitations(AUTH)).resolves.toEqual([])
+    const missing = wire({
+      'GET /v1/projects/invitations/pending': { status: 404 },
+    })
+    await expect(missing.transport.pendingInvitations(AUTH)).resolves.toEqual([])
+  })
+
   it('rejects a non-unbound projectByRemote failure', async () => {
     const { transport } = wire({
       'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fr': {

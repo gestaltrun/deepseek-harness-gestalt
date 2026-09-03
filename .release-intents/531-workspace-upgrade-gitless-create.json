@@ -3,8 +3,8 @@
   "version": 1,
   "id": "531-workspace-upgrade-gitless-create",
   "summary": {
-    "en": "Allow Cloud Project create from a git-less Workspace and treat production byRemote 404 as unbound.",
-    "zh": "允许无 Git 的 Workspace 创建 Cloud Project，并将生产环境 byRemote 404 视为未绑定。"
+    "en": "Allow Cloud Project create from a git-less Workspace, treat production byRemote/pending 404 as unbound/empty, and reconstruct Desktop HTTP 204 without a Fetch body.",
+    "zh": "允许无 Git 的 Workspace 创建 Cloud Project，将生产环境 byRemote/pending 404 视为未绑定/空列表，并用无 Fetch body 重建 Desktop HTTP 204。"
   },
   "releases": {
     "desktop": "patch",
@@ -14,7 +14,7 @@
   "compatibilityExceptions": [
     {
       "releaseUnit": "mobile",
-      "reason": "Mobile does not compose Workspace settings, the membership client 404 mapping, or the local://workspace sentinel used for git-less Cloud Project create."
+      "reason": "Mobile does not compose Workspace settings, the membership client 404 mapping, the Desktop HTTP 204 reconstruction, or the local://workspace sentinel used for git-less Cloud Project create."
     }
   ]
 }

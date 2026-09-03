@@ -95,6 +95,7 @@
       "out/main.mjs",
       "out/preload.cjs",
       "out/operated-platform.json",
+      "out/sub2api-sources.json",
       "cordis.patch.yml",
       "package.json"
     ],

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
@@ -205,6 +207,10 @@ describe('workspace settings and invite wizard (M4)', () => {
       for (const label of online) {
         expect(label.className).toMatch(/visuallyHidden/)
       }
+      // jsdom never resolves CSS-module rules, so the clip contract is pinned
+      // against the stylesheet source: 在线 must not wrap inside the 16px slot.
+      const stylesheet = await readFile(join(process.cwd(), 'packages/client/ui-workspace/src/client/WorkspaceSettings.module.css'), 'utf8')
+      expect(stylesheet).toMatch(/\.visuallyHidden\s*\{[^}]*position:\s*absolute[^}]*clip/s)
       const row = mona.parentElement
       expect(row?.className).toMatch(/memberRow/)
       expect(getComputedStyle(row!).flexDirection).toBe('row')

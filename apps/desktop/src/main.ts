@@ -12,7 +12,7 @@ import {
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
 import {
-  ACCOUNT_ACCEPT_PRIVACY, ACCOUNT_BEGIN_LOGIN, ACCOUNT_GET_SNAPSHOT,
+  ACCOUNT_ACCEPT_PRIVACY, ACCOUNT_BEGIN_LOGIN, ACCOUNT_CANCEL_LOGIN, ACCOUNT_GET_SNAPSHOT,
   ACCOUNT_SIGN_OUT, ACCOUNT_SNAPSHOT_CHANGED,
   PROJECT_MEMBERSHIP_BY_REMOTE, PROJECT_MEMBERSHIP_CHANGE_ROLE, PROJECT_MEMBERSHIP_CREATE, PROJECT_MEMBERSHIP_DECIDE,
   PROJECT_MEMBERSHIP_INVITE, PROJECT_MEMBERSHIP_ISSUED, PROJECT_MEMBERSHIP_PENDING, PROJECT_MEMBERSHIP_REMOVE,
@@ -868,6 +868,7 @@ function installIpc(): void {
     })
     return account.getSnapshot()
   })
+  ipcMain.handle(ACCOUNT_CANCEL_LOGIN, () => account.cancelLogin())
   ipcMain.handle(ACCOUNT_SIGN_OUT, async () => {
     const snapshot = await account.signOut()
     await pairing.deactivate('mobile-access-disabled')
@@ -1092,7 +1093,8 @@ function createDesktopAccount(environment: SelectedPlatformEnvironment): Desktop
     store,
     presentation: desktopInstallationPresentation({ hostname: hostname(), platform: process.platform }),
     systemBrowser: {
-      open: async (url) => {
+      open: async (url, options) => {
+        if (options?.signal?.aborted) return
         if (!app.isPackaged && process.env.DSH_DESKTOP_E2E_AUTO_AUTHORIZE === '1') {
           const response = await systemFetch(url)
           if (!response.ok) {

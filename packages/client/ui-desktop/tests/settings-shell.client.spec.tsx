@@ -219,6 +219,7 @@ function bridge(account: DesktopAccountSnapshot, pairing: DesktopPairingSnapshot
     accountGetSnapshot: vi.fn().mockResolvedValue(account),
     accountAcceptPrivacy: vi.fn(),
     accountBeginLogin: vi.fn(),
+    accountCancelLogin: vi.fn(),
     accountSignOut: vi.fn(),
     onAccountSnapshot: vi.fn(() => () => {}),
     pairingGetSnapshot: vi.fn().mockResolvedValue(pairing),

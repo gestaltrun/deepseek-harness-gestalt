@@ -12,13 +12,13 @@ Per-ticket pull requests, a root session that merges, and exploration notes comm
 
 [Delivery orchestration](../../../skills/orchestrate-dsh-delivery/SKILL.md) lands one specification on one pull request. That pull request targets `master`, carries every ticket's closing keywords, and is the only merge into the default branch for the delivery.
 
-The root task still owns authority, dispatch, monitoring, human blockers, and the release stop. It does not merge worker branches. A merger subagent fast-forwards or merge-commits each completed ticket branch into the specification branch and reports the new head.
+The root task still owns authority, dispatch, monitoring, human blockers, and the release stop. It does not implement, and it does not merge worker branches. [Root-session orchestration](2026-09-03-root-session-orchestrates-only.md) owns that split. A merger subagent fast-forwards or merge-commits each completed ticket branch into the specification branch and reports the new head.
 
 Each ready ticket still has one writer, one `codex/<issue>-<slug>` branch, and one isolated worktree. Writers follow [`implement`](../../../skills/implement/SKILL.md) and [pre-push checks](../../../skills/dsh-pre-push-checks/SKILL.md). They do not open pull requests.
 
 Exploration notes stay outside version control in a scratch directory whose absolute path is recorded in the gitignored [runtime memo](2026-09-02-desktop-test-instance-and-runtime-memo.md). Planning authority that later workers must read (specification, Agent Notes, tickets) remains committed on the specification branch before dispatch.
 
-After the specification branch has every ticket, required checks, and a clean standards-and-spec review, the root asks each writer session to run [`retro`](../../../skills/retro/SKILL.md). The root synthesizes those candidates, presents them to the user, and lands only the accepted environment changes on the same specification pull request. Merge to `master` waits for that user decision.
+After the specification branch has every ticket, required checks, and a clean standards-and-spec review, the root asks each writer session to run [`retro`](../../../skills/retro/SKILL.md). The root synthesizes those candidates, presents them to the user, and dispatches a writer to land only the accepted environment changes on the same specification pull request. Merge to `master` waits for that user decision.
 
 The [earlier default-orchestration note](2026-08-16-default-ticket-delivery-orchestration.md) still owns request authority, isolated writers, GitHub as durable state, GUI evidence, cleanup proofs, and the release stop. This note owns pull-request cardinality, who merges, where exploration notes live, and the retro gate.
 

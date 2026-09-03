@@ -12,13 +12,13 @@ Status: implemented
 
 [交付编排](../../../skills/orchestrate-dsh-delivery/SKILL.md)把一份规格落成一张 pull request。该 pull request 以 `master` 为基线，携带全部票的 closing keywords，并且是这次交付进入默认分支的唯一合并。
 
-根任务仍然拥有权限、派发、监控、人工阻塞和发布停点。它不合并 worker 分支。merger 子代理把每张已完成票的分支快进或 merge-commit 进规格分支，并报告新 head。
+根任务仍然拥有权限、派发、监控、人工阻塞和发布停点。它不实现，也不合并 worker 分支。[根会话只做编排](2026-09-03-root-session-orchestrates-only.zh.md)拥有该拆分。merger 子代理把每张已完成票的分支快进或 merge-commit 进规格分支，并报告新 head。
 
 每个就绪票仍然只有一个 writer、一条 `codex/<issue>-<slug>` 分支和一个隔离 worktree。Writer 遵循 [`implement`](../../../skills/implement/SKILL.md) 和[推送前检查](../../../skills/dsh-pre-push-checks/SKILL.md)。他们不开 pull request。
 
 探索笔记留在版本控制之外的 scratch 目录，其绝对路径记在 gitignore 的[运行时备忘](2026-09-02-desktop-test-instance-and-runtime-memo.zh.md)中。后续 worker 必须读取的规划权威（规格、Agent Note、票）仍在派发前提交到规格分支。
 
-规格分支收齐全部票、所需检查以及干净的规范与规格评审之后，根任务要求每个 writer 会话运行 [`retro`](../../../skills/retro/SKILL.md)。根任务归纳这些候选，交给用户决定，并只把接受的环境改动落到同一张规格 pull request 上。合入 `master` 等待该用户决定。
+规格分支收齐全部票、所需检查以及干净的规范与规格评审之后，根任务要求每个 writer 会话运行 [`retro`](../../../skills/retro/SKILL.md)。根任务归纳这些候选，交给用户决定，并派发 writer 只把接受的环境改动落到同一张规格 pull request 上。合入 `master` 等待该用户决定。
 
 [先前的默认编排注记](2026-08-16-default-ticket-delivery-orchestration.zh.md)仍然拥有请求权限、隔离 writer、作为持久状态的 GitHub、GUI 证据、清理证明和发布停点。本注记拥有 pull request 数量、谁负责合并、探索笔记存放位置，以及 retro 闸门。
 

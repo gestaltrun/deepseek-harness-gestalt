@@ -18,6 +18,7 @@ import type {
 } from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneListingSource } from './registry.ts'
+import { measureMjpegCurrentFrame } from './measure-mjpeg-current-frame.ts'
 import { PhoneH264PlaybackOwner, PhoneH264Surface } from './PhoneH264Surface.tsx'
 import css from './PhoneConnectedView.module.css'
 import shared from './PhoneShared.module.css'
@@ -122,9 +123,9 @@ const WHEEL_MIN_TRAVEL = 0.08
 /** Maximum normalized vertical travel of a coalesced wheel swipe. */
 const WHEEL_MAX_TRAVEL = 0.4
 /**
- * Re-measure cadence for a live MJPEG image: a rotated multipart stream
- * updates `naturalWidth`/`naturalHeight` in place without a new load event,
- * so the surface is re-read on this interval while MJPEG renders.
+ * Re-measure cadence for a live MJPEG image. Chromium keeps
+ * `naturalWidth`/`naturalHeight` at the first `multipart/x-mixed-replace`
+ * JPEG, so the interval reads the currently painted bitmap.
  */
 const MJPEG_SURFACE_POLL_MS = 500
 
@@ -217,9 +218,10 @@ export function PhoneConnectedView({
     surfaceHeight: number
     handle: ReturnType<typeof setTimeout>
   } | undefined>(undefined)
-  /** The live MJPEG image, re-measured on a cadence because a rotated
-      multipart stream flips its natural size without a new load event. */
+  /** The live MJPEG image; its currently painted JPEG is re-measured on a cadence. */
   const mjpegImg = useRef<HTMLImageElement | null>(null)
+  /** Drops an in-flight current-frame measurement after a newer one starts or MJPEG leaves live. */
+  const mjpegMeasureGeneration = useRef(0)
 
   const releaseDrag = useCallback((): void => {
     const state = drag.current
@@ -252,6 +254,14 @@ export function PhoneConnectedView({
     source.refresh().catch(() => undefined)
   }, [source])
 
+  const applyMjpegSurface = useCallback((img: HTMLImageElement): void => {
+    const token = ++mjpegMeasureGeneration.current
+    void measureMjpegCurrentFrame(img).then((size) => {
+      if (token !== mjpegMeasureGeneration.current || size === undefined) return
+      controller.noteSurface('mjpeg', size.width, size.height)
+    })
+  }, [controller])
+
   const mjpegLive = phase.kind === 'live' && phase.format === 'mjpeg'
   useEffect(() => {
     if (!mjpegLive) return
@@ -259,12 +269,15 @@ export function PhoneConnectedView({
       // The effect lives only while the live MJPEG phase renders the image;
       // its cleanup clears the interval before the ref can detach.
       const img = mjpegImg.current as HTMLImageElement
-      controller.noteSurface('mjpeg', img.naturalWidth, img.naturalHeight)
+      applyMjpegSurface(img)
     }
     measure()
     const handle = setInterval(measure, MJPEG_SURFACE_POLL_MS)
-    return () => { clearInterval(handle) }
-  }, [controller, mjpegLive])
+    return () => {
+      mjpegMeasureGeneration.current += 1
+      clearInterval(handle)
+    }
+  }, [applyMjpegSurface, mjpegLive])
 
   const normalize = (event: ReactPointerEvent<HTMLDivElement>): { u: number; v: number } => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -389,9 +402,7 @@ export function PhoneConnectedView({
             alt={`${name} 实时画面`}
             className={css.stream}
             draggable={false}
-            onLoad={(event) => {
-              controller.noteSurface('mjpeg', event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
-            }}
+            onLoad={(event) => { applyMjpegSurface(event.currentTarget) }}
             onError={() => { controller.noteCaptureFailure('mjpeg') }}
           />
         )

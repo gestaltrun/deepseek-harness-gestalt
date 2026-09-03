@@ -345,8 +345,8 @@ export class PhoneConnectionController {
    * rotation flips width and height) notifies subscribers so the frame box
    * follows the new aspect.
    * @param format - Encoding whose renderer measured the surface.
-   * @param width - natural width in device pixels.
-   * @param height - natural height in device pixels.
+   * @param width - Frame width in device pixels.
+   * @param height - Frame height in device pixels.
    */
   noteSurface(format: PhoneCaptureFormat, width: number, height: number): void {
     if (this.phase.kind !== 'live' || this.phase.format !== format) return

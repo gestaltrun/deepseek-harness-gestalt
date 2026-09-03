@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`。该子路径对浏览器安全，并由 client bundle 内联；Host 包根再导出同一函数。列表是定位 `pointerMove`、不带坐标的 `pointerDown`、终点 `pointerMove`、150 ms `pause`、`pointerUp`。`pointerDown` 之后的 pause 会延长按下，变成 iOS 长按 / 「朗读所选内容」。devicekit 把 `pause` 接到上一转换动作，因此位移时长应放在终点 move 之后。中间采样轨迹点不转发；swipe 由起点与松开界定。滚轮突发合并 50 ms 后，沿纵轴发送同一条 swipe。触控映射仍使用 H264 解码显示尺寸或 MJPEG `naturalWidth`/`naturalHeight`，不用 CSS 布局尺寸。
+GUI 拖动、触控板滚轮与 `device_act` swipe 共用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`。该子路径对浏览器安全，并由 client bundle 内联；Host 包根再导出同一函数。列表是定位 `pointerMove`、不带坐标的 `pointerDown`、终点 `pointerMove`、150 ms `pause`、`pointerUp`。`pointerDown` 之后的 pause 会延长按下，变成 iOS 长按 / 「朗读所选内容」。devicekit 把 `pause` 接到上一转换动作，因此位移时长应放在终点 move 之后。中间采样轨迹点不转发；swipe 由起点与松开界定。滚轮突发合并 50 ms 后，沿纵轴发送同一条 swipe。触控映射仍使用 H264 解码显示尺寸或当前 MJPEG JPEG 尺寸，不用 CSS 布局尺寸。
 
 ## Alternatives considered
 

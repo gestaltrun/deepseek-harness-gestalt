@@ -87,6 +87,26 @@ function stubRect(el: Element, width: number, height: number): void {
   })
 }
 
+/**
+ * Chromium freezes MJPEG `naturalWidth` at the first JPEG; tests drive the
+ * current-frame API independently of those sticky properties.
+ */
+function stubCurrentMjpegFrame(width: number, height: number): {
+  set(nextWidth: number, nextHeight: number): void
+} {
+  let current = { width, height }
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+    width: current.width,
+    height: current.height,
+    close: vi.fn(),
+  })))
+  return {
+    set(nextWidth: number, nextHeight: number): void {
+      current = { width: nextWidth, height: nextHeight }
+    },
+  }
+}
+
 async function renderLive(): Promise<Harness> {
   const harness = renderView()
   await flush()
@@ -136,7 +156,8 @@ describe('PhoneConnectedView chrome', () => {
       naturalWidth: { configurable: true, value: 1080 },
       naturalHeight: { configurable: true, value: 2400 },
     })
-    fireEvent.load(surface)
+    stubCurrentMjpegFrame(1080, 2400)
+    await act(async () => { fireEvent.load(surface) })
     stubRect(frame(), 270, 600)
     fireEvent.pointerDown(frame(), { clientX: 135, clientY: 300 })
     fireEvent.pointerUp(frame(), { clientX: 135, clientY: 300 })
@@ -410,6 +431,9 @@ describe('PhoneConnectedView screen frame aspect', () => {
   })
 
   it('keeps the locked 1:2 placeholder until the MJPEG frame reports its size', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => {
+      throw new Error('no current JPEG')
+    }))
     await renderLiveMjpeg()
     const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
     expect(surface).toBeInstanceOf(HTMLImageElement)
@@ -417,6 +441,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
     // renders the locked 1:2 placeholder.
     expect(frameRatio()).toBe('')
 
+    stubCurrentMjpegFrame(1080, 2400)
     Object.defineProperties(surface, {
       naturalWidth: { configurable: true, value: 1080 },
       naturalHeight: { configurable: true, value: 2400 },
@@ -425,11 +450,12 @@ describe('PhoneConnectedView screen frame aspect', () => {
     expect(frameRatio()).toBe(String(1080 / 2400))
   })
 
-  it('re-measures a rotated MJPEG stream between load events and keeps taps aligned', async () => {
+  it('flips the box from the current JPEG when naturalWidth stays portrait', async () => {
     vi.useFakeTimers()
     try {
       const gateway = new FakeGateway()
       gateway.queueMint({ session: { ...SESSION_A, preferredFormat: 'mjpeg' } })
+      const bitmap = stubCurrentMjpegFrame(1080, 2400)
       render(
         <PhoneConnectedView
           serial="emulator-5554"
@@ -456,13 +482,11 @@ describe('PhoneConnectedView screen frame aspect', () => {
       await act(async () => { fireEvent.load(surface) })
       expect(frameRatio()).toBe(String(1080 / 2400))
 
-      // Rotation flips the multipart stream's natural size in place; the
-      // poll cadence picks it up without any new load event.
-      Object.defineProperties(surface, {
-        naturalWidth: { configurable: true, value: 2400 },
-        naturalHeight: { configurable: true, value: 1080 },
-      })
-      await act(async () => { vi.advanceTimersByTime(500) })
+      // Chromium keeps naturalWidth at the first JPEG; the poll reads the
+      // currently painted bitmap instead.
+      bitmap.set(2400, 1080)
+      await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+      expect(Number(frameRatio())).toBeGreaterThan(1)
       expect(frameRatio()).toBe(String(2400 / 1080))
 
       stubRect(frame(), 400, 200)
@@ -472,6 +496,11 @@ describe('PhoneConnectedView screen frame aspect', () => {
         jsonrpc: '2.0', id: 1, method: 'tap',
         params: { deviceId: 'emulator-5554', x: 1800, y: 540 },
       })
+
+      bitmap.set(1080, 2400)
+      await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+      expect(Number(frameRatio())).toBeLessThan(1)
+      expect(frameRatio()).toBe(String(1080 / 2400))
     } finally {
       vi.useRealTimers()
     }

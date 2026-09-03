@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-03-phone-frame-follows-measured-surface.md
-2026-09-03-phone-frame-follows-measured-surface.md: 0bf7b1bfbb0e603f5b887ad96236af457f551778
-2026-09-03-phone-frame-follows-measured-surface.zh.md: 823d53bf5a4184611e12a343a8bd6db4c8358c87
+2026-09-03-phone-frame-follows-measured-surface.md: 523763d1a0e51f40d724c3b8c1a4272ca74df14c
+2026-09-03-phone-frame-follows-measured-surface.zh.md: f5592ad3cabbe6dac972314e4befb99790081e12

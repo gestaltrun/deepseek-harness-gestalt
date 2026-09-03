@@ -85,8 +85,12 @@ describe('phone runtime service lifecycle', () => {
     contexts.push(context)
     const previousPath = process.env.PATH
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
+    const previousNpmPrefix = process.env.npm_config_prefix
     process.env.PATH = ''
     process.env.HOME = ''
+    delete process.env.USERPROFILE
+    delete process.env.npm_config_prefix
     try {
       // Composition survives: the Host must not die for an optional provider.
       await context.plugin(PhoneDevices, { ...FAST_CONFIG }).await()
@@ -99,6 +103,10 @@ describe('phone runtime service lifecycle', () => {
       else process.env.PATH = previousPath
       if (previousHome === undefined) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
+      if (previousNpmPrefix === undefined) delete process.env.npm_config_prefix
+      else process.env.npm_config_prefix = previousNpmPrefix
     }
   })
 

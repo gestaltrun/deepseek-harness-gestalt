@@ -249,7 +249,9 @@
    without paying the compositing cost at rest. */
 .panel,
 .bottomPanel {
-  contain: layout style;
+  /* Desktop: `contain: layout` on this absolute panel puts the tab strip
+     off-screen so the official page covers the sidebar tab list. */
+  contain: style;
 }
 
 body[data-dsh-sidebar-dragging] .panel,

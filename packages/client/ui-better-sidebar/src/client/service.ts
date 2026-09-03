@@ -22,7 +22,7 @@
 import type { ReactNode } from 'react'
 import type { Context } from '../context-types.ts'
 import {
-  activateTab as activateTabReducer, allLeaves, closeTab as closeTabReducer, closeFloatByTab, floatWithTab,
+  activateTab as activateTabReducer, allLeaves, closeTab as closeTabReducer, closeFloatByTab, firstLeaf, floatWithTab,
   leafWithTab, openTabInActivePane, patchTab, raiseFloat, tabOpenIn, togglePanel, treeOf,
   type SidebarSnapshot, type SidebarState, type SidebarStore, type SidebarTab,
 } from './state.ts'
@@ -426,7 +426,12 @@ export interface BetterSidebarService {
    * (v0.12.0+) rides to the callback like `closeTab`'s.
    */
   activateTab(tabId: string, scope?: SessionScope): void
-  /** Open a file in the sidebar editor of `scope`'s session (title defaults to the file name). */
+  /**
+   * Open a file in the sidebar editor of `scope`'s session.
+   * Title defaults to the file name. A seed with a path or URL that would
+   * otherwise land in the bottom workbench is retargeted to the right
+   * workbench before minting.
+   */
   openFile(scope: SessionScope, path: string, title?: string): void
   /**
    * Expand or collapse the right workbench panel. A no-op when the requested
@@ -643,14 +648,20 @@ export function createBetterSidebarService(
     let created: SidebarTab | undefined
     let activated: SidebarTab | undefined
     const reducer = (state: SidebarState): SidebarState => {
+      // Path/URL seeds do not follow a last-touched bottom pane; type-only
+      // opens still use the pane that owns the + menu.
+      const contentOpen = seed.path !== undefined || seed.url !== undefined
+      const landing = contentOpen && treeOf(state, state.activePane ?? '') === 'bottomSplits'
+        ? { ...state, activePane: firstLeaf(state.splits).id }
+        : state
       // Let the descriptor mint the tab (terminal's nextTerminal bump, etc.).
       let tab: SidebarTab
       let next: SidebarState
       if (descriptor.createTab !== undefined) {
-        const result = descriptor.createTab(state)
+        const result = descriptor.createTab(landing)
         if (result === null) return state
         tab = result.tab
-        next = applyDedupe(state, result.tab, descriptor)
+        next = applyDedupe(landing, result.tab, descriptor)
         if (result.patch !== undefined) next = { ...next, ...result.patch }
       } else {
         tab = {
@@ -663,7 +674,7 @@ export function createBetterSidebarService(
           ...(seed.diff !== undefined ? { diff: seed.diff } : {}),
           ...(seed.meta !== undefined ? { meta: seed.meta } : {}),
         }
-        next = applyDedupe(state, tab, descriptor)
+        next = applyDedupe(landing, tab, descriptor)
       }
       // Classify the landing against the INPUT state FIRST: a FOCUS fires
       // onActivate with the tab that is active NOW; a real creation fires
@@ -722,7 +733,7 @@ export function createBetterSidebarService(
       // hosting the landing pane is collapsed, expand it. On narrow
       // viewports the two workbenches merge into one drawer, so the drawer
       // (panelOpen) is the only lever; on wide viewports the landing pane's
-      // own panel opens — the bottom panel when the active pane lives in the
+      // own panel opens — the bottom panel when that pane lives in the
       // bottom tree, else the right panel. Type-only opens (+ menu,
       // agent-terminal auto-tabs) never expand (the panel behavior is their
       // caller's business). The check runs on the post-dedupe state, so a

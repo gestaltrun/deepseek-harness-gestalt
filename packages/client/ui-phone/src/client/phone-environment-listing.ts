@@ -3,7 +3,9 @@
  * picker already consumes. A successful `GET /phone/devices` pull reaches
  * probing, platform-neutral no-device recovery, and ready; a `PHONE_UNRESOLVED` pull stays on the
  * mobilecli-missing row; any other failed first pull stays on the
- * missing-service probe-failed row.
+ * missing-service probe-failed row. After ready, the source follows later
+ * listing commits and refreshes on the Host `pollIntervalMs` default so the
+ * card does not wait for 「重新检测」.
  */
 import {
   environmentErrorOf, PROBE_FAILED_ERROR,
@@ -11,6 +13,12 @@ import {
   type PhoneReadyDevice,
 } from './phone-environment.ts'
 import type { PhoneDeviceSummary, PhoneListingSnapshot, PhoneListingSource } from './registry.ts'
+
+/**
+ * Browser listing poll cadence. Matches Host `phone-runtime` `pollIntervalMs`
+ * default 5000 ms; the browser has no Host change stream for `GET /phone/devices`.
+ */
+export const PHONE_LISTING_POLL_INTERVAL_MS = 5_000
 
 /** Checklist shown while the first (or a later) fleet pull is in flight. */
 const PROBING_CHECKS: readonly PhoneEnvironmentCheck[] = Object.freeze([
@@ -100,6 +108,10 @@ function viewFromListing(listing: PhoneListingSnapshot): PhoneEnvironmentView {
 
 /**
  * Wrap one fleet listing source as the settings-card environment snapshot.
+ * First detection still goes through {@link PhoneEnvironmentSource.redetect}
+ * / `ensureDetected`. After ready, listing commits notify card subscribers and
+ * a 5000 ms `GET /phone/devices` poll keeps the inventory current; a failed
+ * poll keeps the last committed listing.
  * @param listing - Host `GET /phone/devices` source already used by the picker.
  * @returns the environment source the Plugins-tab card injects.
  */
@@ -109,8 +121,36 @@ export function createListingPhoneEnvironmentSource(
   let phase: DetectPhase = 'idle'
   let lastError: PhoneEnvironmentError = PROBE_FAILED_ERROR
   const listeners = new Set<() => void>()
+  let stopListing: (() => void) | undefined
+  let pollTimer: ReturnType<typeof setInterval> | undefined
   const notify = (): void => {
     for (const listener of [...listeners]) listener()
+  }
+  const syncPolling = (): void => {
+    const shouldPoll = phase === 'ready' && listeners.size > 0
+    if (shouldPoll) {
+      if (pollTimer !== undefined) return
+      pollTimer = setInterval(() => {
+        void listing.refresh().catch(() => {
+          // A refused or malformed GET keeps the last committed snapshot;
+          // the next interval retries.
+        })
+      }, PHONE_LISTING_POLL_INTERVAL_MS)
+      return
+    }
+    if (pollTimer === undefined) return
+    clearInterval(pollTimer)
+    pollTimer = undefined
+  }
+  const attachListing = (): void => {
+    if (stopListing !== undefined) return
+    stopListing = listing.subscribe(() => {
+      if (phase === 'ready') notify()
+    })
+  }
+  const detachListing = (): void => {
+    stopListing?.()
+    stopListing = undefined
   }
 
   const source: PhoneEnvironmentSource = {
@@ -121,6 +161,7 @@ export function createListingPhoneEnvironmentSource(
     },
     redetect: async () => {
       phase = 'probing'
+      syncPolling()
       notify()
       try {
         await listing.refresh()
@@ -131,6 +172,7 @@ export function createListingPhoneEnvironmentSource(
         lastError = environmentErrorOf(error)
         phase = 'failed'
       }
+      syncPolling()
       notify()
     },
     ensureDetected: () => {
@@ -141,7 +183,14 @@ export function createListingPhoneEnvironmentSource(
     },
     subscribe: (listener) => {
       listeners.add(listener)
-      return () => { listeners.delete(listener) }
+      attachListing()
+      syncPolling()
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size > 0) return
+        detachListing()
+        syncPolling()
+      }
     },
   }
   return source

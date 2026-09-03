@@ -2,7 +2,7 @@
  * Phone settings card controller: enable-flag projection, missing-service
  * probe-failed view, and the next-action / copy callbacks.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import {
   MISSING_PHONE_ENVIRONMENT_SOURCE, PROBE_FAILED_ERROR, resolvePhoneCardView,
@@ -10,9 +10,13 @@ import {
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
 import { MISSING_PHONE_ENVIRONMENT, type PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
-import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
+import {
+  createListingPhoneEnvironmentSource, PHONE_LISTING_POLL_INTERVAL_MS,
+} from '../src/client/phone-environment-listing.ts'
 import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
+
+afterEach(() => { vi.useRealTimers() })
 
 function readyScope(enabled: boolean) {
   const host = stubSettingsScope<PhoneSettings>()
@@ -101,6 +105,54 @@ describe('PhoneSettingsCardController first-open auto-detect', () => {
     expect(idle.refreshCount).toBe(0)
     controller.dispose()
     off.dispose()
+  })
+
+  it('shows 已停止 after a listing commit and stops polling when disabled', async () => {
+    vi.useFakeTimers()
+    const listing = new FakeListingSource()
+    listing.scriptNext(listingOf([], [{
+      id: 'CB65BAB1-E388-4C27-B9AB-81CFB37920C3',
+      name: 'DSH Gestalt iPhone',
+      channel: 'emulator',
+      state: 'online',
+      online: true,
+    }]))
+    const host = readyScope(true)
+    const controller = new PhoneSettingsCardController(host.scope, createListingPhoneEnvironmentSource(listing))
+    const face = controller.inject()
+    await Promise.resolve()
+    const online = face.hooks.phoneSettingsCard.getSnapshot().view
+    expect(online.kind).toBe('ready')
+    if (online.kind !== 'ready') throw new Error('expected ready')
+    expect(online.devices[0]?.online).toBe(true)
+    expect(listing.refreshCount).toBe(1)
+
+    listing.scriptNext(listingOf([], [{
+      id: 'CB65BAB1-E388-4C27-B9AB-81CFB37920C3',
+      name: 'DSH Gestalt iPhone',
+      channel: 'emulator',
+      state: 'offline',
+      online: false,
+    }]))
+    await listing.refresh()
+    const offline = face.hooks.phoneSettingsCard.getSnapshot().view
+    expect(offline.kind).toBe('ready')
+    if (offline.kind !== 'ready') throw new Error('expected ready')
+    expect(offline.devices[0]?.online).toBe(false)
+    expect(offline.devices[0]?.meta).toContain('已停止')
+    expect(listing.refreshCount).toBe(2)
+
+    listing.scriptNext(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
+    ]))
+    await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS)
+    expect(listing.refreshCount).toBe(3)
+
+    host.publish({ value: { enabled: false } })
+    listing.scriptNext(listingOf())
+    await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS)
+    expect(listing.refreshCount).toBe(3)
+    controller.dispose()
   })
 })
 

@@ -14,7 +14,7 @@ Host 半边注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默�
 
 Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是组装默认值。注册不依赖它——关闭时选择器入口仍然可达，选择器内容会在空态上方固定渲染「手机连接未启用」说明条。持久化开关关闭时不发现设备、不拉起 `mobilecli`、不路由任何流。
 
-条状徽标与两块内容读取同一个注入抽象 `PhoneListingSource`（`getBadge(): { onlineCount }` 供每次渲染的徽标读取，`snapshot()` / `refresh()` / `subscribe()` 供两块内容读取）。随包实现消费 Host 的 `GET /phone/devices` 路由：每次拉取都会校验分组清单，emulator 与 simulator 类型归入「模拟器」组、真机归入「USB 真机」组，且只在成功时提交——失败的拉取保留上一份清单。启用时选择器在挂载时拉取一次，并由「重新检测环境」再次拉取；占用内容挂载时也会拉取，使其下拉无需先访问选择器即可点亮。徽标取值：存在在线设备时输出在线台数，否则为 `null`。
+条状徽标与两块内容读取同一个注入抽象 `PhoneListingSource`（`getBadge(): { onlineCount }` 供每次渲染的徽标读取，`snapshot()` / `refresh()` / `subscribe()` 供两块内容读取）。随包实现消费 Host 的 `GET /phone/devices` 路由：每次拉取都会校验分组清单，emulator 与 simulator 类型归入「模拟器」组、真机归入「USB 真机」组，且只在成功时提交——失败的拉取保留上一份清单。启用时选择器在挂载时拉取一次，并由「重新检测环境」再次拉取；占用内容挂载时也会拉取，使其下拉无需先访问选择器即可点亮。首次检测完成后，设置页清单跟随 listing 提交，并在 ready 期间每 5000 ms（Host `phone-runtime` `pollIntervalMs` 默认值）刷新 `GET /phone/devices`；失败的刷新保留上一份已提交清单。徽标取值：存在在线设备时输出在线台数，否则为 `null`。
 
 组装关系：`tsconfig.client.json` 聚合引用本包；`packages/bundle/web-app/cordis.patch.yml` 携带 `ui-phone` 浏览器行；`packages/bundle/web-app/package.json` 声明依赖。包 invariant 伴生体在同进程 fake 注册表上以真实 cordis fiber 证明 tab 注册/注销对称。
 

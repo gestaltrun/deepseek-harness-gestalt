@@ -293,7 +293,7 @@ export function listingOf(
 export class FakeListingSource implements PhoneListingSource {
   private committed: PhoneListingSnapshot = listingOf()
   private readonly listeners = new Set<() => void>()
-  private readonly scripts: Array<PhoneListingSnapshot | Promise<void>> = []
+  private readonly scripts: Array<PhoneListingSnapshot | Promise<void> | Error> = []
 
   /** How many times refresh() ran, mount pulls included. */
   refreshCount = 0
@@ -305,7 +305,7 @@ export class FakeListingSource implements PhoneListingSource {
   }
 
   /** Script one refresh outcome for the next refresh() call. */
-  scriptNext(outcome: PhoneListingSnapshot | Promise<void>): void {
+  scriptNext(outcome: PhoneListingSnapshot | Promise<void> | Error): void {
     this.scripts.push(outcome)
   }
 
@@ -323,6 +323,7 @@ export class FakeListingSource implements PhoneListingSource {
   async refresh(): Promise<void> {
     this.refreshCount += 1
     const next = this.scripts.shift()
+    if (next instanceof Error) throw next
     if (next instanceof Promise) {
       await next
       return

@@ -4,13 +4,18 @@
  * failed first pull falls back to the missing-service probe-failed row.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
+import {
+  createListingPhoneEnvironmentSource, PHONE_LISTING_POLL_INTERVAL_MS,
+} from '../src/client/phone-environment-listing.ts'
 import { MOBILECLI_MISSING_ERROR, PROBE_FAILED_ERROR } from '../src/client/phone-environment.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import { FakeListingSource, listingOf } from './phone-fakes.client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
 
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 const ANDROID_EMULATOR: PhoneDeviceSummary = {
   id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true,
@@ -120,6 +125,102 @@ describe('createListingPhoneEnvironmentSource', () => {
     const stop = source.subscribe(() => { seen.push(source.getView().kind) })
     await source.redetect()
     expect(seen).toContain('ready')
+    stop()
+  })
+
+  it('shows 已停止 after a later listing commit without calling redetect', async () => {
+    const listing = new FakeListingSource()
+    listing.scriptNext(listingOf([], [{
+      id: 'CB65BAB1-E388-4C27-B9AB-81CFB37920C3',
+      name: 'DSH Gestalt iPhone',
+      channel: 'emulator',
+      state: 'online',
+      online: true,
+    }]))
+    const source = createListingPhoneEnvironmentSource(listing)
+    const kinds: string[] = []
+    const stop = source.subscribe(() => { kinds.push(source.getView().kind) })
+    await source.redetect()
+    const online = source.getView()
+    expect(online.kind).toBe('ready')
+    if (online.kind !== 'ready') throw new Error('expected ready')
+    expect(online.devices[0]?.online).toBe(true)
+    expect(online.devices[0]?.meta).toContain('运行中')
+    expect(listing.refreshCount).toBe(1)
+
+    listing.scriptNext(listingOf([], [{
+      id: 'CB65BAB1-E388-4C27-B9AB-81CFB37920C3',
+      name: 'DSH Gestalt iPhone',
+      channel: 'emulator',
+      state: 'offline',
+      online: false,
+    }]))
+    await listing.refresh()
+    const offline = source.getView()
+    expect(offline.kind).toBe('ready')
+    if (offline.kind !== 'ready') throw new Error('expected ready')
+    expect(offline.devices[0]?.online).toBe(false)
+    expect(offline.devices[0]?.meta).toContain('已停止')
+    expect(kinds).toEqual(['probing', 'ready', 'ready'])
+    expect(listing.refreshCount).toBe(2)
+    stop()
+  })
+
+  it('polls the listing on the Host interval and notifies a second refresh', async () => {
+    vi.useFakeTimers()
+    const listing = new FakeListingSource()
+    listing.scriptNext(listingOf([], [{
+      id: 'CB65BAB1-E388-4C27-B9AB-81CFB37920C3',
+      name: 'DSH Gestalt iPhone',
+      channel: 'emulator',
+      state: 'online',
+      online: true,
+    }]))
+    const source = createListingPhoneEnvironmentSource(listing)
+    const onlineFlags: boolean[] = []
+    const stop = source.subscribe(() => {
+      const view = source.getView()
+      if (view.kind === 'ready') onlineFlags.push(view.devices[0]?.online === true)
+    })
+    await source.redetect()
+    expect(listing.refreshCount).toBe(1)
+    const extra = source.subscribe(() => {})
+    extra()
+    listing.scriptNext(listingOf([], [{
+      id: 'CB65BAB1-E388-4C27-B9AB-81CFB37920C3',
+      name: 'DSH Gestalt iPhone',
+      channel: 'emulator',
+      state: 'offline',
+      online: false,
+    }]))
+    await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS)
+    expect(listing.refreshCount).toBe(2)
+    expect(onlineFlags).toEqual([true, false])
+    const view = source.getView()
+    expect(view.kind).toBe('ready')
+    if (view.kind !== 'ready') throw new Error('expected ready')
+    expect(view.devices[0]?.online).toBe(false)
+    expect(view.devices[0]?.meta).toContain('已停止')
+    stop()
+    listing.scriptNext(listingOf([ANDROID_EMULATOR]))
+    await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS)
+    expect(listing.refreshCount).toBe(2)
+  })
+
+  it('keeps the last ready inventory when a poll refresh fails', async () => {
+    vi.useFakeTimers()
+    const listing = new FakeListingSource()
+    listing.scriptNext(listingOf([ANDROID_EMULATOR]))
+    const source = createListingPhoneEnvironmentSource(listing)
+    const stop = source.subscribe(() => {})
+    await source.redetect()
+    listing.scriptNext(new Error('host down'))
+    await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS)
+    const view = source.getView()
+    expect(view.kind).toBe('ready')
+    if (view.kind !== 'ready') throw new Error('expected ready')
+    expect(view.devices[0]?.online).toBe(true)
+    expect(view.devices[0]?.meta).toContain('运行中')
     stop()
   })
 })

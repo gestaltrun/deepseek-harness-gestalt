@@ -79,7 +79,10 @@ export interface PhoneEnvironmentSource {
    * it undefined.
    */
   ensureDetected?(): void
-  /** Subscribe to view replacements; returns the disposer. */
+  /**
+   * Subscribe to view replacements, including later listing commits after
+   * the first detection; returns the disposer.
+   */
   subscribe(listener: () => void): () => void
 }
 

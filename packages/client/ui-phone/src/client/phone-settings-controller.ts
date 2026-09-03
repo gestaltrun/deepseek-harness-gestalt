@@ -79,7 +79,7 @@ export class PhoneSettingsCardController {
     platforms: MISSING_PHONE_ENVIRONMENT.platforms,
   })
   private readonly unsubscribeScope: () => void
-  private unsubscribeSource: () => void
+  private unsubscribeSource: (() => void) | undefined
   private source: PhoneEnvironmentSource
   private readonly unsubscribeRuntime: () => void
 
@@ -99,7 +99,6 @@ export class PhoneSettingsCardController {
   ) {
     this.source = source
     this.unsubscribeScope = scope.subscribe(() => { this.publish() })
-    this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.unsubscribeRuntime = runtime?.subscribe(() => { this.publish() }) ?? (() => {})
     this.publish()
   }
@@ -109,16 +108,15 @@ export class PhoneSettingsCardController {
    * @param source - Environment snapshot the card should now follow.
    */
   setSource(source: PhoneEnvironmentSource): void {
-    this.unsubscribeSource()
+    this.unfollowSource()
     this.source = source
-    this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.publish()
   }
 
   /** Stop following the settings scope and the environment source. */
   dispose(): void {
     this.unsubscribeScope()
-    this.unsubscribeSource()
+    this.unfollowSource()
     this.unsubscribeRuntime()
     this.runtime?.dispose()
   }
@@ -159,6 +157,16 @@ export class PhoneSettingsCardController {
     return this.scope.getSnapshot().value?.enabled === true
   }
 
+  private followSource(): void {
+    if (this.unsubscribeSource !== undefined) return
+    this.unsubscribeSource = this.source.subscribe(() => { this.publish() })
+  }
+
+  private unfollowSource(): void {
+    this.unsubscribeSource?.()
+    this.unsubscribeSource = undefined
+  }
+
   private publishing = false
 
   private publish(): void {
@@ -172,7 +180,13 @@ export class PhoneSettingsCardController {
       const snapshot = this.scope.getSnapshot()
       // An enabled card must not settle on the probe-failed arm while its
       // first detection is still in flight: kick it when it has not run.
-      if (this.isEnabled()) this.source.ensureDetected?.()
+      // Unfollow while disabled so the listing poll cannot GET /phone/devices.
+      if (this.isEnabled()) {
+        this.followSource()
+        this.source.ensureDetected?.()
+      } else {
+        this.unfollowSource()
+      }
       this.runtime?.ensureDetected()
       const enabled = snapshot.value?.enabled === true
       const environment = this.runtime?.getSnapshot() ?? MISSING_PHONE_ENVIRONMENT

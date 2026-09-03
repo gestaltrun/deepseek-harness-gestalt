@@ -1,0 +1,34 @@
+{
+  "version": "0.1.13",
+  "tag": "gestalt-v0.1.13",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "d0ca0146455f803afa58fb19d99190af7335ba1e"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.13 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "产品变更",
+          "items": [
+            "在桌面端设置中新增一键安装 Sub2API sidecar 和本地“订阅转 API”控制。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.13 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Product changes",
+          "items": [
+            "Add one-click Sub2API sidecar installation and local subscription-to-API controls to Desktop Settings."
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -103,6 +103,7 @@ describe('Desktop release workflow', () => {
     }
     expect(workflow).not.toContain('PLATFORM_GITHUB_CLIENT_SECRET')
     expect(record(record(desktopPackage).build).files).toContain('out/operated-platform.json')
+    expect(record(record(desktopPackage).build).files).toContain('out/sub2api-sources.json')
 
     for (const name of ['pack-mac', 'pack-win']) {
       expect(record(job(name).env)).not.toHaveProperty('DSH_DESKTOP_OPERATED_PLATFORM_CONFIG')
@@ -113,6 +114,11 @@ describe('Desktop release workflow', () => {
         )
       }
     }
+
+    const macBuild = steps('pack-mac').find(step => step.name === 'Build')
+    const winBuild = steps('pack-win').find(step => step.name === 'Build')
+    expect(String(macBuild?.run)).toContain('-- --platform darwin --arch ${{ matrix.arch }}')
+    expect(String(winBuild?.run)).toContain('-- --platform win32 --arch x64')
   })
 
   it('keeps the prepared workspace dependencies intact while packaging', () => {

@@ -1,0 +1,8 @@
+{
+  "darwin-arm64": {
+    "bundleUrl": "https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/dsh-sub2api-sidecar-0.1.25.tgz",
+    "bundleSha256SumsUrl": "https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/bundle-sha256sums.txt",
+    "runtimePackUrl": "https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/runtime-pack-0.1.183-dsh.445.13-darwin-arm64.tar.gz",
+    "runtimePackSha256SumsUrl": "https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/runtime-pack-sha256sums.txt"
+  }
+}

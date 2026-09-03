@@ -14,7 +14,7 @@ import * as ToolPhone from '@deepseek-ai/dsh-tool-phone'
 import * as ToolPhoneInvariant from '../src/invariant.ts'
 
 const signal = new AbortController().signal
-const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const PNG_PATH = '/tmp/dsh-home/phone/screenshots/emulator-5554.png'
 const DEVICE_TOOLS = [
   'device_act',
   'device_close',
@@ -69,7 +69,7 @@ interface FakeFleet {
   boot(id: DeviceId, signal?: AbortSignal): Promise<void>
   shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
   io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
-  screenshot(id: DeviceId, signal?: AbortSignal): Promise<{ mediaType: 'image/png'; data: string }>
+  screenshot(id: DeviceId, signal?: AbortSignal): Promise<{ mediaType: 'image/png'; path: string }>
 }
 
 const contexts: Context[] = []
@@ -100,7 +100,7 @@ function fakeFleet(listing: PhoneDeviceList = LISTING): FakeFleet {
     },
     async screenshot(id) {
       this.screenshots.push(id)
-      return { mediaType: 'image/png', data: PNG_1X1 }
+      return { mediaType: 'image/png', path: PNG_PATH }
     },
   }
 }
@@ -235,15 +235,20 @@ describe('deferred phone device Consumer', () => {
     })
     expect(shot).toMatchObject({
       isError: false,
-      value: { deviceId: 'emulator-5554', mediaType: 'image/png', data: PNG_1X1 },
+      value: { deviceId: 'emulator-5554', path: PNG_PATH },
     })
+    expect(shot.content).toEqual([{
+      type: 'text',
+      text: `deviceId: emulator-5554\npath: ${PNG_PATH}`,
+    }])
+    expect(JSON.stringify(shot)).not.toMatch(/iVBORw0KGgo|data:/)
     expect(fleet.boots).toEqual([])
     expect(fleet.shutdowns).toEqual([])
     expect(fleet.ioCalls).toEqual([])
     expect(fleet.screenshots).toEqual([ANDROID_ID])
   })
 
-  it('returns image/png from device_screenshot when the injected fleet exposes screenshot', async () => {
+  it('returns the absolute PNG path from device_screenshot when the injected fleet exposes screenshot', async () => {
     const fleet = fakeFleet()
     const { ctx } = await harness(fleet)
     const shot = await ctx.tools.execute({
@@ -254,12 +259,13 @@ describe('deferred phone device Consumer', () => {
     })
     expect(shot).toMatchObject({
       isError: false,
-      value: { deviceId: 'emulator-5554', mediaType: 'image/png', data: PNG_1X1 },
+      value: { deviceId: 'emulator-5554', path: PNG_PATH },
     })
+    expect(shot.content[0]).toMatchObject({ text: `deviceId: emulator-5554\npath: ${PNG_PATH}` })
     expect(fleet.screenshots).toEqual([ANDROID_ID])
   })
 
-  it('asks before a consequential act, runs once when allowed, and leaves the device untouched when rejected', async () => {
+  it('runs a closed act without asking, and asks only for open and close', async () => {
     const fleet = fakeFleet()
     const { ctx } = await harness(fleet)
     await ctx.plugin(ApprovalService)
@@ -268,17 +274,11 @@ describe('deferred phone device Consumer', () => {
       deviceId: 'emulator-5554',
       action: { kind: 'tap', x: 12, y: 40 },
     }
-
-    ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('allowed-once'))
-    const opened = await ctx.tools.execute({
-      callId: CallId('open-allow'),
-      name: 'device_open',
-      arguments: { deviceId: 'SIM-UDID' },
-      agent,
-      signal,
+    const asked: string[] = []
+    ctx.on('approval/request', (request: { toolName: string }) => {
+      asked.push(request.toolName)
+      return Promise.resolve<ApprovalOutcome>('allowed-once')
     })
-    expect(opened).toMatchObject({ isError: false, value: { deviceId: 'SIM-UDID', status: 'ok' } })
-    expect(fleet.boots).toEqual([IOS_SIM_ID])
 
     const allowed = await ctx.tools.execute({
       callId: CallId('act-allow'),
@@ -291,7 +291,19 @@ describe('deferred phone device Consumer', () => {
       isError: false,
       value: { deviceId: 'emulator-5554', action: { kind: 'tap', x: 12, y: 40 }, status: 'ok' },
     })
+    expect(asked).toEqual([])
     expect(fleet.ioCalls).toEqual([{ deviceId: ANDROID_ID, method: 'tap', x: 12, y: 40 }])
+
+    const opened = await ctx.tools.execute({
+      callId: CallId('open-allow'),
+      name: 'device_open',
+      arguments: { deviceId: 'SIM-UDID' },
+      agent,
+      signal,
+    })
+    expect(opened).toMatchObject({ isError: false, value: { deviceId: 'SIM-UDID', status: 'ok' } })
+    expect(asked).toEqual(['device_open'])
+    expect(fleet.boots).toEqual([IOS_SIM_ID])
 
     await expect(ctx.tools.execute({
       callId: CallId('act-swipe'),
@@ -314,6 +326,7 @@ describe('deferred phone device Consumer', () => {
       agent,
       signal,
     })).resolves.toMatchObject({ isError: false, value: { action: { kind: 'button', name: 'home' } } })
+    expect(asked).toEqual(['device_open'])
     expect(fleet.ioCalls).toEqual([
       { deviceId: ANDROID_ID, method: 'tap', x: 12, y: 40 },
       {
@@ -331,17 +344,23 @@ describe('deferred phone device Consumer', () => {
       { deviceId: ANDROID_ID, method: 'button', button: 'HOME' },
     ])
 
-    ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('rejected'), { prepend: true })
-    const denied = await ctx.tools.execute({
+    ctx.on('approval/request', (request: { toolName: string }) => {
+      asked.push(request.toolName)
+      return Promise.resolve<ApprovalOutcome>('rejected')
+    }, { prepend: true })
+    const deniedAct = await ctx.tools.execute({
       callId: CallId('act-deny'),
       name: 'device_act',
       arguments: tap,
       agent,
       signal,
     })
-    expect(denied.isError).toBe(true)
-    expect(denied.content[0]).toMatchObject({ text: 'Error: the user rejected tool "device_act"' })
-    expect(fleet.ioCalls).toHaveLength(4)
+    expect(deniedAct).toMatchObject({
+      isError: false,
+      value: { deviceId: 'emulator-5554', action: { kind: 'tap', x: 12, y: 40 }, status: 'ok' },
+    })
+    expect(asked).toEqual(['device_open'])
+    expect(fleet.ioCalls).toHaveLength(5)
 
     const closed = await ctx.tools.execute({
       callId: CallId('close-deny'),
@@ -351,9 +370,13 @@ describe('deferred phone device Consumer', () => {
       signal,
     })
     expect(closed.isError).toBe(true)
+    expect(asked).toEqual(['device_open', 'device_close'])
     expect(fleet.shutdowns).toEqual([])
 
-    ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('allowed-once'), { prepend: true })
+    ctx.on('approval/request', (request: { toolName: string }) => {
+      asked.push(request.toolName)
+      return Promise.resolve<ApprovalOutcome>('allowed-once')
+    }, { prepend: true })
     const closedOk = await ctx.tools.execute({
       callId: CallId('close-allow'),
       name: 'device_close',
@@ -362,6 +385,7 @@ describe('deferred phone device Consumer', () => {
       signal,
     })
     expect(closedOk).toMatchObject({ isError: false, value: { deviceId: 'SIM-UDID', status: 'ok' } })
+    expect(asked).toEqual(['device_open', 'device_close', 'device_close'])
     expect(fleet.shutdowns).toEqual([IOS_SIM_ID])
   })
 

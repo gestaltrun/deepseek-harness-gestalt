@@ -14,8 +14,8 @@ export const name = 'tool-phone'
 /** Phone fleet Service and tool registry required by this Consumer. */
 export const inject = ['phoneDevices', 'tools']
 
-/** Consequential tools that default to `tools/pre-execute` ask. */
-const ASK_TOOLS: ReadonlySet<string> = new Set(['device_act', 'device_open', 'device_close'])
+/** Boot and shutdown default to `tools/pre-execute` ask. Closed taps do not. */
+const ASK_TOOLS: ReadonlySet<string> = new Set(['device_open', 'device_close'])
 
 /** Hardware buttons accepted by `device_act`. */
 const BUTTON_NAMES = ['home', 'back', 'recents', 'power', 'volume_up', 'volume_down'] as const
@@ -147,8 +147,7 @@ const SCREENSHOT_SCHEMA = {
   additionalProperties: false,
   properties: {
     deviceId: { type: 'string' as const, required: true as const },
-    mediaType: { type: 'string' as const, required: true as const, const: 'image/png' },
-    data: { type: 'string' as const, required: true as const },
+    path: { type: 'string' as const, required: true as const },
   },
 } as const
 
@@ -187,7 +186,7 @@ interface PhoneFleet {
   boot(id: DeviceId, signal?: AbortSignal): Promise<void>
   shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
   io?(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
-  screenshot?(id: DeviceId, signal?: AbortSignal): Promise<{ readonly mediaType: 'image/png'; readonly data: string }>
+  screenshot?(id: DeviceId, signal?: AbortSignal): Promise<{ readonly mediaType: 'image/png'; readonly path: string }>
   isReady?(): boolean
   onReadinessChanged?(listener: (ready: boolean) => void): () => void
 }
@@ -195,6 +194,16 @@ interface PhoneFleet {
 /** Complete phone facts are rendered into the durable ordinary tool result. */
 function renderValue(_args: unknown, value: unknown): ContentBlock[] {
   return [{ type: 'text', text: JSON.stringify(value, null, 2) }]
+}
+
+interface ScreenshotResult {
+  readonly deviceId: string
+  readonly path: string
+}
+
+/** Screenshot results name the device and the absolute PNG path, never file bytes. */
+function renderScreenshot(_args: unknown, value: ScreenshotResult): ContentBlock[] {
+  return [{ type: 'text', text: `deviceId: ${value.deviceId}\npath: ${value.path}` }]
 }
 
 /**
@@ -303,8 +312,8 @@ function ioRequestFrom(id: DeviceId, action: DeviceAction): PhoneIoRequest {
 }
 
 /**
- * Register six deferred phone-device tools. Consequential mutations ask through
- * `tools/pre-execute` before the fleet is touched.
+ * Register six deferred phone-device tools. Boot and shutdown ask through
+ * `tools/pre-execute` before the fleet is touched; closed taps do not.
  * @param ctx - Consumer context with the phone fleet and tool registry.
  * @param config - Per-call timeout configuration.
  */
@@ -462,10 +471,10 @@ function registerPhoneTools(ctx: Context, fleet: PhoneFleet, timeoutMs: number):
   disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_screenshot',
-      description: 'Capture one PNG screenshot of a phone device.',
+      description: 'Capture one PNG screenshot of a phone device and return its absolute file path.',
       timeoutMs,
       parameters: { deviceId: DEVICE_ID_PARAMETER },
-      output: { schema: SCREENSHOT_SCHEMA, render: renderValue },
+      output: { schema: SCREENSHOT_SCHEMA, render: renderScreenshot },
       execute: async (args, exec) => {
         const id = requireDeviceId(args.deviceId)
         if (fleet.screenshot === undefined) {
@@ -473,7 +482,7 @@ function registerPhoneTools(ctx: Context, fleet: PhoneFleet, timeoutMs: number):
         }
         try {
           const shot = await fleet.screenshot(id, exec.signal)
-          return { deviceId: id, mediaType: shot.mediaType, data: shot.data }
+          return { deviceId: id, path: shot.path }
         } catch (error) {
           wrapFleetError(error)
         }

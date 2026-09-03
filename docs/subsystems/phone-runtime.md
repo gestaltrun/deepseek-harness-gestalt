@@ -4,7 +4,7 @@ English | [中文](phone-runtime.zh.md)
 
 The phone device fleet seam: `packages/phone/phone-runtime` folds the Service Definition and its mobilecli Service Provider into one package while mobilecli is the only backend, and `packages/phone/tool-phone` is the deferred model Consumer. The Service owns the external `mobilecli server start` child process (loopback-only, spawned with the credential-scrubbed parent environment), probes its HTTP JSON-RPC endpoint until the first successful `server.info` reply, then polls `devices.list` on the configured cadence — accepting the result as the bare device array or mobilecli 1.0.5's `{ devices: [...] }` envelope, with duplicate upstream entries kept verbatim. Device ids are branded `DeviceId` values (an Android serial or an iOS UDID); the grouped listing `{ android, ios: { simulators, reals } }` carries frozen `PhoneDeviceRef` entries whose `kind` translates the upstream `type` field, whose `state` carries the upstream state verbatim — an `unauthorized` handset keeps its state, with upstream refusing its io until the trust prompt is accepted, instead of folding into offline — and whose `online` is true only for the upstream `online` state.
 
-Failure semantics are total: a missing or unusable mobilecli binary still activates the Service, and every operation then rejects with `PHONE_UNRESOLVED` plus install guidance; a child that dies before readiness rejects plugin initialization; an unexpected post-ready exit (or a refused socket, or a protocol breach) marks the Service lost, and every later operation rejects with the recorded reason instead of degrading. All operations fuse the caller's `AbortSignal` with validated Config ceilings (`requestTimeoutMs`, `bootTimeoutMs`, `agentTimeoutMs`); boot and shutdown refuse physical handsets locally before any RPC. `io`, `startCapture`, and `screenshot` accept physical handsets and only refuse ids absent from the latest published listing. `startCapture` maps `h264` onto upstream `avc` and bounds only the wait for response headers; the caller owns the unread capture body. The capture answer follows both upstream shapes — the bare stream and mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is resolved against the server origin and forced back onto the loopback fence. `screenshot` returns one PNG still through `mobilecli screenshot --format png`.
+Failure semantics are total: a missing or unusable mobilecli binary still activates the Service, and every operation then rejects with `PHONE_UNRESOLVED` plus install guidance; a child that dies before readiness rejects plugin initialization; an unexpected post-ready exit (or a refused socket, or a protocol breach) marks the Service lost, and every later operation rejects with the recorded reason instead of degrading. All operations fuse the caller's `AbortSignal` with validated Config ceilings (`requestTimeoutMs`, `bootTimeoutMs`, `agentTimeoutMs`); boot and shutdown refuse physical handsets locally before any RPC. `io`, `startCapture`, and `screenshot` accept physical handsets and only refuse ids absent from the latest published listing. `startCapture` maps `h264` onto upstream `avc` and bounds only the wait for response headers; the caller owns the unread capture body. The capture answer follows both upstream shapes — the bare stream and mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is resolved against the server origin and forced back onto the loopback fence. `screenshot` returns one PNG still through `mobilecli screenshot --format png`, persisted at an owner-only path under `$DSH_HOME/phone/screenshots`.
 
 The iOS real-device link lives behind the listing's real group: `agentStatus` and `installAgent` run the upstream `agent status` / `agent install` commands as one-shot children of the same executable, keeping the on-device agent installed idempotently and re-signing real handsets through the configured `provisioningProfilePath` (the upstream command requires it for real iOS installs). Every answer about an installed, re-signed real handset carries `FREE_SIGNING_PROFILE_REMINDER` — free-team profiles expire after 7 days, and `installAgent(id, { force: true })` is the re-run entry. Failures whose output names a structured arm surface as `PHONE_REAL_DEVICE_ISSUE` with the arm on `PhoneDevicesError.issue`, classified identically from agent-command output and upstream JSON-RPC error messages; upstream `-32010` stays `PHONE_DEVICE_NOT_FOUND`.
 
@@ -61,8 +61,8 @@ interface PhoneCaptureStream {
 interface PhoneScreenshot {
   /** Always PNG; the still comes from `mobilecli screenshot --format png`. */
   readonly mediaType: 'image/png'
-  /** Canonical base64 of the PNG file bytes. */
-  readonly data: string
+  /** Absolute owner-only PNG path under `$DSH_HOME/phone/screenshots`. */
+  readonly path: string
 }
 ```
 
@@ -234,7 +234,7 @@ async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream>
  * Live MJPEG/H264 capture stays on `startCapture`.
  * @param id - Branded Android serial or iOS UDID whose screen to capture.
  * @param signal - Caller's optional cancellation signal.
- * @returns PNG media type and canonical base64 file bytes.
+ * @returns PNG media type and the absolute owner-only file path.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
  *   absent from the latest published listing, and otherwise per the
  *   class-documented failure modes.

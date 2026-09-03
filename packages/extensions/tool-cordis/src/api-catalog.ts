@@ -1358,7 +1358,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'async screenshot(id: DeviceId, signal?: AbortSignal): Promise<PhoneScreenshot>',
         description: 'Capture one PNG still of a listed device through `mobilecli screenshot`. Live MJPEG/H264 capture stays on `startCapture`.',
         parameters: [{ name: 'id', description: 'Branded Android serial or iOS UDID whose screen to capture.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
-        returns: 'PNG media type and canonical base64 file bytes.',
+        returns: 'PNG media type and the absolute owner-only file path.',
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
       },
       {
@@ -4923,7 +4923,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneScreenshot',
-    declaration: 'export interface PhoneScreenshot {\n    readonly mediaType: \'image/png\';\n    readonly data: string;\n}',
+    declaration: 'export interface PhoneScreenshot {\n    readonly mediaType: \'image/png\';\n    readonly path: string;\n}',
   },
   {
     name: 'PhoneStreamSession',

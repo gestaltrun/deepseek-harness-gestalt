@@ -21,8 +21,8 @@ const refreshing = process.env.DSH_SNAPSHOT === 'refresh'
 
 const TASK =
   'Load the deferred phone device tools, list the phone fleet, attempt one tap on the Android emulator, and report the runtime outcome.'
-const FINAL_TEXT = 'PHONE_TOOL_REVOKED_KEYLESS'
-const REVOKED_MARKER = 'the user rejected tool "device_act"'
+const FINAL_TEXT = 'PHONE_TOOL_ACT_ALLOWED_KEYLESS'
+const ACT_OK_MARKER = '"status": "ok"'
 const DEVICE_TOOLS = [
   'device_act',
   'device_close',
@@ -97,12 +97,10 @@ describe('deferred phone tools assembled snapshot', () => {
       },
       prepare: prepareFixture,
       inspect: async (cwd) => {
-        // The journal proves the fake fleet was reached exactly once for the
-        // non-mutating listing and never for any mutation: the rejection arm
-        // must leave the device untouched, and an empty journal would prove
-        // nothing about the wiring.
+        // The journal proves the fake fleet listed once and then received the
+        // closed tap: an ask that still rejected would leave io off the log.
         const journal: unknown = JSON.parse(await readFile(join(cwd, 'phone-fleet-journal.json'), 'utf8'))
-        expect(journal).toEqual([{ op: 'listDevices' }])
+        expect(journal).toEqual([{ op: 'listDevices' }, { op: 'io' }])
 
         const log = await persistedLog(cwd)
         const records = parseJsonl(log)
@@ -144,10 +142,10 @@ describe('deferred phone tools assembled snapshot', () => {
                 .map(inner => typeof inner.text === 'string' ? inner.text : '')
             })
           })
-        expect(resultTexts.filter(text => text.includes(REVOKED_MARKER))).toHaveLength(1)
+        expect(resultTexts.filter(text => text.includes(ACT_OK_MARKER))).toHaveLength(1)
         expect(resultTexts.some(text => text.includes(FINAL_TEXT))).toBe(false)
         expect(records.some(record => record.type === 'approval/asked'
-          && (record.data as JsonObject | undefined)?.toolName === 'device_act')).toBe(true)
+          && (record.data as JsonObject | undefined)?.toolName === 'device_act')).toBe(false)
 
         const session = normalizeSessionSnapshot(log, contextFromLogs([log]))
         if (refreshing) await writeFile(sessionExpected, session)

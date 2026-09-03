@@ -45,7 +45,7 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-browser` | `browser_close`、`browser_create`、`browser_focus`、`browser_input`、`browser_navigate`、`browser_observe`、`browser_screenshot` | `ctx.tools`、`ctx.browserRuntime` | `tool/call`、`tool/result` | - | 所有 Browser 工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。 |
-| `@deepseek-ai/dsh-tool-phone` | `device_act`、`device_close`、`device_list`、`device_observe`、`device_open`、`device_screenshot` | `ctx.tools`、`ctx.phoneDevices` | `tool/call`、`tool/result` | - | 所有手机设备工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。device_act、device_open 与 device_close 默认走 tools/pre-execute ask。 |
+| `@deepseek-ai/dsh-tool-phone` | `device_act`、`device_close`、`device_list`、`device_observe`、`device_open`、`device_screenshot` | `ctx.tools`、`ctx.phoneDevices` | `tool/call`、`tool/result` | - | 所有手机设备工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。device_open 与 device_close 默认走 tools/pre-execute ask；device_act 不走。 |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
@@ -2767,7 +2767,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 ### `device_screenshot`
 
-捕获一台手机设备的 PNG 截图。
+捕获一台手机设备的 PNG 截图并返回其绝对文件路径。
 
 ```json
 {
@@ -2786,7 +2786,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 
 来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
 
-所有手机设备工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。device_act、device_open 与 device_close 默认走 tools/pre-execute ask。
+所有手机设备工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。device_open 与 device_close 默认走 tools/pre-execute ask；device_act 不走。
 
 <a id="deepseek-aidsh-tool-web"></a>
 

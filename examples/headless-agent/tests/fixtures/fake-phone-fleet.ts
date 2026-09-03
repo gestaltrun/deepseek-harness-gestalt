@@ -37,7 +37,7 @@ const LISTING = {
   },
 }
 
-/** The journal lands beside the spawned process cwd; the snapshot inspect reads it to assert zero mutating fleet calls. */
+/** The journal lands beside the spawned process cwd; the snapshot inspect reads it to assert the listing plus one closed tap. */
 const JOURNAL_PATH = join(process.cwd(), 'phone-fleet-journal.json')
 
 const calls: { op: string; deviceId?: string }[] = []
@@ -59,16 +59,18 @@ export function apply(ctx: Context): void {
     },
     async listDevices() {
       record('listDevices')
-      ready = false
-      for (const listener of [...readinessListeners]) listener(false)
       return LISTING
     },
     async boot(deviceId: string) { record('boot', deviceId) },
     async shutdown(deviceId: string) { record('shutdown', deviceId) },
-    async io() { record('io') },
+    async io() {
+      record('io')
+      ready = false
+      for (const listener of [...readinessListeners]) listener(false)
+    },
     async screenshot(deviceId: string) {
       record('screenshot', deviceId)
-      return { mediaType: 'image/png' as const, data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' }
+      return { mediaType: 'image/png' as const, path: '/tmp/dsh-home/phone/screenshots/emulator-5554.png' }
     },
   } as never)
 }

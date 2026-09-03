@@ -1,24 +1,39 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import PhoneDevices, { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import { PhoneDevicesError } from '../src/errors.ts'
 import { runMobilecliScreenshot } from '../src/screenshot-process.ts'
+import { persistPhoneScreenshot } from '../src/screenshot-store.ts'
 import { isPng } from '../src/png.ts'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
 import { pngDimensions, PNG_SIGNATURE, stageFake, wireDevice } from './helpers.ts'
-import { rename } from 'node:fs/promises'
+import { mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
 const contexts: CordisContext[] = []
 const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
+const homes: string[] = []
+let previousHome: string | undefined
+
+beforeEach(async () => {
+  previousHome = process.env.DSH_HOME
+  const home = await mkdtemp(join(tmpdir(), 'dsh-phone-shot-home-'))
+  homes.push(home)
+  process.env.DSH_HOME = home
+})
 
 afterEach(async () => {
   console.error('child diagnostics:', MobilecliServerProcess.diagnostics.splice(0))
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
+  if (previousHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = previousHome
+  await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true })))
 })
 
 async function errorOf(run: () => Promise<unknown>): Promise<PhoneDevicesError> {
@@ -191,6 +206,39 @@ describe('phone runtime PNG screenshot', () => {
     const upstream = await errorOf(() => context.phoneDevices.screenshot(ANDROID_EMULATOR))
     expect(upstream.code).toBe('PHONE_UPSTREAM')
     expect(upstream.message).toContain('(no output)')
+  })
+
+  it('persists a PNG under $DSH_HOME/phone/screenshots with owner-only modes', async () => {
+    const path = await persistPhoneScreenshot('emulator-5554', PNG_SIGNATURE)
+    expect(path.startsWith(join(process.env.DSH_HOME ?? '', 'phone', 'screenshots'))).toBe(true)
+    expect(path).toMatch(/emulator-5554-\d+-[0-9a-f]+\.png$/u)
+    expect(await readFile(path)).toEqual(Buffer.from(PNG_SIGNATURE))
+    if (process.platform !== 'win32') {
+      expect((await stat(join(process.env.DSH_HOME ?? '', 'phone', 'screenshots'))).mode & 0o777).toBe(0o700)
+      expect((await stat(path)).mode & 0o777).toBe(0o600)
+    }
+  })
+
+  it('keeps unsafe device ids inside phone/screenshots', async () => {
+    const path = await persistPhoneScreenshot('../a b:c', PNG_SIGNATURE)
+    expect(path.startsWith(join(process.env.DSH_HOME ?? '', 'phone', 'screenshots'))).toBe(true)
+    expect(path).toMatch(/\.\._a_b_c-\d+-[0-9a-f]+\.png$/u)
+  })
+
+  it('uses a fallback file-name fragment for an empty device id', async () => {
+    const path = await persistPhoneScreenshot('', PNG_SIGNATURE)
+    expect(path.startsWith(join(process.env.DSH_HOME ?? '', 'phone', 'screenshots'))).toBe(true)
+    expect(path).toMatch(/device-\d+-[0-9a-f]+\.png$/u)
+  })
+
+  it('maps a screenshot persist failure onto PHONE_PROTOCOL', async () => {
+    const blocked = process.env.DSH_HOME
+    if (blocked === undefined) throw new Error('expected DSH_HOME to be pinned')
+    await rm(blocked, { recursive: true, force: true })
+    await writeFile(blocked, 'not-a-directory')
+    const rejected = await errorOf(() => persistPhoneScreenshot('emulator-5554', PNG_SIGNATURE))
+    expect(rejected.code).toBe('PHONE_PROTOCOL')
+    expect(rejected.message).toContain('could not persist')
   })
 
   it('returns PNG bytes from the screenshot command itself', async () => {

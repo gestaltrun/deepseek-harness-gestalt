@@ -2,9 +2,9 @@
 # deferred device tools against a recorded fake fleet. The `phone-mock`
 # adapter scripts the model turns, so the snapshot pins the whole assembled
 # arc: zero device schemas in the initial request, `tool_search`
-# reconstruction, and the unattended rejection of the consequential act
+# reconstruction, and a closed tap that runs without a new approval prompt
 # (`DSH_PERMISSION_MODE=danger-full-access` maps the approval policy to
-# `never`, whose fixed outcome is `rejected`).
+# `never`, which would reject any remaining ask).
 - id: agent-default-model
   config:
     provider: phone-mock

@@ -125,12 +125,16 @@ describe('ui-browser browser plugin', () => {
     face.addNamedProfile('tmp')
     face.addNamedProfile('work')
     face.addNamedProfile('lab')
+    face.renameNamedProfile('work', 'tmp')
+    face.renameNamedProfile('work', 'desk')
     face.removeNamedProfile('work')
     face.removeNamedProfile('lab')
     face.setDefaultKind('shared')
     face.setDefaultPersistentName('lab')
     expect(host.set.mock.calls).toEqual([
       ['namedProfiles', ['work', 'lab']],
+      ['namedProfiles', ['desk']],
+      ['defaultPersistentName', 'desk'],
       ['namedProfiles', []],
       ['defaultPersistentName', ''],
       ['namedProfiles', ['work']],

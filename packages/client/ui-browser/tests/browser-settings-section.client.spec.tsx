@@ -8,7 +8,7 @@ function renderSection(
   state: BrowserSettings,
   actions: Pick<
     BrowserSettingsSectionProps,
-    'setDefaultKind' | 'setDefaultPersistentName' | 'addNamedProfile' | 'removeNamedProfile'
+    'setDefaultKind' | 'setDefaultPersistentName' | 'addNamedProfile' | 'removeNamedProfile' | 'renameNamedProfile'
   >,
 ) {
   return render(
@@ -26,8 +26,9 @@ describe('BrowserSettingsSection', () => {
     const setDefaultPersistentName = vi.fn()
     const addNamedProfile = vi.fn()
     const removeNamedProfile = vi.fn()
+    const renameNamedProfile = vi.fn()
     const view = renderSection(DEFAULT_BROWSER_SETTINGS, {
-      setDefaultKind, setDefaultPersistentName, addNamedProfile, removeNamedProfile,
+      setDefaultKind, setDefaultPersistentName, addNamedProfile, removeNamedProfile, renameNamedProfile,
     })
     fireEvent.click(view.getByLabelText('settings.kind.temporary'))
     expect(setDefaultKind).toHaveBeenCalledWith('temporary')
@@ -42,11 +43,12 @@ describe('BrowserSettingsSection', () => {
     const setDefaultPersistentName = vi.fn()
     const addNamedProfile = vi.fn()
     const removeNamedProfile = vi.fn()
+    const renameNamedProfile = vi.fn()
     const view = renderSection({
       defaultKind: 'persistent',
       defaultPersistentName: 'work',
       namedProfiles: ['work'],
-    }, { setDefaultKind, setDefaultPersistentName, addNamedProfile, removeNamedProfile })
+    }, { setDefaultKind, setDefaultPersistentName, addNamedProfile, removeNamedProfile, renameNamedProfile })
     fireEvent.change(view.getByLabelText('settings.defaultPersistentName'), { target: { value: '' } })
     expect(setDefaultPersistentName).toHaveBeenCalledWith('')
     fireEvent.click(view.getByText('settings.roster.remove'))
@@ -54,6 +56,27 @@ describe('BrowserSettingsSection', () => {
     fireEvent.change(view.getByLabelText('settings.roster.add'), { target: { value: 'tmp' } })
     expect(view.getByRole('alert').textContent).toBe('settings.roster.invalid')
     expect((view.getByText('settings.roster.submit') as HTMLButtonElement).disabled).toBe(true)
+    view.unmount()
+  })
+
+  it('renames a roster entry through the named input', () => {
+    const setDefaultKind = vi.fn()
+    const setDefaultPersistentName = vi.fn()
+    const addNamedProfile = vi.fn()
+    const removeNamedProfile = vi.fn()
+    const renameNamedProfile = vi.fn()
+    const view = renderSection({
+      defaultKind: 'persistent',
+      defaultPersistentName: 'work',
+      namedProfiles: ['work'],
+    }, { setDefaultKind, setDefaultPersistentName, addNamedProfile, removeNamedProfile, renameNamedProfile })
+    const name = view.getByLabelText('settings.roster.name') as HTMLInputElement
+    fireEvent.change(name, { target: { value: 'lab' } })
+    fireEvent.blur(name)
+    expect(renameNamedProfile).toHaveBeenCalledWith('work', 'lab')
+    fireEvent.change(name, { target: { value: 'tmp' } })
+    fireEvent.blur(name)
+    expect(renameNamedProfile).toHaveBeenCalledTimes(1)
     view.unmount()
   })
 })

@@ -32,6 +32,8 @@ export const zh = {
   'settings.roster.empty': '还没有命名 Profile',
   'settings.roster.add': '新名称',
   'settings.roster.submit': '添加',
+  'settings.roster.name': 'Profile 名称',
+  'settings.roster.rename': '重命名',
   'settings.roster.remove': '删除',
   'settings.roster.invalid': '名称须为稳定分区键：字母或数字开头，不含 shared 或 tmp 前缀。',
 } satisfies Record<string, string>
@@ -68,6 +70,8 @@ export const en = {
   'settings.roster.empty': 'No named Profiles yet',
   'settings.roster.add': 'New name',
   'settings.roster.submit': 'Add',
+  'settings.roster.name': 'Profile name',
+  'settings.roster.rename': 'Rename',
   'settings.roster.remove': 'Remove',
   'settings.roster.invalid': 'The name must be a stable partition key: start with a letter or digit, and do not use shared or a tmp prefix.',
 } satisfies Record<BrowserKey, string>

@@ -12,7 +12,7 @@ Session 可以拥有 Browser Workspace、实例、标签页、Dock 几何与当�
 
 `dsh-client-ui-browser` 把 Session 持有的 Browser Workspace 呈现为官方截图加文本 chrome。占用关系后来迁到工作台侧栏的 `browser` 标签；见 [工作台官方浏览器 Agent Note](2026-08-21-workbench-official-browser.zh.md)。收起预览仍占用 `conversation.browser.preview`。实时事实通过 `useProjection('browserWorkspace')` 到达。变更走生成的 `remote.browserWorkspace` 命名空间，包括 `create`。
 
-chrome 没有 Profile 切换或 Agent 状态行。工作台侧栏标签条就是页面列表；页面 chrome 没有标签条。持久 Profile 名称只出现在地址栏旁。活动标签页的标题、地址栏与截图会在该标签页的列表修订号前进时重新观察，因此 Binder 已提交的 navigate 会替换仍为空白的 `about:blank` 界面。刷新会先观察 Runtime 的当前 URL，再导航到该 URL。地址栏可编辑：回车导航，没有 scheme 的主机名会补上 `https://`。视口显示最近一次截图与页面文本，并在截图大于窗格时滚动；它不嵌入第二个进程。官方 chrome 不占用 `details`；窄屏浮层留给其他详情占用方（[窄屏浮层 Agent Note](../bug-fix/2026-08-21-narrow-browser-dock-overlay.zh.md)）。
+chrome 没有 Profile 切换或 Agent 状态行。工作台侧栏标签条就是页面列表；页面 chrome 没有标签条。持久 Profile 名称出现在地址栏旁，以及设置分区 `id: 'browser'` 的可编辑名册行里。重命名名册项会替换 `namedProfiles` 中的分区键，并在 `defaultPersistentName` 仍指向旧名称时一并改写；Chromium partition 数据不会迁移。活动标签页的标题、地址栏与截图会在该标签页的列表修订号前进时重新观察，因此 Binder 已提交的 navigate 会替换仍为空白的 `about:blank` 界面。刷新会先观察 Runtime 的当前 URL，再导航到该 URL。地址栏可编辑：回车导航，没有 scheme 的主机名会补上 `https://`。视口显示最近一次截图与页面文本，并在截图大于窗格时滚动；它不嵌入第二个进程。官方 chrome 不占用 `details`；窄屏浮层留给其他详情占用方（[窄屏浮层 Agent Note](../bug-fix/2026-08-21-narrow-browser-dock-overlay.zh.md)）。
 
 收起预览是同一批页面的单行分层摘要。点击后层会用该标签页在列表中的修订号聚焦它；点击当前层会通过 better-sidebar 展开工作台标签。后台标签页上的列表修订号冲突会 observe 一次并重试，或展示失败；该恢复由[列表过期 Agent Note](../bug-fix/2026-08-20-dock-listing-stale.zh.md)持有。ChatView 在对话右侧留白窄于 240px 时隐藏预览。普通 MCP 工具行仍留在对话历史中。选中 `browser_*` 工具行会聚焦列表中的标签页；该路径由[对话浏览器工具聚焦 Agent Note](2026-08-20-chat-browser-tool-focus-dock.zh.md)持有。[删除报告式控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.zh.md)持有展示状态权威。
 

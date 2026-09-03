@@ -2680,6 +2680,24 @@ body[data-dsh-tab-dragging] .windowDragSpace {
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Link-styled button: without the border/background reset the native button
+   chrome shows a box around the label. */
+.producedFolder {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.producedFolder:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* ── Shared interaction rules ──────────────────────────────────────────── */
 
 /* Keyboard focus stays visible on every interactive control (the styling
@@ -2700,6 +2718,7 @@ body[data-dsh-tab-dragging] .windowDragSpace {
 .gitLogMore:focus-visible,
 .gitDiffFile:focus-visible,
 .gitDiffExpand:focus-visible,
+.producedFolder:focus-visible,
 .terminalRetry:focus-visible,
 .editorModeButton:focus-visible,
 .editorDownloadLink:focus-visible,

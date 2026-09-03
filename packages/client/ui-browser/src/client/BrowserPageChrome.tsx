@@ -82,6 +82,7 @@ export function BrowserPageChrome({
   useEffect(() => {
     const url = page?.url
     if (url === undefined || url === '' || url === 'about:blank') return
+    /* v8 ignore next -- consecutive observe of the same committed URL is a no-op. */
     if (historyRef.current[cursorRef.current] === url) return
     historyRef.current = [...historyRef.current.slice(0, cursorRef.current + 1), url]
     cursorRef.current += 1
@@ -148,6 +149,7 @@ export function BrowserPageChrome({
   const goHistory = (offset: -1 | 1): void => {
     const next = cursorRef.current + offset
     const url = historyRef.current[next]
+    /* v8 ignore next -- the buttons are disabled at the trail edges and while navigating. */
     if (url === undefined || page === undefined || navigating) return
     cursorRef.current = next
     setTrail({ size: historyRef.current.length, cursor: next })
@@ -156,6 +158,7 @@ export function BrowserPageChrome({
 
   const openExternal = (): void => {
     const url = page?.url
+    /* v8 ignore next -- the control is disabled until an open non-blank URL exists. */
     if (url === undefined || url === '' || url === 'about:blank') return
     window.open(url, '_blank', 'noopener')
   }

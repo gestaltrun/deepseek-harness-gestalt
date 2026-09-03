@@ -356,6 +356,24 @@ describe('OfficialBrowserBridge', () => {
     })
   })
 
+  it('keeps the Profile identity on a rejected create and a retry', async () => {
+    const profile = { kind: 'persistent' as const, name: 'test' }
+    const b = bench({
+      projection: projection(false),
+      tabs: [{ id: 'browser:1', type: 'browser', meta: { profile, createError: 'runtime gone' } }],
+    })
+    vi.mocked(b.remote.create).mockRejectedValueOnce('runtime gone')
+    b.bridge.ensureOfficial('browser:1')
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenNthCalledWith(1, 'browser:1', { meta: { profile } })
+    })
+    await vi.waitFor(() => {
+      expect(b.sidebar.updateTab).toHaveBeenLastCalledWith('browser:1', {
+        meta: { profile, createError: 'runtime gone' },
+      })
+    })
+  })
+
   it('clears the recorded failure at the next attempt and binds on success', async () => {
     const b = bench({
       projection: projection(false),

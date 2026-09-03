@@ -81,6 +81,12 @@ describe('BrowserPageChrome', () => {
     expect(onRetry).toHaveBeenCalledOnce()
   })
 
+  it('shows the create failure without a retry control when none is provided', () => {
+    render(<BrowserPageChrome {...props({ target: undefined })} createError="runtime gone" />)
+    expect(screen.getByText('页面创建失败')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+  })
+
   it('keeps the creating placeholder while the first create attempt runs', () => {
     render(<BrowserPageChrome {...props({ target: undefined })} />)
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()

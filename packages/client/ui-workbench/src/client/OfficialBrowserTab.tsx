@@ -104,6 +104,7 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
 
   if (isDesktopOverlayDocument() || actions === undefined) return null
 
+  const createError = bound === undefined ? officialCreateErrorOf(tab.meta) : undefined
   return (
     <BrowserPageChrome
       target={bound}
@@ -115,9 +116,7 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
       {...(visible === undefined ? {} : { visible })}
       onCommittedPage={onCommittedPage}
       onMissingTarget={onMissingTarget}
-      {...(bound === undefined && officialCreateErrorOf(tab.meta) !== undefined
-        ? { createError: officialCreateErrorOf(tab.meta), onRetry: onRetryCreate }
-        : {})}
+      {...(createError === undefined ? {} : { createError, onRetry: onRetryCreate })}
     />
   )
 }

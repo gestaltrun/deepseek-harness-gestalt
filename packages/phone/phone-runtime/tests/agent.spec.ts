@@ -264,18 +264,15 @@ describe('phone runtime on-device agent operations', () => {
   })
 
   it('bounds a hung agent install with the configured agent ceiling', async () => {
-    const fake = await stageFake({
-      devices: BASE_DEVICES,
-      agent: { statusDelayMs: 0, installDelayMs: 20_000 },
-    })
+    const fake = await stageFake({ devices: BASE_DEVICES, agent: { installDelayMs: 6_000 } })
     fakes.push(fake)
-    // The status probe has no fake delay; agentTimeoutMs must still exceed a
-    // loaded host's spawn of that child so the hung install is what times out.
-    const context = await mountWith(fake, { agentTimeoutMs: 8_000, provisioningProfilePath: fake.profilePath })
-    const timedOut = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL))
+    // force skips the status probe so the 2s ceiling applies to the hung install
+    // child. Without force, a loaded host can expire that ceiling on status spawn.
+    const context = await mountWith(fake, { agentTimeoutMs: 2_000, provisioningProfilePath: fake.profilePath })
+    const timedOut = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL, { force: true }))
     expect(timedOut.code).toBe('PHONE_TIMEOUT')
     expect(timedOut.message).toContain('agent install')
-  }, 30_000)
+  })
 
   it('reports pre-aborted agent operations as PHONE_ABORTED', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })

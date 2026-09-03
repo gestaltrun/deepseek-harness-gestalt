@@ -197,7 +197,18 @@ describe('workspace settings and invite wizard (M4)', () => {
       // Binding resolves: the roster read rides the same gateway.
       expect(membership.roster).toHaveBeenCalledWith('project-1')
       expect(screen.getByText('Assembled')).toBeTruthy()
-      expect(screen.getByText('mona')).toBeTruthy()
+      const mona = screen.getByText('mona')
+      expect(mona).toBeTruthy()
+      const online = screen.getAllByText('在线')
+      expect(online.length).toBeGreaterThan(0)
+      for (const label of online) {
+        expect(label.className).toMatch(/visuallyHidden/)
+      }
+      const row = mona.parentElement
+      expect(row?.className).toMatch(/memberRow/)
+      expect(getComputedStyle(row!).flexDirection).toBe('row')
+      const presence = row?.querySelector('[class*="presence"]')
+      expect(presence?.className).toMatch(/presence/)
       const inviteRole = screen.getByLabelText('邀请角色')
       expect(inviteRole).toBeTruthy()
       expect(Array.from(inviteRole.querySelectorAll('option')).map(option => option.value)).toEqual(['admin', 'member'])

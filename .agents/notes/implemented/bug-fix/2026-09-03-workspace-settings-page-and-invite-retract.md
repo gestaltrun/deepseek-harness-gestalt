@@ -14,6 +14,8 @@ The settings dialog is a headless page: `min(820px, calc(100vw - 64px))` by `min
 
 The wizard never submits or re-offers an invitation that left the pending pool. `decide` failures with `INVITATION_NOT_PENDING`, `INVITATION_NOT_FOUND`, or a retracted/not-pending message close the wizard, record that id, and skip it on later polls. Other decide failures map to short dictionary copy and never keep the Electron IPC prefix. Link radios use the checkout basename.
 
+Roster presence is a 16px overflow-hidden slot: the green/offline dot is visible, and `members.online` / `members.offline` live only in `.visuallyHidden` plus the `title` tooltip. Without that clip, the two-character label wraps inside the slot and stacks next to the GitHub login.
+
 ## Supersession check
 
 [The Git-less create and byRemote 404 note](2026-09-03-workspace-upgrade-gitless-create-and-byremote-404.md) still owns name-only create, independent loads, and 404-as-unbound. This note only replaces the compact dialog chrome and the retracted-invite poll. [The invitation role picker note](../feature/2026-09-02-invitation-granted-role.md) still owns grant policy.

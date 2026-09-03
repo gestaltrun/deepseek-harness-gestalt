@@ -175,15 +175,32 @@
 
 .memberRow {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
+  min-width: 0;
+  padding: 8px 0;
 }
 
 .presence {
+  position: relative;
   display: inline-flex;
+  flex: none;
   align-items: center;
+  justify-content: center;
   width: 16px;
+  height: 16px;
+  overflow: hidden;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .offlineDot {

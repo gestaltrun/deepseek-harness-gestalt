@@ -388,7 +388,7 @@ function MemberRowItem({ row, gateway, onAct, t }: {
     <li className={css.memberRow}>
       <span className={css.presence} title={row.presence === 'online' ? t('members.online') : t('members.offline')}>
         {row.presence === 'online' ? <StateDot state="done" /> : <span className={css.offlineDot} aria-hidden="true" />}
-        <span className="visually-hidden">{row.presence === 'online' ? t('members.online') : t('members.offline')}</span>
+        <span className={css.visuallyHidden}>{row.presence === 'online' ? t('members.online') : t('members.offline')}</span>
       </span>
       <span className={css.memberName}>{row.displayName === '' ? row.accountId : row.displayName}</span>
       <select

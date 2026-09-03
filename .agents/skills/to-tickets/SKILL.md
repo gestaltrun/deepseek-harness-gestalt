@@ -103,3 +103,5 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 </issue-template>
 
 In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
+
+For a UI change, each ticket's acceptance criteria name the experience-route steps it makes walkable and the frozen-draft screens those steps must match. The whole-route walk stays a delivery-orchestrator session, not a per-ticket headed handoff.

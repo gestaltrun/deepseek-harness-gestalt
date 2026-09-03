@@ -15,7 +15,7 @@ Own one isolated Desktop Electron per user goal. Automated lanes such as `pnpm -
 
 3. **Refuse a second instance.** Scan for other Desktop test processes that still belong to this goal (same scratch root, same memoed `DSH_HOME`, or the same ticket/PR Electron). Stop them before creating a replacement. Complete when this goal has zero live test Electron / Host / PostgreSQL / sidecar processes.
 
-4. **Choose headed only for looking.** Agent self-test, bug reproduction, prototype checks, and pre-acceptance checks run headless. Start a visible window only when asking the user to look, click, accept, or review a prototype that already passed the headless check. Complete when the chosen mode is `headless` or `headed` and matches that rule.
+4. **Choose headed only for looking.** Agent self-test, bug reproduction, prototype checks, fidelity comparison, and the experience-route walk run headless. Start a visible window only when asking the user to look, click, accept, or review a prototype or product that already passed the headless check, including a complete experience-route walk when one exists. Complete when the chosen mode is `headless` or `headed` and matches that rule.
 
 5. **Choose the operated Platform config from the scenario.** Desktop `build-main.mjs` requires `DSH_DESKTOP_OPERATED_PLATFORM_CONFIG` or an argv path; `pnpm gestalt:dev` does not supply one. Pick the config before launch:
 
@@ -34,8 +34,8 @@ Own one isolated Desktop Electron per user goal. Automated lanes such as `pnpm -
 
 | Request | Mode |
 |---|---|
-| Agent self-test, reproduce, fix, prototype check, re-run before review | `headless` |
-| Ask the user to look, click, accept, or review a draft that already passed headless | `headed` after the same cleanup |
+| Agent self-test, reproduce, fix, prototype check, fidelity comparison, experience-route walk, re-run before review | `headless` |
+| Ask the user to look, click, accept, or review a draft or product that already passed headless, including a complete experience-route walk | `headed` after the same cleanup |
 
 Headed and headless both use the scratch home. Never point a test instance at the user's normal `DSH_HOME`.
 
@@ -84,4 +84,4 @@ Stop recorded PIDs, then verify. Do not use a command-line substring kill that c
 
 The Sub2API Electron runner already fails if those survivors remain; agent-started instances use the same completion bar.
 
-GIF recording still follows [record-browser-gif](../record-browser-gif/SKILL.md). Browser automation still follows [ego-browser](../ego-browser/SKILL.md), which reads and writes the `ego` record in this memo. UI prototypes follow [prototype/UI.md](../prototype/UI.md) and use this skill for the headless check then the headed review.
+GIF recording still follows [record-browser-gif](../record-browser-gif/SKILL.md). Browser automation still follows [ego-browser](../ego-browser/SKILL.md), which reads and writes the `ego` record in this memo. UI prototypes follow [prototype/UI.md](../prototype/UI.md) and use this skill for the headless check then the headed review. Fidelity comparison and the dedicated acceptance walk follow [the fidelity-and-acceptance-route decision](../../notes/implemented/process/2026-09-03-ui-fidelity-and-acceptance-route.md) and use this skill for one isolated instance per goal.

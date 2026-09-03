@@ -10,11 +10,11 @@ Status: implemented
 
 ## Decision
 
-[`dsh-desktop-test-instance`](../../../skills/dsh-desktop-test-instance/SKILL.md) 负责由智能体启动的 Desktop 测试 Electron 生命周期。一个用户目标只对应一套实例。智能体先停止备忘中的实例，再停止该目标下其他仍存活的测试进程，然后才启动替换实例。智能体自测（含 prototype 检查）使用无头模式；只有在请用户查看、点击、验收，或评审已通过无头检查的稿时，才启动有窗口实例。智能体按场景选择 operated Platform 配置：除非本轮必须连接真实 Platform，或 diff 改了 Platform 身份、callback、Relay 或 companion-attachment 字段，否则使用 `apps/desktop/tests/fixtures/operated-platform.json`。需要调用模型的实例只从正式 DSH Home 盲拷 `settings.yaml` 和 `.credentials.yaml`，拷贝路径遵循 `scripts/web-acceptance.ts` 中的 `copyModelConfiguration`，并且不得编造 provider 模型。
+[`dsh-desktop-test-instance`](../../../skills/dsh-desktop-test-instance/SKILL.md) 负责由智能体启动的 Desktop 测试 Electron 生命周期。一个用户目标只对应一套实例。智能体先停止备忘中的实例，再停止该目标下其他仍存活的测试进程，然后才启动替换实例。智能体自测（含 prototype 检查、还原度对照和体验路线走法）使用无头模式；只有在请用户查看、点击、验收，或评审已通过无头检查的稿或产品时（含完整体验路线走通）才启动有窗口实例。智能体按场景选择 operated Platform 配置：除非本轮必须连接真实 Platform，或 diff 改了 Platform 身份、callback、Relay 或 companion-attachment 字段，否则使用 `apps/desktop/tests/fixtures/operated-platform.json`。需要调用模型的实例只从正式 DSH Home 盲拷 `settings.yaml` 和 `.credentials.yaml`，拷贝路径遵循 `scripts/web-acceptance.ts` 中的 `copyModelConfiguration`，并且不得编造 provider 模型。
 
 `.agents/local/runtime-memo.json` 是该 checkout 的 gitignore 本机清单。Desktop 在其中记录 PID、端口和临时路径；[`ego-browser`](../../../skills/ego-browser/SKILL.md) 在同一文件中记录当前 DSH Task Space id，并一直复用该 id，直到用户要求新 Space、目标改变，或已记录的 Space 不存在。第一个 Space 仍在时再创建第二个 DSH Space，本轮失败。
 
-[`orchestrate-dsh-delivery`](../../../skills/orchestrate-dsh-delivery/SKILL.md) 在 GUI smoke 和浏览器工作上指向这两个技能。`pnpm --dir apps/desktop test:e2e-sub2api` 这类自动化通道继续使用自己的 teardown，不属于该实例技能。
+[`orchestrate-dsh-delivery`](../../../skills/orchestrate-dsh-delivery/SKILL.md) 在 GUI smoke、还原度对照、专用验收走法和浏览器工作上指向这两个技能。`pnpm --dir apps/desktop test:e2e-sub2api` 这类自动化通道继续使用自己的 teardown，不属于该实例技能。[还原度与验收路线决策](2026-09-03-ui-fidelity-and-acceptance-route.zh.md)拥有何时由专用会话（而不是根会话）启动 headed 实例。
 
 ## Alternatives considered
 

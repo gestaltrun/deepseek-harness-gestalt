@@ -12,7 +12,7 @@ Status: implemented
 
 [`prototype/UI.md`](../../../skills/prototype/UI.md) 仍然要求若干交互变体。每个变体都把新功能融入宿主页面和当前组件库。默认是 sub-shape A：现有路由、在该路由上用 `?variant=`、新功能使用 mock 数据。旁白、grilling 注释和切换条是脚手架；有窗口评审只展示高保真构图。
 
-prototype 会话不是协调会话。[`orchestrate-dsh-delivery`](../../../skills/orchestrate-dsh-delivery/SKILL.md) 派发隔离的 Codex worktree 任务或 DSH subagent，并附上短 brief。该会话通过 [`dsh-desktop-test-instance`](../../../skills/dsh-desktop-test-instance/SKILL.md) 无头自检每个变体，只有请用户评审时才启动有窗口实例。[`to-spec`](../../../skills/to-spec/SKILL.md) 链接冻结稿和可丢弃分支；没有该稿就不得发布 UI spec。
+prototype 会话不是协调会话。[`orchestrate-dsh-delivery`](../../../skills/orchestrate-dsh-delivery/SKILL.md) 派发隔离的 Codex worktree 任务或 DSH subagent，并附上短 brief。该会话通过 [`dsh-desktop-test-instance`](../../../skills/dsh-desktop-test-instance/SKILL.md) 无头自检每个变体，只有请用户评审时才启动有窗口实例。[`to-spec`](../../../skills/to-spec/SKILL.md) 链接冻结稿、可丢弃分支和体验路线；没有这些就不得发布 UI spec。实现随后按[还原度与验收路线决策](2026-09-03-ui-fidelity-and-acceptance-route.zh.md)把正在跑的产品对照该稿。
 
 ## Alternatives considered
 
@@ -26,4 +26,4 @@ prototype 会话不是协调会话。[`orchestrate-dsh-delivery`](../../../skill
 
 ## Consequences
 
-prototype 分支仍是规划输入，不是生产历史。实现票按测试和生命周期规则重写获胜变体。规格引用冻结稿，而不是复述布局。协调会话更小，因为它不再承载绘制循环。
+prototype 分支仍是规划输入，不是生产历史。实现票按测试和生命周期规则重写获胜变体。规格引用冻结稿和体验路线，而不是复述布局。协调会话更小，因为它不再承载绘制循环。实现仍须在 headed 评审前把正在跑的产品对照该稿。

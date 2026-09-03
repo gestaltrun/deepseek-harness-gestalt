@@ -71,6 +71,21 @@ describe('BrowserPageChrome', () => {
     expect(screen.getByText('正在创建页面')).toBeTruthy()
   })
 
+  it('offers a retry when the page create failed', () => {
+    const onRetry = vi.fn()
+    render(<BrowserPageChrome {...props({ target: undefined })} createError="runtime gone" onRetry={onRetry} />)
+    expect(screen.getByRole('alert').textContent).toBe('页面创建失败')
+    expect(screen.getByText('runtime gone')).toBeTruthy()
+    expect(screen.queryByText('正在创建页面')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the creating placeholder while the first create attempt runs', () => {
+    render(<BrowserPageChrome {...props({ target: undefined })} />)
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+  })
+
   it('shows title, persistent Profile, screenshot, and page text', async () => {
     render(<BrowserPageChrome {...props()} />)
     await waitFor(() => {
@@ -286,6 +301,60 @@ describe('BrowserPageChrome', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toBe('无法完成该操作')
     })
+  })
+
+  it('walks the chrome history with back and forward', async () => {
+    const input = props()
+    const { rerender } = render(<BrowserPageChrome {...input} />)
+    await waitFor(() => { expect(screen.getByDisplayValue('https://alpha.test/path')).toBeTruthy() })
+    const back = screen.getByRole('button', { name: '后退' })
+    const forward = screen.getByRole('button', { name: '前进' })
+    expect((back as HTMLButtonElement).disabled).toBe(true)
+    expect((forward as HTMLButtonElement).disabled).toBe(true)
+
+    const beta = page({ revision: 5, url: 'https://beta.test/', title: 'Beta' })
+    input.observe = vi.fn().mockResolvedValue(beta)
+    input.refresh = vi.fn().mockResolvedValue(beta)
+    rerender(<BrowserPageChrome {...input} listedRevision={5} />)
+    await waitFor(() => { expect(screen.getByDisplayValue('https://beta.test/')).toBeTruthy() })
+    await waitFor(() => { expect((screen.getByRole('button', { name: '后退' }) as HTMLButtonElement).disabled).toBe(false) })
+
+    fireEvent.click(screen.getByRole('button', { name: '后退' }))
+    await waitFor(() => {
+      expect(input.refresh).toHaveBeenCalledWith(TARGET, 5, 'https://alpha.test/path')
+    })
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: '前进' }) as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '前进' }))
+    await waitFor(() => {
+      expect(input.refresh).toHaveBeenCalledWith(TARGET, 5, 'https://beta.test/')
+    })
+    await waitFor(() => {
+      expect((screen.getByRole('button', { name: '前进' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+  })
+
+  it('opens the committed page in the default browser', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    render(<BrowserPageChrome {...props()} />)
+    await waitFor(() => { expect(screen.getByDisplayValue('https://alpha.test/path')).toBeTruthy() })
+    fireEvent.click(screen.getByRole('button', { name: '在默认浏览器打开' }))
+    expect(open).toHaveBeenCalledWith('https://alpha.test/path', '_blank', 'noopener')
+  })
+
+  it('disables external open on a blank page', async () => {
+    const blank = page({
+      revision: 0,
+      url: 'about:blank',
+      title: 'New Tab',
+      text: '',
+      chrome: { kind: 'temporary', partition: 'tmp' },
+    })
+    render(<BrowserPageChrome {...props({ page: blank })} listedRevision={0} />)
+    await waitFor(() => { expect(screen.getByDisplayValue('about:blank')).toBeTruthy() })
+    expect((screen.getByRole('button', { name: '在默认浏览器打开' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('does not navigate from the address bar before observe settles', () => {

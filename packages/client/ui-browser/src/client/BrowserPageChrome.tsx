@@ -2,8 +2,10 @@
  * Official page chrome for one Session-owned page.
  * The workbench sidebar tab bar is the page list; this pane has no tab strip.
  */
-import { useEffect, useState, type FormEvent } from 'react'
-import { IconRefreshOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import {
+  IconChevronLeftOutline14, IconChevronRightOutline14, IconLinkOutline16, IconRefreshOutline16,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { BrowserPageState, BrowserTarget } from '@deepseek-ai/dsh-browser-workspace/client'
 import type { BrowserPageChromeActions } from './slots.ts'
 import {
@@ -31,6 +33,10 @@ export interface BrowserPageChromeProps extends BrowserPageChromeActions {
   onCommittedPage?: (page: BrowserPageState) => void
   /** Replaces a projected target absent from the current Runtime. */
   onMissingTarget?: (target: BrowserTarget) => BrowserPageState | undefined | Promise<BrowserPageState | undefined>
+  /** Create failure for an unbound tab; switches the placeholder to a retry affordance. */
+  createError?: string
+  /** Retry the failed page create. */
+  onRetry?: () => void
 }
 
 /**
@@ -40,6 +46,7 @@ export interface BrowserPageChromeProps extends BrowserPageChromeActions {
  */
 export function BrowserPageChrome({
   target, listedRevision, refresh, observe, screenshot, t, visible, onCommittedPage, onMissingTarget,
+  createError, onRetry,
 }: BrowserPageChromeProps) {
   const { page, screenshot: shot } = useBrowserPage(
     target,
@@ -65,8 +72,35 @@ export function BrowserPageChrome({
     if (page !== undefined) onCommittedPage?.(page)
   }, [page, onCommittedPage])
 
+  // Chrome-local back/forward trail. The Runtime owns no history verbs, so
+  // the pane records every committed URL (address-bar navigations and, on
+  // Desktop, in-page link clicks observed after a revision advance) and
+  // revisits entries through the same navigate path.
+  const historyRef = useRef<string[]>([])
+  const cursorRef = useRef(-1)
+  const [trail, setTrail] = useState({ size: 0, cursor: -1 })
+  useEffect(() => {
+    const url = page?.url
+    if (url === undefined || url === '' || url === 'about:blank') return
+    if (historyRef.current[cursorRef.current] === url) return
+    historyRef.current = [...historyRef.current.slice(0, cursorRef.current + 1), url]
+    cursorRef.current += 1
+    setTrail({ size: historyRef.current.length, cursor: cursorRef.current })
+  }, [page?.url])
+
   if (target === undefined) {
-    return <div className={css.root} data-browser-page=""><div className={css.empty}>{t('dock.creating')}</div></div>
+    if (createError === undefined) {
+      return <div className={css.root} data-browser-page=""><div className={css.empty}>{t('dock.creating')}</div></div>
+    }
+    return (
+      <div className={css.root} data-browser-page="">
+        <div className={css.empty} role="alert">{t('dock.createFailed')}</div>
+        <div className={css.createError}>{createError}</div>
+        {onRetry !== undefined && (
+          <button type="button" className={css.retry} onClick={onRetry}>{t('dock.retry')}</button>
+        )}
+      </div>
+    )
   }
 
   const goTo = (url?: string): void => {
@@ -109,10 +143,48 @@ export function BrowserPageChrome({
     goTo(url)
   }
 
+  // Moving the cursor before goTo keeps the observe effect from appending
+  // the revisited URL as a new entry.
+  const goHistory = (offset: -1 | 1): void => {
+    const next = cursorRef.current + offset
+    const url = historyRef.current[next]
+    if (url === undefined || page === undefined || navigating) return
+    cursorRef.current = next
+    setTrail({ size: historyRef.current.length, cursor: next })
+    goTo(url)
+  }
+
+  const openExternal = (): void => {
+    const url = page?.url
+    if (url === undefined || url === '' || url === 'about:blank') return
+    window.open(url, '_blank', 'noopener')
+  }
+
+  const canGoBack = trail.cursor > 0
+  const canGoForward = trail.cursor >= 0 && trail.cursor < trail.size - 1
+
   return (
     <div className={css.root} data-browser-page="">
       {actionError !== undefined && <div className={css.actionError} role="alert">{actionError}</div>}
       <div className={css.toolbar}>
+        <button
+          type="button"
+          className={css.tool}
+          aria-label={t('dock.back')}
+          disabled={!canGoBack || page === undefined || navigating}
+          onClick={() => { goHistory(-1) }}
+        >
+          <IconChevronLeftOutline14 />
+        </button>
+        <button
+          type="button"
+          className={css.tool}
+          aria-label={t('dock.forward')}
+          disabled={!canGoForward || page === undefined || navigating}
+          onClick={() => { goHistory(1) }}
+        >
+          <IconChevronRightOutline14 />
+        </button>
         <button
           type="button"
           className={css.tool}
@@ -143,6 +215,15 @@ export function BrowserPageChrome({
             }}
           />
         </form>
+        <button
+          type="button"
+          className={css.tool}
+          aria-label={t('dock.openExternal')}
+          disabled={page === undefined || page.url === '' || page.url === 'about:blank'}
+          onClick={openExternal}
+        >
+          <IconLinkOutline16 />
+        </button>
       </div>
       <div
         ref={viewport}

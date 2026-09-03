@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Session-owned official Browser chrome and collapsed tab preview. [`dsh-client-ui-workbench`](../ui-workbench/README.md) imports the page chrome directly and mounts it inside the snapshot `browser` tab. This plugin occupies `conversation.browser.preview` and registers settings section `id: 'browser'`. Live Workspace facts arrive through `useProjection('browserWorkspace')`; mutations use the generated `remote.browserWorkspace` namespace and request the shared `api-remotes/client` helper from the module table.
+Session-owned official Browser chrome and collapsed tab preview. [`dsh-client-ui-workbench`](../ui-workbench/README.md) imports the page chrome directly and mounts it inside the snapshot `browser` tab. This plugin occupies `conversation.browser.preview` and registers settings section `id: 'browser'`. Live Workspace facts arrive through `useProjection('browserWorkspace')`; mutations use the generated `remote.browserWorkspace` namespace and request the shared `api-remotes/client` helper from the module table. The page chrome carries back/forward over a pane-local trail of committed URLs and an open-in-default-browser control; a rejected create shows a retry affordance.
 
 The collapsed preview is a layered summary of the same official pages. ChatView paints it in the right gutter of the conversation scrollport and hides that rail when the gutter is narrower than 240px. Clicking a back layer focuses that tab with its listed revision; clicking the current layer reveals the workbench tab. A listed-revision `BROWSER_REVISION_CONFLICT` on a background chip observes that tab once and retries, or shows the failure. Ordinary MCP tool rows stay in conversation history.
 

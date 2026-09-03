@@ -215,7 +215,7 @@ jobs:
           DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
         run: |
           pnpm run build
-          pnpm --filter @deepseek-ai/dsh-desktop build:main
+          pnpm --filter @deepseek-ai/dsh-desktop build:main -- --platform darwin --arch ${{ matrix.arch }}
 
       - name: Fetch official Node
         run: node apps/desktop/scripts/fetch-node.mjs --platform darwin --arch ${{ matrix.arch }}
@@ -325,7 +325,7 @@ jobs:
           DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
         run: |
           pnpm run build
-          pnpm --filter @deepseek-ai/dsh-desktop build:main
+          pnpm --filter @deepseek-ai/dsh-desktop build:main -- --platform win32 --arch x64
 
       - name: Fetch official Node
         run: node apps/desktop/scripts/fetch-node.mjs --platform win32 --arch x64

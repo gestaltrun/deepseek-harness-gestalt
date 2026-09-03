@@ -10,9 +10,11 @@
  * The sources are deployment configuration, not code: they resolve from a JSON
  * file (`DSH_DESKTOP_SUB2API_SOURCES` path override, otherwise
  * `sub2api-sources.json` beside the packaged main entry, mirroring the operated
- * Platform configuration). Without the file the deployment has no component
- * source, and the offer card states that configuration failure instead of
- * pretending a default feed exists.
+ * Platform configuration). `build:main` writes that file from the approved
+ * per-os/arch catalog for the packaged platform; a missing catalog entry omits
+ * the file. Without the file the deployment has no component source, and the
+ * offer card states that configuration failure instead of pretending a default
+ * feed exists.
  * @module @deepseek-ai/dsh-desktop/sub2api-sources
  */
 

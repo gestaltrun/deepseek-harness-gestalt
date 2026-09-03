@@ -28,7 +28,7 @@ Sub2API 账号池是 Settings 里 Desktop-only 的 offer 卡（`账号池` 分�
 
 Desktop Host 主进程就是安装器，且绝不调用用户 PATH 上的 pnpm 或 `dsh` CLI。它把两个归档下载到私有 staging 目录，各自对照自身 SHA256SUMS 校验（runtime pack 解压后再验内部 sums），把 bundle 包放到 `web` profile 的 `node_modules` 下，并恰好追加一行 `dsh.profile.bundles`——即 `dsh plugin add` 的语义，manifest 其余条目原样保留。runtime pack 解压到 `$DSH_HOME/sub2api/runtime`（supervisor 的 `binaryDir` 默认值）。profile patch 之后的任何失败都会回滚该行与本次解压产物；全新安装后首次重启失败同样回滚，并以回滚前缀上报。启用经 Web Host 子进程的常规生命周期重启——窗口保持不动、会话在磁盘保活——随后轮询 sidecar 的 quota-snapshot 路由，直到 2xx 将卡片推至 running。停用把精确的 patch 行 `{ id: 'dsh-sub2api-sidecar', disabled: true }` 写入 profile 自己的 `cordis.patch.yml`，并拒绝触碰该 id 上用户自有的行。
 
-下载源来自 `DSH_DESKTOP_SUB2API_SOURCES`（绝对 JSON 文件路径）或打包主入口旁的 `sub2api-sources.json`；文件内写明 bundle 压缩包、runtime pack 压缩包及各自 SHA256SUMS 的 URL。`build:main` 按被打包的 os/arch 从仓库内已批准清单（`sub2api-sources.catalog.json`）写出该文件（`--platform`/`--arch` 或 `DSH_DESKTOP_SUB2API_PLATFORM`/`DSH_DESKTOP_SUB2API_ARCH`，否则用当前进程），electron-builder 只在文件存在时打进包。清单没有对应条目时不写该文件，因此该架构继续走占位启用错误，而不会装上另一平台的源。文件存在但非法会作为该分区的可操作错误显示，而不是砸掉 Desktop 启动。
+下载源来自 `DSH_DESKTOP_SUB2API_SOURCES`（绝对 JSON 文件路径）或打包主入口旁的 `sub2api-sources.json`；文件内写明 bundle 压缩包、runtime pack 压缩包及各自 SHA256SUMS 的 URL。`build:main` 按被打包的 os/arch 从仓库内已批准清单（`sub2api-sources.catalog.json`）写出该文件（`--platform`/`--arch` 或 `DSH_DESKTOP_SUB2API_PLATFORM`/`DSH_DESKTOP_SUB2API_ARCH`，否则用当前进程），electron-builder 只在文件存在时打进包。清单没有对应条目时不写该文件，因此该架构继续走占位启用错误。文件存在但非法会作为该分区的可操作错误显示，而不是砸掉 Desktop 启动。
 
 ## Schedule 与能力默认值
 

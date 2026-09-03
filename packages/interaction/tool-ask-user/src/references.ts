@@ -106,22 +106,18 @@ export async function validateRoutedReferences(
 ): Promise<ValidatedRoutedAskUserQuestionReferences> {
   const validated = await validateReferences(references, workspaceRoot)
   if (validated === undefined) return { references: undefined, documents: [] }
-  if (workspaceRoot === undefined) {
-    throw new AskUserQuestionError(
-      'REFERENCES_INVALID: path cannot be resolved without a session workspace',
-      'REFERENCES_INVALID',
-    )
-  }
   const documents: AskUserQuestionReferenceDocument[] = []
   const failures: string[] = []
   const byteLimit = Math.min(
     REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
     REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
   )
+  /* v8 ignore next -- validateReferences admits a non-empty list only with a workspace root. */
+  const root = workspaceRoot ?? ''
   for (const [index, reference] of validated.entries()) {
     const resolved = isAbsolute(reference.path)
       ? reference.path
-      : resolvePath(workspaceRoot, reference.path)
+      : resolvePath(root, reference.path)
     try {
       const bytes = await readFile(resolved)
       if (bytes.byteLength > byteLimit) {

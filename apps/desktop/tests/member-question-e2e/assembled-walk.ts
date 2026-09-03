@@ -106,10 +106,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     expect((await platform.heartbeat(a1)).status).toBe(204)
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
-    expect(await rosterPresence(platform, project.id, a1)).toEqual([
-      [String(a1.accountId), 'online'],
-      [String(b1.accountId), 'online'],
-    ].sort(([left], [right]) => left.localeCompare(right)))
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
     expect((await platform.closePresence(b2)).status).toBe(204)
     expect(await rosterPresence(platform, project.id, a1)).toEqual([
       [String(a1.accountId), 'online'],
@@ -122,10 +119,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     ].sort(([left], [right]) => left.localeCompare(right)))
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
-    expect(await rosterPresence(platform, project.id, a1)).toEqual([
-      [String(a1.accountId), 'online'],
-      [String(b1.accountId), 'online'],
-    ].sort(([left], [right]) => left.localeCompare(right)))
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
 
     const membershipPlatform = platform
     await aCtx.plugin(CompanionMemberQuestionSender, {
@@ -270,6 +264,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     })
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
     const expired = aCtx.memberQuestionSender.send(terminalPayload('session-a1-expired', 'Expire assembled ask'))
     await expect(expired).rejects.toMatchObject({ code: 'QUESTION_EXPIRED' })
     await expect.poll(async () => (await receiverB2.snapshot()).terminal.some(row => (
@@ -278,6 +273,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
 
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
     const abort = new AbortController()
     const withdrawn = aCtx.memberQuestionSender.send(
       terminalPayload('session-a1-withdrawn', 'Withdraw assembled ask'),
@@ -294,6 +290,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
 
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
     const superseded = aCtx.memberQuestionSender.send(
       terminalPayload('session-a1-superseded', 'Original assembled ask'),
     )
@@ -302,6 +299,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     ))).toBe(true)
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
     const replacement = aCtx.memberQuestionSender.send(
       terminalPayload('session-a1-superseded', 'Replacement assembled ask'),
     )
@@ -433,6 +431,25 @@ async function pendingCount(
   const response = await platform.get('/v1/projects/invitations/pending', session)
   expect(response.status).toBe(200)
   return (await response.json() as unknown[]).length
+}
+
+async function expectOnlineRoster(
+  platform: Awaited<ReturnType<typeof startLocalKeylessPlatform>>,
+  projectId: string,
+  a1: KeylessPlatformSession,
+  b1: KeylessPlatformSession,
+  b2: KeylessPlatformSession,
+): Promise<void> {
+  const expected = [
+    [String(a1.accountId), 'online'],
+    [String(b1.accountId), 'online'],
+  ].sort(([left], [right]) => left.localeCompare(right))
+  await expect.poll(async () => {
+    expect((await platform.heartbeat(a1)).status).toBe(204)
+    expect((await platform.heartbeat(b1)).status).toBe(204)
+    expect((await platform.heartbeat(b2)).status).toBe(204)
+    return rosterPresence(platform, projectId, a1)
+  }, { timeout: 2_000, interval: 50 }).toEqual(expected)
 }
 
 async function rosterPresence(

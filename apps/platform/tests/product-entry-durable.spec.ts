@@ -1324,6 +1324,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     }
     for (const path of [
       '/v1/account/login-attempts',
+      '/v1/projects',
       '/v1/remote-access/personal-pairing',
       '/v1/remote-attachments',
     ]) {
@@ -1516,6 +1517,7 @@ function operatedFixtureEnv(): NodeJS.Dict<string> {
     PLATFORM_REDIS_TLS: '1',
     PLATFORM_LISTEN_HOST: '127.0.0.1',
     PORT: '0',
+    PLATFORM_MEMBERSHIP_STORAGE: join(tmpdir(), 'dsh-platform-membership-fixture'),
   }
 }
 

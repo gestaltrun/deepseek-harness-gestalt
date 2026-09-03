@@ -111,6 +111,7 @@ case "$action" in
     docker rm -f dsh-platform-candidate >/dev/null
     docker run -d --name dsh-platform --restart unless-stopped \
       --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
+      -v dsh-platform-membership:/var/lib/dsh/projects \
       -p 80:8080 --env-file "$candidate_env" "$DSH_DEPLOY_IMAGE"
     wait_for_storage 80 "$DSH_DEPLOY_STORAGE"
     ;;

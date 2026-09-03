@@ -1,7 +1,8 @@
 /* Connected phone tab body: devbar rhythm copied from the better-sidebar
-   browserBar (6×8 padding, 28-high controls, hairline bottom), the locked
-   1:2 fixed-ratio screen centered in the leftover area, and the circular
-   toolbar strip from the locked mockup. Tokens only — no literal colors. */
+   browserBar (6×8 padding, 28-high controls, hairline bottom), the live
+   screen centered in the leftover area at the measured surface aspect, and
+   the circular toolbar strip from the locked mockup. Tokens only — no
+   literal colors. */
 
 .view {
   flex: 1;
@@ -155,7 +156,7 @@
   background: var(--dsw-alias-state-business-primary);
 }
 
-/* ── screen area: the locked 1:2 frame centered in the leftover space ── */
+/* ── screen area: the surface-aspect frame centered in the leftover space ── */
 
 .screenArea {
   container-type: size;
@@ -169,13 +170,16 @@
   overflow: hidden;
 }
 
-/* The locked 1:2 ratio stays exact at every panel size: the frame derives
-   both axes from the area's container units — height fills the rung, width
-   is height/2 clamped by the available width. */
+/* The frame follows the measured surface aspect at every panel size: the
+   view sets --phone-surface-ratio to width/height of the streamed frame
+   (flipping live on device rotation), and both axes derive from the area's
+   container units — the box is the largest exact-ratio rectangle the area
+   fits. The 0.5 fallback is the locked 1:2 placeholder shown only until the
+   first surface measurement arrives. */
 .screenFrame {
   position: relative;
-  height: 100cqh;
-  width: min(100cqw, 50cqh);
+  height: min(100cqh, 100cqw / var(--phone-surface-ratio, 0.5));
+  width: min(100cqw, 100cqh * var(--phone-surface-ratio, 0.5));
   border-radius: 12px;
   overflow: hidden;
   outline: 1px solid var(--dsw-alias-border-l2);
@@ -188,11 +192,13 @@
   outline: 2px solid var(--dsw-alias-button-info-fill);
 }
 
+/* The box already matches the frame aspect, so contain maps pixels without
+   distortion; fill would stretch any rounding mismatch into the box. */
 .stream {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: fill;
+  object-fit: contain;
   user-select: none;
   -webkit-user-drag: none;
 }

@@ -330,7 +330,20 @@ export class PhoneConnectionController {
   }
 
   /**
+   * Learned device pixel size of the streamed frame, or undefined before the
+   * first measurement. Identity changes only when the size changes, so
+   * subscribers can read it through `useSyncExternalStore`.
+   * @returns the latest measured surface.
+   */
+  surfaceSize(): PhoneSurfaceSize | undefined {
+    return this.surface
+  }
+
+  /**
    * Learn the streamed frame's device pixel size from the capture element.
+   * A repeated identical measurement is a no-op; a real change (device
+   * rotation flips width and height) notifies subscribers so the frame box
+   * follows the new aspect.
    * @param format - Encoding whose renderer measured the surface.
    * @param width - natural width in device pixels.
    * @param height - natural height in device pixels.
@@ -338,7 +351,9 @@ export class PhoneConnectionController {
   noteSurface(format: PhoneCaptureFormat, width: number, height: number): void {
     if (this.phase.kind !== 'live' || this.phase.format !== format) return
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+    if (this.surface?.width === width && this.surface.height === height) return
     this.surface = { width, height }
+    this.notify()
   }
 
   /**
@@ -555,6 +570,10 @@ export class PhoneConnectionController {
 
   private setPhase(phase: PhoneConnectionPhase): void {
     this.phase = phase
+    this.notify()
+  }
+
+  private notify(): void {
     for (const listener of this.listeners) listener()
   }
 }

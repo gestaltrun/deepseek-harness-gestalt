@@ -1,14 +1,16 @@
 /**
  * Connected phone tab body (locked design states ③④): the BrowserView-
- * rhythm devbar (device dropdown + the active-format chip), the 1:2 fixed-ratio
- * live frame centered in the panel, the circular Back/Home/Recents/
- * screenshot toolbar, and the error cards whose copy states the next
- * action. Everything reactive arrives through one per-tab
+ * rhythm devbar (device dropdown + the active-format chip), the live frame
+ * centered in the panel at the measured surface aspect (the locked 1:2
+ * ratio is only the pre-measurement placeholder), the circular
+ * Back/Home/Recents/screenshot toolbar, and the error cards whose copy
+ * states the next action. Everything reactive arrives through one per-tab
  * `PhoneConnectionController`; the component only mirrors its snapshot.
  */
 import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type {
+  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
@@ -119,6 +121,12 @@ const WHEEL_LINE_PX = 16
 const WHEEL_MIN_TRAVEL = 0.08
 /** Maximum normalized vertical travel of a coalesced wheel swipe. */
 const WHEEL_MAX_TRAVEL = 0.4
+/**
+ * Re-measure cadence for a live MJPEG image: a rotated multipart stream
+ * updates `naturalWidth`/`naturalHeight` in place without a new load event,
+ * so the surface is re-read on this interval while MJPEG renders.
+ */
+const MJPEG_SURFACE_POLL_MS = 500
 
 /** The toolbar icon glyphs, drawn inline to stay on the primitives idiom. */
 function ChevronDown(): ReactNode {
@@ -188,6 +196,8 @@ export function PhoneConnectedView({
   const subscribe = useCallback((listener: () => void) => controller.subscribe(listener), [controller])
   const snapshot = useCallback(() => controller.snapshot(), [controller])
   const phase = useSyncExternalStore(subscribe, snapshot, snapshot)
+  const surfaceSnapshot = useCallback(() => controller.surfaceSize(), [controller])
+  const surfaceSize = useSyncExternalStore(subscribe, surfaceSnapshot, surfaceSnapshot)
   const listSubscribe = useCallback((listener: () => void) => source.subscribe(listener), [source])
   const listSnapshot = useCallback(() => source.snapshot(), [source])
   const listing = useSyncExternalStore(listSubscribe, listSnapshot, listSnapshot)
@@ -207,6 +217,9 @@ export function PhoneConnectedView({
     surfaceHeight: number
     handle: ReturnType<typeof setTimeout>
   } | undefined>(undefined)
+  /** The live MJPEG image, re-measured on a cadence because a rotated
+      multipart stream flips its natural size without a new load event. */
+  const mjpegImg = useRef<HTMLImageElement | null>(null)
 
   const releaseDrag = useCallback((): void => {
     const state = drag.current
@@ -238,6 +251,20 @@ export function PhoneConnectedView({
     // committed listing.
     source.refresh().catch(() => undefined)
   }, [source])
+
+  const mjpegLive = phase.kind === 'live' && phase.format === 'mjpeg'
+  useEffect(() => {
+    if (!mjpegLive) return
+    const measure = (): void => {
+      // The effect lives only while the live MJPEG phase renders the image;
+      // its cleanup clears the interval before the ref can detach.
+      const img = mjpegImg.current as HTMLImageElement
+      controller.noteSurface('mjpeg', img.naturalWidth, img.naturalHeight)
+    }
+    measure()
+    const handle = setInterval(measure, MJPEG_SURFACE_POLL_MS)
+    return () => { clearInterval(handle) }
+  }, [controller, mjpegLive])
 
   const normalize = (event: ReactPointerEvent<HTMLDivElement>): { u: number; v: number } => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -357,6 +384,7 @@ export function PhoneConnectedView({
         )
         : (
           <img
+            ref={mjpegImg}
             src={phase.streamUrl}
             alt={`${name} 实时画面`}
             className={css.stream}
@@ -367,12 +395,20 @@ export function PhoneConnectedView({
             onError={() => { controller.noteCaptureFailure('mjpeg') }}
           />
         )
+      // The box follows the measured surface aspect; before the first
+      // measurement the stylesheet's `--phone-surface-ratio` fallback keeps
+      // the locked 1:2 placeholder. An exact-ratio box plus
+      // `object-fit: contain` maps frames without distorting pixels.
+      const frameStyle = surfaceSize === undefined
+        ? undefined
+        : { '--phone-surface-ratio': String(surfaceSize.width / surfaceSize.height) } as CSSProperties
       return (
         <div
           role="application"
           aria-label={`${name} 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本`}
           tabIndex={0}
           className={css.screenFrame}
+          style={frameStyle}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}

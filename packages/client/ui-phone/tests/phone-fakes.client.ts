@@ -32,6 +32,8 @@ export interface FakeH264PlaybackRuntime {
   readonly drawImage: ReturnType<typeof vi.fn>
   /** Deliver one asynchronous WebCodecs failure to the newest decoder. */
   failLastDecoder(): void
+  /** Emit one decoded frame of the given display size from the newest decoder (rotation). */
+  emitFrame(width: number, height: number): void
 }
 
 /** Install a same-origin Annex-B response and WebCodecs decoder for view specs. */
@@ -40,6 +42,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
   const decoderCloseCounts: number[] = []
   const frameCloseCounts: number[] = []
   const decoderErrors: Array<(error: DOMException) => void> = []
+  const decoderOutputs: Decoder['output'][] = []
   const drawImage = vi.fn()
   const payload = Uint8Array.from([
     0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x06, 0x41, 0xaf, 0x9a, 0xd0,
@@ -75,6 +78,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
       this.output = init.output
       this.error = init.error
       decoderErrors.push(init.error)
+      decoderOutputs.push(init.output)
     }
 
     configure(): void { this.state = 'configured' }
@@ -121,6 +125,14 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     drawImage,
     failLastDecoder() {
       decoderErrors.at(-1)?.(new DOMException('decode failed', 'EncodingError'))
+    },
+    emitFrame(width: number, height: number) {
+      const frameIndex = frameCloseCounts.push(0) - 1
+      decoderOutputs.at(-1)?.({
+        displayWidth: width,
+        displayHeight: height,
+        close: () => { frameCloseCounts[frameIndex] = (frameCloseCounts[frameIndex] ?? 0) + 1 },
+      })
     },
   }
 }

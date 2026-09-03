@@ -644,6 +644,40 @@ describe('PhoneConnectionController io', () => {
     })
   })
 
+  it('publishes the learned surface and notifies subscribers only when the size changes', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    expect(controller.surfaceSize()).toBeUndefined()
+    let notifications = 0
+    controller.subscribe(() => { notifications += 1 })
+
+    controller.noteSurface('h264', 390, 844)
+    expect(controller.surfaceSize()).toEqual({ width: 390, height: 844 })
+    expect(notifications).toBe(1)
+
+    // A repeated identical measurement (the MJPEG re-measure cadence) is a no-op.
+    controller.noteSurface('h264', 390, 844)
+    expect(notifications).toBe(1)
+    expect(controller.surfaceSize()).toEqual({ width: 390, height: 844 })
+
+    // A rotation flip is a new snapshot identity and notifies again.
+    controller.noteSurface('h264', 844, 390)
+    expect(notifications).toBe(2)
+    expect(controller.surfaceSize()).toEqual({ width: 844, height: 390 })
+  })
+
+  it('maps a tap through the rotated landscape surface onto landscape device coordinates', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', 390, 844)
+    controller.noteSurface('h264', 844, 390)
+    expect(controller.tap(0.75, 0.5)).toBe(true)
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 633, y: 195 },
+    })
+  })
+
   it('uses MJPEG natural dimensions after fallback and ignores stale H264 dimensions', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())

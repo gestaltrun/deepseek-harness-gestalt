@@ -2,7 +2,8 @@
 /**
  * The connected phone tab body on the real connection controller driven by
  * a fake gateway: BrowserView-rhythm devbar with the device dropdown and
- * format chips, the 1:2 centered live frame, the circular toolbar, touch →
+ * format chips, the centered live frame whose aspect follows the measured
+ * surface (1:2 placeholder until then), the circular toolbar, touch →
  * tap/gesture, keyboard → text, and the error/suspend arms with their
  * next-action copy.
  */
@@ -102,7 +103,7 @@ function parseSentFrame(value: string): unknown {
 }
 
 describe('PhoneConnectedView chrome', () => {
-  it('renders the devbar rhythm: device dropdown, format chips, and the 1:2 frame', async () => {
+  it('renders the devbar rhythm: device dropdown, format chips, and the live frame', async () => {
     await renderLive()
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
     const h264 = screen.getByLabelText('当前画面编码 H264 · 30 fps')
@@ -353,6 +354,127 @@ describe('PhoneConnectedView chrome', () => {
     renderView(true, undefined, source)
     await act(async () => { await flush() })
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
+  })
+})
+
+describe('PhoneConnectedView screen frame aspect', () => {
+  /** Render a live MJPEG session (the iOS-simulator encoding). */
+  async function renderLiveMjpeg(): Promise<Harness> {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const onOpenDevice = vi.fn()
+    const source = new FakeListingSource().seed(listingOf(DEVICES))
+    gateway.queueMint({ session: { ...SESSION_A, preferredFormat: 'mjpeg' } })
+    render(
+      <PhoneConnectedView
+        serial="emulator-5554"
+        name="Pixel_6_API_35"
+        visible={true}
+        source={source}
+        onOpenDevice={onOpenDevice}
+        createController={serial => new PhoneConnectionController({
+          gateway,
+          deviceId: serial,
+          schedule: scheduler.schedule,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    return { gateway, scheduler, source, onOpenDevice }
+  }
+
+  /** The inline surface ratio the frame box follows. */
+  function frameRatio(): string {
+    return frame().style.getPropertyValue('--phone-surface-ratio')
+  }
+
+  it('follows the decoded H264 surface and flips the box live on rotation', async () => {
+    const harness = await renderLive()
+    // The fake decoder paints 390×844, so the box takes the portrait ratio.
+    expect(frameRatio()).toBe(String(390 / 844))
+
+    await act(async () => { h264Runtime.emitFrame(844, 390) })
+    const canvas = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' }) as HTMLCanvasElement
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 844, height: 390 })
+    expect(frameRatio()).toBe(String(844 / 390))
+
+    // A tap inside the landscape box maps through the landscape surface.
+    stubRect(frame(), 400, 200)
+    fireEvent.pointerDown(frame(), { clientX: 300, clientY: 100 })
+    fireEvent.pointerUp(frame(), { clientX: 300, clientY: 100 })
+    expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toEqual({
+      jsonrpc: '2.0', id: 1, method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 633, y: 195 },
+    })
+  })
+
+  it('keeps the locked 1:2 placeholder until the MJPEG frame reports its size', async () => {
+    await renderLiveMjpeg()
+    const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+    expect(surface).toBeInstanceOf(HTMLImageElement)
+    // No measurement yet: no inline ratio, so the stylesheet's 0.5 fallback
+    // renders the locked 1:2 placeholder.
+    expect(frameRatio()).toBe('')
+
+    Object.defineProperties(surface, {
+      naturalWidth: { configurable: true, value: 1080 },
+      naturalHeight: { configurable: true, value: 2400 },
+    })
+    await act(async () => { fireEvent.load(surface) })
+    expect(frameRatio()).toBe(String(1080 / 2400))
+  })
+
+  it('re-measures a rotated MJPEG stream between load events and keeps taps aligned', async () => {
+    vi.useFakeTimers()
+    try {
+      const gateway = new FakeGateway()
+      gateway.queueMint({ session: { ...SESSION_A, preferredFormat: 'mjpeg' } })
+      render(
+        <PhoneConnectedView
+          serial="emulator-5554"
+          name="Pixel_6_API_35"
+          visible={true}
+          source={new FakeListingSource().seed(listingOf(DEVICES))}
+          onOpenDevice={() => {}}
+          createController={serial => new PhoneConnectionController({
+            gateway,
+            deviceId: serial,
+            schedule: new ManualScheduler().schedule,
+          })}
+        />,
+      )
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      gateway.lastSocket!.accept()
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+      Object.defineProperties(surface, {
+        naturalWidth: { configurable: true, value: 1080 },
+        naturalHeight: { configurable: true, value: 2400 },
+      })
+      await act(async () => { fireEvent.load(surface) })
+      expect(frameRatio()).toBe(String(1080 / 2400))
+
+      // Rotation flips the multipart stream's natural size in place; the
+      // poll cadence picks it up without any new load event.
+      Object.defineProperties(surface, {
+        naturalWidth: { configurable: true, value: 2400 },
+        naturalHeight: { configurable: true, value: 1080 },
+      })
+      await act(async () => { vi.advanceTimersByTime(500) })
+      expect(frameRatio()).toBe(String(2400 / 1080))
+
+      stubRect(frame(), 400, 200)
+      fireEvent.pointerDown(frame(), { clientX: 300, clientY: 100 })
+      fireEvent.pointerUp(frame(), { clientX: 300, clientY: 100 })
+      expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
+        jsonrpc: '2.0', id: 1, method: 'tap',
+        params: { deviceId: 'emulator-5554', x: 1800, y: 540 },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

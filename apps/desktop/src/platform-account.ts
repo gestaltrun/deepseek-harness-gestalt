@@ -244,11 +244,11 @@ export class DesktopAccountController implements DesktopAccountActions {
       record.pending = attempt
       record.pendingPrivateKey = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
       await this.options.store.save(record)
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- cancel aborts this signal during save.
       if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
       this.publish({ status: 'polling', privacyAccepted: true })
       this.schedulePoll()
       await this.options.systemBrowser.open(attempt.authorizationUrl, { signal: abort.signal })
-      if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
     } catch (error) {
       if (generation !== this.loginGeneration || abort.signal.aborted) return this.snapshot
       this.cancelScheduledPoll()
@@ -388,9 +388,10 @@ export class DesktopAccountController implements DesktopAccountActions {
       try {
         result = await this.options.transport.pollLogin(request)
       } catch (error) {
-        await this.transitions.run(async () => {
-          if (this.disposed || loginGeneration !== this.loginGeneration) return
+        await this.transitions.run(() => {
+          if (this.disposed || loginGeneration !== this.loginGeneration) return Promise.resolve()
           this.fail(error)
+          return Promise.resolve()
         })
         return
       }

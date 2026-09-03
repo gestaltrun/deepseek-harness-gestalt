@@ -222,7 +222,22 @@ describe('project_members tool', () => {
       },
     })
     expect(schema?.parameters.required).toBeUndefined()
-    expect(ctx.tools.get('project_members')?.output?.schema).toMatchObject({ type: 'array' })
+    const output = ctx.tools.get('project_members')?.output?.schema as {
+      type: string
+      items: {
+        required?: string[]
+        properties: {
+          accountId: { description?: string }
+          displayName: { description?: string }
+          self: { type?: string }
+        }
+      }
+    }
+    expect(output).toMatchObject({ type: 'array' })
+    expect(output.items.properties.displayName.description).toContain('ask_user_question.to_project_member')
+    expect(output.items.properties.accountId.description).toContain('Not the ask_user_question.to_project_member')
+    expect(output.items.properties.self).toMatchObject({ type: 'boolean' })
+    expect(output.items.required).toEqual(expect.arrayContaining(['self']))
   })
 
   it('returns the full roster as compact JSON with presence offline absent a presenter', async () => {
@@ -232,13 +247,13 @@ describe('project_members tool', () => {
 
     expect(result.isError).toBe(false)
     expect(resultValue(result)).toEqual([
-      { accountId: 'acc-owner', role: 'owner', tags: ['founding'], presence: 'offline' },
-      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline' },
+      { accountId: 'acc-owner', role: 'owner', tags: ['founding'], presence: 'offline', self: true },
+      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline', self: false },
     ])
     expect(result.content[0]).toMatchObject({
       type: 'text',
-      text: '[{"accountId":"acc-owner","role":"owner","tags":["founding"],"presence":"offline"},'
-        + '{"accountId":"acc-member","role":"member","tags":["docs","review"],"presence":"offline"}]',
+      text: '[{"accountId":"acc-owner","role":"owner","tags":["founding"],"presence":"offline","self":true},'
+        + '{"accountId":"acc-member","role":"member","tags":["docs","review"],"presence":"offline","self":false}]',
     })
   })
 
@@ -297,9 +312,9 @@ describe('project_members tool', () => {
     expect(resultValue(result)).toEqual([
       {
         accountId: 'acc-owner', displayName: 'alice', avatarRef: 'https://example.com/a.png',
-        role: 'owner', tags: ['founding'], presence: 'online',
+        role: 'owner', tags: ['founding'], presence: 'online', self: true,
       },
-      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline' },
+      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline', self: false },
     ])
   })
 
@@ -316,8 +331,8 @@ describe('project_members tool', () => {
 
     expect(result.isError).toBe(false)
     expect(resultValue(result)).toEqual([
-      { accountId: 'acc-owner', displayName: 'alice', role: 'owner', tags: ['founding'], presence: 'online' },
-      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline' },
+      { accountId: 'acc-owner', displayName: 'alice', role: 'owner', tags: ['founding'], presence: 'online', self: true },
+      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline', self: false },
     ])
   })
 
@@ -463,7 +478,7 @@ describe('project_members tool', () => {
     const result = await execute(ctx, 'pm-bridge', { projectId: 'proj-alpha' })
     expect(result.isError).toBe(false)
     expect(resultValue(result)).toEqual([
-      { accountId: 'acc-owner', role: 'owner', tags: ['founding'], presence: 'offline' },
+      { accountId: 'acc-owner', role: 'owner', tags: ['founding'], presence: 'offline', self: true },
     ])
     const withAgent = await execute(ctx, 'pm-bridge-agent', { projectId: 'proj-alpha' }, stubAgent('session-bridge'))
     expect(withAgent.isError).toBe(false)

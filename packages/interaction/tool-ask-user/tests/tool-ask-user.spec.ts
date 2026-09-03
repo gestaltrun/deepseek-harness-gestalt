@@ -51,7 +51,7 @@ interface OptionSchemaShape {
         } & Record<string, unknown>
       }
     }
-    to_project_member: { type: string }
+    to_project_member: { type: string; description?: string }
     background: { type: string }
     references: {
       type: string
@@ -107,7 +107,9 @@ async function setupRouted(delivery = new MemoryMemberQuestionDelivery()) {
     routeResolver: ({ toProjectMember }) => Promise.resolve(
       toProjectMember.toLowerCase() === 'grace'
         ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer' }
-        : undefined,
+        : toProjectMember.toLowerCase() === 'ada'
+          ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: routedOrigin.askerAccountId }
+          : undefined,
     ),
     boundProjectResolver: () => Promise.resolve('project-atlas'),
   })
@@ -130,7 +132,11 @@ describe('ask_user_question tool', () => {
       },
     })
     const parameters = schema?.parameters as unknown as OptionSchemaShape
-    expect(parameters.properties.to_project_member).toMatchObject({ type: 'string' })
+    expect(parameters.properties.to_project_member).toMatchObject({
+      type: 'string',
+      description: expect.stringContaining('project_members.displayName'),
+    })
+    expect(parameters.properties.to_project_member.description).toContain('accountId')
     expect(parameters.properties.background).toMatchObject({ type: 'string' })
     expect(parameters.properties.references).toMatchObject({ type: 'array' })
     expect(parameters.properties.references.items.properties).toMatchObject({
@@ -501,6 +507,25 @@ describe('ask_user_question tool', () => {
     expect(result).toMatchObject({
       isError: true,
       error: { info: { name: 'AskUserQuestionError', code: 'INELIGIBLE_ADDRESSEE' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects routing a question to the asking account', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-self-addressee'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Ada',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'SELF_ADDRESSEE' } },
     })
     expect(delivery.delivered).toHaveLength(0)
   })

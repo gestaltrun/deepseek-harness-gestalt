@@ -93,6 +93,8 @@ export interface ProjectMemberView {
   readonly tags: string[]
   /** Whether the member holds a live presence at the read. */
   readonly presence: MemberPresence
+  /** True when this row is the asking session account. */
+  readonly self: boolean
 }
 
 /** Stable failure taxonomy of the `project_members` tool. */
@@ -177,6 +179,7 @@ function resolveConfig(config: Config): Config {
 const TOOL_DESCRIPTION =
   'Query the roster of a cloud project: every member with their account reference, display name, '
   + 'avatar, permission role, function tags, and presence. '
+  + 'displayName is the public GitHub login to copy into ask_user_question.to_project_member from a row whose self is false; accountId is the durable Platform id and is not that addressee. '
   + 'Omit projectId to query the project bound to the current workspace. '
   + 'Use it when coordination, review, or task routing needs to know who is on the project, what each member covers, and who is online.'
 
@@ -208,12 +211,24 @@ export function apply(ctx: Context, config: Config = {}): void {
           type: 'object',
           additionalProperties: false,
           properties: {
-            accountId: { type: 'string', required: true },
-            displayName: { type: 'string' },
+            accountId: {
+              type: 'string',
+              required: true,
+              description: 'Durable Platform Account id. Not the ask_user_question.to_project_member addressee.',
+            },
+            displayName: {
+              type: 'string',
+              description: 'Public GitHub login. Copy this value into ask_user_question.to_project_member.',
+            },
             avatarRef: { type: 'string' },
             role: { type: 'string', required: true, enum: ['owner', 'admin', 'member'] },
             tags: { type: 'array', required: true, items: { type: 'string' } },
             presence: { type: 'string', required: true, enum: ['online', 'offline'] },
+            self: {
+              type: 'boolean',
+              required: true,
+              description: 'True when this row is the asking session account. Do not pass this member to ask_user_question.to_project_member.',
+            },
           },
         },
       },
@@ -235,7 +250,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       } else {
         view = await membership.roster(actor, projectId)
       }
-      return toMemberViews(view, resolved)
+      return toMemberViews(view, resolved, actor)
     },
   }))
 }
@@ -297,14 +312,14 @@ async function resolveActor(config: Config, agent: Agent | undefined, signal: Ab
  * @param config - injected provider faces.
  * @returns the complete member array, never a partial roster.
  */
-async function toMemberViews(view: RosterView, config: Config): Promise<ProjectMemberView[]> {
+async function toMemberViews(view: RosterView, config: Config, actor: AccountRef): Promise<ProjectMemberView[]> {
   const presentations = config.rosterPresenter
     ? await config.rosterPresenter(view)
     : view.members.map(() => ({ presence: 'offline' as const }))
   const members: ProjectMemberView[] = []
   for (const [index, member] of view.members.entries()) {
     const presentation = presentations[index] ?? { presence: 'offline' as const }
-    members.push(toMemberView(member, presentation))
+    members.push(toMemberView(member, presentation, actor))
   }
   return members
 }
@@ -316,7 +331,7 @@ async function toMemberViews(view: RosterView, config: Config): Promise<ProjectM
  * @param presentation - presence and identity fields for this member.
  * @returns the model-facing member view.
  */
-function toMemberView(member: MemberView, presentation: MemberPresentation): ProjectMemberView {
+function toMemberView(member: MemberView, presentation: MemberPresentation, actor: AccountRef): ProjectMemberView {
   return {
     accountId: member.accountId,
     ...presentation.displayName !== undefined ? { displayName: presentation.displayName } : {},
@@ -324,5 +339,6 @@ function toMemberView(member: MemberView, presentation: MemberPresentation): Pro
     role: member.role,
     tags: [...member.tags],
     presence: presentation.presence,
+    self: member.accountId === actor,
   }
 }

@@ -172,7 +172,7 @@ export class DesktopProjectMembershipService extends Service {
     const actor = roster.members.find(member => member.accountId === context.account.id)
     if (actor === undefined) throw new Error('project-membership-desktop: current Account is absent from its bound Project roster')
     const matched = matchPublicLogin(roster, presentations, addresseeLogin)
-    if (matched === undefined) return undefined
+    if (matched === undefined || matched === context.account.id) return undefined
     return {
       projectId: context.project.id,
       toProjectMember: matched,

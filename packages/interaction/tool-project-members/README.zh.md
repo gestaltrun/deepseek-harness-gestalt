@@ -10,7 +10,7 @@
 
 - `projectId` — 要查询的云项目。省略时，工具向组合注入的工作区绑定解析当前工作区归属的项目；显式传入的 id 优先。
 
-调用先解析会话绑定账号，再解析项目绑定，然后通过注入的 resolver 或 `ctx.projectMembership.roster()` 读取存储的名册。规范结果为按加入顺序排列的成员数组 `[{ accountId, displayName?, avatarRef?, role, tags, presence }]`；要么返回全部存储成员，要么调用失败——不存在部分名册。
+调用先解析会话绑定账号，再解析项目绑定，然后通过注入的 resolver 或 `ctx.projectMembership.roster()` 读取存储的名册。规范结果为按加入顺序排列的成员数组 `[{ accountId, displayName?, avatarRef?, role, tags, presence, self }]`；要么返回全部存储成员，要么调用失败——不存在部分名册。`displayName` 是从 `self` 为 false 的行复制进 `ask_user_question.to_project_member` 的公开 GitHub 登录名；`accountId` 是持久 Platform id，不是该收件人。`self` 对提问会话账号为 true。
 
 ## 注入的提供方接口
 

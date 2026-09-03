@@ -280,7 +280,8 @@ retractInvitation(invitationId: InvitationId): Promise<void>
 
 /**
  * List trusted pending invitation cards for the current Account.
- * @returns trusted pending invitation cards.
+ * @returns trusted pending invitation cards. HTTP 204 and HTTP 404 are an
+ *   empty list; other non-OK answers reject.
  */
 pendingInvitations(): Promise<readonly PendingInvitationView[]>
 

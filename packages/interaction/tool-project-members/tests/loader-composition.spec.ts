@@ -195,8 +195,8 @@ describe('tool-project-members real Loader composition through cordis.yml', () =
     })
     expect(result.isError).toBe(false)
     expect(resultText(result)).toBe(
-      '[{"accountId":"acc-owner","role":"owner","tags":["founding"],"presence":"offline"},'
-      + '{"accountId":"acc-member","role":"member","tags":[],"presence":"offline"}]',
+      '[{"accountId":"acc-owner","role":"owner","tags":["founding"],"presence":"offline","self":true},'
+      + '{"accountId":"acc-member","role":"member","tags":[],"presence":"offline","self":false}]',
     )
   }, 30_000)
 

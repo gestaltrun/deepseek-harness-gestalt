@@ -14,7 +14,7 @@
 - `header`：可选的简短标题。
 - `options`：可选选项，包含 `label` 和 `description`。如需推荐某个选项，请将其置于首位，并在该标签末尾追加 `(Recommended)`。
 - `multi_select`：该问题是否可以返回多个选中的选项。
-- `to_project_member`：可选的单收件人。存在时，调用经 `ctx.memberQuestionSender` 路由，不会进入本地 user-questions 提供方。运行期资格过滤会在组装后的提示中隐藏该参数，除非 `boundProjectResolver` 返回云端项目 id；静态注册表 schema 仍保留它。
+- `to_project_member`：可选的单收件人。从 `self` 为 false 的行复制 `project_members.displayName`（公开 GitHub 登录名）；`accountId` 与提问账号（`self: true`）不合格，并以 `SELF_ADDRESSEE` 失败。存在时，调用经 `ctx.memberQuestionSender` 路由，不会进入本地 user-questions 提供方。运行期资格过滤会在组装后的提示中隐藏该参数，除非 `boundProjectResolver` 返回云端项目 id；静态注册表 schema 仍保留它。
 - `background`：agent 撰写的决策简报文本。与 `to_project_member` 一起时必填；1 到 600 个 Unicode 码点，构建期以 `BACKGROUND_REQUIRED` 或 `BACKGROUND_TOO_LONG` 拒绝。
 - `references`：可选的 `{ path, reason? }[]`，本地与路由提问均可使用。每个 `path` 必须解析为提问会话工作区内的现存文件；每个 `reason` 至多 100 个码点。失败会抛出 `REFERENCES_INVALID` 并指出具体项。本地提问接受 references 且不改变路由；将 details 面板聚焦到被引用文件被推迟。
 

@@ -10,7 +10,7 @@ Model-facing `project_members` tool over `ctx.projectMembership`: one read that 
 
 - `projectId` — the cloud project to query. Omitted, the tool asks the composition's workspace binding which project the current workspace maps to; an explicit id wins.
 
-The call resolves the session-bound account first, then the project binding, then reads the stored roster through an injected resolver or `ctx.projectMembership.roster()`. The canonical result is the member array `[{ accountId, displayName?, avatarRef?, role, tags, presence }]` in join order; every stored member appears or the call fails — there are no partial rosters.
+The call resolves the session-bound account first, then the project binding, then reads the stored roster through an injected resolver or `ctx.projectMembership.roster()`. The canonical result is the member array `[{ accountId, displayName?, avatarRef?, role, tags, presence, self }]` in join order; every stored member appears or the call fails — there are no partial rosters. `displayName` is the public GitHub login copied into `ask_user_question.to_project_member` from a row whose `self` is false; `accountId` is the durable Platform id and is not that addressee. `self` is true for the asking session account.
 
 ## Injected provider faces
 

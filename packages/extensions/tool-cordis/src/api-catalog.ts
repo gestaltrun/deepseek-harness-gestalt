@@ -1742,7 +1742,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'pendingInvitations(): Promise<readonly PendingInvitationView[]>',
         description: 'List trusted pending invitation cards for the current Account.',
         parameters: [],
-        returns: 'trusted pending invitation cards.',
+        returns: 'trusted pending invitation cards. HTTP 204 and HTTP 404 are an empty list; other non-OK answers reject.',
       },
       {
         signature: 'issuedInvitations(projectId: ProjectId): Promise<readonly IssuedInvitationView[]>',

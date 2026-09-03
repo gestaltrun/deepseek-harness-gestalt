@@ -30,6 +30,8 @@ Neither platform note is superseded. [The project-membership authority note](202
 
 The tool is complete and testable today against stub faces. Desktop assemblies inject the loopback provider faces; browser-only `dsh web` still sees `ACCOUNT_UNAVAILABLE` or an omitted tool rather than a roster. The resolver contracts are plain functions in Config, so `cordis.yml` supplies them as `!!js` expressions and tests inject stubs without a plugin — but nothing validates a resolver's identity beyond its signature, and a composition that injects the wrong account's resolver gets that account's roster. The in-memory provider and stub resolvers in the package tests are the reference for the assembled platform face.
 
+`ask_user_question.to_project_member` matches `project_members.displayName` (public GitHub login) on a row whose `self` is false, never `accountId` and never the asking account. The roster marks the asking session account with `self: true`. Routing that login fails with `SELF_ADDRESSEE` before delivery.
+
 ## Testing
 
 `tests/tool-project-members.spec.ts` pins the canonical JSON shape, the presenter contract, both stable error paths (including chained causes and the account-before-binding order), config misconfiguration failing at load, and registration disposal. `tests/loader-composition.spec.ts` boots the tool through the real Loader from `cordis.yml` whose `!!js` config carries function-valued faces, proving the injection path and the no-faces error end to end. `examples/project-members` keyless snapshot replay pins the assembled stream-json transcript of one roster read followed by a routed ask whose `to_project_member` is the live public login.

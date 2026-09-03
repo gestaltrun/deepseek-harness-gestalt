@@ -50,7 +50,7 @@ This table connects model-visible tool names to the plugin package and service s
 
 ### `ask_user_question`
 
-Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer. Pass to_project_member to route the question to one project member instead of the local user; routed asks require background (1 to 600 characters). references attaches workspace files that support the decision, locally or routed.
+Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer. Pass to_project_member to route the question to one project member instead of the local user; copy that value from project_members.displayName of a row whose self is false, never accountId and never the asking account. routed asks require background (1 to 600 characters). references attaches workspace files that support the decision, locally or routed.
 
 ```json
 {
@@ -109,7 +109,7 @@ Ask the user a concise question when you need confirmation, a choice, or missing
     },
     "to_project_member": {
       "type": "string",
-      "description": "Single project-member addressee. When present, the question is routed to that member instead of the local user and background is required."
+      "description": "Public GitHub login of one current member other than the asking account. Copy project_members.displayName from a row whose self is false (case-insensitive match). Do not pass project_members.accountId or a row whose self is true. When present, the question is routed to that member instead of the local user and background is required."
     },
     "background": {
       "type": "string",
@@ -153,7 +153,7 @@ ask_user_question pauses a local call until the active UI provider returns a hum
 
 ### `project_members`
 
-Query the roster of a cloud project: every member with their account reference, display name, avatar, permission role, function tags, and presence. Omit projectId to query the project bound to the current workspace. Use it when coordination, review, or task routing needs to know who is on the project, what each member covers, and who is online.
+Query the roster of a cloud project: every member with their account reference, display name, avatar, permission role, function tags, and presence. displayName is the public GitHub login to copy into ask_user_question.to_project_member from a row whose self is false; accountId is the durable Platform id and is not that addressee. Omit projectId to query the project bound to the current workspace. Use it when coordination, review, or task routing needs to know who is on the project, what each member covers, and who is online.
 
 ```json
 {

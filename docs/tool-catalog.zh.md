@@ -54,7 +54,7 @@
 
 ### `ask_user_question`
 
-继续操作前，如果需要确认、选择或缺失的信息，请向用户提出简明问题。发送一个或多个问题，每个问题都带一个稳定 id，该 id 会在答案中原样返回。传入 to_project_member 可将问题路由给一名项目成员而非本地用户；路由提问需要 background（1 到 600 个字符）。references 附加支持该决策的工作区文件，本地与路由均可使用。
+继续操作前，如果需要确认、选择或缺失的信息，请向用户提出简明问题。发送一个或多个问题，每个问题都带一个稳定 id，该 id 会在答案中原样返回。传入 to_project_member 可将问题路由给一名项目成员而非本地用户；该值从 self 为 false 的 project_members.displayName（公开 GitHub 登录名）复制，切勿使用 accountId，也切勿提问账号。路由提问需要 background（1 到 600 个字符）。references 附加支持该决策的工作区文件，本地与路由均可使用。
 
 ```json
 {
@@ -113,7 +113,7 @@
     },
     "to_project_member": {
       "type": "string",
-      "description": "Single project-member addressee. When present, the question is routed to that member instead of the local user and background is required."
+      "description": "Public GitHub login of one current member other than the asking account. Copy project_members.displayName from a row whose self is false (case-insensitive match). Do not pass project_members.accountId or a row whose self is true. When present, the question is routed to that member instead of the local user and background is required."
     },
     "background": {
       "type": "string",
@@ -157,7 +157,7 @@ ask_user_question 会暂停本地调用，直到当前 UI 提供方返回人类�
 
 ### `project_members`
 
-查询云项目的成员名册：每位成员的账号引用、显示名称、头像、权限角色、职能标签与在线状态。省略 projectId 即查询当前工作区绑定的项目。当协作、评审或任务分派需要知道项目上有谁、各自覆盖什么以及谁在线时使用它。
+查询云项目的成员名册：每位成员的账号引用、显示名称、头像、权限角色、职能标签与在线状态。displayName 是从 self 为 false 的行复制进 ask_user_question.to_project_member 的公开 GitHub 登录名；accountId 是持久 Platform id，不是该收件人。省略 projectId 即查询当前工作区绑定的项目。当协作、评审或任务分派需要知道项目上有谁、各自覆盖什么以及谁在线时使用它。
 
 ```json
 {

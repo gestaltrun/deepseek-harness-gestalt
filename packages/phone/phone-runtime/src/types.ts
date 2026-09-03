@@ -90,8 +90,8 @@ export interface PhoneCaptureStream {
 export interface PhoneScreenshot {
   /** Always PNG; the still comes from `mobilecli screenshot --format png`. */
   readonly mediaType: 'image/png'
-  /** Canonical base64 of the PNG file bytes. */
-  readonly data: string
+  /** Absolute owner-only PNG path under `$DSH_HOME/phone/screenshots`. */
+  readonly path: string
 }
 
 /** Closed error-code union carried by {@link PhoneDevicesError}. */

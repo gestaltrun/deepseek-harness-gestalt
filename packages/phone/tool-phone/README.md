@@ -12,9 +12,9 @@ All six definitions exist only while `phoneDevices.isReady()` is true. The Consu
 
 `tool_search` returns matching schemas but never activates tools. Eligibility remains the only discovery and dispatch authority. The tools omit custom presenters, so Host clients use the same generic MCP-style tool card path as other ordinary tools.
 
-`device_act`, `device_open`, and `device_close` default to `tools/pre-execute` `ask` after earlier listeners return `allow`. A prior deny or ask is left unchanged. An `allowed-once` approval runs the fleet call once; a rejection leaves the device untouched.
+`device_open` and `device_close` default to `tools/pre-execute` `ask` after earlier listeners return `allow`. A prior deny or ask is left unchanged. An `allowed-once` approval runs the fleet call once; a rejection leaves the device untouched. `device_act` keeps that prior deny or ask and otherwise runs the closed tap, swipe, type, or button without a new prompt.
 
-Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, `PHONE_ABORTED`, `PHONE_TIMEOUT`, `PHONE_UNAVAILABLE`, `PHONE_UNRESOLVED`, `PHONE_PROTOCOL`, `PHONE_UPSTREAM`, `PHONE_DEVICE_NOT_FOUND`, `PHONE_REAL_DEVICE`) are rethrown as `HarnessError` with that same code. `device_act` forwards a closed tap, swipe, type, or button onto `phoneDevices.io`. A swipe uses `phoneSwipeActions` from `@deepseek-ai/dsh-phone-runtime/swipe` ([encoding](../../../.agents/notes/implemented/bug-fix/2026-09-02-phone-ios-wda-swipe-gesture.md)). Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` calls `phoneDevices.screenshot` and returns `image/png`; `PHONE_UNSUPPORTED` remains only when an injected test fleet omits that method. Live MJPEG/H264 capture stays on `dsh-phone-stream`.
+Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, `PHONE_ABORTED`, `PHONE_TIMEOUT`, `PHONE_UNAVAILABLE`, `PHONE_UNRESOLVED`, `PHONE_PROTOCOL`, `PHONE_UPSTREAM`, `PHONE_DEVICE_NOT_FOUND`, `PHONE_REAL_DEVICE`) are rethrown as `HarnessError` with that same code. `device_act` forwards a closed tap, swipe, type, or button onto `phoneDevices.io`. A swipe uses `phoneSwipeActions` from `@deepseek-ai/dsh-phone-runtime/swipe` ([encoding](../../../.agents/notes/implemented/bug-fix/2026-09-02-phone-ios-wda-swipe-gesture.md)). Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` calls `phoneDevices.screenshot` and returns `{ deviceId, path }` for the owner-only PNG on disk; rendered tool text is those two fields, never PNG bytes or a base64 image block. `PHONE_UNSUPPORTED` remains only when an injected test fleet omits that method. Live MJPEG/H264 capture stays on `dsh-phone-stream`.
 
 ## Model Experience
 
@@ -22,7 +22,7 @@ Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, 
 
 #### What the model sees
 
-The initial tool list omits all six device tools and includes the ordinary `tool_search` schema. A search for device capabilities returns the exact schemas in a durable result. Later requests revalidate those names against current eligible deferred definitions. Every operation result renders the complete listing, observation, mutation receipt, closed action, or PNG screenshot facts as JSON text.
+The initial tool list omits all six device tools and includes the ordinary `tool_search` schema. A search for device capabilities returns the exact schemas in a durable result. Later requests revalidate those names against current eligible deferred definitions. Every operation result renders the complete listing, observation, mutation receipt, closed action, or screenshot `deviceId` and PNG path as text.
 
 #### Token effect
 

@@ -645,7 +645,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolPhone)
     },
     note:
-      'All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_act, device_open, and device_close default to tools/pre-execute ask.',
+      'All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_open and device_close default to tools/pre-execute ask; device_act does not.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-web',

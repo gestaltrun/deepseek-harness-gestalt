@@ -1,4 +1,4 @@
-/** Keyless adapter scripting the deferred phone arc: discover → list → runtime loss → revoked act. */
+/** Keyless adapter scripting the deferred phone arc: discover → list → allowed act. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -13,8 +13,8 @@ import {
 const HIGH = ReasoningEffortId('high')
 const OFF = ReasoningEffortId('off')
 
-/** The model-visible deny text the assembled approval chain produces for an unattended ask. */
-const REVOKED_MARKER = 'the user rejected tool "device_act"'
+/** Successful closed-act receipt the assembled Consumer renders for a tap. */
+const ACT_OK_MARKER = '"status": "ok"'
 
 function toolCallChunks(id: string, name: string, args: string): StreamChunk[] {
   return [
@@ -39,7 +39,7 @@ function textChunks(text: string): StreamChunk[] {
 /**
  * Scripted `phone-mock` adapter; the completed tool-result count selects the
  * turn, and the final turn fails loud unless the assembled chain actually
- * rejected the act — a regression that executes the tap never reaches the
+ * executed the tap — a regression that asks and rejects never reaches the
  * scripted reply.
  */
 class PhoneMockAdapter extends LlmAdapter {
@@ -82,10 +82,10 @@ class PhoneMockAdapter extends LlmAdapter {
       .filter(block => block.type === 'text')
       .map(block => block.text)
       .join('') ?? ''
-    if (!text.includes(REVOKED_MARKER)) {
-      throw new Error(`phone-mock expected the revoked device_act failure, got: ${text}`)
+    if (!text.includes(ACT_OK_MARKER) || !text.includes('emulator-5554')) {
+      throw new Error(`phone-mock expected the allowed device_act receipt, got: ${text}`)
     }
-    yield* textChunks('PHONE_TOOL_REVOKED_KEYLESS')
+    yield* textChunks('PHONE_TOOL_ACT_ALLOWED_KEYLESS')
   }
 }
 

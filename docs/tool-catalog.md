@@ -41,7 +41,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-browser` | `browser_close`, `browser_create`, `browser_focus`, `browser_input`, `browser_navigate`, `browser_observe`, `browser_screenshot` | `ctx.tools`, `ctx.browserRuntime` | `tool/call`, `tool/result` | - | All Browser tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. |
-| `@deepseek-ai/dsh-tool-phone` | `device_act`, `device_close`, `device_list`, `device_observe`, `device_open`, `device_screenshot` | `ctx.tools`, `ctx.phoneDevices` | `tool/call`, `tool/result` | - | All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_act, device_open, and device_close default to tools/pre-execute ask. |
+| `@deepseek-ai/dsh-tool-phone` | `device_act`, `device_close`, `device_list`, `device_observe`, `device_open`, `device_screenshot` | `ctx.tools`, `ctx.phoneDevices` | `tool/call`, `tool/result` | - | All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_open and device_close default to tools/pre-execute ask; device_act does not. |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
@@ -2759,7 +2759,7 @@ Source: [`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/
 
 ### `device_screenshot`
 
-Capture one PNG screenshot of a phone device.
+Capture one PNG screenshot of a phone device and return its absolute file path.
 
 ```json
 {
@@ -2778,7 +2778,7 @@ Capture one PNG screenshot of a phone device.
 
 Source: [`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
 
-All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_act, device_open, and device_close default to tools/pre-execute ask.
+All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_open and device_close default to tools/pre-execute ask; device_act does not.
 
 <a id="deepseek-aidsh-tool-web"></a>
 

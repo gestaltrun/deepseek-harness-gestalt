@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import type { Config } from '@deepseek-ai/dsh-phone-runtime'
@@ -8,16 +8,31 @@ import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-proc
 import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, pngDimensions, PNG_SIGNATURE, stageFake, wireDevice } from './helpers.ts'
 import { buildGradientH264 } from './fixtures/u3-visible-frames.ts'
 import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
 const contexts: CordisContext[] = []
 const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
+const homes: string[] = []
+let previousHome: string | undefined
+
+beforeEach(async () => {
+  previousHome = process.env.DSH_HOME
+  const home = await mkdtemp(join(tmpdir(), 'dsh-phone-service-home-'))
+  homes.push(home)
+  process.env.DSH_HOME = home
+})
 
 afterEach(async () => {
   console.error('child diagnostics:', MobilecliServerProcess.diagnostics.splice(0))
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
+  if (previousHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = previousHome
+  await Promise.all(homes.splice(0).map(home => rm(home, { recursive: true, force: true })))
 })
 
 async function errorOf(run: () => Promise<unknown>): Promise<PhoneDevicesError> {
@@ -565,13 +580,14 @@ describe('phone runtime service lifecycle', () => {
     const context = await mountWith(fake)
     const android = await context.phoneDevices.screenshot(ANDROID_EMULATOR)
     expect(android.mediaType).toBe('image/png')
-    const androidBytes = Buffer.from(android.data, 'base64')
+    expect(android.path.startsWith(join(process.env.DSH_HOME ?? '', 'phone', 'screenshots'))).toBe(true)
+    const androidBytes = await readFile(android.path)
     expect(androidBytes.subarray(0, 8).equals(PNG_SIGNATURE)).toBe(true)
     expect(pngDimensions(androidBytes)).toEqual({ width: 390, height: 844 })
 
     const ios = await context.phoneDevices.screenshot(IOS_REAL)
     expect(ios.mediaType).toBe('image/png')
-    expect(pngDimensions(Buffer.from(ios.data, 'base64'))).toEqual({ width: 390, height: 844 })
+    expect(pngDimensions(await readFile(ios.path))).toEqual({ width: 390, height: 844 })
     expect((await fake.counters()).captures).toEqual([])
   })
 

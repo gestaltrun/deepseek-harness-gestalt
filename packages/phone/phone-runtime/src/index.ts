@@ -22,6 +22,7 @@ import { ioParams, iosScreenScale } from './io.ts'
 import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { runMobilecliScreenshot } from './screenshot-process.ts'
+import { persistPhoneScreenshot } from './screenshot-store.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
 import { statSync } from 'node:fs'
@@ -768,7 +769,7 @@ export class PhoneDevices extends Service {
    * Live MJPEG/H264 capture stays on `startCapture`.
    * @param id - Branded Android serial or iOS UDID whose screen to capture.
    * @param signal - Caller's optional cancellation signal.
-   * @returns PNG media type and canonical base64 file bytes.
+   * @returns PNG media type and the absolute owner-only file path.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
    *   absent from the latest published listing, and otherwise per the
    *   class-documented failure modes.
@@ -786,7 +787,8 @@ export class PhoneDevices extends Service {
       timeoutMs: this.resolved.requestTimeoutMs,
       environment: this.childEnvironment,
     })
-    return Object.freeze({ mediaType: 'image/png' as const, data: Buffer.from(png).toString('base64') })
+    const path = await persistPhoneScreenshot(id, png)
+    return Object.freeze({ mediaType: 'image/png' as const, path })
   }
 
   /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */

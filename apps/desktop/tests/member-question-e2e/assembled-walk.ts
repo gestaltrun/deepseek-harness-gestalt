@@ -21,6 +21,8 @@ import { startKeylessMemberQuestionBroker } from './keyless-broker.ts'
 import { KeylessMemberQuestionEndpoint } from './keyless-transport.ts'
 import { startLocalKeylessPlatform, type KeylessPlatformSession } from './local-platform.ts'
 
+const POLL = { timeout: 10_000, interval: 50 } as const
+
 /** Run the keyless assembled A1/B1/B2 walk and return a stable JSONL transcript. */
 export async function runAssembledProjectMembersWalk(): Promise<string> {
   const roots: string[] = []
@@ -145,6 +147,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
       { length: REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes + 19 },
       (_, index) => index % 251,
     )
+    await expectOnlineRoster(platform, project.id, a1, b1, b2)
     const send = aCtx.memberQuestionSender.send({
       toProjectMember: String(b1.accountId),
       projectId: parseMemberQuestionProjectId(project.id),
@@ -170,8 +173,13 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
       },
       originSessionId: parseCompanionSessionId('session-a1-assembled'),
     })
-    await expect.poll(async () => (await receiverB1.snapshot()).pending.length).toBe(1)
-    await expect.poll(async () => (await receiverB2.snapshot()).pending.length).toBe(1)
+    await expect.poll(async () => {
+      expect((await platform.heartbeat(a1)).status).toBe(204)
+      expect((await platform.heartbeat(b1)).status).toBe(204)
+      expect((await platform.heartbeat(b2)).status).toBe(204)
+      return (await receiverB1.snapshot()).pending.length
+    }, POLL).toBe(1)
+    await expect.poll(async () => (await receiverB2.snapshot()).pending.length, POLL).toBe(1)
     const questionB1 = (await receiverB1.snapshot()).pending[0]
     const questionB2 = (await receiverB2.snapshot()).pending[0]
     const cached = questionB1?.cachedReferences ?? []
@@ -237,8 +245,8 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
       answers: [{ id: 'rollout', selected: [winningSelection] }],
     })
     await Promise.all([
-      expect.poll(async () => (await receiverB1.snapshot()).terminal.length).toBe(1),
-      expect.poll(async () => (await receiverB2.snapshot()).terminal.length).toBe(1),
+      expect.poll(async () => (await receiverB1.snapshot()).terminal.length, POLL).toBe(1),
+      expect.poll(async () => (await receiverB2.snapshot()).terminal.length, POLL).toBe(1),
     ])
     const terminalB1 = (await receiverB1.snapshot()).terminal[0]
     const terminalB2 = (await receiverB2.snapshot()).terminal[0]
@@ -269,7 +277,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     await expect(expired).rejects.toMatchObject({ code: 'QUESTION_EXPIRED' })
     await expect.poll(async () => (await receiverB2.snapshot()).terminal.some(row => (
       row.brief.originSessionId === 'session-a1-expired' && row.terminal.outcome === 'expired'
-    ))).toBe(true)
+    )), POLL).toBe(true)
 
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
@@ -281,12 +289,12 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     )
     await expect.poll(async () => (await receiverB1.snapshot()).pending.some(row => (
       row.operation.originSessionId === 'session-a1-withdrawn'
-    ))).toBe(true)
+    )), POLL).toBe(true)
     abort.abort()
     await expect(withdrawn).rejects.toMatchObject({ code: 'QUESTION_WITHDRAWN' })
     await expect.poll(async () => (await receiverB2.snapshot()).terminal.some(row => (
       row.brief.originSessionId === 'session-a1-withdrawn' && row.terminal.outcome === 'withdrawn'
-    ))).toBe(true)
+    )), POLL).toBe(true)
 
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
@@ -296,7 +304,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     )
     await expect.poll(async () => (await receiverB1.snapshot()).pending.some(row => (
       row.operation.background === 'Original assembled ask'
-    ))).toBe(true)
+    )), POLL).toBe(true)
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
     await expectOnlineRoster(platform, project.id, a1, b1, b2)
@@ -306,7 +314,7 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     await expect(superseded).rejects.toMatchObject({ code: 'QUESTION_SUPERSEDED' })
     await expect.poll(async () => (await receiverB1.snapshot()).pending.some(row => (
       row.operation.background === 'Replacement assembled ask'
-    ))).toBe(true)
+    )), POLL).toBe(true)
     const replacementQuestion = (await receiverB1.snapshot()).pending.find(row => (
       row.operation.background === 'Replacement assembled ask'
     ))
@@ -449,7 +457,7 @@ async function expectOnlineRoster(
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
     return rosterPresence(platform, projectId, a1)
-  }, { timeout: 2_000, interval: 50 }).toEqual(expected)
+  }, POLL).toEqual(expected)
 }
 
 async function rosterPresence(

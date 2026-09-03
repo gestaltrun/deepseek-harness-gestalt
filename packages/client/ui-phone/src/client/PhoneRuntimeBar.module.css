@@ -1,0 +1,30 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--dsw-alias-stroke-subtle);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-elevated);
+}
+
+.copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.copy span,
+.copy small {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.bar progress {
+  width: 120px;
+}
+
+.bar button {
+  min-width: 96px;
+}

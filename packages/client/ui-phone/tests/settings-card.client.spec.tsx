@@ -5,7 +5,7 @@
  * environment view, callbacks) and assert user-visible copy.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { PhoneSettingsCard } from '../src/client/PhoneSettingsCard.tsx'
@@ -14,12 +14,12 @@ import type { PhoneSettingsSectionProps } from '../src/client/PhoneSettingsSecti
 import type { PhoneEnvironmentView } from '../src/client/phone-environment.ts'
 import { zh } from '../src/client/locales.ts'
 import type { PhoneSettingsCardState } from '../src/client/phone-settings-controller.ts'
-import {
-  ANDROID_CREATE_AVD, ANDROID_INSTALL_PLATFORM_TOOLS, ANDROID_INSTALL_SYSTEM_IMAGE,
-  ANDROID_LAUNCH_EMULATOR, IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
-} from '../src/client/phone-wizard-commands.ts'
+import { ANDROID_INSTALL_PLATFORM_TOOLS } from '../src/client/phone-wizard-commands.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 function renderCard(view: PhoneEnvironmentView, rest: {
   enabled?: boolean
@@ -27,6 +27,7 @@ function renderCard(view: PhoneEnvironmentView, rest: {
   onRedetect?: () => void
   onCopy?: (command: string) => void
   onNextAction?: (kind: string) => void
+  onOpenDevice?: (deviceId: string) => void
 } = {}) {
   render(
     <PhoneSettingsCard
@@ -36,11 +37,18 @@ function renderCard(view: PhoneEnvironmentView, rest: {
       onRedetect={rest.onRedetect ?? (() => {})}
       onCopy={rest.onCopy ?? (() => {})}
       onNextAction={rest.onNextAction ?? (() => {})}
+      onOpenDevice={rest.onOpenDevice ?? (() => {})}
     />,
   )
 }
 
 describe('PhoneSettingsCard six states', () => {
+  it('fails loud if a future environment view reaches an unupdated renderer', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    expect(() => { renderCard({ kind: 'future' } as never) })
+      .toThrow(/unhandled phone environment view/)
+  })
+
   it('renders the default-off chrome without a probe body', () => {
     renderCard({ kind: 'off' }, { enabled: false })
     expect(screen.getByRole('heading', { name: '手机设备' })).toBeTruthy()
@@ -100,40 +108,30 @@ describe('PhoneSettingsCard six states', () => {
     expect(screen.getByText('1')).toBeTruthy()
   })
 
-  it('renders the Android wizard with copyable install commands', () => {
+  it('routes the Android wizard to product-managed preparation instead of shell commands', () => {
     const onCopy = vi.fn()
     renderCard({ kind: 'android-wizard', platformToolsInstalled: true }, { onCopy })
     expect(screen.getByRole('heading', { name: '创建第一台 Android 模拟器' })).toBeTruthy()
-    expect(screen.getByText(ANDROID_INSTALL_SYSTEM_IMAGE)).toBeTruthy()
-    expect(screen.getByText(ANDROID_CREATE_AVD)).toBeTruthy()
-    expect(screen.getByText(ANDROID_LAUNCH_EMULATOR)).toBeTruthy()
-    const buttons = screen.getAllByRole('button', { name: '复制' })
-    expect(buttons).toHaveLength(3)
-    fireEvent.click(buttons[0]!)
-    expect(onCopy).toHaveBeenCalledWith(ANDROID_INSTALL_SYSTEM_IMAGE)
-    fireEvent.click(buttons[1]!)
-    expect(onCopy).toHaveBeenCalledWith(ANDROID_CREATE_AVD)
-    fireEvent.click(buttons[2]!)
-    expect(onCopy).toHaveBeenCalledWith(ANDROID_LAUNCH_EMULATOR)
+    expect(screen.getByText('Android 环境尚未准备')).toBeTruthy()
+    expect(screen.getByText(/使用上方 Android 分栏/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(onCopy).not.toHaveBeenCalled()
   })
 
-  it('renders the iOS wizard with runtime commands and the WDA note', () => {
+  it('routes the iOS wizard to product-managed preparation and manual real-device prerequisites', () => {
     const onCopy = vi.fn()
     renderCard({ kind: 'ios-wizard' }, { onCopy })
     expect(screen.getByRole('heading', { name: 'iOS 环境差两步' })).toBeTruthy()
-    expect(screen.getByText('未找到 iOS 模拟器运行时')).toBeTruthy()
-    expect(screen.getByText(IOS_DOWNLOAD_PLATFORM)).toBeTruthy()
-    expect(screen.getByText(IOS_CREATE_SIMULATOR)).toBeTruthy()
-    expect(screen.getByText(/USB 真机的前置条件：WebDriverAgent/)).toBeTruthy()
-    const buttons = screen.getAllByRole('button', { name: '复制' })
-    expect(buttons).toHaveLength(2)
-    fireEvent.click(buttons[0]!)
-    expect(onCopy).toHaveBeenCalledWith(IOS_DOWNLOAD_PLATFORM)
-    fireEvent.click(buttons[1]!)
-    expect(onCopy).toHaveBeenCalledWith(IOS_CREATE_SIMULATOR)
+    expect(screen.getByText('iOS 环境尚未准备')).toBeTruthy()
+    expect(screen.getByText(/使用上方 iOS 分栏/)).toBeTruthy()
+    expect(screen.getByText('USB 真机需要人工授权')).toBeTruthy()
+    expect(screen.getByText(/设备控制代理会报告具体状态/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(onCopy).not.toHaveBeenCalled()
   })
 
-  it('renders the ready inventory grouped by platform', () => {
+  it('renders the ready inventory grouped by platform and opens only online devices', () => {
+    const onOpenDevice = vi.fn()
     renderCard({
       kind: 'ready',
       availableCount: 3,
@@ -167,7 +165,7 @@ describe('PhoneSettingsCard six states', () => {
           meta: '已授权 USB 调试 · WDA 未构建前仅 Android 动作可用',
         },
       ],
-    })
+    }, { onOpenDevice })
     expect(screen.getByText('环境正常 · 3 台可用')).toBeTruthy()
     expect(screen.getByText('模拟器 · ANDROID')).toBeTruthy()
     expect(screen.getByText('模拟器 · IOS')).toBeTruthy()
@@ -176,6 +174,15 @@ describe('PhoneSettingsCard six states', () => {
     expect(screen.getByText('iPhone 16 Pro')).toBeTruthy()
     expect(screen.getByText('SM-S9310（Galaxy S24）')).toBeTruthy()
     expect(screen.getByRole('button', { name: '重新检测' })).toBeTruthy()
+    const open = screen.getAllByRole('button', { name: '打开面板' }) as HTMLButtonElement[]
+    expect(open).toHaveLength(4)
+    expect(open[1]!.disabled).toBe(true)
+    for (const button of open) fireEvent.click(button)
+    expect(onOpenDevice.mock.calls).toEqual([
+      ['emulator-5554'],
+      ['iphone-16-pro'],
+      ['R3CN30'],
+    ])
   })
 
   it('omits empty device groups in the ready inventory', () => {
@@ -224,20 +231,19 @@ describe('PhoneSettingsCard six states', () => {
     expect(onNextAction).toHaveBeenCalledWith('wda-unbuilt')
   })
 
-  it('renders the mobilecli-missing row with the install command', () => {
+  it('renders the mobilecli-missing row with managed preparation guidance', () => {
     renderCard({
       kind: 'errors',
       errors: [{
         kind: 'mobilecli-missing',
         title: '未找到 mobilecli',
-        detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。安装后重新检测：',
-        nextAction: '下一步动作',
-        command: 'npm install -g mobilecli@latest',
+        detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。使用本页的「准备 mobilecli」完成一键准备。',
+        nextAction: '准备 mobilecli',
       }],
     })
     expect(screen.getByText('未找到 mobilecli')).toBeTruthy()
-    expect(screen.getByText('npm install -g mobilecli@latest')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '下一步动作' })).toBeTruthy()
+    expect(screen.queryByText('npm install -g mobilecli@latest')).toBeNull()
+    expect(screen.getByRole('button', { name: '准备 mobilecli' })).toBeTruthy()
   })
 
   it('renders the missing-service probe-failed row with the same next-action verb', () => {
@@ -281,6 +287,11 @@ describe('PhoneSettingsSection', () => {
       enabled: false,
       writable: true,
       view: { kind: 'off' },
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: {
+        android: { kind: 'deferred' },
+        ios: { kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' },
+      },
     })
     const props = {
       t: (key: keyof typeof zh) => zh[key],
@@ -289,10 +300,108 @@ describe('PhoneSettingsSection', () => {
       redetect: vi.fn(),
       copyCommand: vi.fn(),
       nextAction: vi.fn(),
+      prepareRuntime: vi.fn(),
+      cancelRuntime: vi.fn(),
+      refreshRuntime: vi.fn(),
+      prepareAndroid: vi.fn(),
+      cancelAndroid: vi.fn(),
+      refreshAndroid: vi.fn(),
+      startAndroid: vi.fn(),
+      prepareIos: vi.fn(), cancelIos: vi.fn(), refreshIos: vi.fn(), startIos: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     render(<PhoneSettingsSection {...props} />)
     expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()
     expect(screen.getByText(/这与「移动伴侣」不同/)).toBeTruthy()
     expect(screen.getByRole('switch', { name: '启用手机设备' })).toBeTruthy()
+    expect(screen.getByText(zh.iosUnsupported)).toBeTruthy()
+  })
+
+  it('requires explicit license consent before Android preparation', () => {
+    const prepareAndroid = vi.fn()
+    const store = createSnapshotStore<PhoneSettingsCardState>({
+      enabled: true,
+      writable: true,
+      view: { kind: 'android-wizard', platformToolsInstalled: false },
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: {
+        android: {
+          kind: 'missing',
+          plan: {
+            sdkRoot: '/dsh/phone/android/sdk', sdkSource: 'managed',
+            avdHome: '/dsh/phone/android/avd', avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a',
+            commandLineToolsVersion: '15859902', commandLineToolsBytes: 156_083_281,
+            packageIds: ['platform-tools', 'emulator', 'system-images;android-35;google_apis;arm64-v8a'],
+            minimumFreeBytes: 16 * 1024 ** 3, licenseUrl: 'https://developer.android.com/studio/terms',
+            components: {
+              commandLineTools: false, platformTools: false, emulator: false, systemImage: false, avd: false,
+            },
+          },
+        },
+        ios: { kind: 'deferred' },
+      },
+    })
+    const props = {
+      t: (key: keyof typeof zh) => zh[key],
+      usePhoneSettingsCard: bindSnapshotSelector(store),
+      setEnabled: vi.fn(), redetect: vi.fn(), copyCommand: vi.fn(), nextAction: vi.fn(),
+      prepareRuntime: vi.fn(), cancelRuntime: vi.fn(), refreshRuntime: vi.fn(),
+      prepareAndroid, cancelAndroid: vi.fn(), refreshAndroid: vi.fn(), startAndroid: vi.fn(),
+      prepareIos: vi.fn(), cancelIos: vi.fn(), refreshIos: vi.fn(), startIos: vi.fn(),
+    } as unknown as PhoneSettingsSectionProps
+    render(<PhoneSettingsSection {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '一键准备 Android' }))
+    const submit = screen.getByRole('button', { name: '接受并准备' }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    expect(screen.getByText('/dsh/phone/android/sdk')).toBeTruthy()
+    expect(screen.getByText(/15859902/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(submit.disabled).toBe(false)
+    fireEvent.click(submit)
+    expect(prepareAndroid).toHaveBeenCalledOnce()
+  })
+
+  it('offers managed iOS Runtime preparation and reports MJPEG after verified readiness', () => {
+    const prepareIos = vi.fn()
+    const refreshIos = vi.fn()
+    const plan = {
+      developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+      simulatorName: 'DSH Gestalt iPhone',
+      deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+    }
+    const store = createSnapshotStore<PhoneSettingsCardState>({
+      enabled: true, writable: true, view: { kind: 'ios-wizard' },
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'runtime-missing', plan } },
+    })
+    const props = {
+      t: (key: keyof typeof zh) => zh[key], usePhoneSettingsCard: bindSnapshotSelector(store),
+      setEnabled: vi.fn(), redetect: vi.fn(), copyCommand: vi.fn(), nextAction: vi.fn(),
+      prepareRuntime: vi.fn(), cancelRuntime: vi.fn(), refreshRuntime: vi.fn(),
+      prepareAndroid: vi.fn(), cancelAndroid: vi.fn(), refreshAndroid: vi.fn(), startAndroid: vi.fn(),
+      prepareIos, cancelIos: vi.fn(), refreshIos, startIos: vi.fn(),
+    } as unknown as PhoneSettingsSectionProps
+    const rendered = render(<PhoneSettingsSection {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '一键准备 iOS' }))
+    expect(prepareIos).toHaveBeenCalledOnce()
+
+    store.set({ ...store.getSnapshot(), platforms: { android: { kind: 'deferred' }, ios: {
+      kind: 'failed', plan, code: 'PHONE_IOS_ABORTED',
+      message: 'iOS Simulator picture verification was cancelled', retryable: true,
+    } } })
+    rendered.rerender(<PhoneSettingsSection {...props} />)
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull()
+    const iosCard = document.querySelector<HTMLElement>('[data-phone-platform-ios="failed"]')
+    if (iosCard === null) throw new Error('iOS failed card did not render')
+    fireEvent.click(within(iosCard).getByRole('button', { name: '重新检测' }))
+    expect(refreshIos).toHaveBeenCalledOnce()
+
+    store.set({ ...store.getSnapshot(), platforms: { android: { kind: 'deferred' }, ios: {
+      kind: 'ready', plan: { ...plan, runtime: {
+        identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', available: true,
+      } }, deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', running: true,
+    } } })
+    rendered.rerender(<PhoneSettingsSection {...props} />)
+    expect(screen.getByText(/MJPEG 实时画面/)).toBeTruthy()
+    expect(screen.queryByText(/设备控制代理验证 mobilecli MJPEG/)).toBeNull()
   })
 })

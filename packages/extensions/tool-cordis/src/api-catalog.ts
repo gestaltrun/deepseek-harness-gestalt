@@ -1301,6 +1301,28 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing. An unresolvable mobilecli still activates the Service; every operation then rejects with `PHONE_UNRESOLVED` and install guidance instead of failing composition.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_UNRESOLVED` — the mobilecli executable could not be resolved.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n- `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device failure arm; PhoneDevicesError.issue carries which one (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`, `device-unplugged`).\n\n`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing. `agentStatus` and `installAgent` drive the upstream `agent status` / `agent install` commands as one-shot child runs of the same executable, keep the on-device agent installed idempotently, re-sign real handsets through the configured provisioning profile, and attach the free-signing expiry reminder to every answer about a re-signed real handset.',
     methods: [
       {
+        signature: 'isReady(): boolean',
+        description: 'Read whether the current child may accept fleet operations.',
+        parameters: [],
+        returns: 'current generation readiness.',
+      },
+      {
+        signature: 'onReadinessChanged(listener: (ready: boolean) => void): () => void',
+        description: 'Subscribe to ready/not-ready transitions of the replaceable runtime generation.',
+        parameters: [{ name: 'listener', description: 'callback receiving the committed readiness value.' }],
+        returns: 'the disposer.',
+      },
+      {
+        signature: 'async activateExecutable( executablePath: string, signal?: AbortSignal, environment: Readonly<Record<string, string>> = {}, ): Promise<void>',
+        description: 'Replace the owned mobilecli child generation without replacing this Service. In-flight work on the prior generation is aborted and its process is stopped before the replacement begins readiness probing.',
+        parameters: [{ name: 'executablePath', description: 'absolute executable path selected by the environment owner.' }, { name: 'signal', description: 'optional cancellation signal for replacement and readiness.' }, { name: 'environment', description: 'non-sensitive SDK/AVD environment owned by the selected generation.' }],
+      },
+      {
+        signature: 'async deactivate(): Promise<void>',
+        description: 'Stop the current child generation while retaining this Service for later activation.',
+        parameters: [],
+      },
+      {
         signature: 'async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>',
         description: 'Fetch and publish one fresh grouped device listing.',
         parameters: [{ name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
@@ -1321,13 +1343,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>',
-        description: 'Forward one `device.io.tap` / `gesture` / `text` / `button` round trip. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
-        parameters: [{ name: 'request', description: 'Branded device id plus the OpenRPC params for that verb.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
-        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+        description: 'Forward one `device.io.tap` / `gesture` / `text` / `button` round trip. Public tap and gesture coordinates are capture pixels. Android forwards them unchanged; iOS reads and caches `device.info.screenSize.scale` for the current runtime generation and converts them to XCTest logical points. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
+        parameters: [{ name: 'request', description: 'Branded device id plus capture-pixel or non-coordinate input.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_PROTOCOL` when an iOS `device.info` answer lacks a valid positive screen size, and otherwise per the class-documented failure modes.'],
       },
       {
         signature: 'async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream>',
-        description: 'Open one upstream `device.screencapture` stream. `h264` maps onto the upstream `avc` format; the returned body is unread so the Host can proxy frames without buffering a capture.',
+        description: 'Open one `device.screencapture` stream. `h264` maps onto upstream `avc`; Android pre-reads and replays at most one bounded key-access-unit probe, then replaces an invalid, failed, or timed-out source with the system `screenrecord` H264 stream when available. Other bodies remain unread.',
         parameters: [{ name: 'request', description: 'Branded device id, encoding, and optional cancellation.' }],
         returns: 'the live capture content type and body; the caller owns cancellation.',
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
@@ -1344,7 +1366,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Keep the on-device agent installed for one listed device. Without `force` the upstream `agent status` command runs first and an already-installed agent answers without any install spawn, so repeated calls are idempotent; `force` reinstalls and re-signs through the configured provisioning profile, which real iOS installs require upstream.',
         parameters: [{ name: 'id', description: 'Branded id of the device to install on.' }, { name: 'options', description: 'Force reinstall switch and optional cancellation.' }],
         returns: 'the resulting installation state; `reinstalled` is true only when this call spawned an install.',
-        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured real-device arm, and otherwise per the class-documented failure modes.'],
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_AGENT_PROFILE_REQUIRED` when a real-iOS install lacks `provisioningProfilePath`, `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured real-device arm, and otherwise per the class-documented failure modes.'],
       },
       {
         signature: 'onChanged(sub: (change: PhoneDeviceChange) => void): () => void',
@@ -1355,14 +1377,68 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'phoneEnvironment',
+    summary: 'Stable Host Service for phone runtime discovery, preparation, and activation.',
+    description: 'Stable Host Service for phone runtime discovery, preparation, and activation.',
+    methods: [
+      {
+        signature: 'snapshot(): PhoneEnvironmentSnapshot',
+        description: 'Read the latest committed environment state.',
+        parameters: [],
+        returns: 'the current immutable full snapshot.',
+      },
+      {
+        signature: 'setEnabled(enabled: boolean): Promise<void>',
+        description: 'Apply the durable settings gate and symmetrically activate or stop the child generation.',
+        parameters: [{ name: 'enabled', description: 'current `ui-phone.enabled` value.' }],
+      },
+      {
+        signature: 'onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void',
+        description: 'Subscribe to committed full-snapshot replacements.',
+        parameters: [{ name: 'listener', description: 'callback receiving the new immutable snapshot.' }],
+        returns: 'the disposer.',
+      },
+      {
+        signature: 'registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void',
+        description: 'Register the Android platform Provider while retaining this Service as the full-snapshot owner.',
+        parameters: [{ name: 'provider', description: 'Android SDK, AVD, and emulator lifecycle owner.' }],
+        returns: 'disposer that detaches the Provider and restores the deferred state.',
+      },
+      {
+        signature: 'registerIosEnvironment(provider: IosEnvironmentProvider): () => void',
+        description: 'Register the iOS platform Provider while retaining this Service as the full-snapshot owner. A running snapshot discovered during registration remains pending until the active mobilecli generation passes list and picture verification.',
+        parameters: [{ name: 'provider', description: 'Xcode runtime and Simulator lifecycle owner.' }],
+        returns: 'disposer that detaches the Provider and restores the deferred state.',
+      },
+      {
+        signature: 'refresh(signal?: AbortSignal): Promise<PhoneEnvironmentSnapshot>',
+        description: 'Re-detect runtime sources in fixed override-managed-system precedence.',
+        parameters: [{ name: 'signal', description: 'optional owner cancellation for detection and activation.' }],
+        returns: 'the committed full snapshot after detection settles.',
+      },
+      {
+        signature: 'prepare(): Promise<PhoneEnvironmentSnapshot>',
+        description: 'Download, verify, publish, and optionally activate the pinned host asset.',
+        parameters: [],
+        returns: 'the committed full snapshot after preparation settles.',
+        throws: ['{@link PhoneEnvironmentError} with `PHONE_ENVIRONMENT_OVERRIDE` while `executablePath` is authoritative, `PHONE_ENVIRONMENT_BUSY` for concurrent preparation, or the documented download, verification, filesystem, cancellation, and activation codes.'],
+      },
+      {
+        signature: 'cancel(): void',
+        description: 'Cancel the current detection, download, version probe, or child activation.',
+        parameters: [],
+      },
+    ],
+  },
+  {
     key: 'phoneStream',
     summary: 'Same-origin phone stream Consumer.',
     description: 'Same-origin phone stream Consumer. It injects `phoneDevices` and `webServer`, registers the IO upgrade and signed capture routes, and publishes `ctx.phoneStream` so later GUI consumers can mint URLs without talking to `:12000`.',
     methods: [
       {
-        signature: 'sessionFor(id: DeviceId): PhoneStreamSession',
+        signature: 'sessionFor( id: DeviceId, agentManaged: boolean = false, preferredFormat: PhoneCaptureFormat = \'h264\', ): PhoneStreamSession',
         description: 'Mint signed same-origin MJPEG and H264 URLs for one known device.',
-        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }],
+        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }, { name: 'agentManaged', description: 'Whether control failures should enter the managed device-agent recovery flow.' }, { name: 'preferredFormat', description: 'Encoding the browser should open first for this device class.' }],
         returns: 'the IO upgrade path plus both capture URLs and their expiry.',
       },
     ],
@@ -3535,6 +3611,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgentStatus = \'idle\' | \'running\';',
   },
   {
+    name: 'AndroidEnvironmentProvider',
+    declaration: 'export interface AndroidEnvironmentProvider {\n    snapshot(): PhoneAndroidState;\n    refresh(signal?: AbortSignal): Promise<PhoneAndroidState>;\n    prepare(request: AndroidPrepareRequest, signal?: AbortSignal): Promise<PhoneAndroidState>;\n    start(signal?: AbortSignal): Promise<PhoneAndroidState>;\n    cancel(): void;\n    deactivate(): Promise<void>;\n    runtimeEnvironment(): Readonly<Record<string, string>>;\n    onChanged(listener: (state: PhoneAndroidState) => void): () => void;\n}',
+  },
+  {
+    name: 'AndroidPreparationPlan',
+    declaration: 'export interface AndroidPreparationPlan {\n    readonly sdkRoot: string;\n    readonly sdkSource: AndroidSdkSource;\n    readonly avdHome: string;\n    readonly avdName: string;\n    readonly abi: \'arm64-v8a\' | \'x86_64\';\n    readonly commandLineToolsVersion: string;\n    readonly commandLineToolsBytes: number;\n    readonly packageIds: readonly string[];\n    readonly minimumFreeBytes: number;\n    readonly licenseUrl: string;\n    readonly components: {\n        readonly commandLineTools: boolean;\n        readonly platformTools: boolean;\n        readonly emulator: boolean;\n        readonly systemImage: boolean;\n        readonly avd: boolean;\n    };\n}',
+  },
+  {
+    name: 'AndroidPrepareRequest',
+    declaration: 'export interface AndroidPrepareRequest {\n    readonly licenseAccepted: true;\n}',
+  },
+  {
+    name: 'AndroidSdkSource',
+    declaration: 'export type AndroidSdkSource = \'existing\' | \'managed\';',
+  },
+  {
     name: 'ApiKeyRecord',
     declaration: 'export interface ApiKeyRecord {\n    readonly kind: \'api-key\';\n    readonly key?: string;\n    readonly env?: Readonly<Record<string, string>>;\n}',
   },
@@ -4383,6 +4475,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
   },
   {
+    name: 'IosDeviceTypePlan',
+    declaration: 'export interface IosDeviceTypePlan {\n    readonly identifier: string;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'IosEnvironmentProvider',
+    declaration: 'export interface IosEnvironmentProvider {\n    snapshot(): PhoneIosState;\n    refresh(signal?: AbortSignal): Promise<PhoneIosState>;\n    prepare(signal?: AbortSignal): Promise<PhoneIosState>;\n    start(signal?: AbortSignal): Promise<PhoneIosState>;\n    cancel(): void;\n    deactivate(): Promise<void>;\n    onChanged(listener: (state: PhoneIosState) => void): () => void;\n}',
+  },
+  {
+    name: 'IosPreparationPlan',
+    declaration: 'export interface IosPreparationPlan {\n    readonly developerDir: string;\n    readonly xcodeVersion: string;\n    readonly simulatorName: string;\n    readonly runtime?: IosRuntimePlan;\n    readonly deviceType?: IosDeviceTypePlan;\n}',
+  },
+  {
+    name: 'IosRuntimePlan',
+    declaration: 'export interface IosRuntimePlan {\n    readonly identifier: string;\n    readonly name: string;\n    readonly version: string;\n    readonly available: true;\n}',
+  },
+  {
     name: 'JobDoneListener',
     declaration: 'export type JobDoneListener = (snapshot: JobSnapshot, owner: Agent | undefined) => void | PromiseLike<void>;',
   },
@@ -4763,6 +4871,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhoneAgentStatus {\n    readonly deviceId: DeviceId;\n    readonly installed: boolean;\n    readonly version?: string;\n    readonly bundleId?: string;\n    readonly profileReminder?: string;\n}',
   },
   {
+    name: 'PhoneAndroidState',
+    declaration: 'export type PhoneAndroidState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n} | {\n    readonly kind: \'checking\';\n} | {\n    readonly kind: \'missing\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'awaiting-license\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'downloading\';\n    readonly plan: AndroidPreparationPlan;\n    readonly receivedBytes: number;\n    readonly totalBytes: number;\n} | {\n    readonly kind: \'installing\';\n    readonly plan: AndroidPreparationPlan;\n    readonly step: \'licenses\' | \'packages\';\n} | {\n    readonly kind: \'creating-avd\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'checking-acceleration\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'booting\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'manual-required\';\n    readonly plan: AndroidPreparationPlan;\n    readonly code: \'disk-space\' | \'windows-hypervisor\' | \'linux-kvm\' | \'virtualization\';\n    readonly message: string;\n} | {\n    readonly kind: \'ready\';\n    readonly plan: AndroidPreparationPlan;\n    readonly deviceId?: DeviceId;\n    readonly running: boolean;\n} | {\n    readonly kind: \'failed\';\n    readonly plan?: AndroidPreparationPlan;\n    readonly code: string;\n    readonly message: string;\n    readonly retryable: boolean;\n};',
+  },
+  {
     name: 'PhoneCaptureRequest',
     declaration: 'export interface PhoneCaptureRequest {\n    readonly deviceId: DeviceId;\n    readonly format: PhoneCaptureFormat;\n    readonly signal?: AbortSignal;\n}',
   },
@@ -4787,12 +4899,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhoneDeviceRef {\n    readonly id: DeviceId;\n    readonly name: string;\n    readonly kind: PhoneDeviceKind;\n    readonly platform: \'ios\' | \'android\';\n    readonly state: string;\n    readonly online: boolean;\n}',
   },
   {
+    name: 'PhoneEnvironmentSnapshot',
+    declaration: 'export interface PhoneEnvironmentSnapshot {\n    readonly revision: number;\n    readonly enabled: boolean;\n    readonly runtime: PhoneRuntimeState;\n    readonly platforms: {\n        readonly android: PhoneAndroidState;\n        readonly ios: PhoneIosState;\n    };\n}',
+  },
+  {
     name: 'PhoneIoRequest',
     declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
   },
   {
+    name: 'PhoneIosState',
+    declaration: 'export type PhoneIosState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n} | {\n    readonly kind: \'checking\';\n    readonly operation?: \'prepare\';\n} | {\n    readonly kind: \'xcode-missing\';\n    readonly message: string;\n} | {\n    readonly kind: \'license-required\';\n    readonly developerDir: string;\n    readonly message: string;\n} | {\n    readonly kind: \'manual-required\';\n    readonly code: \'first-launch\' | \'xcode-update\';\n    readonly message: string;\n    readonly developerDir?: string;\n} | {\n    readonly kind: \'runtime-missing\';\n    readonly plan: IosPreparationPlan;\n} | {\n    readonly kind: \'no-simulator\';\n    readonly plan: IosPreparationPlan;\n} | {\n    readonly kind: \'preparing\';\n    readonly plan: IosPreparationPlan;\n    readonly step: \'downloading-runtime\' | \'creating-simulator\' | \'booting\';\n} | {\n    readonly kind: \'ready\';\n    readonly plan: IosPreparationPlan;\n    readonly deviceId: DeviceId;\n    readonly running: boolean;\n} | {\n    readonly kind: \'failed\';\n    readonly plan?: IosPreparationPlan;\n    readonly code: string;\n    readonly message: string;\n    readonly retryable: boolean;\n};',
+  },
+  {
+    name: 'PhoneRuntimeState',
+    declaration: 'export type PhoneRuntimeState = {\n    readonly kind: \'missing\';\n    readonly targetVersion: string;\n    readonly assetBytes?: number;\n} | {\n    readonly kind: \'downloading\';\n    readonly targetVersion: string;\n    readonly receivedBytes: number;\n    readonly totalBytes: number;\n} | {\n    readonly kind: \'verifying\';\n    readonly targetVersion: string;\n} | {\n    readonly kind: \'activating\';\n    readonly targetVersion: string;\n    readonly source: PhoneRuntimeSource;\n} | {\n    readonly kind: \'ready\';\n    readonly version: string;\n    readonly source: PhoneRuntimeSource;\n} | {\n    readonly kind: \'failed\';\n    readonly targetVersion: string;\n    readonly code: string;\n    readonly message: string;\n};',
+  },
+  {
     name: 'PhoneStreamSession',
-    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
+    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly agentManaged: boolean;\n    readonly preferredFormat: PhoneCaptureFormat;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
   },
   {
     name: 'PhoneStreamUrl',

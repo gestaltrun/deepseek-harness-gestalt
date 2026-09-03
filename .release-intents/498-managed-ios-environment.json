@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "498-managed-ios-environment",
+  "summary": {
+    "en": "Let Desktop prepare and start an iOS Simulator, prepare the iOS device-control agent, and explain actionable physical-iPhone readiness failures.",
+    "zh": "让 Desktop 准备并启动 iOS 模拟器、准备 iOS 设备控制代理，并为 iPhone 真机就绪失败提供可操作说明。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Simulator preparation and physical-iPhone agent readiness run in the Desktop Host and Web client; they do not change Mobile source, build inputs, or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The local iOS environment and device-control paths do not change Platform services, deployment inputs, or wire formats."
+    }
+  ]
+}

@@ -10,16 +10,120 @@ import type { PhoneIoTarget, PhoneStreamSessionView } from '../src/client/phone-
 import type {
   PhoneBadgeSnapshot, PhoneDeviceSummary, PhoneGateSource, PhoneListingSnapshot, PhoneListingSource,
 } from '../src/client/registry.ts'
+import { vi } from 'vitest'
 
 export const SESSION_A: PhoneStreamSessionView = {
   deviceId: 'emulator-5554',
   ioPath: '/phone/ws/io',
+  agentManaged: false,
+  preferredFormat: 'h264',
   mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1000 },
   h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1000 },
 }
 
 /** Drain the microtask queue of one in-flight mint round trip. */
 export const flush = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
+
+/** Observable browser resources installed for a decoded 390×844 H264 frame. */
+export interface FakeH264PlaybackRuntime {
+  readonly abortSignals: AbortSignal[]
+  readonly decoderCloseCounts: number[]
+  readonly frameCloseCounts: number[]
+  readonly drawImage: ReturnType<typeof vi.fn>
+  /** Deliver one asynchronous WebCodecs failure to the newest decoder. */
+  failLastDecoder(): void
+}
+
+/** Install a same-origin Annex-B response and WebCodecs decoder for view specs. */
+export function installFakeH264Playback(): FakeH264PlaybackRuntime {
+  const abortSignals: AbortSignal[] = []
+  const decoderCloseCounts: number[] = []
+  const frameCloseCounts: number[] = []
+  const decoderErrors: Array<(error: DOMException) => void> = []
+  const drawImage = vi.fn()
+  const payload = Uint8Array.from([
+    0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x06, 0x41, 0xaf, 0x9a, 0xd0,
+    0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80,
+    0, 0, 0, 1, 0x65, 0x88, 0x86,
+    0, 0, 0, 1, 0x09, 0xf0,
+    0, 0, 0, 1, 0x0c, 0x80,
+  ])
+
+  class Chunk {
+    constructor(readonly init: EncodedVideoChunkInit) {}
+  }
+
+  class Decoder extends EventTarget {
+    static async isConfigSupported(config: VideoDecoderConfig): Promise<VideoDecoderSupport> {
+      return { supported: true, config }
+    }
+
+    readonly index = decoderCloseCounts.push(0) - 1
+    readonly output: (frame: {
+      readonly displayWidth: number
+      readonly displayHeight: number
+      close(): void
+    }) => void
+    readonly error: (error: DOMException) => void
+    state: CodecState = 'unconfigured'
+    decodeQueueSize = 0
+    decoded = 0
+    emitted = 0
+
+    constructor(init: { output: Decoder['output']; error: Decoder['error'] }) {
+      super()
+      this.output = init.output
+      this.error = init.error
+      decoderErrors.push(init.error)
+    }
+
+    configure(): void { this.state = 'configured' }
+    decode(_chunk: Chunk): void {
+      this.decoded += 1
+      const frameIndex = frameCloseCounts.push(0) - 1
+      this.emitted += 1
+      this.output({
+        displayWidth: 390,
+        displayHeight: 844,
+        close: () => { frameCloseCounts[frameIndex] = (frameCloseCounts[frameIndex] ?? 0) + 1 },
+      })
+    }
+    async flush(): Promise<void> {
+      while (this.emitted < this.decoded) {
+        const frameIndex = frameCloseCounts.push(0) - 1
+        this.emitted += 1
+        this.output({
+          displayWidth: 390,
+          displayHeight: 844,
+          close: () => { frameCloseCounts[frameIndex] = (frameCloseCounts[frameIndex] ?? 0) + 1 },
+        })
+      }
+    }
+    close(): void {
+      decoderCloseCounts[this.index] = (decoderCloseCounts[this.index] ?? 0) + 1
+      this.state = 'closed'
+    }
+  }
+
+  vi.stubGlobal('isSecureContext', true)
+  vi.stubGlobal('EncodedVideoChunk', Chunk)
+  vi.stubGlobal('VideoDecoder', Decoder)
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.signal !== undefined && init.signal !== null) abortSignals.push(init.signal)
+    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(payload) } })
+    return new Response(body, { status: 200, headers: { 'content-type': 'video/h264' } })
+  }))
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as never)
+  return {
+    abortSignals,
+    decoderCloseCounts,
+    frameCloseCounts,
+    drawImage,
+    failLastDecoder() {
+      decoderErrors.at(-1)?.(new DOMException('decode failed', 'EncodingError'))
+    },
+  }
+}
 
 /** One socket the fake gateway handed out; events fire explicitly. */
 export class FakeSocket implements PhoneIoSocket {
@@ -47,6 +151,18 @@ export class FakeSocket implements PhoneIoSocket {
     this.handlers.onClose()
   }
 
+  /** Deliver a remote close without a preceding socket error. */
+  closeFromRemote(): void {
+    if (!this.opened) return
+    this.opened = false
+    this.handlers.onClose()
+  }
+
+  /** Deliver an error callback even after the socket stopped being current. */
+  fail(): void {
+    this.handlers.onError()
+  }
+
   send(data: string): void {
     this.sent.push(data)
   }
@@ -61,11 +177,25 @@ export class FakeGateway implements PhoneStreamGateway {
   readonly sockets: FakeSocket[] = []
   readonly mintedDevices: string[] = []
   readonly dialedPaths: string[] = []
+  readonly agentStatusDevices: string[] = []
+  readonly agentInstallCalls: Array<{ readonly deviceId: string; readonly force: boolean }> = []
   private readonly mintScript: Array<{ readonly session?: PhoneStreamSessionView; readonly error?: unknown }> = []
+  private readonly agentStatusScript: Array<{ readonly installed?: boolean; readonly error?: unknown }> = []
+  private readonly agentInstallScript: Array<{ readonly installed?: boolean; readonly error?: unknown }> = []
 
   /** Queue one mint outcome; unqueued mints succeed with SESSION_A. */
   queueMint(outcome: { readonly session?: PhoneStreamSessionView; readonly error?: unknown }): void {
     this.mintScript.push(outcome)
+  }
+
+  /** Queue one real-device status outcome; unqueued checks report installed. */
+  queueAgentStatus(outcome: { readonly installed?: boolean; readonly error?: unknown }): void {
+    this.agentStatusScript.push(outcome)
+  }
+
+  /** Queue one real-device install outcome; unqueued installs succeed. */
+  queueAgentInstall(outcome: { readonly installed?: boolean; readonly error?: unknown }): void {
+    this.agentInstallScript.push(outcome)
   }
 
   async mintSession(deviceId: string): Promise<PhoneStreamSessionView> {
@@ -73,6 +203,20 @@ export class FakeGateway implements PhoneStreamGateway {
     const next = this.mintScript.shift()
     if (next !== undefined && next.error !== undefined) throw next.error
     return next?.session ?? SESSION_A
+  }
+
+  async agentStatus(deviceId: string): Promise<{ readonly deviceId: string; readonly installed: boolean }> {
+    this.agentStatusDevices.push(deviceId)
+    const next = this.agentStatusScript.shift()
+    if (next?.error !== undefined) throw next.error
+    return { deviceId, installed: next?.installed ?? true }
+  }
+
+  async installAgent(deviceId: string, force: boolean): Promise<{ readonly deviceId: string; readonly installed: boolean }> {
+    this.agentInstallCalls.push({ deviceId, force })
+    const next = this.agentInstallScript.shift()
+    if (next?.error !== undefined) throw next.error
+    return { deviceId, installed: next?.installed ?? true }
   }
 
   connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket {

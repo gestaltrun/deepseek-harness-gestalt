@@ -9,6 +9,7 @@ import {
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
+import { MISSING_PHONE_ENVIRONMENT, type PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
 import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
 import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
@@ -143,6 +144,128 @@ describe('PhoneSettingsCardController publish re-entrancy', () => {
 })
 
 describe('PhoneSettingsCardController', () => {
+  it('keeps the runtime subscription across environment-source replacement and disposes it', () => {
+    const runtimeListeners = new Set<() => void>()
+    const dispose = vi.fn()
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => ({
+        revision: 0,
+        enabled: false,
+        runtime: { kind: 'missing', targetVersion: '1.0.5' },
+        platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+      }),
+      refresh: async () => {},
+      prepare: async () => {},
+      cancel: async () => {},
+      prepareAndroid: async () => {},
+      cancelAndroid: async () => {},
+      refreshAndroid: async () => {},
+      startAndroid: async () => {},
+      prepareIos: async () => {},
+      cancelIos: async () => {},
+      refreshIos: async () => {},
+      startIos: async () => {},
+      ensureDetected: () => {},
+      dispose,
+      subscribe: (listener) => {
+        runtimeListeners.add(listener)
+        return () => { runtimeListeners.delete(listener) }
+      },
+    }
+    const controller = new PhoneSettingsCardController(
+      readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
+    )
+    expect(runtimeListeners.size).toBe(1)
+    expect(() => { controller.inject().openDevice('offline') }).not.toThrow()
+    controller.setSource(MISSING_PHONE_ENVIRONMENT_SOURCE)
+    expect(runtimeListeners.size).toBe(1)
+    controller.dispose()
+    expect(runtimeListeners.size).toBe(0)
+    expect(dispose).toHaveBeenCalledOnce()
+  })
+
+  it('republishes runtime snapshots and contains rejected runtime operations', async () => {
+    const runtimeListeners = new Set<() => void>()
+    let runtimeSnapshot: ReturnType<PhoneRuntimeSource['getSnapshot']> = {
+      revision: 0,
+      enabled: false,
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+    }
+    const refresh = vi.fn(async () => { throw new Error('refresh failed') })
+    const prepare = vi.fn(async () => { throw new Error('prepare failed') })
+    const cancel = vi.fn(async () => { throw new Error('cancel failed') })
+    const prepareAndroid = vi.fn(async () => { throw new Error('Android prepare failed') })
+    const cancelAndroid = vi.fn(async () => { throw new Error('Android cancel failed') })
+    const refreshAndroid = vi.fn(async () => { throw new Error('Android refresh failed') })
+    const startAndroid = vi.fn(async () => { throw new Error('Android start failed') })
+    const prepareIos = vi.fn(async () => { throw new Error('iOS prepare failed') })
+    const cancelIos = vi.fn(async () => { throw new Error('iOS cancel failed') })
+    const refreshIos = vi.fn(async () => { throw new Error('iOS refresh failed') })
+    const startIos = vi.fn(async () => { throw new Error('iOS start failed') })
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => runtimeSnapshot,
+      refresh,
+      prepare,
+      cancel,
+      prepareAndroid,
+      cancelAndroid,
+      refreshAndroid,
+      startAndroid,
+      prepareIos,
+      cancelIos,
+      refreshIos,
+      startIos,
+      ensureDetected: vi.fn(),
+      dispose: vi.fn(),
+      subscribe: (listener) => {
+        runtimeListeners.add(listener)
+        return () => { runtimeListeners.delete(listener) }
+      },
+    }
+    const controller = new PhoneSettingsCardController(
+      readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
+    )
+    const face = controller.inject()
+    runtimeSnapshot = {
+      revision: 1,
+      enabled: false,
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'unsupported', reason: 'macOS required' } },
+    }
+    for (const listener of runtimeListeners) listener()
+    expect(face.hooks.phoneSettingsCard.getSnapshot()).toMatchObject({
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { ios: { kind: 'unsupported', reason: 'macOS required' } },
+    })
+
+    face.prepareRuntime()
+    face.cancelRuntime()
+    face.refreshRuntime()
+    face.prepareAndroid()
+    face.cancelAndroid()
+    face.refreshAndroid()
+    face.startAndroid()
+    face.prepareIos()
+    face.cancelIos()
+    face.refreshIos()
+    face.startIos()
+    face.nextAction('mobilecli-missing')
+    await flush()
+    expect(prepare).toHaveBeenCalledTimes(2)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(prepareAndroid).toHaveBeenCalledOnce()
+    expect(cancelAndroid).toHaveBeenCalledOnce()
+    expect(refreshAndroid).toHaveBeenCalledOnce()
+    expect(startAndroid).toHaveBeenCalledOnce()
+    expect(prepareIos).toHaveBeenCalledOnce()
+    expect(cancelIos).toHaveBeenCalledOnce()
+    expect(refreshIos).toHaveBeenCalledOnce()
+    expect(startIos).toHaveBeenCalledOnce()
+    controller.dispose()
+  })
+
   it('projects the durable enable flag onto the off / probe-failed views', () => {
     const host = readyScope(false)
     const controller = new PhoneSettingsCardController(host.scope)
@@ -151,6 +274,8 @@ describe('PhoneSettingsCardController', () => {
       enabled: false,
       writable: true,
       view: { kind: 'off' },
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
     })
     face.setEnabled(true)
     expect(host.set).toHaveBeenCalledWith('enabled', true)
@@ -232,7 +357,15 @@ describe('PhoneSettingsCardController', () => {
       subscribe: () => () => {},
     }
     const writeText = vi.fn(() => Promise.resolve())
-    const controller = new PhoneSettingsCardController(host.scope, source, { writeText })
+    const prepare = vi.fn(async () => {})
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => MISSING_PHONE_ENVIRONMENT,
+      refresh: async () => {}, prepare, cancel: async () => {},
+      prepareAndroid: async () => {}, cancelAndroid: async () => {}, refreshAndroid: async () => {}, startAndroid: async () => {},
+      prepareIos: async () => {}, cancelIos: async () => {}, refreshIos: async () => {}, startIos: async () => {},
+      ensureDetected: () => {}, subscribe: () => () => {}, dispose: vi.fn(),
+    }
+    const controller = new PhoneSettingsCardController(host.scope, source, { writeText }, runtime)
     const face = controller.inject()
     face.copyCommand('sdkmanager "platform-tools"')
     expect(writeText).toHaveBeenCalledWith('sdkmanager "platform-tools"')
@@ -241,7 +374,8 @@ describe('PhoneSettingsCardController', () => {
     face.nextAction('probe-failed')
     face.nextAction('mobilecli-missing')
     face.nextAction('wda-unbuilt')
-    expect(redetect).toHaveBeenCalledTimes(4)
+    expect(redetect).toHaveBeenCalledTimes(3)
+    expect(prepare).toHaveBeenCalledOnce()
     controller.dispose()
   })
 
@@ -249,7 +383,7 @@ describe('PhoneSettingsCardController', () => {
     const host = readyScope(true)
     const controller = new PhoneSettingsCardController(host.scope)
     controller.inject().copyCommand('sdkmanager "platform-tools"')
-    MISSING_PHONE_ENVIRONMENT_SOURCE.redetect()
+    void MISSING_PHONE_ENVIRONMENT_SOURCE.redetect()
     controller.dispose()
   })
 })

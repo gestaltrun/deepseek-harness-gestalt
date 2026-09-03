@@ -16,6 +16,9 @@
     - button "Browser":
       - img
       - text: Browser
+    - button "Phone Devices":
+      - img
+      - text: Phone Devices
     - button "Side card"
   - button "Open configuration file"
   - button "Close":

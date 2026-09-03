@@ -14,10 +14,12 @@
     "javac",
     "keytool",
     "musl-gcc",
+    "mkfifo",
     "openssl",
     "ps",
     "postgres",
     "python3",
+    "ps",
     "postgres",
     "redis-server",
     "sandbox-exec",
@@ -737,7 +739,8 @@
         "src/preload.cjs",
         "scripts/**/*.mjs",
         "tests/**/*.spec.ts",
-        "tests/e2e-sub2api/**/*.ts"
+        "tests/e2e-sub2api/**/*.ts",
+        "tests/e2e-electron/**/*.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -746,6 +749,7 @@
       ],
       "ignoreDependencies": [
         "@deepseek-ai/dsh-client-ui-phone",
+        "@deepseek-ai/dsh-phone-environment",
         "@deepseek-ai/dsh-phone-runtime",
         "@deepseek-ai/dsh-phone-stream",
         "@deepseek-ai/dsh-tool-phone",

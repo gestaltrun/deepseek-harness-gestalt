@@ -19,6 +19,10 @@ export interface PhoneStreamSession {
   readonly deviceId: DeviceId
   /** Exact-path WebSocket upgrade that forwards `device.io.*` JSON-RPC. */
   readonly ioPath: string
+  /** Whether control failures for this session can enter product-managed device-agent recovery. */
+  readonly agentManaged: boolean
+  /** Encoding the browser should open first for this device class. */
+  readonly preferredFormat: PhoneCaptureFormat
   /** Signed MJPEG capture URL. */
   readonly mjpeg: PhoneStreamUrl
   /** Signed H264 (`avc`) capture URL. */

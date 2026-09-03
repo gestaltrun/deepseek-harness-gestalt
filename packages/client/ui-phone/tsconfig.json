@@ -18,6 +18,9 @@
       "path": "../../runtime-diagnostics/invariants"
     },
     {
+      "path": "../../phone/phone-runtime"
+    },
+    {
       "path": "../../settings/settings"
     },
     {
@@ -28,6 +31,9 @@
     },
     {
       "path": "../ui-settings"
+    },
+    {
+      "path": "../ui-desktop"
     },
     {
       "path": "../locale"

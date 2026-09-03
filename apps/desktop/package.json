@@ -16,6 +16,8 @@
     "dev": "node scripts/build-main.mjs && electron out/main.mjs",
     "build:main": "node scripts/build-main.mjs",
     "test:e2e-sub2api": "node scripts/run-e2e-sub2api.mjs",
+    "typecheck:e2e-electron": "tsc -p tests/e2e-electron/tsconfig.json",
+    "test:e2e-electron": "node scripts/run-e2e-electron.mjs",
     "package": "node scripts/build-main.mjs && electron-builder --publish never",
     "package:unsigned": "node scripts/build-main.mjs && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 --publish never -c.mac.notarize=false"
   },
@@ -27,6 +29,7 @@
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "@deepseek-ai/dsh-phone-runtime": "workspace:^",
+    "@deepseek-ai/dsh-phone-environment": "workspace:^",
     "@deepseek-ai/dsh-phone-stream": "workspace:^",
     "@deepseek-ai/dsh-platform-account": "workspace:^",
     "@deepseek-ai/dsh-platform-account-client": "workspace:^",
@@ -43,6 +46,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-loop": "workspace:^",
@@ -81,6 +85,7 @@
     "electron": "41.2.1",
     "electron-builder": "^26.8.1",
     "esbuild": "^0.24.0",
+    "fflate": "^0.8.2",
     "jsdom": "29.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

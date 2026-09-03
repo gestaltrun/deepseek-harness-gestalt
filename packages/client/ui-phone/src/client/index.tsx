@@ -19,12 +19,17 @@ import { PhoneTab } from './PhoneTab.tsx'
 import { PhoneSettingsSection } from './PhoneSettingsSection.tsx'
 import { PhoneSettingsCardController } from './phone-settings-controller.ts'
 import { createListingPhoneEnvironmentSource } from './phone-environment-listing.ts'
+import { createHttpPhoneRuntimeSource } from './phone-runtime-source.ts'
 import { PhoneConnectionController } from './phone-connection.ts'
 import { createHttpPhoneGateway } from './phone-stream-client.ts'
-import { createHttpPhoneListingSource } from './phone-listing.ts'
+import { createHttpPhoneListingSource, fetchPhoneListing } from './phone-listing.ts'
 import {
-  installPhoneTab, phoneDeviceTabMetaOf,
-  type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabView,
+  isDesktopOverlayDocument, phoneDesktopOverlayBridgeOf, phoneDeviceIdFromSelection,
+  selectPhoneDeviceFromOverlay, waitForPhoneGate,
+} from './desktop-device-open.ts'
+import {
+  installPhoneTab, openPhoneDevicePanel, phoneDeviceTabMetaOf,
+  type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabOpenFace, type PhoneTabView,
 } from './registry.ts'
 import { en, NS, zh, type PhoneSettingsKey } from './locales.ts'
 import { PHONE_SETTINGS_NAMESPACE } from '../phone-settings.ts'
@@ -39,6 +44,16 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Services required before activation. */
 export const inject = ['betterSidebar', 'slots', 'locale', 'settingsScope'] as const
+
+function enabledValue(settings: PhoneSettings | undefined): boolean | undefined {
+  return settings?.enabled
+}
+
+function runSettingsDeviceOpen(operation: Promise<void>): void {
+  void operation.catch((error: unknown) => {
+    console.error('[ui-phone] opening a Settings device failed:', error)
+  })
+}
 
 /**
  * Enable gate of the phone tab. The default stays `false`: a deployment must
@@ -93,18 +108,61 @@ export function apply(ctx: ClientContext, config: Config): void {
   const scope = ctx.settingsScope.bind<PhoneSettings>({ namespace: PHONE_SETTINGS_NAMESPACE })
   const listing = createHttpPhoneListingSource()
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-phone: settings dictionaries')
+  const tabEnabled = (): boolean => {
+    const snapshot = scope.getSnapshot()
+    if (snapshot.status === 'ready') return enabledValue(snapshot.value) ?? compositionEnabled
+    return compositionEnabled
+  }
+  const sidebar = ctx.get('betterSidebar') as PhoneTabOpenFace
+  let selectionEpoch = 0
+  let activeSelection: AbortController | undefined
+  ctx.effect(() => () => {
+    selectionEpoch += 1
+    activeSelection?.abort()
+    activeSelection = undefined
+  }, 'ui-phone: Settings device-open lifetime')
+  const openListedDevice = async (deviceId: string): Promise<void> => {
+    activeSelection?.abort()
+    const selection = new AbortController()
+    activeSelection = selection
+    const epoch = ++selectionEpoch
+    try {
+      const fresh = await fetchPhoneListing(selection.signal)
+      if (selection.signal.aborted || epoch !== selectionEpoch) return
+      const enabled = await waitForPhoneGate(scope, tabEnabled, selection.signal)
+      if (!enabled || epoch !== selectionEpoch) return
+      const devices = [...fresh.android, ...fresh.ios]
+      const device = devices.find(candidate => candidate.id === deviceId && candidate.online)
+      if (device === undefined) return
+      openPhoneDevicePanel(sidebar, () => true, device.id, device.name)
+    } catch (error) {
+      if (!selection.signal.aborted) throw error
+    } finally {
+      if (activeSelection === selection) activeSelection = undefined
+    }
+  }
+  const overlayBridge = phoneDesktopOverlayBridgeOf(
+    (globalThis as { dshDesktop?: unknown }).dshDesktop,
+  )
+  const openFromSettings = isDesktopOverlayDocument() && overlayBridge !== undefined
+    ? (deviceId: string): void => {
+      runSettingsDeviceOpen(selectPhoneDeviceFromOverlay(overlayBridge, deviceId))
+    }
+    : (deviceId: string): void => { runSettingsDeviceOpen(openListedDevice(deviceId)) }
+  if (!isDesktopOverlayDocument() && overlayBridge !== undefined) {
+    ctx.effect(() => overlayBridge.onChromeOverlayResult((result) => {
+      const deviceId = phoneDeviceIdFromSelection(result)
+      if (deviceId !== undefined) runSettingsDeviceOpen(openListedDevice(deviceId))
+    }), 'ui-phone: Desktop settings device open')
+  }
   const card = new PhoneSettingsCardController(
     scope,
     createListingPhoneEnvironmentSource(listing),
-    globalThis.navigator?.clipboard,
+    globalThis.navigator.clipboard,
+    createHttpPhoneRuntimeSource(),
+    openFromSettings,
   )
   ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings section')
-
-  const tabEnabled = (): boolean => {
-    const snapshot = scope.getSnapshot()
-    if (snapshot.status === 'ready' && snapshot.value !== undefined) return snapshot.value.enabled === true
-    return compositionEnabled
-  }
   // The body reads the gate reactively: scope invalidation (the enable
   // switch toggling) re-renders the gate strip on the same tick.
   const gate = { snapshot: tabEnabled, subscribe: (listener: () => void) => scope.subscribe(listener) }

@@ -30,6 +30,8 @@ describe('U3 visible capture frames', () => {
   })
 
   it('rejects a six-byte SPS prefix as a visible picture', () => {
-    expect(() => assertRecognizableH264Picture(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42]))).toThrow(/no PPS NAL/)
+    expect(() => {
+      assertRecognizableH264Picture(Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42]))
+    }).toThrow(/no PPS NAL/)
   })
 })

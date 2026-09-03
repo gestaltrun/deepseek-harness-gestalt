@@ -23,6 +23,8 @@ interface FakeAgentKnobs {
   installExitCode?: number
   /** When set, a successful install prints this JSON answer verbatim. */
   installAnswer?: string
+  /** When set, status prints this JSON answer verbatim. */
+  statusAnswer?: string
   /** Makes the POSIX agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
   ignoreTerm?: boolean
 }
@@ -31,7 +33,11 @@ interface FakeAgentKnobs {
 export interface FakeKnobs {
   devices?: Array<Record<string, unknown>>
   listDelayMs?: number
+  /** Apply listDelayMs only after this many total RPC requests. */
+  listDelayAfterRequests?: number
   screencaptureDelayMs?: number
+  /** Delay one device.info answer after recording that the request arrived. */
+  infoDelayMs?: number
   hang?: boolean
   exitAfter?: number
   /** Exit before binding anything; simulates a binary that cannot start. */
@@ -48,6 +54,8 @@ export interface FakeKnobs {
   captureEnvelope?: boolean
   /** MJPEG frames per capture body (default 1); larger values keep the body open for mid-stream teardown tests. */
   streamFrameCount?: number
+  /** Device ids whose AVC response is HTTP 200 video/h264 carrying the real mobilecli failure text. */
+  h264FailureDeviceIds?: readonly string[]
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */
@@ -68,11 +76,21 @@ export interface StagedFake {
   /** Release the placeholder port reservation and wait until the child can bind it. */
   claim(): Promise<void>
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
+  /** Rewrite the device seed that the next server generation reads at startup. */
+  setLaunchDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
   /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
   setAgent(agent: FakeAgentKnobs): Promise<void>
   /** Read the persistent agent state the fake CLI invocations record. */
   agentState(): Promise<FakeAgentState>
-  counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }>
+  counters(): Promise<{
+    requests: number
+    bootCount: number
+    shutdownCount: number
+    infoCount: number
+    io: unknown[]
+    captures: Array<{ readonly deviceId: string; readonly format: string }>
+    scroll: Record<string, number>
+  }>
   /** Resolves when the RPC endpoint answers or rejects when the fake is gone. */
   awaitOnline(timeoutMs?: number): Promise<void>
   dispose(): Promise<void>
@@ -186,6 +204,7 @@ export async function stageFake(
     }
     const profilePath = join(fixturesDir, 'profile.mobileprovision')
     await writeFile(profilePath, 'fake provisioning profile payload')
+    const configPath = join(fixturesDir, 'fakemobilecli.config.json')
     const port = await randomPort()
     const hold = await holdPort(port)
     const baseUrl = `http://127.0.0.1:${String(port)}`
@@ -206,8 +225,11 @@ export async function stageFake(
         })
         if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
       },
+      async setLaunchDevices(devices): Promise<void> {
+        const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+        await writeFile(configPath, JSON.stringify({ ...current, devices }))
+      },
       async setAgent(agent): Promise<void> {
-        const configPath = join(fixturesDir, 'fakemobilecli.config.json')
         const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
         await writeFile(configPath, JSON.stringify({ ...current, agent }))
       },
@@ -218,12 +240,23 @@ export async function stageFake(
           return { installed: false, installCount: 0, statusCount: 0, lastInstallArgv: null }
         }
       },
-      async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }> {
+      async counters(): Promise<{
+        requests: number
+        bootCount: number
+        shutdownCount: number
+        infoCount: number
+        io: unknown[]
+        captures: Array<{ readonly deviceId: string; readonly format: string }>
+        scroll: Record<string, number>
+      }> {
         return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
           requests: number
           bootCount: number
           shutdownCount: number
+          infoCount: number
           io: unknown[]
+          captures: Array<{ readonly deviceId: string; readonly format: string }>
+          scroll: Record<string, number>
         }
       },
       async awaitOnline(timeoutMs = 5_000): Promise<void> {

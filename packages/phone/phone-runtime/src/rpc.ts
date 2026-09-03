@@ -2,7 +2,7 @@
  * JSON-RPC 2.0 client over HTTP for one loopback mobilecli `/rpc` endpoint,
  * plus normalization of transport failures onto the public error vocabulary.
  * Method names follow the upstream OpenRPC specification (`devices.list`,
- * `device.boot`, `device.shutdown`, `server.info`, `device.io.*`,
+ * `device.boot`, `device.shutdown`, `device.info`, `server.info`, `device.io.*`,
  * `device.screencapture`); this module owns no other mobilecli behavior.
  * The capture answer follows both upstream shapes: the bare byte stream and
  * mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is
@@ -157,7 +157,6 @@ export class MobilecliRpc {
         `mobilecli answered HTTP ${String(response.status)} instead of a capture stream`,
       )
     }
-    /* v8 ignore next 4 -- node:fetch always attaches a body on a completed HTTP response */
     if (response.body === null) {
       throw new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli ${JSON.stringify(method)} answered no capture body`)
     }
@@ -210,7 +209,6 @@ export class MobilecliRpc {
       )
     }
     const sessionType = session.headers.get('content-type')
-    /* v8 ignore next 4 -- node:fetch always attaches a body on a completed HTTP response */
     if (session.body === null) {
       throw new PhoneDevicesError('PHONE_PROTOCOL', 'the mobilecli capture session answered no body')
     }

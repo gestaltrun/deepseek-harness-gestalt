@@ -4,6 +4,8 @@
 
 这是 `ctx.phoneDevices` 的模型 Consumer。它把 `device_list`、`device_open`、`device_close`、`device_observe`、`device_act` 与 `device_screenshot` 注册为普通延迟工具。`device_act` 只接受封闭的 tap、swipe、type 或硬件按钮动作；没有任意 `adb` 或 shell 路径。`device_list` 与 `device_observe` 的应答每项携带 `id`/`name`/`kind`/`state`/`online`/`platform`。
 
+只有 `phoneDevices.isReady()` 为 true 时，六个 definition 才存在。Consumer 订阅 generation readiness，在激活时注册完整集合，并在 generation 停止或替换前 dispose 完整集合。缺少 readiness 方法的树外 fleet 实现保留静态注册约定以维持兼容。
+
 ## 配置
 
 `timeoutMs` 是每次调用的正安全整数协作超时，默认值为 `30000`。无效值会让插件加载失败。Consumer 依赖手机设备群 Service 与工具注册表；禁用 `toolSearch` 时注册会明确失败。
@@ -12,7 +14,7 @@
 
 `device_act`、`device_open` 与 `device_close` 在先前监听器返回 `allow` 后，默认走 `tools/pre-execute` `ask`。先前的 deny 或 ask 保持不变。`allowed-once` 审批会执行一次设备群调用；拒绝则设备无副作用。
 
-已携带 `PhoneDevicesError` 代码（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）的设备群失败会以同一代码重抛为 `HarnessError`。`device_act` 把封闭的 tap、swipe、type 或按钮动作转发到 `phoneDevices.io`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 仍要求注入 PNG 方法；实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。
+已携带 `PhoneDevicesError` 代码（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）的设备群失败会以同一代码重抛为 `HarnessError`。`device_act` 把封闭的 tap、swipe、type 或按钮动作转发到 `phoneDevices.io`。swipe 使用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`（[编码](../../../.agents/notes/implemented/bug-fix/2026-09-02-phone-ios-wda-swipe-gesture.zh.md)）。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 仍要求注入 PNG 方法；实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。
 
 ## 模型体验
 

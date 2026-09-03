@@ -1,20 +1,22 @@
 /**
  * Phone live-view connection controller: the React-free state machine one
  * occupying device runs against the same-origin stream gateway. It mints
- * signed H264 capture sessions (`format: 'avc'` on the Host mint), owns
- * the io WebSocket lifecycle, bounds automatic reconnects after stream
- * interruptions, and maps normalized screen touches onto JSON-RPC io
- * frames. Renderers subscribe and read phase snapshots; every decision
- * stays in this module so the machine is testable without a browser.
+ * signed capture sessions, opens the Host-selected device-class encoding,
+ * owns the io WebSocket lifecycle, falls back from H264 to the same session's MJPEG URL,
+ * bounds automatic reconnects after both encodings fail, and maps normalized
+ * screen touches onto JSON-RPC io frames. Renderers subscribe and read phase
+ * snapshots; every decision stays in this module so the machine is testable
+ * without a browser.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
+import { phoneSwipeActions } from '@deepseek-ai/dsh-phone-runtime/swipe'
 import {
   encodePhoneIoFrame, isUnauthorizedMessage, parsePhoneIoReply, PhoneStreamHttpError,
-  type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
+  type PhoneAgentStatusView, type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
 } from './phone-stream-client.ts'
 
-/** Capture encoding the live view requests (Host `h264` maps onto upstream `avc`). */
-export type PhoneCaptureFormat = 'h264'
+/** Capture encoding currently rendered by the live view. */
+export type PhoneCaptureFormat = 'h264' | 'mjpeg'
 
 /** Closed failure vocabulary the error copy switches on. */
 export type PhoneStreamFailureKind =
@@ -28,10 +30,27 @@ export type PhoneStreamFailureKind =
   | 'refused'
   /** The stream channel is unreachable (network or upstream). */
   | 'unavailable'
+  /** The managed device control agent has not been installed. */
+  | 'agent-missing'
+  | 'agent-install-restricted'
+  /** Agent installation is blocked until the Host names a provisioning profile. */
+  | 'agent-profile-required'
+  /** The real iPhone must be unlocked before agent or picture operations continue. */
+  | 'device-locked'
+  /** Developer Mode, certificate trust, signing identity, or provisioning trust needs human action. */
+  | 'cert-untrusted'
+  /** The installed real-device agent must be re-signed with a current profile. */
+  | 'profile-expired'
+  /** The real-device transport tunnel could not be established. */
+  | 'tunnel-failed'
+  /** The real iPhone disconnected from the Host. */
+  | 'device-unplugged'
 
 /** One terminal stream failure carried by the error phase. */
 export interface PhoneStreamFailure {
   readonly kind: PhoneStreamFailureKind
+  /** Product action that can repair the on-device agent after any stated manual prerequisite. */
+  readonly agentRecovery?: 'install' | 'reinstall'
 }
 
 /** Closed phase union the connected view renders from. */
@@ -55,6 +74,8 @@ export type PhoneConnectionPhase =
     readonly streamUrl?: string
   }
   | { readonly kind: 'suspended' }
+  | { readonly kind: 'checking-agent' }
+  | { readonly kind: 'repairing-agent'; readonly force: boolean }
   | { readonly kind: 'error'; readonly failure: PhoneStreamFailure }
 
 /** Events one io socket delivers to the controller. */
@@ -81,6 +102,10 @@ export interface PhoneIoSocket {
 export interface PhoneStreamGateway {
   /** Mint one signed same-origin session for the device. */
   mintSession(deviceId: string): Promise<PhoneStreamSessionView>
+  /** Detect the managed device control agent through the Host. */
+  agentStatus(deviceId: string): Promise<PhoneAgentStatusView>
+  /** Install or force-reinstall the managed device control agent through the Host. */
+  installAgent(deviceId: string, force: boolean): Promise<PhoneAgentStatusView>
   /** Open the io WebSocket on the session's minted path; events fire asynchronously. */
   connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket
 }
@@ -136,12 +161,24 @@ export function devicePointOf(point: PhoneScreenPoint, surface: PhoneSurfaceSize
  */
 export function classifyPhoneStreamFailure(error: unknown): PhoneStreamFailureKind {
   if (error instanceof PhoneStreamHttpError) {
+    if (error.code === 'PHONE_AGENT_MISSING') return 'agent-missing'
+    if (error.message.includes('INSTALL_FAILED_USER_RESTRICTED')) return 'agent-install-restricted'
+    if (error.code === 'PHONE_AGENT_PROFILE_REQUIRED') return 'agent-profile-required'
+    if (error.code === 'PHONE_REAL_DEVICE_ISSUE' && error.issue !== undefined) return error.issue
     if (error.status === 404) return 'device-offline'
     if (error.status === 403) return 'refused'
     if (isUnauthorizedMessage(error.message)) return 'unauthorized'
     return 'unavailable'
   }
   return 'unavailable'
+}
+
+function failureOf(error: unknown): PhoneStreamFailure {
+  const kind = classifyPhoneStreamFailure(error)
+  if (kind === 'agent-missing') return { kind, agentRecovery: 'install' }
+  if (kind === 'agent-install-restricted') return { kind, agentRecovery: 'install' }
+  if (kind === 'profile-expired') return { kind, agentRecovery: 'reinstall' }
+  return { kind }
 }
 
 /** Constructor dependencies; everything but the gateway stays defaultable. */
@@ -230,6 +267,31 @@ export class PhoneConnectionController {
   }
 
   /**
+   * Install or force-reinstall the managed device agent, then reconnect the picture session.
+   * @param force - whether to replace an already installed agent and refresh its signing.
+   */
+  recoverAgent(force: boolean): void {
+    if (this.phase.kind !== 'error') return
+    this.teardown()
+    this.setPhase({ kind: 'repairing-agent', force })
+    const epoch = this.epoch
+    void this.gateway.installAgent(this.deviceId, force).then(
+      (status) => {
+        if (this.epoch !== epoch) return
+        if (!status.installed) {
+          this.setPhase({ kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' } })
+          return
+        }
+        void this.startConnect()
+      },
+      (error: unknown) => {
+        if (this.epoch !== epoch) return
+        this.setPhase({ kind: 'error', failure: failureOf(error) })
+      },
+    )
+  }
+
+  /**
    * Pause pulling while the tab hides and resume on re-show. Suspending
    * never forgets the device; resuming mints a fresh session because the
    * signed capture URLs are short-lived.
@@ -246,11 +308,22 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Report a failed capture element (img/video error) so a broken stream
-   * reconnects even while the io socket stays open.
+   * Report a failed capture. H264 switches to MJPEG from the already-minted
+   * session without replacing its io socket; MJPEG spends the retry budget.
+   * @param format - Encoding whose current renderer failed.
    */
-  noteCaptureFailure(): void {
-    if (this.phase.kind !== 'live') return
+  noteCaptureFailure(format: PhoneCaptureFormat): void {
+    if (this.phase.kind !== 'live' || this.phase.format !== format) return
+    if (format === 'h264' && this.session !== undefined) {
+      this.surface = undefined
+      this.setPhase({
+        kind: 'live',
+        streamUrl: this.session.mjpeg.url,
+        format: 'mjpeg',
+        expiresAt: this.session.mjpeg.expiresAt,
+      })
+      return
+    }
     this.teardown()
     this.lastTransient = 'interrupted'
     this.scheduleRetry()
@@ -258,10 +331,12 @@ export class PhoneConnectionController {
 
   /**
    * Learn the streamed frame's device pixel size from the capture element.
+   * @param format - Encoding whose renderer measured the surface.
    * @param width - natural width in device pixels.
    * @param height - natural height in device pixels.
    */
-  noteSurface(width: number, height: number): void {
+  noteSurface(format: PhoneCaptureFormat, width: number, height: number): void {
+    if (this.phase.kind !== 'live' || this.phase.format !== format) return
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
     this.surface = { width, height }
   }
@@ -279,20 +354,22 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Send a drag as a `pointerDown`/`pointerMove`…/`pointerUp` gesture.
+   * Send a drag as the WDA gesture mobilecli's iOS converter consumes.
+   * Positioning `pointerMove` precedes `pointerDown`; pauses supply drag duration.
    * @param points - the drag path in normalized screen points.
    * @returns false when the path is empty, the surface unknown, or not live.
    */
   swipe(points: readonly PhoneScreenPoint[]): boolean {
     const surface = this.surface
-    if (surface === undefined || points.length === 0) return false
-    const mapped = points.map(point => devicePointOf(point, surface))
-    const actions = mapped.map((point, index) => ({
-      type: index === 0 ? 'pointerDown' : index === mapped.length - 1 ? 'pointerUp' : 'pointerMove',
-      x: point.x,
-      y: point.y,
-    }))
-    return this.send({ method: 'gesture', actions })
+    const origin = points[0]
+    const release = points[points.length - 1]
+    if (surface === undefined || origin === undefined || release === undefined) return false
+    const start = devicePointOf(origin, surface)
+    const end = devicePointOf(release, surface)
+    return this.send({
+      method: 'gesture',
+      actions: phoneSwipeActions([start, end]),
+    })
   }
 
   /**
@@ -324,6 +401,8 @@ export class PhoneConnectionController {
     return this.phase.kind === 'connecting'
       || this.phase.kind === 'live'
       || this.phase.kind === 'reconnecting'
+      || this.phase.kind === 'checking-agent'
+      || this.phase.kind === 'repairing-agent'
   }
 
   private async startConnect(): Promise<void> {
@@ -335,7 +414,7 @@ export class PhoneConnectionController {
       session = await this.gateway.mintSession(this.deviceId)
     } catch (error) {
       if (epoch !== this.epoch) return
-      this.handleConnectFailure(classifyPhoneStreamFailure(error))
+      this.handleConnectFailure(failureOf(error))
       return
     }
     if (epoch !== this.epoch) return
@@ -347,11 +426,12 @@ export class PhoneConnectionController {
     entry.socket = this.gateway.connectIo(session, {
       onOpen: () => {
         if (!isCurrent()) return
+        const format = session.preferredFormat
         this.setPhase({
           kind: 'live',
-          streamUrl: this.streamUrlOf(session),
-          format: 'h264',
-          expiresAt: session.h264.expiresAt,
+          streamUrl: this.streamUrlOf(session, format),
+          format,
+          expiresAt: session[format].expiresAt,
         })
       },
       onClose: () => {
@@ -374,10 +454,18 @@ export class PhoneConnectionController {
     this.socket = entry.socket
   }
 
-  private handleConnectFailure(kind: PhoneStreamFailureKind): void {
+  private handleConnectFailure(failure: PhoneStreamFailure): void {
+    const { kind } = failure
     if (kind === 'device-offline' || kind === 'unauthorized' || kind === 'refused') {
       this.teardown()
-      this.setPhase({ kind: 'error', failure: { kind } })
+      this.setPhase({ kind: 'error', failure })
+      return
+    }
+    if (kind === 'agent-missing' || kind === 'agent-install-restricted' || kind === 'agent-profile-required'
+      || kind === 'device-locked' || kind === 'cert-untrusted'
+      || kind === 'profile-expired' || kind === 'tunnel-failed' || kind === 'device-unplugged') {
+      this.teardown()
+      this.setPhase({ kind: 'error', failure })
       return
     }
     this.lastTransient = 'unavailable'
@@ -397,18 +485,27 @@ export class PhoneConnectionController {
     if (reply.message !== undefined && isUnauthorizedMessage(reply.message)) {
       this.teardown()
       this.setPhase({ kind: 'error', failure: { kind: 'unauthorized' } })
+      return
+    }
+    if (this.session?.agentManaged === true) {
+      this.teardown()
+      this.lastTransient = 'unavailable'
+      this.checkAgentAfterFailure()
     }
   }
 
   private scheduleRetry(): void {
-    if (this.phase.kind === 'error' || this.phase.kind === 'suspended' || this.phase.kind === 'idle') return
     if (this.retryAttempt >= this.retryLimit) {
-      this.setPhase({ kind: 'error', failure: { kind: this.lastTransient } })
+      if (this.session?.agentManaged === true) {
+        this.checkAgentAfterFailure()
+      } else {
+        this.setPhase({ kind: 'error', failure: { kind: this.lastTransient } })
+      }
       return
     }
     this.retryAttempt += 1
     const attempt = this.retryAttempt
-    const streamUrl = this.session === undefined ? undefined : this.streamUrlOf(this.session)
+    const streamUrl = this.phase.kind === 'live' ? this.phase.streamUrl : undefined
     this.setPhase(streamUrl === undefined
       ? { kind: 'reconnecting', attempt }
       : { kind: 'reconnecting', attempt, streamUrl })
@@ -418,19 +515,38 @@ export class PhoneConnectionController {
     })
   }
 
-  private streamUrlOf(session: PhoneStreamSessionView): string {
-    return session.h264.url
+  private checkAgentAfterFailure(): void {
+    this.setPhase({ kind: 'checking-agent' })
+    const epoch = this.epoch
+    void this.gateway.agentStatus(this.deviceId).then(
+      (status) => {
+        if (this.epoch !== epoch) return
+        this.setPhase(status.installed
+          ? { kind: 'error', failure: { kind: this.lastTransient, agentRecovery: 'reinstall' } }
+          : { kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' } })
+      },
+      (error: unknown) => {
+        if (this.epoch !== epoch) return
+        this.setPhase({ kind: 'error', failure: failureOf(error) })
+      },
+    )
+  }
+
+  private streamUrlOf(session: PhoneStreamSessionView, format: PhoneCaptureFormat): string {
+    return session[format].url
   }
 
   private send(request: PhoneClientIoRequest): boolean {
-    if (this.phase.kind !== 'live' || this.socket === undefined) return false
-    this.socket.send(encodePhoneIoFrame(this.nextFrameId, this.deviceId, request))
+    if (this.phase.kind !== 'live') return false
+    const socket = this.socket as PhoneIoSocket
+    socket.send(encodePhoneIoFrame(this.nextFrameId, this.deviceId, request))
     this.nextFrameId += 1
     return true
   }
 
   private teardown(): void {
     this.epoch += 1
+    this.surface = undefined
     this.cancelRetry?.()
     this.cancelRetry = undefined
     this.socket?.close()

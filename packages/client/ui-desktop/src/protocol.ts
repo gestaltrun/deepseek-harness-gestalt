@@ -78,6 +78,8 @@ export const CHROME_OVERLAY_STATE = 'chrome:overlay-state'
 export const CHROME_OVERLAY_RESULT = 'chrome:overlay-result'
 /** Query parameter that boots the Session Surface as the native overlay document. */
 export const DESKTOP_OVERLAY_PARAM = 'dsh-desktop-overlay'
+/** Maximum text length accepted for overlay request and selection identities. */
+export const CHROME_OVERLAY_ID_MAX_LENGTH = 128
 
 /** Official page identity sent with present and conceal. */
 export interface DesktopBrowserPresentTarget {

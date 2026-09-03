@@ -13,7 +13,7 @@ import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import type { DeviceId, PhoneCaptureFormat, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneCaptureFormat, PhoneCaptureStream, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import { HttpError, readJsonObject, writeHttpError, writeJson } from '@deepseek-ai/dsh-host-webserver'
 import { WebSocketServer } from 'ws'
 import { signPhoneStreamToken, verifyPhoneStreamToken } from './token.ts'
@@ -32,10 +32,11 @@ export const PHONE_IO_PATH = '/phone/ws/io'
 export const PHONE_STREAM_PATH = '/phone/stream'
 /** Prefix for minting signed same-origin session URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
+/** Prefix for managed device-agent detection and installation operations. */
+export const PHONE_AGENT_PATH = '/phone/agent'
 /** Exact-path GET listing of the grouped device fleet behind the `/api` fence. */
 export const PHONE_DEVICES_PATH = '/phone/devices'
 
-const IO_METHODS = new Set(['tap', 'gesture', 'text', 'button'])
 const JSON_BODY_LIMITS = {
   maxBytes: 64 * 1024,
   tooLarge: { status: 413, code: 'payload-too-large', message: 'phone stream JSON body exceeds 64 KiB' },
@@ -97,6 +98,11 @@ export class PhoneStream extends Service {
     }), 'phone-stream: /phone/session')
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix',
+      path: PHONE_AGENT_PATH,
+      handler: (req, res) => this.handleAgent(req, res),
+    }), 'phone-stream: /phone/agent')
+    ctx.effect(() => ctx.webServer.register({
+      kind: 'prefix',
       path: PHONE_DEVICES_PATH,
       handler: (req, res) => this.handleDevices(req, res),
     }), 'phone-stream: /phone/devices')
@@ -107,7 +113,9 @@ export class PhoneStream extends Service {
     }), 'phone-stream: /phone/stream')
     ctx.effect(() => ctx.webServer.registerUpgrade({
       path: PHONE_IO_PATH,
-      handler: (req, socket, head) => this.handleIoUpgrade(wss, req, socket, head),
+      handler: (req, socket, head) => {
+        this.handleIoUpgrade(wss, req, socket, head)
+      },
     }), 'phone-stream: /phone/ws/io')
     ctx.effect(() => () => {
       for (const socket of this.sockets) socket.destroy()
@@ -119,13 +127,21 @@ export class PhoneStream extends Service {
   /**
    * Mint signed same-origin MJPEG and H264 URLs for one known device.
    * @param id - Branded device id present in the latest published listing.
+   * @param agentManaged - Whether control failures should enter the managed device-agent recovery flow.
+   * @param preferredFormat - Encoding the browser should open first for this device class.
    * @returns the IO upgrade path plus both capture URLs and their expiry.
    */
-  sessionFor(id: DeviceId): PhoneStreamSession {
+  sessionFor(
+    id: DeviceId,
+    agentManaged: boolean = false,
+    preferredFormat: PhoneCaptureFormat = 'h264',
+  ): PhoneStreamSession {
     const expiresAt = Date.now() + this.tokenTtlMs
     return Object.freeze({
       deviceId: id,
       ioPath: PHONE_IO_PATH,
+      agentManaged,
+      preferredFormat,
       mjpeg: this.signedUrl(id, 'mjpeg', expiresAt),
       h264: this.signedUrl(id, 'h264', expiresAt),
     })
@@ -166,17 +182,82 @@ export class PhoneStream extends Service {
       }
       const id = deviceId(rawId)
       const list = await this.ctx.phoneDevices.listDevices()
-      const known = [...list.android, ...list.ios.simulators, ...list.ios.reals].some(ref => ref.id === id)
-      if (!known) {
+      const knownReal = list.ios.reals.find(ref => ref.id === id)
+      const knownSimulator = list.ios.simulators.find(ref => ref.id === id)
+      const known = knownReal ?? knownSimulator ?? list.android.find(ref => ref.id === id)
+      if (known === undefined) {
         throw new PhoneDevicesError(
           'PHONE_DEVICE_NOT_FOUND',
           `cannot mint stream URLs: ${JSON.stringify(id)} is absent from the latest device listing`,
         )
       }
-      writeJson(res, 200, this.sessionFor(id))
+      if (knownReal !== undefined) {
+        const status = await this.ctx.phoneDevices.agentStatus(id)
+        if (!status.installed) {
+          writeJson(res, 409, {
+            error: {
+              code: 'PHONE_AGENT_MISSING',
+              message: 'the iOS real-device control agent is not installed',
+            },
+          })
+          return
+        }
+      }
+      writeJson(res, 200, this.sessionFor(
+        id,
+        knownReal !== undefined || known.platform === 'android',
+        knownSimulator === undefined ? 'h264' : 'mjpeg',
+      ))
     } catch (error) {
       this.writeFailure(res, error)
     }
+  }
+
+  private async handleAgent(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isTrustedApiRequest(req, this.trustedHosts())) {
+      writeForbidden(res)
+      return
+    }
+    if (req.method !== 'POST') {
+      writeHttpError(res, new HttpError(405, 'method-not-allowed', 'phone agent operations are POST-only'))
+      return
+    }
+    const pathname = pathnameOf(req)
+    if (pathname !== `${PHONE_AGENT_PATH}/status` && pathname !== `${PHONE_AGENT_PATH}/install`) {
+      writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone agent path'))
+      return
+    }
+    try {
+      const body = await readJsonObject(req, JSON_BODY_LIMITS)
+      const rawId = body.deviceId
+      if (typeof rawId !== 'string' || rawId.length === 0) {
+        throw new HttpError(400, 'bad-request', 'deviceId is required')
+      }
+      const id = deviceId(rawId)
+      await this.requireManagedAgentDevice(id)
+      if (pathname === `${PHONE_AGENT_PATH}/status`) {
+        writeJson(res, 200, await this.ctx.phoneDevices.agentStatus(id))
+        return
+      }
+      if (body.force !== undefined && typeof body.force !== 'boolean') {
+        throw new HttpError(400, 'bad-request', 'force must be a boolean')
+      }
+      writeJson(res, 200, await this.ctx.phoneDevices.installAgent(id, { force: body.force === true }))
+    } catch (error) {
+      this.writeFailure(res, error)
+    }
+  }
+
+  private async requireManagedAgentDevice(id: DeviceId): Promise<void> {
+    const list = await this.ctx.phoneDevices.listDevices()
+    if ([...list.android, ...list.ios.reals].some(device => device.id === id)) return
+    if (list.ios.simulators.some(device => device.id === id)) {
+      throw new HttpError(400, 'agent-not-managed', 'phone agent operations require Android or an iOS real device')
+    }
+    throw new PhoneDevicesError(
+      'PHONE_DEVICE_NOT_FOUND',
+      `cannot operate the device agent: ${JSON.stringify(id)} is absent from the latest device listing`,
+    )
   }
 
   /**
@@ -231,61 +312,55 @@ export class PhoneStream extends Service {
       writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone capture path'))
       return
     }
-    const token = url.searchParams.get('token') ?? /* v8 ignore next */ ''
+    const token = url.searchParams.get('token') ?? ''
     const grant = verifyPhoneStreamToken(this.secret, parsed.deviceId, parsed.format, token, Date.now())
     if (grant === undefined) {
       writeForbidden(res)
       return
     }
+    let capture: PhoneCaptureStream
     try {
-      const capture = await this.ctx.phoneDevices.startCapture({
+      capture = await this.ctx.phoneDevices.startCapture({
         deviceId: deviceId(grant.deviceId),
         format: grant.format,
       })
-      // Real 1.0.5 streams mix a declared JSON-notification boundary with an
-      // undeclared frame boundary; the browser can only parse one, so the
-      // multipart body is re-emitted under a single normalized image-frame
-      // boundary. Non-multipart bodies (H264) stream through untouched.
-      const multipart = capture.contentType.includes('multipart/x-mixed-replace')
-      res.writeHead(200, {
-        'content-type': multipart
-          ? `multipart/x-mixed-replace; boundary=${MJPEG_NORMALIZED_BOUNDARY}`
-          : capture.contentType,
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff',
-      })
-      const reader = (multipart ? normalizeMultipartImageStream(capture.body) : capture.body).getReader()
-      /* v8 ignore start -- browser disconnect cancels the unread capture body */
-      const abort = (): void => {
-        void reader.cancel()
-      }
-      /* v8 ignore stop */
-      req.on('aborted', abort)
-      res.on('close', abort)
-      try {
-        for (;;) {
-          const next = await reader.read()
-          if (next.done) break
-          /* v8 ignore next -- node:fetch yields a defined Uint8Array chunk or done */
-          if (next.value === undefined) continue
-          res.write(Buffer.from(next.value))
-        }
-        res.end()
-      } catch {
-        // The browser or upstream capture ended the pipe; both sides are already closing.
-        /* v8 ignore next -- headers are already sent when the pipe throws */
-        if (!res.writableEnded) res.destroy()
-      } finally {
-        req.off('aborted', abort)
-        res.off('close', abort)
-      }
     } catch (error) {
-      /* v8 ignore next 4 -- startCapture fails before writeHead in the suite */
-      if (res.headersSent) {
-        res.destroy()
-        return
-      }
       this.writeFailure(res, error)
+      return
+    }
+    // Real 1.0.5 streams mix a declared JSON-notification boundary with an
+    // undeclared frame boundary; the browser can only parse one, so the
+    // multipart body is re-emitted under a single normalized image-frame
+    // boundary. Non-multipart bodies (H264) stream through untouched.
+    const multipart = capture.contentType.includes('multipart/x-mixed-replace')
+    res.writeHead(200, {
+      'content-type': multipart
+        ? `multipart/x-mixed-replace; boundary=${MJPEG_NORMALIZED_BOUNDARY}`
+        : capture.contentType,
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    })
+    const reader = (multipart ? normalizeMultipartImageStream(capture.body) : capture.body).getReader()
+    let cancellation: Promise<void> | undefined
+    const abort = (): void => {
+      cancellation ??= reader.cancel()
+    }
+    req.on('aborted', abort)
+    res.on('close', abort)
+    try {
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) break
+        res.write(Buffer.from(next.value))
+      }
+      res.end()
+    } catch {
+      // The browser or upstream capture ended the pipe; both sides are already closing.
+      res.destroy()
+    } finally {
+      req.off('aborted', abort)
+      res.off('close', abort)
+      if (cancellation !== undefined) await cancellation
     }
   }
 
@@ -329,7 +404,7 @@ export class PhoneStream extends Service {
       await this.ctx.phoneDevices.io(request)
       ws.send(JSON.stringify({ jsonrpc: '2.0', id, result: { status: 'ok' } }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : /* v8 ignore next */ String(error)
+      const message = error instanceof Error ? error.message : String(error)
       const code = error instanceof PhoneDevicesError && error.code === 'PHONE_DEVICE_NOT_FOUND'
         ? -32010
         : -32000
@@ -347,10 +422,15 @@ export class PhoneStream extends Service {
       return
     }
     if (error instanceof PhoneDevicesError) {
-      writeHttpError(res, new HttpError(502, error.code, error.message))
+      writeJson(res, error.code === 'PHONE_AGENT_PROFILE_REQUIRED' ? 409 : 502, {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.issue === undefined ? {} : { issue: error.issue }),
+        },
+      })
       return
     }
-    /* v8 ignore next -- PhoneDevicesError and HttpError already returned */
     const message = error instanceof Error ? error.message : String(error)
     writeHttpError(res, new HttpError(502, 'upstream', message))
   }
@@ -368,10 +448,7 @@ function pathnameOf(req: IncomingMessage): string {
 }
 
 function parseCapturePath(pathname: string): { readonly deviceId: string; readonly format: string } | undefined {
-  const prefix = `${PHONE_STREAM_PATH}/`
-  /* v8 ignore next -- handleCapture already 404s unknown prefixes */
-  if (!pathname.startsWith(prefix)) return undefined
-  const rest = pathname.slice(prefix.length)
+  const rest = pathname.slice(PHONE_STREAM_PATH.length + 1)
   const separator = rest.lastIndexOf('/')
   if (separator <= 0 || separator === rest.length - 1) return undefined
   let deviceIdValue: string
@@ -385,7 +462,7 @@ function parseCapturePath(pathname: string): { readonly deviceId: string; readon
 }
 
 function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
-  if (typeof method !== 'string' || !IO_METHODS.has(method)) {
+  if (typeof method !== 'string') {
     throw new HttpError(400, 'bad-request', `unsupported phone io method ${JSON.stringify(method)}`)
   }
   if (typeof params !== 'object' || params === null) {
@@ -411,12 +488,8 @@ function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
         throw new HttpError(400, 'bad-request', 'button is required')
       }
       return { deviceId: id, method: 'button', button: record.button }
-    /* v8 ignore start -- IO_METHODS already closed the union */
-    default: {
-      const exhaustive: never = method as never
-      throw new HttpError(400, 'bad-request', `unsupported phone io method ${JSON.stringify(exhaustive)}`)
-    }
-    /* v8 ignore stop */
+    default:
+      throw new HttpError(400, 'bad-request', `unsupported phone io method ${JSON.stringify(method)}`)
   }
 }
 

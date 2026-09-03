@@ -16,6 +16,9 @@
     - button "浏览器":
       - img
       - text: 浏览器
+    - button "手机设备":
+      - img
+      - text: 手机设备
     - button "侧边卡片"
   - button "打开配置文件"
   - button "关闭":
@@ -28,12 +31,6 @@
     - tab "插件列表"
   - tabpanel "插件配置":
     - list:
-      - listitem:
-        - banner:
-          - heading "手机设备" [level=3]
-          - paragraph: 把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。
-          - switch "启用手机设备"
-        - paragraph: 关闭时不注册任何 device_* 工具，也不监听 adb / mobilecli 进程；本机环境不受影响。
       - listitem:
         - 'button "展开设置: 终端"':
           - text: 终端 限制 agent 运行的每一条命令。

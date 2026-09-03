@@ -636,8 +636,8 @@ const TOOL_PACKAGES: ToolPackage[] = [
     toolsConfig: { toolSearch: { maxResultBytes: 65_536 } },
     async mount(ctx) {
       ctx.provide('phoneDevices', {
-        async listDevices() {
-          return { android: [], ios: { simulators: [], reals: [] } }
+        listDevices() {
+          return Promise.resolve({ android: [], ios: { simulators: [], reals: [] } })
         },
         async boot() {},
         async shutdown() {},

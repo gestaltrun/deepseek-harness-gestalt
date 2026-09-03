@@ -14,9 +14,12 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import z from '@deepseek-ai/schemastery'
+import { openAndroidSystemH264 } from './android-h264-process.ts'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
-import { PhoneDevicesError } from './errors.ts'
+import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
+import { ioParams, iosScreenScale } from './io.ts'
+import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
@@ -61,6 +64,12 @@ export type {
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
+export { phoneSwipeActions } from './swipe.ts'
+export { verifyAnnexBH264KeyAccessUnit } from './h264.ts'
+export type { H264KeyAccessUnitVerificationOptions } from './h264.ts'
+export { verifyMjpegJpegPicture } from './jpeg.ts'
+export type { MjpegPictureVerificationOptions } from './jpeg.ts'
+export { resolveMobilecliExecutable } from './resolve-binary.ts'
 export type { ServerExit } from './server-process.ts'
 
 /**
@@ -76,10 +85,14 @@ const METHOD_DEVICES_LIST = 'devices.list'
 const METHOD_DEVICE_BOOT = 'device.boot'
 /** OpenRPC method shutting down one simulator or emulator. */
 const METHOD_DEVICE_SHUTDOWN = 'device.shutdown'
+/** OpenRPC method reporting logical screen size and device-pixel scale. */
+const METHOD_DEVICE_INFO = 'device.info'
 /** OpenRPC method opening an MJPEG or AVC screen-capture stream. */
 const METHOD_DEVICE_SCREENCAPTURE = 'device.screencapture'
 /** OpenRPC method probed until the spawned server answers its first request. */
 const METHOD_SERVER_INFO = 'server.info'
+/** Maximum bytes inspected before one Android H264 source is rejected. */
+const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
 
 const IO_METHODS = {
   tap: 'device.io.tap',
@@ -101,14 +114,20 @@ export interface Config {
    * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
    */
   executablePath?: string
+  /** Wait for the environment owner to select and activate an executable. */
+  deferStart?: boolean
   /** Loopback TCP port the spawned server listens on. */
   serverPort?: number
   /** Interval between health probes and device-list polls, in milliseconds. */
   pollIntervalMs?: number
-  /** Total window granted to the first readiness probe, in milliseconds. */
+  /** Stable-child interval required after the first valid device listing, in milliseconds. */
+  readyStabilityMs?: number
+  /** Total window granted to readiness probing, baseline listing, and stability, in milliseconds. */
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number
+  /** Ceiling for recognizing one H264 key access unit from each Android source. */
+  h264ProbeTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -124,15 +143,25 @@ export interface Config {
 
 /** Runtime configuration schema applied by composition. */
 export const Config: z<Config> = z.object({
+  deferStart: z.boolean().default(false),
   serverPort: z.number().default(12_000),
   pollIntervalMs: z.number().default(5_000),
+  readyStabilityMs: z.number().default(50),
   readyTimeoutMs: z.number().default(60_000),
   requestTimeoutMs: z.number().default(30_000),
+  h264ProbeTimeoutMs: z.number().default(15_000),
   bootTimeoutMs: z.number().default(180_000),
   agentTimeoutMs: z.number().default(120_000),
 })
 
 type ResolvedConfig = Omit<Required<Config>, 'executablePath' | 'provisioningProfilePath'> & Pick<Config, 'executablePath' | 'provisioningProfilePath'>
+
+/** Immutable references that keep a chained io operation on one runtime generation. */
+interface IoGeneration {
+  readonly client: MobilecliRpc
+  readonly lifetime: AbortController
+  readonly iosScreenScales: Map<DeviceId, number>
+}
 
 function assertDurationField(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -150,8 +179,10 @@ function resolveValidatedConfig(config: Config): ResolvedConfig {
   const values = config as ResolvedConfig
   assertPortField(values.serverPort)
   assertDurationField('pollIntervalMs', values.pollIntervalMs)
+  assertDurationField('readyStabilityMs', values.readyStabilityMs)
   assertDurationField('readyTimeoutMs', values.readyTimeoutMs)
   assertDurationField('requestTimeoutMs', values.requestTimeoutMs)
+  assertDurationField('h264ProbeTimeoutMs', values.h264ProbeTimeoutMs)
   assertDurationField('bootTimeoutMs', values.bootTimeoutMs)
   assertDurationField('agentTimeoutMs', values.agentTimeoutMs)
   const trimmedPath = values.executablePath?.trim()
@@ -173,6 +204,18 @@ function assertProfileFile(path: string): void {
     // reported below; there is no other readable fact to surface first.
   }
   throw new Error(`phone-runtime: provisioningProfilePath ${JSON.stringify(path)} is not an existing file; fix the path or drop the field.`)
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function errorValue(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+function failedCaptureBody(error: unknown): ReadableStream<Uint8Array> {
+  return new ReadableStream({ start(controller) { controller.error(errorValue(error)) } })
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -222,18 +265,24 @@ export class PhoneDevices extends Service {
   readonly [PHONE_RUNTIME_STATE_OWNER]: PhoneRuntimeStateOwner = Object.freeze({})
 
   private readonly resolved: ResolvedConfig
-  private readonly executablePath: string | undefined
-  private readonly resolutionFailure: PhoneDevicesError | undefined
+  private executablePath: string | undefined
+  private childEnvironment: Readonly<Record<string, string>> = Object.freeze({})
+  private resolutionFailure: PhoneDevicesError | undefined
   private readonly subscribers = new Set<(change: PhoneDeviceChange) => void>()
-  private readonly lifetime = new AbortController()
+  private readonly readinessSubscribers = new Set<(ready: boolean) => void>()
+  private lifetime = new AbortController()
+  private activationTail: Promise<void> = Promise.resolve()
   private queueTail: Promise<void> = Promise.resolve()
   private closing = false
   private disposed = false
   private ready = false
+  private publishedReadiness = false
   private lost: PhoneDevicesError | undefined
   private child: MobilecliServerProcess | undefined
   private rpcClient: MobilecliRpc | undefined
   private publishedList: PhoneDeviceList | undefined
+  private iosScreenScales = new Map<DeviceId, number>()
+  private readonly openNativeAndroidH264 = openAndroidSystemH264
   private startupOutcome: Promise<void> | undefined
   private pollTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -249,33 +298,46 @@ export class PhoneDevices extends Service {
   constructor(ctx: Context, config: Config) {
     super(ctx, 'phoneDevices')
     this.resolved = resolveValidatedConfig(config)
-    const override = this.resolved.executablePath
-    try {
-      this.executablePath = resolveMobilecliExecutable({
-        ...(override !== undefined ? { executablePath: override } : {}),
-        env: process.env,
-      })
-    } catch (error) {
+    if (this.resolved.deferStart) {
       this.resolutionFailure = new PhoneDevicesError(
         'PHONE_UNRESOLVED',
-        error instanceof Error ? error.message : String(error),
-        { cause: error },
+        'the phone runtime is waiting for its environment owner to select mobilecli',
       )
     }
-    ctx.effect(() => () => {
-      this.subscribers.clear()
-    }, 'phone runtime subscriber registry cleanup')
-    ctx.effect(() => () => this.teardown(), 'phone runtime teardown')
-    ctx.effect(
-      () => registerPhoneRuntimeStateReader(this[PHONE_RUNTIME_STATE_OWNER], () => this.publishedList),
-      'phone runtime state reader',
-    )
+    if (this.resolutionFailure === undefined) {
+      const override = this.resolved.executablePath
+      try {
+        this.executablePath = resolveMobilecliExecutable({
+          ...(override !== undefined ? { executablePath: override } : {}),
+          env: process.env,
+        })
+      } catch (error) {
+        this.resolutionFailure = new PhoneDevicesError(
+          'PHONE_UNRESOLVED',
+          (error as Error).message,
+          { cause: error },
+        )
+      }
+    }
+    this.registerEffects(ctx)
     if (this.resolutionFailure !== undefined) return
     this.child = new MobilecliServerProcess({
       executablePath: this.executable,
       port: this.resolved.serverPort,
     })
     this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
+  }
+
+  private registerEffects(ctx: Context): void {
+    ctx.effect(() => () => {
+      this.subscribers.clear()
+      this.readinessSubscribers.clear()
+    }, 'phone runtime subscriber registry cleanup')
+    ctx.effect(() => () => this.teardown(), 'phone runtime teardown')
+    ctx.effect(
+      () => registerPhoneRuntimeStateReader(this[PHONE_RUNTIME_STATE_OWNER], () => this.publishedList),
+      'phone runtime state reader',
+    )
   }
 
   /**
@@ -288,6 +350,78 @@ export class PhoneDevices extends Service {
     return this.startupOutcome
   }
 
+  /**
+   * Read whether the current child may accept fleet operations.
+   * @returns current generation readiness.
+   */
+  isReady(): boolean {
+    return this.ready && this.lost === undefined && !this.closing && !this.disposed
+  }
+
+  /**
+   * Subscribe to ready/not-ready transitions of the replaceable runtime generation.
+   * @param listener - callback receiving the committed readiness value.
+   * @returns the disposer.
+   */
+  onReadinessChanged(listener: (ready: boolean) => void): () => void {
+    this.readinessSubscribers.add(listener)
+    return () => { this.readinessSubscribers.delete(listener) }
+  }
+
+  /**
+   * Replace the owned mobilecli child generation without replacing this Service.
+   * In-flight work on the prior generation is aborted and its process is stopped
+   * before the replacement begins readiness probing.
+   * @param executablePath - absolute executable path selected by the environment owner.
+   * @param signal - optional cancellation signal for replacement and readiness.
+   * @param environment - non-sensitive SDK/AVD environment owned by the selected generation.
+   */
+  async activateExecutable(
+    executablePath: string,
+    signal?: AbortSignal,
+    environment: Readonly<Record<string, string>> = {},
+  ): Promise<void> {
+    this.assertAccepting()
+    if (signal?.aborted === true) throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
+    const resolved = resolveMobilecliExecutable({ executablePath, env: process.env })
+    const operation = this.activationTail.then(async () => {
+      this.assertAccepting()
+      await this.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'the phone runtime generation was replaced'))
+      this.assertAccepting()
+      if (signal?.aborted === true) throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
+      this.executablePath = resolved
+      this.childEnvironment = Object.freeze({ ...environment })
+      this.resolutionFailure = undefined
+      this.lost = undefined
+      this.lifetime = new AbortController()
+      this.iosScreenScales = new Map()
+      this.child = new MobilecliServerProcess({
+        executablePath: resolved,
+        port: this.resolved.serverPort,
+        environment: this.childEnvironment,
+      })
+      this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
+      this.startupOutcome = this.startup(signal)
+      await this.startupOutcome
+    })
+    this.activationTail = operation.catch(() => {})
+    await operation
+  }
+
+  /** Stop the current child generation while retaining this Service for later activation. */
+  async deactivate(): Promise<void> {
+    this.assertAccepting()
+    const operation = this.activationTail.then(async () => {
+      this.assertAccepting()
+      await this.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'the phone runtime generation was disabled'))
+      this.executablePath = undefined
+      this.childEnvironment = Object.freeze({})
+      this.resolutionFailure = new PhoneDevicesError('PHONE_UNRESOLVED', 'the phone runtime is not prepared')
+    })
+    this.activationTail = operation.catch(() => {})
+    await operation
+  }
+
   /** Refuse operations while the mobilecli executable is unresolvable. */
   private requireResolved(): void {
     if (this.resolutionFailure !== undefined) throw this.resolutionFailure
@@ -298,14 +432,7 @@ export class PhoneDevices extends Service {
    * @returns the path accepted by spawn; callers run after {@link requireResolved}.
    */
   private get executable(): string {
-    /* v8 ignore next -- requireResolved already threw for the unresolved arm */
-    if (this.executablePath === undefined) {
-      throw this.resolutionFailure ?? new PhoneDevicesError(
-        'PHONE_UNRESOLVED',
-        'phone-runtime: the mobilecli executable was not resolved',
-      )
-    }
-    return this.executablePath
+    return this.executablePath as string
   }
 
   /** Reject work entering after teardown begins. */
@@ -320,7 +447,7 @@ export class PhoneDevices extends Service {
     if (this.lost !== undefined) throw this.lost
   }
 
-  private async startup(): Promise<void> {
+  private async startup(signal?: AbortSignal): Promise<void> {
     // The constructor spawned the child before any effect could dispose it;
     // teardown nulls these fields only after init has settled either way.
     const child = this.child as MobilecliServerProcess
@@ -330,13 +457,17 @@ export class PhoneDevices extends Service {
       settledExit = exit
     })
     const window = deadline(undefined, this.resolved.readyTimeoutMs, 'READY_WINDOW')
+    const startupSignal = signal === undefined
+      ? AbortSignal.any([window.signal, this.lifetime.signal])
+      : AbortSignal.any([window.signal, this.lifetime.signal, signal])
     try {
       for (;;) {
         if (settledExit !== undefined) throw exitedBeforeReady(child, settledExit)
+        if (signal?.aborted === true) throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
         if (window.signal.aborted) throw this.readinessWindowElapsed(child)
         try {
           // The lifetime signal lets teardown interrupt a hung probe at once.
-          await client.call(METHOD_SERVER_INFO, {}, AbortSignal.any([window.signal, this.lifetime.signal]))
+          await client.call(METHOD_SERVER_INFO, {}, startupSignal)
           break
         } catch {
           // Probes fail while the server binary is still starting up; the next
@@ -346,19 +477,48 @@ export class PhoneDevices extends Service {
           Math.min(this.resolved.pollIntervalMs, this.resolved.requestTimeoutMs),
           window.signal,
           this.lifetime.signal,
+          signal,
           exitSeen,
         )
       }
       void child.exit.then((exit) => { this.onChildExit(child, exit) })
-      this.ready = true
       // Commit the baseline listing inside initialization so every observer
       // attaches to a stable starting point and receives only later changes.
-      await this.pollAttempt()
+      await this.pollAttempt(true, startupSignal)
+      // Hold readiness for the configured stability interval. A process can flush
+      // the baseline response immediately before exiting; the close event may
+      // arrive on a later event-loop turn and must win before readiness is
+      // published.
+      await pauseBeforeNextProbe(
+        this.resolved.readyStabilityMs,
+        window.signal,
+        this.lifetime.signal,
+        signal,
+        exitSeen,
+      )
+      const exitAfterStability = readSettledExit(() => settledExit)
+      if (exitAfterStability !== undefined) throw exitedBeforeReady(child, exitAfterStability)
+      if (this.lost !== undefined) throw this.lost
+      if (isSignalAborted(signal) || this.lifetime.signal.aborted) {
+        throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
+      }
+      if (isSignalAborted(window.signal)) throw this.readinessWindowElapsed(child)
+      this.assertAccepting()
+      this.ready = true
+      this.publishReadiness(true)
       this.armPoll()
     } catch (error) {
-      const failure = new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli startup failed unexpectedly: ${String(error)}`, { cause: error })
+      const failure = signal?.aborted === true
+        ? new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled', { cause: error })
+        : error instanceof PhoneDevicesError
+          ? error
+          : new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli startup failed unexpectedly: ${String(error)}`, { cause: error })
       this.lost = failure
-      await child.stop()
+      try {
+        await child.stop()
+      } catch (cleanup) {
+        throw phoneFailureWithCleanup(failure, cleanup, 'mobilecli startup process-tree cleanup failed')
+      }
       throw failure
     } finally {
       window[Symbol.dispose]()
@@ -375,9 +535,9 @@ export class PhoneDevices extends Service {
 
   private onChildExit(child: MobilecliServerProcess, exit: { readonly code: number | null }): void {
     if (child !== this.child || this.closing || !this.ready) return
-    // The poll pipeline owns loss detection; the exit is logged so the next
-    // refused poll confirms and halts with the socket-level reason.
-    this.ctx.logger.error(`the mobilecli server exited unexpectedly (code ${String(exit.code)}); the next poll will confirm the loss`)
+    this.markLost(new PhoneDevicesError(
+      'PHONE_UNAVAILABLE', `the mobilecli server exited unexpectedly (code ${String(exit.code)})`,
+    ))
   }
 
   /**
@@ -408,14 +568,23 @@ export class PhoneDevices extends Service {
    */
   private async roundTrip(method: string, params: unknown, signal: AbortSignal | undefined, ceilingMs: number): Promise<unknown> {
     this.assertUsable()
+    return await this.roundTripInGeneration(this.captureIoGeneration(), method, params, signal, ceilingMs)
+  }
+
+  /** Run one round trip against immutable references to a single generation. */
+  private async roundTripInGeneration(
+    generation: IoGeneration,
+    method: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    ceilingMs: number,
+  ): Promise<unknown> {
     if (signal?.aborted === true) {
       throw new PhoneDevicesError('PHONE_ABORTED', 'cancelled before the request was sent')
     }
-    const budget = deadline(fuseCallerAndLifetime(signal, this.lifetime.signal), ceilingMs, method)
+    const budget = deadline(fuseCallerAndLifetime(signal, generation.lifetime.signal), ceilingMs, method)
     try {
-      // this.rpcClient is constructor-guaranteed; teardown nulls it only with
-      // this.disposed, which assertUsable already rejected above.
-      return await (this.rpcClient as MobilecliRpc).call(method, params, budget.signal)
+      return await generation.client.call(method, params, budget.signal)
     } catch (error) {
       const normalized = normalizeOperationError(error)
       if (normalized.code === 'PHONE_TIMEOUT') {
@@ -481,25 +650,72 @@ export class PhoneDevices extends Service {
 
   /**
    * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
+   * Public tap and gesture coordinates are capture pixels. Android forwards
+   * them unchanged; iOS reads and caches `device.info.screenSize.scale` for
+   * the current runtime generation and converts them to XCTest logical points.
    * Physical handsets are valid targets; only ids absent from the latest
    * published listing fail locally before any RPC.
-   * @param request - Branded device id plus the OpenRPC params for that verb.
+   * @param request - Branded device id plus capture-pixel or non-coordinate input.
    * @param signal - Caller's optional cancellation signal.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
-   *   absent from the latest published listing, and otherwise per the
-   *   class-documented failure modes.
+   *   absent from the latest published listing, `PHONE_PROTOCOL` when an iOS
+   *   `device.info` answer lacks a valid positive screen size, and otherwise
+   *   per the class-documented failure modes.
    */
   async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
     this.requireResolved()
-    this.requireKnown(request.deviceId, 'io')
+    this.assertUsable()
+    const known = this.requireKnown(request.deviceId, 'io')
     await this.whenReady(signal)
-    await this.roundTrip(IO_METHODS[request.method], ioParams(request), signal, this.resolved.requestTimeoutMs)
+    const generation = this.captureIoGeneration()
+    const scale = await this.ioScale(generation, known, request, signal)
+    await this.roundTripInGeneration(
+      generation,
+      IO_METHODS[request.method],
+      ioParams(request, scale),
+      signal,
+      this.resolved.requestTimeoutMs,
+    )
+  }
+
+  /** Resolve and cache the iOS capture-pixel to XCTest logical-point scale. */
+  private async ioScale(
+    generation: IoGeneration,
+    known: PhoneDeviceRef,
+    request: PhoneIoRequest,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    if (known.platform !== 'ios' || request.method === 'text' || request.method === 'button') return 1
+    const cached = generation.iosScreenScales.get(known.id)
+    if (cached !== undefined) return cached
+    const result = await this.roundTripInGeneration(
+      generation,
+      METHOD_DEVICE_INFO,
+      { deviceId: known.id },
+      signal,
+      this.resolved.requestTimeoutMs,
+    )
+    const scale = iosScreenScale(result)
+    generation.iosScreenScales.set(known.id, scale)
+    return scale
+  }
+
+  /** Capture the process, cancellation, and coordinate cache of the current generation. */
+  private captureIoGeneration(): IoGeneration {
+    // Callers enter only after resolution/readiness; teardown aborts the
+    // captured lifetime before clearing the active client.
+    return {
+      client: this.rpcClient as MobilecliRpc,
+      lifetime: this.lifetime,
+      iosScreenScales: this.iosScreenScales,
+    }
   }
 
   /**
-   * Open one upstream `device.screencapture` stream. `h264` maps onto the
-   * upstream `avc` format; the returned body is unread so the Host can proxy
-   * frames without buffering a capture.
+   * Open one `device.screencapture` stream. `h264` maps onto upstream `avc`;
+   * Android pre-reads and replays at most one bounded key-access-unit probe,
+   * then replaces an invalid, failed, or timed-out source with the system
+   * `screenrecord` H264 stream when available. Other bodies remain unread.
    * @param request - Branded device id, encoding, and optional cancellation.
    * @returns the live capture content type and body; the caller owns cancellation.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -508,7 +724,8 @@ export class PhoneDevices extends Service {
    */
   async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream> {
     this.requireResolved()
-    this.requireKnown(request.deviceId, 'capture')
+    this.assertUsable()
+    const known = this.requireKnown(request.deviceId, 'capture')
     await this.whenReady(request.signal)
     this.assertUsable()
     if (request.signal?.aborted === true) {
@@ -516,8 +733,9 @@ export class PhoneDevices extends Service {
     }
     const fused = fuseCallerAndLifetime(request.signal, this.lifetime.signal)
     const budget = deadline(fused, this.resolved.requestTimeoutMs, METHOD_DEVICE_SCREENCAPTURE)
+    let capture: PhoneCaptureStream
     try {
-      const capture = await (this.rpcClient as MobilecliRpc).stream(
+      capture = await (this.rpcClient as MobilecliRpc).stream(
         METHOD_DEVICE_SCREENCAPTURE,
         {
           deviceId: request.deviceId,
@@ -525,7 +743,6 @@ export class PhoneDevices extends Service {
         },
         budget.signal,
       )
-      return Object.freeze({ contentType: capture.contentType, body: capture.body })
     } catch (error) {
       const normalized = normalizeOperationError(error)
       if (normalized.code !== 'PHONE_TIMEOUT') throw normalized
@@ -534,6 +751,77 @@ export class PhoneDevices extends Service {
         `${JSON.stringify(METHOD_DEVICE_SCREENCAPTURE)} exceeded its ${String(this.resolved.requestTimeoutMs)}ms ceiling`,
         { cause: normalized },
       )
+    } finally {
+      budget[Symbol.dispose]()
+    }
+    if (request.format !== 'h264' || known.platform !== 'android') {
+      return Object.freeze({ contentType: capture.contentType, body: capture.body })
+    }
+    return await this.preferAndroidH264(capture, request.deviceId, fused)
+  }
+
+  /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */
+  private async preferAndroidH264(
+    capture: PhoneCaptureStream,
+    id: DeviceId,
+    signal: AbortSignal,
+  ): Promise<PhoneCaptureStream> {
+    let mobilecli: Awaited<ReturnType<typeof inspectAnnexBH264KeyAccessUnit>>
+    try {
+      mobilecli = await this.inspectAndroidH264(capture.body, signal)
+    } catch (error) {
+      if (signal.aborted) throw normalizeOperationError(signal.reason)
+      mobilecli = Object.freeze({
+        recognizable: false,
+        body: failedCaptureBody(error),
+        failure: errorValue(error),
+      })
+    }
+    if (mobilecli.recognizable) {
+      return Object.freeze({ contentType: capture.contentType, body: mobilecli.body })
+    }
+    if (signal.aborted) {
+      await mobilecli.body.cancel().catch(() => {})
+      throw normalizeOperationError(signal.reason)
+    }
+    let nativeBody: ReadableStream<Uint8Array> | undefined
+    try {
+      nativeBody = this.openNativeAndroidH264({
+        deviceId: id,
+        environment: this.childEnvironment,
+        signal,
+      })
+      const native = await this.inspectAndroidH264(nativeBody, signal)
+      if (!native.recognizable) {
+        await native.body.cancel().catch(() => {})
+        throw native.failure ?? new Error('Android system H264 stream was not recognizable')
+      }
+      await mobilecli.body.cancel().catch(() => {})
+      return Object.freeze({ contentType: 'video/h264', body: native.body })
+    } catch (nativeFailure) {
+      await nativeBody?.cancel().catch(() => {})
+      if (isSignalAborted(signal)) {
+        await mobilecli.body.cancel().catch(() => {})
+        throw normalizeOperationError(signal.reason)
+      }
+      this.ctx.logger.warn(
+        `[phone-runtime] Android H264 sources failed for ${JSON.stringify(id)}; renderer fallback remains available: ${failureText(mobilecli.failure)}; ${failureText(nativeFailure)}`,
+      )
+      return Object.freeze({ contentType: capture.contentType, body: mobilecli.body })
+    }
+  }
+
+  /** Bound syntax recognition independently from the JSON-RPC header deadline. */
+  private async inspectAndroidH264(
+    body: ReadableStream<Uint8Array>,
+    signal: AbortSignal,
+  ): Promise<Awaited<ReturnType<typeof inspectAnnexBH264KeyAccessUnit>>> {
+    const budget = deadline(signal, this.resolved.h264ProbeTimeoutMs, 'Android H264 key access unit')
+    try {
+      return await inspectAnnexBH264KeyAccessUnit(body, {
+        signal: budget.signal,
+        maxBytes: ANDROID_H264_PROBE_MAX_BYTES,
+      })
     } finally {
       budget[Symbol.dispose]()
     }
@@ -563,6 +851,7 @@ export class PhoneDevices extends Service {
       args: ['agent', 'status', '--device', id],
       signal,
       timeoutMs: this.resolved.agentTimeoutMs,
+      environment: this.childEnvironment,
     })
     return this.agentAnswer(id, answer)
   }
@@ -578,22 +867,30 @@ export class PhoneDevices extends Service {
    * @returns the resulting installation state; `reinstalled` is true only when
    *   this call spawned an install.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
-   *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
-   *   the command output names a structured real-device arm, and otherwise per
-   *   the class-documented failure modes.
+   *   absent from the latest published listing, `PHONE_AGENT_PROFILE_REQUIRED`
+   *   when a real-iOS install lacks `provisioningProfilePath`,
+   *   `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured
+   *   real-device arm, and otherwise per the class-documented failure modes.
    */
   async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult> {
     this.assertAccepting()
     this.requireResolved()
     await this.whenReady(options.signal)
     this.assertUsable()
-    this.requireKnown(id, 'agent install')
+    const known = this.requireKnown(id, 'agent install')
     const reinstall = options.force === true
     if (!reinstall) {
       const current = await this.agentStatus(id, options.signal)
       if (current.installed) return Object.freeze({ ...current, reinstalled: false })
     }
-    const profile = this.resolved.provisioningProfilePath
+    const iosReal = known.platform === 'ios' && known.kind === 'real'
+    const profile = iosReal ? this.resolved.provisioningProfilePath : undefined
+    if (iosReal && profile === undefined) {
+      throw new PhoneDevicesError(
+        'PHONE_AGENT_PROFILE_REQUIRED',
+        'configure provisioningProfilePath before installing the iOS real-device control agent',
+      )
+    }
     const answer = await runMobilecliAgent({
       executablePath: this.executable,
       args: [
@@ -603,6 +900,7 @@ export class PhoneDevices extends Service {
       ],
       signal: options.signal,
       timeoutMs: this.resolved.agentTimeoutMs,
+      environment: this.childEnvironment,
     })
     if (!answer.ok) {
       throw new PhoneDevicesError('PHONE_UPSTREAM', `mobilecli agent install answered ${JSON.stringify(answer.message)}`)
@@ -619,7 +917,8 @@ export class PhoneDevices extends Service {
    * @returns the frozen public status.
    */
   private agentAnswer(id: DeviceId, answer: MobilecliAgentAnswer): PhoneAgentStatus {
-    const reminder = answer.ok && this.findKnown(id)?.kind === 'real' && this.resolved.provisioningProfilePath !== undefined
+    const known = this.findKnown(id)
+    const reminder = answer.ok && known?.platform === 'ios' && known.kind === 'real' && this.resolved.provisioningProfilePath !== undefined
       ? FREE_SIGNING_PROFILE_REMINDER
       : undefined
     return Object.freeze({
@@ -647,14 +946,16 @@ export class PhoneDevices extends Service {
     }
   }
 
-  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install'): void {
+  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install'): PhoneDeviceRef {
     this.assertAccepting()
-    if (this.findKnown(id) === undefined) {
+    const known = this.findKnown(id)
+    if (known === undefined) {
       throw new PhoneDevicesError(
         'PHONE_DEVICE_NOT_FOUND',
         `cannot ${operation}: ${JSON.stringify(id)} is absent from the latest device listing (online or offline)`,
       )
     }
+    return known
   }
 
   private findKnown(id: DeviceId): PhoneDeviceRef | undefined {
@@ -711,14 +1012,20 @@ export class PhoneDevices extends Service {
     }
   }
 
-  /** One bounded devices.list attempt followed by publication, never throwing outward. */
-  private async pollAttempt(): Promise<void> {
+  /**
+   * Run one bounded devices.list attempt and publish it. Background misses stay
+   * contained; the required startup attempt rejects every failure.
+   * @param required - Whether this attempt must establish the startup baseline.
+   * @param signal - Optional startup cancellation and readiness budget.
+   */
+  private async pollAttempt(required = false, signal?: AbortSignal): Promise<void> {
     let next: PhoneDeviceList
     try {
-      const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, undefined, this.resolved.requestTimeoutMs)
+      const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
       next = groupEntries(parseDeviceInfos(result))
     } catch (error) {
       const normalized = normalizeOperationError(error)
+      if (required) throw normalized
       if (normalized.code === 'PHONE_UNAVAILABLE' || normalized.code === 'PHONE_PROTOCOL') {
         this.markLost(normalized)
         return
@@ -730,16 +1037,19 @@ export class PhoneDevices extends Service {
     }
     const delta = changeSets(this.publishedList, next)
     if (!delta.changed) return
-    this.publish(Object.freeze({
+    const published = this.publish(Object.freeze({
       list: next,
       added: Object.freeze(delta.added),
       removed: Object.freeze(delta.removed),
     }))
+    if (required && !published) throw this.lost ?? new PhoneDevicesError(
+      'PHONE_PROTOCOL', 'the initial mobilecli device listing was rejected',
+    )
   }
 
-  private publish(change: PhoneDeviceChange): void {
+  private publish(change: PhoneDeviceChange): boolean {
     const validator = phoneRuntimeStateValidator(this[PHONE_RUNTIME_STATE_OWNER])
-    if (validator !== undefined && !this.guarded(validator, change)) return
+    if (validator !== undefined && !this.guarded(validator, change)) return false
     this.publishedList = change.list
     for (const sub of [...this.subscribers]) {
       try {
@@ -749,6 +1059,7 @@ export class PhoneDevices extends Service {
         this.ctx.logger.warn(error)
       }
     }
+    return true
   }
 
   /**
@@ -775,8 +1086,15 @@ export class PhoneDevices extends Service {
   private markLost(reason: PhoneDevicesError): void {
     if (this.lost !== undefined) return
     this.lost = reason
+    this.ready = false
+    this.publishReadiness(false)
     this.clearPollTimer()
+    this.clearPublishedList()
     this.ctx.logger.error(reason.message)
+    void this.child?.stop().catch((error: unknown) => {
+      this.ctx.logger.warn('phone-runtime: failed to stop the lost mobilecli child')
+      this.ctx.logger.warn(error)
+    })
   }
 
   /**
@@ -784,16 +1102,58 @@ export class PhoneDevices extends Service {
    * and reach child-exit quiescence before returning.
    */
   private teardown(): void | Promise<void> {
+    if (this.disposed) return undefined
     this.closing = true
-    this.clearPollTimer()
-    this.lifetime.abort(new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed'))
     this.subscribers.clear()
+    this.readinessSubscribers.clear()
     this.disposed = true
+    const operation = this.activationTail.then(() => this.stopRuntime(
+      new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed'),
+    ))
+    this.activationTail = operation.catch(() => {})
+    return operation
+  }
+
+  private publishReadiness(next: boolean): void {
+    if (next === this.publishedReadiness) return
+    this.publishedReadiness = next
+    for (const listener of [...this.readinessSubscribers]) {
+      try {
+        listener(next)
+      } catch (error) {
+        this.ctx.logger.warn('phone-runtime: a readiness observer failed')
+        this.ctx.logger.warn(error)
+      }
+    }
+  }
+
+  /** Abort, drain, and stop exactly the current child generation. */
+  private async stopRuntime(reason: PhoneDevicesError): Promise<void> {
+    this.clearPollTimer()
+    this.lifetime.abort(reason)
+    this.ready = false
+    this.publishReadiness(false)
+    await this.startupOutcome?.catch(() => {})
+    await this.queueTail
     const child = this.child
+    this.iosScreenScales.clear()
+    this.clearPublishedList()
+    if (child !== undefined) await child.stop()
+    if (child !== this.child) return
     this.child = undefined
     this.rpcClient = undefined
-    if (child === undefined) return undefined
-    return child.stop()
+    this.startupOutcome = undefined
+  }
+
+  private clearPublishedList(): void {
+    if (this.publishedList === undefined || allRefsOf(this.publishedList).length === 0) return
+    const empty = emptyDeviceList()
+    const delta = changeSets(this.publishedList, empty)
+    this.publish(Object.freeze({
+      list: empty,
+      added: Object.freeze(delta.added),
+      removed: Object.freeze(delta.removed),
+    }))
   }
 }
 
@@ -809,23 +1169,11 @@ function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
   return [...list.android, ...list.ios.simulators, ...list.ios.reals]
 }
 
-function ioParams(request: PhoneIoRequest): Record<string, unknown> {
-  switch (request.method) {
-    case 'tap':
-      return { deviceId: request.deviceId, x: request.x, y: request.y }
-    case 'gesture':
-      return { deviceId: request.deviceId, actions: request.actions }
-    case 'text':
-      return { deviceId: request.deviceId, text: request.text }
-    case 'button':
-      return { deviceId: request.deviceId, button: request.button }
-    /* v8 ignore start -- PhoneIoRequest is a closed union */
-    default: {
-      const exhaustive: never = request
-      throw new PhoneDevicesError('PHONE_PROTOCOL', `unhandled phone io method: ${String(exhaustive)}`)
-    }
-    /* v8 ignore stop */
-  }
+function emptyDeviceList(): PhoneDeviceList {
+  return Object.freeze({
+    android: Object.freeze([]),
+    ios: Object.freeze({ simulators: Object.freeze([]), reals: Object.freeze([]) }),
+  })
 }
 
 function tailOf(text: string): string {
@@ -858,12 +1206,22 @@ function haltReason(signal: AbortSignal): Error {
   return new PhoneDevicesError('PHONE_ABORTED', 'cancelled while waiting for the phone runtime')
 }
 
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true
+}
+
+function readSettledExit<T>(read: () => T): T {
+  return read()
+}
+
 async function pauseBeforeNextProbe(
   ms: number,
   window: AbortSignal,
   lifetime: AbortSignal,
+  caller: AbortSignal | undefined,
   exitSeen: Promise<unknown>,
 ): Promise<void> {
+  if (window.aborted || lifetime.aborted || caller?.aborted === true) return
   const slept = new Promise<'slept'>((resolveSleep) => {
     const timer = setTimeout(() => {
       resolveSleep('slept')
@@ -871,7 +1229,7 @@ async function pauseBeforeNextProbe(
     timer.unref()
   })
   const abortedOrExited = new Promise<'interrupted'>((resolveInterrupted) => {
-    for (const signal of [window, lifetime]) {
+    for (const signal of caller === undefined ? [window, lifetime] : [window, lifetime, caller]) {
       signal.addEventListener('abort', () => {
         resolveInterrupted('interrupted')
       }, { once: true })

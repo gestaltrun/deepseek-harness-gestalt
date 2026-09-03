@@ -15,6 +15,7 @@ describe('Desktop overlay composed boot', () => {
     const launch = resolveExampleLaunch({
       srcBin: join(repo, 'apps', 'cli', 'src', 'bin.ts'),
       configArgs: ['web', '--patch', join(here, '..', 'cordis.patch.yml'), '--port', '0'],
+      mode: 'lib',
       tsconfigPath: join(repo, 'tsconfig.base.json'),
     })
     let running: RunningWebHost | undefined
@@ -43,6 +44,7 @@ describe('Desktop overlay composed boot', () => {
     const launch = resolveExampleLaunch({
       srcBin: join(repo, 'apps', 'cli', 'src', 'bin.ts'),
       configArgs: ['web', '--patch', join(here, '..', 'cordis.patch.yml'), '--port', '0'],
+      mode: 'lib',
       tsconfigPath: join(repo, 'tsconfig.base.json'),
     })
     let running: RunningWebHost | undefined
@@ -72,7 +74,7 @@ describe('Desktop overlay composed boot', () => {
       expect(devices.status).toBe(502)
       const body = (await devices.json()) as { error?: { code?: string; message?: string } }
       expect(body.error?.code).toBe('PHONE_UNRESOLVED')
-      expect(body.error?.message).toContain('npm install -g mobilecli@latest')
+      expect(body.error?.message).toContain('waiting for its environment owner to select mobilecli')
     } finally {
       await running?.stop()
       rmSync(home, { recursive: true, force: true })

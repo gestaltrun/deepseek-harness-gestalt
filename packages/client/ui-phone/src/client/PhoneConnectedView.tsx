@@ -1,6 +1,6 @@
 /**
  * Connected phone tab body (locked design states ③④): the BrowserView-
- * rhythm devbar (device dropdown + the H264 chip), the 1:2 fixed-ratio
+ * rhythm devbar (device dropdown + the active-format chip), the 1:2 fixed-ratio
  * live frame centered in the panel, the circular Back/Home/Recents/
  * screenshot toolbar, and the error cards whose copy states the next
  * action. Everything reactive arrives through one per-tab
@@ -8,9 +8,15 @@
  */
 import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  WheelEvent as ReactWheelEvent,
+} from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneListingSource } from './registry.ts'
+import { PhoneH264PlaybackOwner, PhoneH264Surface } from './PhoneH264Surface.tsx'
 import css from './PhoneConnectedView.module.css'
 import shared from './PhoneShared.module.css'
 
@@ -61,10 +67,58 @@ const FAILURE_COPY: Record<PhoneStreamFailureKind, {
     title: '无法连接设备画面',
     detail: () => '画面服务暂时不可达；请确认宿主服务正在运行。',
   },
+  'agent-missing': {
+    tone: 'warn',
+    title: '设备控制代理未安装',
+    detail: () => '安装后设备才能稳定接收点击、拖拽与文本操作；Android 会通过 USB 安装，iPhone 会使用 Host 当前配置的签名描述文件。',
+  },
+  'agent-install-restricted': {
+    tone: 'warn',
+    title: '设备拒绝安装控制代理',
+    detail: () => '请保持手机解锁，并在开发者选项中允许「USB 安装」与「USB 调试（安全设置）」后重试。系统确认必须在手机上完成。',
+  },
+  'agent-profile-required': {
+    tone: 'warn',
+    title: '未配置真机签名描述文件',
+    detail: () => '请打开配置文件，为 phone-runtime 选择可用的 provisioningProfilePath，再返回此处安装；产品不会自动创建签名 identity 或 provisioning profile。',
+  },
+  'device-locked': {
+    tone: 'warn',
+    title: 'iPhone 已锁定',
+    detail: () => '请解锁 iPhone、保持屏幕常亮，再重新连接。产品不会代替你输入设备密码。',
+  },
+  'cert-untrusted': {
+    tone: 'warn',
+    title: '设备控制代理未受信任',
+    detail: () => '请在 iPhone 上启用 Developer Mode，并按系统提示信任开发者证书；签名 identity、provisioning 与信任仍需你在 Xcode 和设备上完成。',
+  },
+  'profile-expired': {
+    tone: 'warn',
+    title: '签名描述文件已过期',
+    detail: () => '请先在配置中选择当前可用的 provisioning profile，再重新安装设备控制代理；免费团队签名通常需要定期续签。',
+  },
+  'tunnel-failed': {
+    tone: 'err',
+    title: '真机连接通道未建立',
+    detail: () => '请保持 iPhone 解锁、已信任此 Mac 且数据线连接稳定，然后重新连接。',
+  },
+  'device-unplugged': {
+    tone: 'err',
+    title: 'iPhone 已断开连接',
+    detail: () => '请重新连接数据线并确认设备重新出现在清单中。',
+  },
 }
 
 /** Pointer travel (px) below which a press still counts as a tap. */
 const DRAG_THRESHOLD_PX = 6
+/** Idle gap after which a trackpad wheel burst becomes one vertical swipe. */
+const WHEEL_BURST_IDLE_MS = 50
+/** Pixel travel of one `DOM_DELTA_LINE` wheel unit on the live frame. */
+const WHEEL_LINE_PX = 16
+/** Minimum normalized vertical travel of a coalesced wheel swipe. */
+const WHEEL_MIN_TRAVEL = 0.08
+/** Maximum normalized vertical travel of a coalesced wheel swipe. */
+const WHEEL_MAX_TRAVEL = 0.4
 
 /** The toolbar icon glyphs, drawn inline to stay on the primitives idiom. */
 function ChevronDown(): ReactNode {
@@ -80,16 +134,33 @@ interface ReconnectAlertProps {
   readonly title: string
   readonly detail: string
   readonly onReconnect: () => void
+  readonly agentRecovery?: 'install' | 'reinstall'
+  readonly onRecoverAgent?: (force: boolean) => void
 }
 
-function ReconnectAlert({ tone, title, detail, onReconnect }: ReconnectAlertProps): ReactNode {
+function ReconnectAlert({
+  tone, title, detail, onReconnect, agentRecovery, onRecoverAgent,
+}: ReconnectAlertProps): ReactNode {
   return (
     <div role="alert" className={`${css.alertCard} ${tone === 'warn' ? css.alertWarn : css.alertErr}`}>
       <p className={css.alertTitle}>{title}</p>
       <p className={css.alertDetail}>{detail}</p>
       <div className={css.alertActions}>
-        <button type="button" className={shared.minibtnPrimary} onClick={onReconnect}>
-          重新连接
+        {agentRecovery !== undefined && onRecoverAgent !== undefined && (
+          <button
+            type="button"
+            className={shared.minibtnPrimary}
+            onClick={() => { onRecoverAgent(agentRecovery === 'reinstall') }}
+          >
+            {agentRecovery === 'install' ? '安装设备控制代理' : '重新安装设备控制代理'}
+          </button>
+        )}
+        <button
+          type="button"
+          className={agentRecovery === undefined ? shared.minibtnPrimary : shared.minibtnSecondary}
+          onClick={onReconnect}
+        >
+          {agentRecovery === undefined ? '重新连接' : '重新检测'}
         </button>
       </div>
     </div>
@@ -105,6 +176,8 @@ export function PhoneConnectedView({
   serial, name, visible, source, onOpenDevice, createController,
 }: PhoneConnectedViewProps): ReactNode {
   const createControllerRef = useRef(createController)
+  const h264PlaybackOwnerRef = useRef<PhoneH264PlaybackOwner | undefined>(undefined)
+  const h264PlaybackOwner = h264PlaybackOwnerRef.current ??= new PhoneH264PlaybackOwner()
   createControllerRef.current = createController
   // The tab is a singleton (U1): a serial change disposes the previous
   // controller and mints a new session for the chosen device.
@@ -123,13 +196,42 @@ export function PhoneConnectedView({
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
   const drag = useRef<{
+    readonly pointerId: number
+    readonly target: HTMLDivElement
     readonly origin: { u: number; v: number; clientX: number; clientY: number }
-    last: { u: number; v: number }
+    readonly trail: Array<{ u: number; v: number }>
     dragging: boolean
   } | undefined>(undefined)
+  const wheel = useRef<{
+    deltaY: number
+    surfaceHeight: number
+    handle: ReturnType<typeof setTimeout>
+  } | undefined>(undefined)
+
+  const releaseDrag = useCallback((): void => {
+    const state = drag.current
+    drag.current = undefined
+    if (state?.target.hasPointerCapture(state.pointerId) === true) {
+      state.target.releasePointerCapture(state.pointerId)
+    }
+  }, [])
+
+  const releaseWheel = useCallback((): void => {
+    if (wheel.current !== undefined) clearTimeout(wheel.current.handle)
+    wheel.current = undefined
+  }, [])
 
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
-  useEffect(() => () => { controller.dispose() }, [controller])
+  useEffect(() => () => {
+    releaseDrag()
+    releaseWheel()
+    controller.dispose()
+  }, [controller, releaseDrag, releaseWheel])
+  const liveStreamUrl = phase.kind === 'live' ? phase.streamUrl : undefined
+  useEffect(() => () => {
+    releaseDrag()
+    releaseWheel()
+  }, [liveStreamUrl, releaseDrag, releaseWheel, visible])
   useEffect(() => {
     // The dropdown needs the fleet even when this tab restored from layout
     // without the picker having pulled first; a failed pull keeps the
@@ -147,32 +249,66 @@ export function PhoneConnectedView({
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const point = normalize(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = {
+      pointerId: event.pointerId,
+      target: event.currentTarget,
       origin: { ...point, clientX: event.clientX, clientY: event.clientY },
-      last: point,
+      trail: [],
       dragging: false,
     }
   }
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const state = drag.current
-    if (state === undefined) return
+    if (state === undefined || state.pointerId !== event.pointerId) return
+    state.trail.push(normalize(event))
     if (!state.dragging
       && Math.hypot(event.clientX - state.origin.clientX, event.clientY - state.origin.clientY)
         < DRAG_THRESHOLD_PX) {
       return
     }
     state.dragging = true
-    state.last = normalize(event)
   }
 
   const onPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const state = drag.current
+    if (state === undefined || state.pointerId !== event.pointerId) return
     drag.current = undefined
-    if (state === undefined) return
+    state.target.releasePointerCapture(event.pointerId)
     const point = normalize(event)
-    if (state.dragging) controller.swipe([state.origin, point])
+    const dragging = state.dragging
+      || Math.hypot(event.clientX - state.origin.clientX, event.clientY - state.origin.clientY) >= DRAG_THRESHOLD_PX
+    if (dragging) controller.swipe([state.origin, ...state.trail, point])
     else controller.tap(point.u, point.v)
+  }
+
+  const onPointerCancel = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const state = drag.current
+    if (state === undefined || state.pointerId !== event.pointerId) return
+    drag.current = undefined
+    state.target.releasePointerCapture(event.pointerId)
+  }
+
+  const onWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+    if (event.deltaY === 0) return
+    event.preventDefault()
+    const surfaceHeight = event.currentTarget.getBoundingClientRect().height
+    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? WHEEL_LINE_PX
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? surfaceHeight : 1
+    const deltaY = (wheel.current?.deltaY ?? 0) + event.deltaY * unit
+    if (wheel.current !== undefined) clearTimeout(wheel.current.handle)
+    const handle = setTimeout(() => {
+      wheel.current = undefined
+      const travel = Math.min(WHEEL_MAX_TRAVEL, Math.max(WHEEL_MIN_TRAVEL, Math.abs(deltaY) / Math.max(1, surfaceHeight)))
+      const direction = Math.sign(deltaY)
+      controller.swipe([
+        { u: 0.5, v: 0.5 + direction * travel / 2 },
+        { u: 0.5, v: 0.5 - direction * travel / 2 },
+      ])
+    }, WHEEL_BURST_IDLE_MS)
+    wheel.current = { deltaY, surfaceHeight, handle }
   }
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -208,26 +344,43 @@ export function PhoneConnectedView({
       )
     }
     if (phase.kind === 'live') {
+      const surface = phase.format === 'h264'
+        ? (
+          <PhoneH264Surface
+            owner={h264PlaybackOwner}
+            label={`${name} 实时画面`}
+            className={css.stream}
+            url={phase.streamUrl}
+            onSurface={(width, height) => { controller.noteSurface('h264', width, height) }}
+            onError={() => { controller.noteCaptureFailure('h264') }}
+          />
+        )
+        : (
+          <img
+            src={phase.streamUrl}
+            alt={`${name} 实时画面`}
+            className={css.stream}
+            draggable={false}
+            onLoad={(event) => {
+              controller.noteSurface('mjpeg', event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
+            }}
+            onError={() => { controller.noteCaptureFailure('mjpeg') }}
+          />
+        )
       return (
         <div
           role="application"
-          aria-label={`${name} 画面，点击发送触控，按住拖动为滑动，键入发送文本`}
+          aria-label={`${name} 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本`}
           tabIndex={0}
           className={css.screenFrame}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onWheel={onWheel}
           onKeyDown={onKeyDown}
         >
-          <img
-            role="img"
-            aria-label={`${name} 实时画面`}
-            className={css.stream}
-            src={phase.streamUrl}
-            alt=""
-            onLoad={(event) => { controller.noteSurface(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight) }}
-            onError={() => { controller.noteCaptureFailure() }}
-          />
+          {surface}
           <span className={css.liveFlag}>
             <span aria-hidden="true" className={css.liveDot} />
             代理中
@@ -235,13 +388,15 @@ export function PhoneConnectedView({
         </div>
       )
     }
-    if (phase.kind === 'connecting' || phase.kind === 'reconnecting') {
+    if (phase.kind === 'connecting' || phase.kind === 'reconnecting'
+      || phase.kind === 'checking-agent' || phase.kind === 'repairing-agent') {
       return (
         <div className={css.statusNote}>
           <span aria-hidden="true" className={css.spinner} />
-          {phase.kind === 'connecting'
-            ? '正在连接画面…'
-            : `画面重连中（第 ${phase.attempt} 次尝试）…`}
+          {phase.kind === 'connecting' ? '正在连接画面…'
+            : phase.kind === 'reconnecting' ? `画面重连中（第 ${phase.attempt} 次尝试）…`
+              : phase.kind === 'checking-agent' ? '正在检测设备控制代理…'
+                : phase.force ? '正在重新安装设备控制代理…' : '正在安装设备控制代理…'}
         </div>
       )
     }
@@ -253,6 +408,8 @@ export function PhoneConnectedView({
           title={copy.title}
           detail={copy.detail(name)}
           onReconnect={() => { controller.connect() }}
+          {...(phase.failure.agentRecovery === undefined ? {} : { agentRecovery: phase.failure.agentRecovery })}
+          onRecoverAgent={(force) => { controller.recoverAgent(force) }}
         />
       )
     }
@@ -264,7 +421,7 @@ export function PhoneConnectedView({
   }
 
   return (
-    <div className={css.view}>
+    <div className={css.view} data-phone-connected>
       <div className={css.devbar}>
         <button
           type="button"
@@ -285,12 +442,17 @@ export function PhoneConnectedView({
           <ChevronDown />
         </button>
         <span className={css.devbarSpacer} />
-        {/* The capture cadence is the locked mockup's caption; the stream
-            contract carries no fps field, so no live value exists to bind. */}
-        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 H264 · 30 fps">
+        {/* The H264 cadence is the locked mockup's caption; the stream
+            contract carries no fps field, so MJPEG names only its encoding. */}
+        <span
+          className={`${css.tierChip} ${css.tierChipActive}`}
+          aria-label={phase.kind === 'live' && phase.format === 'mjpeg'
+            ? '当前画面编码 MJPEG'
+            : '当前画面编码 H264 · 30 fps'}
+        >
           <span aria-hidden="true" className={css.liveDot} />
-          H264
-          <span className={css.reslv}>30 fps</span>
+          {phase.kind === 'live' && phase.format === 'mjpeg' ? 'MJPEG' : 'H264'}
+          {!(phase.kind === 'live' && phase.format === 'mjpeg') && <span className={css.reslv}>30 fps</span>}
         </span>
         {menuOpen && (
           <div role="menu" aria-label="切换设备" className={css.pickMenu}>
@@ -355,7 +517,7 @@ export function PhoneConnectedView({
           </svg>
         </button>
       </div>
-      <div className={css.hintline}>点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。</div>
+      <div className={css.hintline}>点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。</div>
     </div>
   )
 }

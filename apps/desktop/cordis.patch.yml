@@ -8,24 +8,36 @@
     - id: ui-desktop
       name: '@deepseek-ai/dsh-client-ui-desktop'
 
-# Phone fleet: entirely opt-in on Desktop. While DSH_PHONE_MOBILECLI is unset
-# the runtime, stream, and tool rows stay unmounted and the Phone tab renders
-# its missing state; setting it to the mobilecli executable path mounts all
-# three, and a bad path fails loud at first use.
+# Phone fleet: Desktop always composes environment, stable fleet, stream, and
+# tool Consumers. The explicit executable env remains the operator override;
+# otherwise the environment selects managed current before system discovery.
 - insert:
     - id: phone-runtime
       name: '@deepseek-ai/dsh-phone-runtime'
-      disabled: !!js process.env.DSH_PHONE_MOBILECLI == null
       config:
+        deferStart: true
+        serverPort: !!js "Number(process.env.DSH_PHONE_SERVER_PORT || 12000)"
+        provisioningProfilePath: !!js process.env.DSH_PHONE_PROVISIONING_PROFILE
+
+    - id: phone-environment
+      name: '@deepseek-ai/dsh-phone-environment'
+      config:
+        root: !!js dshHomePath('phone')
         executablePath: !!js process.env.DSH_PHONE_MOBILECLI
+
+    - id: phone-environment-android
+      name: '@deepseek-ai/dsh-phone-environment-android'
+      config:
+        root: !!js dshHomePath('phone')
+
+    - id: phone-environment-ios
+      name: '@deepseek-ai/dsh-phone-environment-ios'
 
     - id: phone-stream
       name: '@deepseek-ai/dsh-phone-stream'
-      disabled: !!js process.env.DSH_PHONE_MOBILECLI == null
 
     - id: tool-phone
       name: '@deepseek-ai/dsh-tool-phone'
-      disabled: !!js process.env.DSH_PHONE_MOBILECLI == null
 
 # DeepSeek Gestalt owns authoritative Companion search and therefore activates
 # the derived full-text index in its Desktop-only layer. Browser `dsh web`

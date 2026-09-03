@@ -83,7 +83,7 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
     const context = await mountWith(fake)
-    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 5, y: 6 })
+    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 15, y: 18 })
     expect((await fake.counters()).io).toEqual([
       { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 5, y: 6 } },
     ])
@@ -128,10 +128,9 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
     fakes.push(fake)
     const context = await mountWith(fake)
 
-    // list: the enveloped result maps onto the grouped listing, duplicates included.
+    // list: the enveloped result maps onto a grouped listing with each addressable device once.
     const list = await context.phoneDevices.listDevices()
     expect(list.ios.reals.map(device => [device.id, device.state, device.online])).toEqual([
-      [ENVELOPE_REAL_HANDSET, 'online', true],
       [ENVELOPE_REAL_HANDSET, 'online', true],
     ])
     expect(list.ios.simulators.map(device => [device.name, device.online])).toEqual([
@@ -142,7 +141,7 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
 
     // observe leg: the captured handset answers io (the Consumer observe path
     // reads the same listing for its device facts).
-    await context.phoneDevices.io({ deviceId: ENVELOPE_REAL_HANDSET, method: 'tap', x: 1, y: 1 })
+    await context.phoneDevices.io({ deviceId: ENVELOPE_REAL_HANDSET, method: 'tap', x: 3, y: 3 })
     expect((await fake.counters()).io).toEqual([
       { method: 'device.io.tap', params: { deviceId: '00008101-000A2B3C4D5E6F70', x: 1, y: 1 } },
     ])

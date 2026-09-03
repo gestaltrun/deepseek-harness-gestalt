@@ -199,6 +199,9 @@ flowchart LR
   svc_phoneDevices["ctx.phoneDevices<br/>Phone device fleet capability"]
   pkg_tool_phone["tool-phone"]
   pkg_phone_stream["phone-stream"]
+  pkg_phone_environment["phone-environment"]
+  svc_phoneEnvironment["ctx.phoneEnvironment<br/>Host-owned phone toolchain environment"]
+  pkg_client_ui_phone["client-ui-phone"]
   svc_phoneStream["ctx.phoneStream<br/>Same-origin phone IO and capture reverse-proxy"]
   pkg_web["web"]
   svc_web["ctx.web<br/>Web access provider registry"]
@@ -284,6 +287,7 @@ flowchart LR
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
   pkg_permission_presets --> svc_permissionPresets
+  pkg_phone_environment --> svc_phoneEnvironment
   pkg_phone_runtime --> svc_phoneDevices
   pkg_phone_stream --> svc_phoneStream
   pkg_plan_mode --> svc_planMode
@@ -391,8 +395,10 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_phoneDevices --> pkg_phone_environment
   svc_phoneDevices --> pkg_phone_stream
   svc_phoneDevices --> pkg_tool_phone
+  svc_phoneEnvironment --> pkg_client_ui_phone
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_remoteAccess --> pkg_remote_access_http
@@ -540,7 +546,8 @@ flowchart LR
 | `ctx.jobs` | `seam` | [`jobs`](../packages/jobs/jobs) | [`jobs-local`](../packages/jobs/jobs-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-jobs`](../packages/jobs/tool-jobs) | - | Producers (background bash, PTY sends, and subagent delegations) register running work; tool-jobs is the model-facing controller that reads, lists, and kills it; jobs-local is the process-local registry. |
 | `ctx.browserRuntime` | `seam` | `browser` | [`browser-runtime-deterministic`](../packages/browser/browser-runtime-deterministic), [`browser-runtime-electron`](../packages/browser/browser-runtime-electron), [`browser-runtime-tandem`](../packages/browser/browser-runtime-tandem) | [`tool-browser`](../packages/browser/tool-browser), [`browser-workspace`](../packages/browser/browser-workspace) | - | Opaque Profile, Workspace, browser, and tab identities stay behind ctx.browserRuntime; the deferred Consumer uses ordinary discovery, results, and presentation. |
 | `ctx.browserWorkspace` | `core` | `browser` | - | [`tool-browser`](../packages/browser/tool-browser), [`client-ui-browser`](../packages/client/ui-browser), [`client-ui-workbench`](../packages/client/ui-workbench) | - | Each Session independently owns Dock facts, instances, and tabs over ctx.browserRuntime identities; the deferred Consumer binds created tabs when a calling Agent Session is present; the workbench sidebar reads the same snapshot. |
-| `ctx.phoneDevices` | `seam` | [`phone-runtime`](../packages/phone/phone-runtime) | - | [`tool-phone`](../packages/phone/tool-phone), [`phone-stream`](../packages/phone/phone-stream) | - | Opaque DeviceId identities stay behind ctx.phoneDevices; the deferred Consumer uses ordinary discovery, results, and tools/pre-execute ask for mutations; the same-origin stream Consumer reverse-proxies io and capture. |
+| `ctx.phoneDevices` | `seam` | [`phone-runtime`](../packages/phone/phone-runtime) | - | [`tool-phone`](../packages/phone/tool-phone), [`phone-stream`](../packages/phone/phone-stream), [`phone-environment`](../packages/phone/phone-environment) | - | Opaque DeviceId identities stay behind ctx.phoneDevices; the deferred Consumer uses ordinary discovery, results, and tools/pre-execute ask for mutations; the same-origin stream Consumer reverse-proxies io and capture. |
+| `ctx.phoneEnvironment` | `core` | [`phone-environment`](../packages/phone/phone-environment) | - | [`client-ui-phone`](../packages/client/ui-phone) | - | Owns trusted runtime discovery, managed preparation, activation, and revisioned full snapshots; the settings Consumer drives its durable enable value and renders preparation state. |
 | `ctx.phoneStream` | `core` | [`phone-stream`](../packages/phone/phone-stream) | - | - | - | Registers Host WebSocket and signed HTTP capture routes so the browser never dials mobilecli :12000. |
 | `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | Search and fetch providers register into one ctx.web seam; tool-web owns the stable model-facing names. |
 | `ctx.spillStore` | `seam` | [`spill`](../packages/spill/spill) | [`spill-local`](../packages/spill/spill-local) | [`spill-policy`](../packages/spill/spill-policy) | - | The backend saves oversized tool text and returns a model-facing locator plus retrieval hint; spill-policy is the tools/post-execute consumer that decides when to spill. |

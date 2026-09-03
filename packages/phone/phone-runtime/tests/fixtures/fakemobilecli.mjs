@@ -12,7 +12,54 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
+/**
+ * Vertical page-offset delta for one gesture list. A tap-shaped list, any
+ * pause after pointerDown before destination move (Speak Selection), or a
+ * destination move with no post-move pause keeps offset 0.
+ */
+function phoneSwipeScrollDelta(actions) {
+  let origin
+  let destination
+  let pressed = false
+  let longPress = false
+  let travelPause = false
+  for (const action of actions ?? []) {
+    if (action?.type === 'pointerMove' && typeof action.x === 'number' && typeof action.y === 'number') {
+      if (!pressed) origin = { x: action.x, y: action.y }
+      else destination = { x: action.x, y: action.y }
+      continue
+    }
+    if (action?.type === 'pointerDown') {
+      pressed = true
+      if (typeof action.x === 'number' && typeof action.y === 'number' && origin === undefined) {
+        origin = { x: action.x, y: action.y }
+      }
+      continue
+    }
+    if (action?.type === 'pointerUp') {
+      pressed = false
+      continue
+    }
+    if (action?.type === 'pause' && pressed) {
+      if (destination === undefined) longPress = true
+      else travelPause = true
+    }
+  }
+  if (longPress || !travelPause || origin === undefined || destination === undefined) return 0
+  return origin.y - destination.y
+}
+
+function applyGestureScroll(deviceId, params) {
+  const delta = phoneSwipeScrollDelta(params?.actions)
+  const current = state.scroll[deviceId] ?? 0
+  state.scroll[deviceId] = current + delta
+}
+
 const args = process.argv.slice(2)
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('mobilecli version 1.0.5\n')
+  process.exit(0)
+}
 const listenIndex = args.indexOf('--listen')
 const address = listenIndex >= 0 ? (args[listenIndex + 1] ?? '127.0.0.1:12000') : '127.0.0.1:12000'
 const port = Number(address.split(':').at(-1))
@@ -55,11 +102,15 @@ const state = {
   devices: knobs.devices ?? [],
   bootCount: 0,
   shutdownCount: 0,
+  infoCount: 0,
   io: [],
+  captures: [],
+  scroll: {},
 }
 let requests = 0
 
 const listDelayMs = knobs.listDelayMs ?? 0
+const listDelayAfterRequests = knobs.listDelayAfterRequests ?? 0
 const hangEveryResponse = knobs.hang === true
 const exitAfter = typeof knobs.exitAfter === 'number' ? knobs.exitAfter : null
 // When set, the named RPC method answers with this JSON-RPC error instead of
@@ -81,8 +132,8 @@ function writeAgentState(agentState) {
 }
 
 function replyAgent(payload) {
+  process.exitCode = 0
   process.stdout.write(`${JSON.stringify(payload)}\n`)
-  process.exit(0)
 }
 
 // CLI mode: `fakemobilecli agent status|install --device <id> ...` runs as a
@@ -103,36 +154,47 @@ if (args[0] === 'agent') {
   const delayMs = subcommand === 'install' ? (agentKnobs.installDelayMs ?? 0) : (agentKnobs.statusDelayMs ?? 0)
   setTimeout(() => {
     if (typeof failText === 'string') {
+      process.exitCode = subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1)
       process.stderr.write(`${failText}\n`)
-      process.exit(subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1))
+      return
     }
     if (subcommand === 'status') {
       agentState.statusCount += 1
       writeAgentState(agentState)
+      if (typeof agentKnobs.statusAnswer === 'string') {
+        process.exitCode = 0
+        process.stdout.write(`${agentKnobs.statusAnswer}\n`)
+        return
+      }
       if (agentState.installed) {
         replyAgent({ status: 'ok', data: { message: 'Agent version 0.0.0-test is installed on device', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+        return
       }
       replyAgent({ status: 'fail', data: { message: 'Agent is not installed on the device' } })
+      return
     }
     if (subcommand === 'install') {
       agentState.installCount += 1
       agentState.lastInstallArgv = [...args]
       writeAgentState(agentState)
       const deviceEntry = state.devices.find(candidate => candidate.id === device)
-      if (deviceEntry?.type === 'real' && !args.includes('--provisioning-profile')) {
+      if (deviceEntry?.platform === 'ios' && deviceEntry.type === 'real' && !args.includes('--provisioning-profile')) {
+        process.exitCode = 1
         process.stderr.write('--provisioning-profile is required for real iOS devices\n')
-        process.exit(1)
+        return
       }
       agentState.installed = true
       writeAgentState(agentState)
       if (typeof agentKnobs.installAnswer === 'string') {
+        process.exitCode = 0
         process.stdout.write(`${agentKnobs.installAnswer}\n`)
-        process.exit(0)
+        return
       }
       replyAgent({ status: 'ok', data: { message: 'Agent installed successfully', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+      return
     }
+    process.exitCode = 1
     process.stderr.write(`unknown agent subcommand: ${String(subcommand)}\n`)
-    process.exit(1)
   }, delayMs)
 }
 
@@ -144,9 +206,14 @@ function reply(res, id, payload) {
 // One capture payload: an MJPEG multipart stream or a raw H264 Annex-B stream.
 // With streamFrameCount the MJPEG body stays open, emitting a frame every 40ms
 // until the client disconnects — so a mid-stream teardown reaches the proxy.
-function serveCapture(res, format) {
+function serveCapture(res, format, deviceId) {
+  state.captures.push({ deviceId, format })
   if (format === 'avc') {
     res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
+    if (knobs.h264FailureDeviceIds?.includes(deviceId) === true) {
+      res.end('Error: Error 0x80001001')
+      return
+    }
     res.write(h264Stream())
     res.end()
     return
@@ -181,7 +248,7 @@ async function handleRpc(req, res) {
     reply(res, id, { error: { code: failArm.code ?? -32000, message: failArm.message } })
     return
   }
-  if (listDelayMs > 0 && method === 'devices.list') {
+  if (listDelayMs > 0 && requests > listDelayAfterRequests && method === 'devices.list') {
     await new Promise(resolveDelay => setTimeout(resolveDelay, listDelayMs))
   }
   // The exit knob fires only after the real method reply, so response content
@@ -204,6 +271,28 @@ async function handleRpc(req, res) {
       }))
       // Real mobilecli 1.0.5 wraps the array in a `{ devices: [...] }` envelope.
       reply(res, id, { result: knobs.listEnvelope === true ? { devices: entries } : entries })
+      return
+    }
+    case 'device.info': {
+      const deviceId = params?.deviceId
+      const device = state.devices.find(candidate => candidate.id === deviceId)
+      if (device === undefined) {
+        reply(res, id, { error: { code: -32010, message: `no device ${String(deviceId)}` } })
+        return
+      }
+      state.infoCount += 1
+      const infoDelayMs = knobs.infoDelayMs ?? 0
+      if (infoDelayMs > 0) await new Promise(resolveDelay => setTimeout(resolveDelay, infoDelayMs))
+      reply(res, id, {
+        result: {
+          device: {
+            ...device,
+            screenSize: device.screenSize ?? (device.platform === 'ios'
+              ? { width: 402, height: 874, scale: 3 }
+              : { width: 390, height: 844, scale: 1 }),
+          },
+        },
+      })
       return
     }
     case 'device.boot':
@@ -247,6 +336,7 @@ async function handleRpc(req, res) {
         return
       }
       state.io.push({ method, params })
+      if (method === 'device.io.gesture') applyGestureScroll(String(deviceId), params)
       reply(res, id, { result: { status: 'ok' } })
       return
     }
@@ -265,10 +355,13 @@ async function handleRpc(req, res) {
       // Real mobilecli 1.0.5 answers with a session envelope; the stream then
       // lives on the separate /stream?s= endpoint this server also serves.
       if (knobs.captureEnvelope === true) {
-        reply(res, id, { result: { format, sessionUrl: `/stream?s=${format}` } })
+        const device = knobs.h264FailureDeviceIds === undefined
+          ? ''
+          : `&deviceId=${encodeURIComponent(String(deviceId))}`
+        reply(res, id, { result: { format, sessionUrl: `/stream?s=${format}${device}` } })
         return
       }
-      serveCapture(res, format)
+      serveCapture(res, format, String(deviceId))
       return
     }
     default: {
@@ -303,15 +396,24 @@ const server = http.createServer((req, res) => {
           res.end()
           return
         }
-        serveCapture(res, s === 'avc' ? 'avc' : 'mjpeg')
+        const deviceId = new URL(req.url ?? '/stream', 'http://127.0.0.1').searchParams.get('deviceId') ?? ''
+        serveCapture(res, s === 'avc' ? 'avc' : 'mjpeg', deviceId)
         return
       }
       if (req.method === 'GET' && req.url === '/__test/counters') {
-        reply(res, undefined, { requests, bootCount: state.bootCount, shutdownCount: state.shutdownCount, io: state.io })
+        reply(res, undefined, {
+          requests,
+          bootCount: state.bootCount,
+          shutdownCount: state.shutdownCount,
+          infoCount: state.infoCount,
+          io: state.io,
+          captures: state.captures,
+          scroll: state.scroll,
+        })
         return
       }
       if (req.method === 'GET' && req.url === '/__test/pid') {
-        reply(res, undefined, { pid: process.pid })
+        reply(res, undefined, { pid: process.pid, ownerToken: knobs.ownerToken })
         return
       }
       if (req.method === 'POST' && req.url === '/__test/set-devices') {

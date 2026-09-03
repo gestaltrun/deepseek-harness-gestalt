@@ -1,4 +1,4 @@
-/** Keyless adapter scripting the deferred phone arc: discover → list → refused act → final report. */
+/** Keyless adapter scripting the deferred phone arc: discover → list → runtime loss → revoked act. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -14,7 +14,7 @@ const HIGH = ReasoningEffortId('high')
 const OFF = ReasoningEffortId('off')
 
 /** The model-visible deny text the assembled approval chain produces for an unattended ask. */
-const REJECTION_MARKER = 'the user rejected tool "device_act"'
+const REVOKED_MARKER = 'the user rejected tool "device_act"'
 
 function toolCallChunks(id: string, name: string, args: string): StreamChunk[] {
   return [
@@ -82,10 +82,10 @@ class PhoneMockAdapter extends LlmAdapter {
       .filter(block => block.type === 'text')
       .map(block => block.text)
       .join('') ?? ''
-    if (!text.includes(REJECTION_MARKER)) {
-      throw new Error(`phone-mock expected the unattended device_act rejection, got: ${text}`)
+    if (!text.includes(REVOKED_MARKER)) {
+      throw new Error(`phone-mock expected the revoked device_act failure, got: ${text}`)
     }
-    yield* textChunks('PHONE_ACT_REJECTED_KEYLESS')
+    yield* textChunks('PHONE_TOOL_REVOKED_KEYLESS')
   }
 }
 

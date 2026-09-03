@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Model-facing Consumer for `ctx.phoneDevices`. It registers `device_list`, `device_open`, `device_close`, `device_observe`, `device_act`, and `device_screenshot` as ordinary deferred tools. `device_act` accepts exactly one closed tap, swipe, type, or hardware-button action; there is no arbitrary `adb` or shell path. `device_list` and `device_observe` answers carry `id`/`name`/`kind`/`state`/`online`/`platform` per entry.
 
+All six definitions exist only while `phoneDevices.isReady()` is true. The Consumer subscribes to generation readiness, registers the complete set on activation, and disposes the complete set before a generation stops or is replaced. A fleet implementation without the readiness methods retains the static registration contract for out-of-tree compatibility.
+
 ## Configuration
 
 `timeoutMs` is the positive safe-integer cooperative timeout for every call and defaults to `30000`. Invalid values fail plugin load. The Consumer requires the phone fleet Service and tool registry; registration fails loud when `toolSearch` is disabled.
@@ -12,7 +14,7 @@ Model-facing Consumer for `ctx.phoneDevices`. It registers `device_list`, `devic
 
 `device_act`, `device_open`, and `device_close` default to `tools/pre-execute` `ask` after earlier listeners return `allow`. A prior deny or ask is left unchanged. An `allowed-once` approval runs the fleet call once; a rejection leaves the device untouched.
 
-Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, `PHONE_ABORTED`, `PHONE_TIMEOUT`, `PHONE_UNAVAILABLE`, `PHONE_UNRESOLVED`, `PHONE_PROTOCOL`, `PHONE_UPSTREAM`, `PHONE_DEVICE_NOT_FOUND`, `PHONE_REAL_DEVICE`) are rethrown as `HarnessError` with that same code. `device_act` forwards a closed tap, swipe, type, or button onto `phoneDevices.io`. Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` still requires an injected screenshot method; live MJPEG/H264 capture stays on `dsh-phone-stream`.
+Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, `PHONE_ABORTED`, `PHONE_TIMEOUT`, `PHONE_UNAVAILABLE`, `PHONE_UNRESOLVED`, `PHONE_PROTOCOL`, `PHONE_UPSTREAM`, `PHONE_DEVICE_NOT_FOUND`, `PHONE_REAL_DEVICE`) are rethrown as `HarnessError` with that same code. `device_act` forwards a closed tap, swipe, type, or button onto `phoneDevices.io`. A swipe uses `phoneSwipeActions` from `@deepseek-ai/dsh-phone-runtime/swipe` ([encoding](../../../.agents/notes/implemented/bug-fix/2026-09-02-phone-ios-wda-swipe-gesture.md)). Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` still requires an injected screenshot method; live MJPEG/H264 capture stays on `dsh-phone-stream`.
 
 ## Model Experience
 

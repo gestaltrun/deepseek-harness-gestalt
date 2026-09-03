@@ -6,6 +6,8 @@
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { PhoneSettingsCard } from './PhoneSettingsCard.tsx'
+import { PhoneRuntimeBar } from './PhoneRuntimeBar.tsx'
+import { PhonePlatformCards } from './PhonePlatformCards.tsx'
 import type { PhoneSettingsCardFace } from './phone-settings-controller.ts'
 import css from './PhoneSettingsSection.module.css'
 
@@ -26,6 +28,25 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
     <section className={css.section} data-phone-settings>
       <h2 className={css.heading}>{props.t('title')}</h2>
       <p className={css.intro}>{props.t('intro')}</p>
+      <PhoneRuntimeBar
+        runtime={state.runtime}
+        onPrepare={props.prepareRuntime}
+        onCancel={props.cancelRuntime}
+        onRefresh={props.refreshRuntime}
+      />
+      <PhonePlatformCards
+        android={state.platforms.android}
+        ios={state.platforms.ios}
+        iosUnsupportedMessage={props.t('iosUnsupported')}
+        onPrepareAndroid={props.prepareAndroid}
+        onCancelAndroid={props.cancelAndroid}
+        onRefreshAndroid={props.refreshAndroid}
+        onStartAndroid={props.startAndroid}
+        onPrepareIos={props.prepareIos}
+        onCancelIos={props.cancelIos}
+        onRefreshIos={props.refreshIos}
+        onStartIos={props.startIos}
+      />
       <PhoneSettingsCard
         enabled={state.enabled}
         view={state.view}
@@ -33,6 +54,7 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
         onRedetect={props.redetect}
         onCopy={props.copyCommand}
         onNextAction={props.nextAction}
+        onOpenDevice={props.openDevice}
       />
     </section>
   )

@@ -59,7 +59,7 @@ function styleInjectionModule(
  * Everything else under @deepseek-ai/* is either a module-table entry
  * (external) or a leak the purity gate rejects.
  */
-export const INLINE_SAFE = /^(?:@deepseek-ai\/dsh-platform-account\/privacy|@deepseek-ai\/dsh-browser-workspace\/client$|@deepseek-ai\/dsh-(?:host-apiproxy|file-reference|session|llm|tools|brand|request-trust)(?:\/|$))/
+export const INLINE_SAFE = /^(?:@deepseek-ai\/dsh-platform-account\/privacy|@deepseek-ai\/dsh-browser-workspace\/client$|@deepseek-ai\/dsh-phone-runtime\/swipe$|@deepseek-ai\/dsh-(?:host-apiproxy|file-reference|session|llm|tools|brand|request-trust)(?:\/|$))/
 
 /**
  * Vendored framework libraries: rescoped into @deepseek-ai, so the gate below
@@ -101,7 +101,8 @@ function browserSourcePath(source: string, sourcemapPath: string): string {
  * @param libEntry - node-half entries, spelled at the call site so the
  * package-invariants gate can see `lib/types/invariant.js` in each package's
  * own tsdown.config.ts (a preset-side glob hides it from the mechanical check).
- * @param options - phase placement, lib overrides, and companion Node configs.
+ * @param options - development client entry, phase placement, lib overrides,
+ * and companion Node configs.
  * @returns ENV-selected tsdown config for the current build face.
  */
 export function clientBundle(
@@ -112,7 +113,9 @@ export function clientBundle(
   const lib = clientLibraryConfig(id, libEntry, options.lib)
   return ({ env }) => {
     const face = buildFace(env?.DSH_BUILD_FACE)
-    const clientEntry = face === undefined ? 'src/client/index.ts' : 'lib/types/client/index.js'
+    const clientEntry = face === undefined
+      ? options.clientSourceEntry ?? 'src/client/index.ts'
+      : 'lib/types/client/index.js'
     const client = clientConfig(id, clientEntry)
     const node = [lib, ...(options.companions ?? [])]
     if (face === 'host') return options.hostPhase === true ? node : [SKIP_WORKSPACE_BUILD]
@@ -212,6 +215,8 @@ export function clientOnly(configs: readonly UserConfig[]): BuildFaceConfig {
 }
 
 interface ClientBundleOptions {
+  /** TypeScript source entry consumed by the development watcher. */
+  readonly clientSourceEntry?: string
   /** Emit the Node-side artifacts during the Host pass instead of the Client pass. */
   readonly hostPhase?: boolean
   /** Additional Node-side configs emitted alongside the package library. */

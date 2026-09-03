@@ -43,6 +43,9 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  * blocks. A package moves on or off this list with its context behavior.
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
+  'packages/phone/phone-environment': { kind: 'indirect', reason: 'The Host-side environment service delegates model rendering to dsh-tool-phone.' },
+  'packages/phone/phone-environment-android': { kind: 'indirect', reason: 'The Android environment Provider reaches the model through dsh-tool-phone.' },
+  'packages/phone/phone-environment-ios': { kind: 'indirect', reason: 'The iOS environment Provider reaches the model through dsh-tool-phone.' },
   'packages/phone/phone-runtime': { kind: 'indirect', reason: 'The Host-side device fleet service delegates model rendering to dsh-tool-phone.' },
   'packages/phone/phone-stream': { kind: 'none', reason: 'The Host-side reverse-proxy registers no prompt, schema, or model-visible surface.' },
   'packages/browser/browser-runtime': { kind: 'indirect', reason: 'The Service Definition delegates model rendering to dsh-tool-browser.' },
@@ -79,7 +82,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/client/ui-layout': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-sidebar': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-desktop': { kind: 'none', reason: 'Desktop-only UI plugin layer; registers nothing model-facing.' },
-  'packages/client/ui-phone': { kind: 'none', reason: 'The browser UI and Host settings namespace register no prompt, tool schema, session event, or provider request.' },
+  'packages/client/ui-phone': { kind: 'none', reason: 'The browser UI, Host settings namespace, and video playback register no prompt, tool schema, session event, or provider request.' },
   'packages/platform/platform-account': { kind: 'none', reason: 'Platform identity service; Account state never enters a model request.' },
   'packages/platform/platform-account-core': { kind: 'none', reason: 'Platform identity provider; Account state never enters a model request.' },
   'packages/platform/platform-account-http': { kind: 'none', reason: 'Platform identity HTTP consumer; Account state never enters a model request.' },

@@ -193,6 +193,14 @@ export interface PhoneTabSwitchFace {
   updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void
 }
 
+/** Sidebar verbs used when Settings opens a device into the visible panel. */
+export interface PhoneTabOpenFace extends PhoneTabSwitchFace {
+  /** Create or focus the singleton Phone tab. */
+  openTab(seed: { readonly type: string }): void
+  /** Make the right panel visible after the device is selected. */
+  setPanelOpen(open: boolean): void
+}
+
 /**
  * Build the in-place device switcher against one sidebar face: the single
  * tab's meta flips to the chosen device and the title follows `手机·<name>`
@@ -214,6 +222,28 @@ export function createPhoneTabSwitcher(
       meta: { kind: 'device', serial, name },
     })
   }
+}
+
+/**
+ * Create or focus the singleton Phone tab, select one device, and reveal it.
+ * @param sidebar - Better Sidebar projection owned by the active renderer.
+ * @param isEnabled - Current durable Phone gate.
+ * @param serial - Online device identity.
+ * @param name - Device title shown in the tab strip.
+ */
+export function openPhoneDevicePanel(
+  sidebar: PhoneTabOpenFace,
+  isEnabled: () => boolean,
+  serial: string,
+  name: string,
+): void {
+  if (!isEnabled()) return
+  sidebar.openTab({ type: PHONE_TAB_ID })
+  sidebar.updateTab(PHONE_TAB_ID, {
+    title: phoneTabTitleOf(name),
+    meta: { kind: 'device', serial, name },
+  })
+  sidebar.setPanelOpen(true)
 }
 
 /** Environment the descriptor hands each tab body at render time. */

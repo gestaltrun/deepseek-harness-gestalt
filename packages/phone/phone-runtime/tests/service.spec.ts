@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import type { Config } from '@deepseek-ai/dsh-phone-runtime'
-import type { PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
-import { MobilecliServerProcess } from '../src/server-process.ts'
+import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
 import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
+import { buildGradientH264 } from './fixtures/u3-visible-frames.ts'
+import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -80,13 +82,163 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 }
 
 describe('phone runtime service lifecycle', () => {
+  it('hot-activates and deactivates replaceable generations behind one Service', async () => {
+    const fake = await stageFake({
+      devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
+    })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const removedReadiness: boolean[] = []
+    const removeReadiness = context.phoneDevices.onReadinessChanged(ready => removedReadiness.push(ready))
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    removeReadiness()
+    expect((await context.phoneDevices.listDevices()).android.map(device => device.id))
+      .toEqual(['emulator-5554'])
+
+    await context.phoneDevices.deactivate()
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await expect(context.phoneDevices.listDevices()).rejects.toMatchObject({ code: 'PHONE_UNRESOLVED' })
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect(readiness).toEqual([true, false, true])
+    expect(removedReadiness).toEqual([true])
+  })
+
+  it('rejects activation whose caller is already cancelled', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath, controller.signal))
+      .rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+  })
+
+  it('rejects a queued deactivation when teardown owns the Service first', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const captured = context.phoneDevices as unknown as {
+      activationTail: Promise<void>
+      deactivate(): Promise<void>
+    }
+    captured.activationTail = blocked
+    const deactivating = captured.deactivate()
+    const disposing = context.fiber.dispose()
+    release()
+    await expect(deactivating).rejects.toMatchObject({ code: 'PHONE_DISPOSED' })
+    await disposing
+  })
+
+  it('does not publish readiness when activation is cancelled during the baseline hold', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyStabilityMs: 200,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await waitFor(async () => (await fake.counters()).requests >= 2)
+    controller.abort(new Error('cancel during baseline hold'))
+
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
+  it('rejects a timed-out baseline listing without publishing readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 300 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      requestTimeoutMs: 50,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_TIMEOUT' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
+  it('cancels the in-flight baseline listing without publishing readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 5_000 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      requestTimeoutMs: 6_000,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await waitFor(async () => (await fake.counters()).requests >= 2)
+    const abortedAt = Date.now()
+    controller.abort(new Error('cancel during baseline listing'))
+
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    // The five-second fake response delay makes sub-second rejection prove
+    // that caller cancellation reached the in-flight RPC.
+    expect(Date.now() - abortedAt).toBeLessThan(1_000)
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
   it('activates with an unavailable service when PATH carries no mobilecli', async () => {
     const context = new Context()
     contexts.push(context)
     const previousPath = process.env.PATH
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
+    const previousNpmPrefix = process.env.npm_config_prefix
     process.env.PATH = ''
     process.env.HOME = ''
+    delete process.env.USERPROFILE
+    delete process.env.npm_config_prefix
     try {
       // Composition survives: the Host must not die for an optional provider.
       await context.plugin(PhoneDevices, { ...FAST_CONFIG }).await()
@@ -99,6 +251,10 @@ describe('phone runtime service lifecycle', () => {
       else process.env.PATH = previousPath
       if (previousHome === undefined) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
+      if (previousNpmPrefix === undefined) delete process.env.npm_config_prefix
+      else process.env.npm_config_prefix = previousNpmPrefix
     }
   })
 
@@ -301,6 +457,87 @@ describe('phone runtime service lifecycle', () => {
     ])
   })
 
+  it('normalizes iOS screenshot pixels onto device logical points and caches the scale', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'tap',
+      x: 984,
+      y: 1_228,
+    })
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'gesture',
+      actions: [
+        { type: 'pointerDown', x: 3, y: 6, pressure: 0.5 },
+        { type: 'pointerUp', x: 984, y: 1_228 },
+      ],
+    })
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'button',
+      button: 'HOME',
+    })
+    expect((await fake.counters())).toMatchObject({
+      infoCount: 1,
+      io: [
+        { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 328, y: 409 } },
+        {
+          method: 'device.io.gesture',
+          params: {
+            deviceId: 'REAL-UDID',
+            actions: [
+              { type: 'pointerDown', x: 1, y: 2, pressure: 0.5 },
+              { type: 'pointerUp', x: 328, y: 409 },
+            ],
+          },
+        },
+        { method: 'device.io.button', params: { deviceId: 'REAL-UDID', button: 'HOME' } },
+      ],
+    })
+  })
+
+  it('rejects an invalid iOS device.info screen scale before sending io', async () => {
+    const fake = await stageFake({
+      devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 0 } }],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const failure = await errorOf(() => context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'tap',
+      x: 12,
+      y: 34,
+    }))
+    expect(failure.code).toBe('PHONE_PROTOCOL')
+    expect(failure.message).toMatch(/screenSize\.scale/u)
+    expect((await fake.counters()).io).toEqual([])
+  })
+
+  it('keeps chained iOS info and io on one generation and re-queries after replacement', async () => {
+    const fake = await stageFake({
+      devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 3 } }],
+      infoDelayMs: 200,
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const staleFailure = errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 }))
+    await waitFor(async () => (await fake.counters()).infoCount === 1)
+    await fake.setLaunchDevices([
+      { ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 2 } },
+    ])
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    await expect(staleFailure).resolves.toMatchObject({ code: 'PHONE_ABORTED' })
+
+    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 })
+    expect((await fake.counters())).toMatchObject({
+      infoCount: 1,
+      io: [{ method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 6, y: 9 } }],
+    })
+  })
+
   it('refuses io and capture for ids absent from the latest listing', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
@@ -350,6 +587,289 @@ describe('phone runtime service lifecycle', () => {
     assertRecognizableH264Picture(Buffer.concat(h264Chunks))
   })
 
+  it('keeps Android on H264 when mobilecli AVC fails and system screenrecord is recognizable', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      h264FailureDeviceIds: ['emulator-5554'],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const native = vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(new ReadableStream({
+      start(controller) {
+        controller.enqueue(buildGradientH264())
+        controller.close()
+      },
+    }))
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    const bytes = Buffer.from(await new Response(h264.body).arrayBuffer())
+
+    expect(h264.contentType).toBe('video/h264')
+    assertRecognizableH264Picture(bytes)
+    expect(native).toHaveBeenCalledOnce()
+    expect((await fake.counters()).captures).toContainEqual({
+      deviceId: 'emulator-5554',
+      format: 'avc',
+    })
+  })
+
+  it('tries native Android H264 when the mobilecli key-unit probe times out', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const nativeBody = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([4, 5, 6])); controller.close() },
+    })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockRejectedValueOnce(new TimeoutReason('ANDROID_H264_PROBE', 15_000))
+      .mockResolvedValueOnce({ recognizable: true, body: nativeBody })
+    const native = vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+
+    expect(Buffer.from(await new Response(h264.body).arrayBuffer())).toEqual(Buffer.from([4, 5, 6]))
+    expect(native).toHaveBeenCalledOnce()
+  })
+
+  it('tries native Android H264 when the mobilecli body read fails', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const nativeBody = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([7])); controller.close() },
+    })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockRejectedValueOnce('mobilecli reader refusal')
+      .mockResolvedValueOnce({ recognizable: true, body: nativeBody })
+    vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    expect(Buffer.from(await new Response(h264.body).arrayBuffer())).toEqual(Buffer.from([7]))
+  })
+
+  it('propagates cancellation that wins during native Android H264 inspection', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    const mobilecliCancel = vi.fn(async () => { throw new Error('mobilecli cleanup refusal') })
+    const nativeCancel = vi.fn(async () => {})
+    const captured = context.phoneDevices as unknown as {
+      preferAndroidH264(
+        capture: { contentType: string; body: ReadableStream<Uint8Array> },
+        id: DeviceId,
+        signal: AbortSignal,
+      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const mobilecliBody = new ReadableStream<Uint8Array>({ cancel: mobilecliCancel })
+    const nativeBody = new ReadableStream<Uint8Array>({ cancel: nativeCancel })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockResolvedValueOnce({ recognizable: false, body: mobilecliBody, failure: new Error('invalid') })
+      .mockImplementationOnce(async () => {
+        controller.abort(new DOMException('runtime replaced', 'AbortError'))
+        throw controller.signal.reason
+      })
+    vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const cancelled = await errorOf(() => captured.preferAndroidH264({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>(),
+    }, ANDROID_EMULATOR, controller.signal))
+    expect(cancelled.code).toBe('PHONE_ABORTED')
+    expect(nativeCancel).toHaveBeenCalledOnce()
+    expect(mobilecliCancel).toHaveBeenCalledOnce()
+  })
+
+  it('propagates cancellation that rejects the mobilecli H264 inspection', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    const captured = context.phoneDevices as unknown as {
+      preferAndroidH264(
+        capture: { contentType: string; body: ReadableStream<Uint8Array> },
+        id: DeviceId,
+        signal: AbortSignal,
+      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<never>
+    }
+    vi.spyOn(captured, 'inspectAndroidH264').mockImplementation(async () => {
+      controller.abort(new DOMException('runtime replaced', 'AbortError'))
+      throw controller.signal.reason
+    })
+
+    const cancelled = await errorOf(() => captured.preferAndroidH264({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>(),
+    }, ANDROID_EMULATOR, controller.signal))
+    expect(cancelled.code).toBe('PHONE_ABORTED')
+  })
+
+  it('preserves mobilecli failure bytes when Android system H264 is unavailable', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      h264FailureDeviceIds: ['emulator-5554'],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    vi.spyOn(captured, 'openNativeAndroidH264').mockImplementation(() => {
+      throw new PhoneDevicesError('PHONE_UNAVAILABLE', 'adb is absent')
+    })
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+
+    expect(await new Response(h264.body).text()).toBe('Error: Error 0x80001001')
+  })
+
+  it('normalizes cancellation after mobilecli H264 inspection and contains body cleanup failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    const captured = context.phoneDevices as unknown as {
+      preferAndroidH264(
+        capture: { contentType: string; body: ReadableStream<Uint8Array> },
+        id: DeviceId,
+        signal: AbortSignal,
+      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+    }
+    vi.spyOn(captured, 'inspectAndroidH264').mockImplementation(async () => {
+      controller.abort(new DOMException('capture replaced', 'AbortError'))
+      return {
+        recognizable: false,
+        body: new ReadableStream({ cancel() { throw new Error('mobilecli cleanup refusal') } }),
+        failure: new Error('mobilecli invalid'),
+      }
+    })
+
+    const cancelled = await errorOf(() => captured.preferAndroidH264({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>(),
+    }, ANDROID_EMULATOR, controller.signal))
+    expect(cancelled.code).toBe('PHONE_ABORTED')
+  })
+
+  it('contains cleanup failures while preserving bytes after an unrecognizable native H264 stream', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const mobilecliBody = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([1])); controller.close() },
+    })
+    const nativeBody = new ReadableStream<Uint8Array>({ cancel() { throw new Error('native source cleanup refusal') } })
+    const nativeReplay = new ReadableStream<Uint8Array>({ cancel() { throw new Error('native replay cleanup refusal') } })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockResolvedValueOnce({ recognizable: false, body: mobilecliBody, failure: new Error('mobilecli invalid') })
+      .mockResolvedValueOnce({ recognizable: false, body: nativeReplay })
+    vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    expect(Buffer.from(await new Response(h264.body).arrayBuffer())).toEqual(Buffer.from([1]))
+  })
+
+  it('keeps native H264 when mobilecli replay cleanup rejects', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const mobilecliBody = new ReadableStream<Uint8Array>({ cancel() { throw new Error('mobilecli cleanup refusal') } })
+    const nativeBody = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([9, 8, 7])); controller.close() },
+    })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockResolvedValueOnce({ recognizable: false, body: mobilecliBody, failure: new Error('mobilecli invalid') })
+      .mockResolvedValueOnce({ recognizable: true, body: nativeBody })
+    vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    expect(Buffer.from(await new Response(h264.body).arrayBuffer())).toEqual(Buffer.from([9, 8, 7]))
+  })
+
+  it('preserves renderer fallback when native H264 throws a non-Error value', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      h264FailureDeviceIds: ['emulator-5554'],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    vi.spyOn(captured, 'openNativeAndroidH264').mockImplementation(() => { throw 'adb refusal' })
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    expect(await new Response(h264.body).text()).toBe('Error: Error 0x80001001')
+  })
+
   it('reports capture cancellation that arrives before the request is sent as PHONE_ABORTED', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
@@ -397,6 +917,22 @@ describe('phone runtime service lifecycle', () => {
     expect(timedOut.message).toContain('device.screencapture')
   })
 
+  it('preserves a non-timeout screencapture failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      rpcClient: { stream(...args: unknown[]): Promise<unknown> }
+    }
+    vi.spyOn(captured.rpcClient, 'stream').mockRejectedValue(
+      new PhoneDevicesError('PHONE_PROTOCOL', 'capture protocol failed'),
+    )
+    const failure = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264',
+    }))
+    expect(failure.code).toBe('PHONE_PROTOCOL')
+  })
+
   it('boots and shuts simulators down through mobilecli with refreshed listings', async () => {
     const fake = await stageFake({
       devices: [wireDevice('SIM-UDID', 'ios', 'simulator', 'offline')],
@@ -413,7 +949,7 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('bounds a hung upstream answer with the configured method ceiling', async () => {
-    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 1_500 })
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 1_500, listDelayAfterRequests: 2 })
     fakes.push(fake)
     const context = await mountWith(fake, { requestTimeoutMs: 60, pollIntervalMs: 60_000 })
     const timedOut = await errorOf(() => context.phoneDevices.listDevices())
@@ -486,14 +1022,352 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('turns an unexpected child exit into persistent unavailability', async () => {
-    // The fake answers the readiness probe and the baseline listing, then exits.
-    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
+    // The fake survives readiness, answers the first background poll, then exits.
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 3 })
     fakes.push(fake)
     const context = await mountWith(fake)
-    await new Promise(resolveSettle => setTimeout(resolveSettle, 200))
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
     const unavailable = await errorOf(() => context.phoneDevices.listDevices())
     expect(unavailable.code).toBe('PHONE_UNAVAILABLE')
     expect(unavailable.message).toMatch(/exited unexpectedly|socket is gone/)
+  })
+
+  it('marks the current ready generation lost when its child exit callback settles', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      child: MobilecliServerProcess | undefined
+      onChildExit(child: MobilecliServerProcess, exit: { readonly code: number | null }): void
+    }
+    const child = captured.child
+    if (child === undefined) throw new Error('ready phone runtime has no current child')
+
+    captured.onChildExit(child, { code: 73 })
+
+    const unavailable = await errorOf(() => context.phoneDevices.listDevices())
+    expect(unavailable).toMatchObject({ code: 'PHONE_UNAVAILABLE' })
+    expect(unavailable.message).toContain('exited unexpectedly (code 73)')
+  })
+
+  it('does not publish readiness when the first device listing violates the protocol', async () => {
+    const fake = await stageFake({ devices: [{ id: 'malformed' }] as never })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    const fiber = context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+    })
+    const outcome = await fiber.await().then(() => undefined, (error: unknown) => error)
+    expect(outcome).toBeInstanceOf(PhoneDevicesError)
+    expect((outcome as PhoneDevicesError).code).toBe('PHONE_PROTOCOL')
+  })
+
+  it('fails when the child exits after the baseline listing response but before readiness commits', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    const fiber = context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+    })
+    const outcome = await fiber.await().then(() => undefined, (error: unknown) => error)
+    expect(outcome).toBeInstanceOf(PhoneDevicesError)
+    expect((outcome as PhoneDevicesError).code).toBe('PHONE_UNAVAILABLE')
+  })
+
+  it('publishes removals when a ready child is lost', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const changes: PhoneDeviceChange[] = []
+    context.phoneDevices.onChanged(change => changes.push(change))
+    const pidResponse = await fetch(`${fake.baseUrl}/__test/pid`)
+    const { pid } = await pidResponse.json() as { pid: number }
+    process.kill(pid, 'SIGKILL')
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
+    expect(changes.at(-1)?.removed).toEqual([
+      ANDROID_EMULATOR, IOS_SIMULATOR, IOS_REAL,
+    ])
+    expect(changes.at(-1)?.list).toEqual({
+      android: [], ios: { simulators: [], reals: [] },
+    })
+  })
+
+  it('cancels a replacement while its child is waiting for readiness', async () => {
+    const initial = await stageFake({ devices: BASE_DEVICES })
+    const hanging = await stageFake({ hang: true })
+    fakes.push(initial, hanging)
+    const context = await mountWith(initial)
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    const activating = context.phoneDevices.activateExecutable(hanging.executablePath, controller.signal)
+    controller.abort()
+    await expect(activating).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(Date.now() - startedAt).toBeLessThan(500)
+    expect(context.phoneDevices.isReady()).toBe(false)
+  })
+
+  it('observes caller cancellation from inside the readiness probe loop', async () => {
+    const fake = await stageFake({ hang: true })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await new Promise(resolveWait => setTimeout(resolveWait, 30))
+    controller.abort()
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+  })
+
+  it('lets a committed loss and readiness-window expiry win during the stability hold', async () => {
+    const lostFake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(lostFake)
+    await lostFake.claim()
+    const lostContext = new Context()
+    contexts.push(lostContext)
+    await lostContext.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyStabilityMs: 200,
+      serverPort: lostFake.port,
+    }).await()
+    const lostActivation = lostContext.phoneDevices.activateExecutable(lostFake.executablePath)
+    await lostFake.awaitOnline()
+    await waitFor(async () => (await lostFake.counters()).requests >= 2)
+    ;(lostContext.phoneDevices as unknown as { lost?: PhoneDevicesError }).lost =
+      new PhoneDevicesError('PHONE_UNAVAILABLE', 'lost during readiness hold')
+    await expect(lostActivation).rejects.toMatchObject({ code: 'PHONE_UNAVAILABLE' })
+
+    const timeoutFake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(timeoutFake)
+    await timeoutFake.claim()
+    const timeoutContext = new Context()
+    contexts.push(timeoutContext)
+    await timeoutContext.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyTimeoutMs: 1_000,
+      readyStabilityMs: 1_500,
+      serverPort: timeoutFake.port,
+    }).await()
+    await expect(timeoutContext.phoneDevices.activateExecutable(timeoutFake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_TIMEOUT' })
+  })
+
+  it('normalizes an unexpected startup exception as a protocol failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const captured = context.phoneDevices as unknown as {
+      pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
+    }
+    captured.pollAttempt = async () => { throw 'unexpected startup value' }
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_PROTOCOL' })
+  })
+
+  it('preserves the startup failure when process-tree cleanup also fails', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const captured = context.phoneDevices as unknown as {
+      pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
+    }
+    captured.pollAttempt = async () => {
+      throw new PhoneDevicesError('PHONE_TIMEOUT', 'startup listing timed out')
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(MobilecliProcessTree.prototype, 'stop')
+    if (typeof descriptor?.value !== 'function') throw new Error('server stop method is unavailable')
+    const originalStop = descriptor.value as (this: MobilecliServerProcess) => Promise<void>
+    const stop = vi.spyOn(MobilecliServerProcess.prototype, 'stop').mockImplementation(async function (this: MobilecliServerProcess) {
+      await originalStop.call(this)
+      throw new Error('startup cleanup refused')
+    })
+    try {
+      const failure = await errorOf(() => context.phoneDevices.activateExecutable(fake.executablePath))
+      expect(failure.code).toBe('PHONE_TIMEOUT')
+      expect(failure.message).toContain('startup cleanup refused')
+      expect(failure.cause).toBeInstanceOf(AggregateError)
+    } finally {
+      stop.mockRestore()
+    }
+  })
+
+  it('halts after a malformed background listing', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await fake.setDevices([{ id: 'malformed' }])
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
+    await expect(context.phoneDevices.listDevices()).rejects.toMatchObject({ code: 'PHONE_PROTOCOL' })
+  })
+
+  it('keeps the last listing after a retryable background poll miss', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const warnings: unknown[] = []
+    vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const captured = context.phoneDevices as unknown as {
+      roundTrip(): Promise<unknown>
+      pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
+    }
+    captured.roundTrip = async () => { throw new PhoneDevicesError('PHONE_TIMEOUT', 'temporary miss') }
+    await captured.pollAttempt()
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect(warnings).toContain('phone-runtime: device poll missed (PHONE_TIMEOUT); keeping the last listing')
+  })
+
+  it.each([false, true])('rejects an initial listing refused by publication (pre-lost: %s)', async (preLost) => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const captured = context.phoneDevices as unknown as {
+      lost?: PhoneDevicesError
+      publish(change: PhoneDeviceChange): boolean
+    }
+    captured.publish = () => {
+      if (preLost) captured.lost = new PhoneDevicesError('PHONE_UNAVAILABLE', 'publisher stopped')
+      return false
+    }
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath)).rejects.toMatchObject({
+      code: preLost ? 'PHONE_UNAVAILABLE' : 'PHONE_PROTOCOL',
+    })
+  })
+
+  it('contains lost-child stop failure and readiness subscriber failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const warnings: unknown[] = []
+    vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const survivor = vi.fn()
+    context.phoneDevices.onReadinessChanged(() => { throw new Error('bad readiness observer') })
+    context.phoneDevices.onReadinessChanged(survivor)
+    const captured = context.phoneDevices as unknown as {
+      child?: { stop(): Promise<void> }
+      markLost(reason: PhoneDevicesError): void
+    }
+    if (captured.child === undefined) throw new Error('ready runtime did not retain its child')
+    captured.child.stop = vi.fn(async () => { throw new Error('stop failed') })
+    captured.markLost(new PhoneDevicesError('PHONE_UNAVAILABLE', 'synthetic loss'))
+    await vi.waitFor(() => {
+      expect(warnings).toContain('phone-runtime: failed to stop the lost mobilecli child')
+    })
+    expect(warnings).toContain('phone-runtime: a readiness observer failed')
+    expect(survivor).toHaveBeenCalledWith(false)
+  })
+
+  it('records teardown stop failure on the activation tail', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as { child?: { stop(): Promise<void> } }
+    if (captured.child === undefined) throw new Error('ready runtime did not retain its child')
+    const originalStop = captured.child.stop.bind(captured.child)
+    const stop = vi.fn(async () => { throw new Error('teardown stop failed') })
+    captured.child.stop = stop
+    await context.fiber.dispose()
+    expect(stop).toHaveBeenCalledOnce()
+    await originalStop()
+  })
+
+  it('retains a generation after failed deactivation so teardown can retry it', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      child?: { stop(): Promise<void> }
+      deactivate(): Promise<void>
+    }
+    const child = captured.child
+    if (child === undefined) throw new Error('ready runtime did not retain its child')
+    const originalStop = child.stop.bind(child)
+    const stop = vi.fn()
+      .mockRejectedValueOnce(new Error('synthetic stop refusal'))
+      .mockImplementationOnce(originalStop)
+    child.stop = stop
+
+    await expect(captured.deactivate()).rejects.toThrow('synthetic stop refusal')
+    expect(captured.child).toBe(child)
+    await captured.deactivate()
+    expect(captured.child).toBeUndefined()
+    expect(stop).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not clear a replacement generation committed while an earlier stop settles', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      child: { stop(): Promise<void> } | undefined
+      stopRuntime(reason: PhoneDevicesError): Promise<void>
+    }
+    const child = captured.child
+    if (child === undefined) throw new Error('ready runtime did not retain its child')
+    const replacement = { stop: vi.fn(async () => {}) }
+    const originalStop = child.stop.bind(child)
+    child.stop = vi.fn(async () => {
+      await originalStop()
+      captured.child = replacement
+    })
+
+    await captured.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'synthetic replacement'))
+    expect(captured.child).toBe(replacement)
+    captured.child = undefined
+  })
+
+  it('drains a replacement racing service disposal without leaving a child', async () => {
+    const fake = await stageFake({ hang: true })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const activating = context.phoneDevices.activateExecutable(fake.executablePath)
+    const disposing = context.fiber.dispose()
+    await expect(activating).rejects.toMatchObject({ code: 'PHONE_DISPOSED' })
+    await disposing
+    await expect(fetch(`${fake.baseUrl}/__test/pid`)).rejects.toThrow()
   })
 
   it('fails initialization loudly when the server exits before answering readiness', async () => {
@@ -566,5 +1440,10 @@ describe('phone runtime service lifecycle', () => {
     contexts.push(badInterval)
     await expect(badInterval.plugin(PhoneDevices, { ...FAST_CONFIG, pollIntervalMs: -5 }).await())
       .rejects.toThrow(/pollIntervalMs/)
+
+    const badStability = new Context()
+    contexts.push(badStability)
+    await expect(badStability.plugin(PhoneDevices, { ...FAST_CONFIG, readyStabilityMs: 0 }).await())
+      .rejects.toThrow(/readyStabilityMs/)
   })
 })

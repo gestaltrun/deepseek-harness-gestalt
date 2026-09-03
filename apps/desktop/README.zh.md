@@ -4,7 +4,7 @@
 
 [产品发布](../../docs/product-releases.zh.md)定义共用的 Product Release Plan、审批、持久资产与恢复流程；本页只拥有 Desktop 特定打包与更新行为。
 
-DeepSeek Gestalt 的 Desktop Host。Electron 拥有窗口、菜单、GitHub 自动更新，以及进程内 Browser Runtime `webContents`。它启动捆绑的官方 Node 加上 `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0`，并打开该环回 URL。`--no-open` 阻止再唤起系统默认浏览器，因为 Desktop Host 已经拥有窗口。叠加层加入 Schedule、GESTALT 次标、拖拽带、Update Control，以及指向 Host loopback Browser origin 的 Tandem 形态 HTTP 客户端；只有更新可操作或发现版本后发生错误时，控件才会出现。浏览器 `dsh web` 不加载这层，并继续使用确定性 Browser Runtime。这层还会加入 phone runtime、stream 与 tool 三行，它们在 `DSH_PHONE_MOBILECLI` 指向 `mobilecli` 可执行文件之前保持关闭：桌面上的手机设备是 opt-in 的，未设置时该 tab 渲染缺失态。「手机」tab 这一行本身来自 web-app roster，而非这层叠加——重复插入会撞出重复 loader entry id 并中止启动，组合 boot 规格测试正是对此的回归防护。
+DeepSeek Gestalt 的 Desktop Host。Electron 拥有窗口、菜单、GitHub 自动更新，以及进程内 Browser Runtime `webContents`。它启动捆绑的官方 Node 加上 `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0`，并打开该环回 URL。`--no-open` 阻止再唤起系统默认浏览器，因为 Desktop Host 已经拥有窗口。叠加层加入 Schedule、GESTALT 次标、拖拽带、Update Control，以及指向 Host loopback Browser origin 的 Tandem 形态 HTTP 客户端；只有更新可操作或发现版本后发生错误时，控件才会出现。浏览器 `dsh web` 不加载这层，并继续使用确定性 Browser Runtime。叠加层始终加入 phone environment、稳定 runtime、stream 与 tool。runtime 会等待 environment owner 从显式 `DSH_PHONE_MOBILECLI` override、已校验的托管 current 或系统发现结果中选择可执行文件；准备完成后无需重启。「手机」tab 这一行本身来自 web-app roster，而非这层叠加——重复插入会撞出重复 loader entry id 并中止启动，组合 boot 规格测试正是对此的回归防护。
 
 在所有平台关闭最后一个窗口时，会先以 `window-close` 原因排空 Relay；Ctrl+C、quit 与 smoke 测试结束都会取消尚未完成的启动，停止 Personal Pairing 与受生产 gate 保护的 Relay owner，停止 Web Host，释放隐藏 Browser 窗口，并等待其工作排空后再终止 Electron。系统 sleep 会停止 Remote Access；resume 只为仍处于登录状态的账号重新加载。源码 Electron smoke 会在 sleep、关闭手机访问、关闭窗口与 quit 后读取各次 Relay owner 状态，再检查 Web Host 子进程 PID 已消失。首次启动或后续 Host 崩溃共允许一次重试，之后窗口才显示 Host 错误。不存在无窗口 daemon、后台 Host 或 remote wake 路径。Chromium 持久 partition 位于 Electron `userData/Partitions/<name>`；loopback API token 放在 `userData/browser-runtime` 下，绝不写入 Tandem Browser Application Support。Dock 仍是截图、标题与文本的原生窗格。
 
@@ -55,6 +55,8 @@ DSH_SUB2API_E2E_SOURCES=/absolute/path/to/public-sub2api-sources.json DSH_SUB2AP
 ```
 
 配置文件包含 `production` 标记、上文所述六个公开身份字段、附件 Host deadline，以及公开的 Relay WSS endpoint 与 limit；它不包含 OAuth secret。进程还需要 `DSH_NODE` 或 `npm_node_execpath` 上的真正 Node（pnpm 会设置后者）。不要让 Electron 用自己的 execPath 去跑 `dsh`。Sub2API Electron lane 在 macOS 或具有 GUI display 的 Linux 上运行，并要求一个绝对路径的公开四 URL source manifest、精确的 40 位 sidecar Release commit，以及包含 `ZAI_CODING_CN_API_KEY` 的只读 credentials YAML。它强制重建 Host、Client、Web 与 main 产物；只将该 credentials 文件盲拷贝到全新的 `0700` DSH home 并设为 `0600`；安装公开产物；经 Host 注入面创建临时 Z.AI 账号与 composite route；打开嵌入控制台；在 Desktop 输入区选择 Sub2API 模型；并要求真实模型回答。artifact 记录两个仓库身份、source manifest、公开 checksum 文档、已安装 package/runtime 证据、主窗口结果与 sidecar 日志，但绝不记录 credentials 文件。若 Electron、Web Host、PostgreSQL、临时目录或 CDP 端口在 teardown 后仍存活，测试即失败。
+
+`DSH_PHONE_SERVER_PORT` 用于选择 Desktop 手机运行时连接的 mobilecli 回环服务端口。该值必须是 1 到 65535 之间的安全整数；未设置时默认为 `12000`。
 
 ESM 主进程 bundle 会内联工作区代码，但把 Electron、`electron-updater` 和 CommonJS 运行时包 `https-proxy-agent` 与 `ws` 保留为外部依赖。Relay 与单请求 HTTPS helper 是分别捆绑的 CommonJS extra resource，使官方 Node 运行时无需依赖打包应用的依赖图即可加载其网络依赖。packaged 冒烟测试会隔离 `DSH_HOME` 与 Electron userData；在 macOS 上保留已登录用户的 home，使 `safeStorage` 能访问 login Keychain。
 

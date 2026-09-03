@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "nextSequence": 9,
+  "nextSequence": 10,
   "consumedIntentIds": [
     "414-desktop-recovery-version",
     "414-release-orchestration",
@@ -11,6 +11,7 @@
     "475-mobile-webview-compatibility",
     "499-alb-relay-idle-timeout",
     "502-windows-coverage-retry",
-    "507-windows-atomic-replace"
+    "507-windows-atomic-replace",
+    "555-platform-membership-http"
   ]
 }

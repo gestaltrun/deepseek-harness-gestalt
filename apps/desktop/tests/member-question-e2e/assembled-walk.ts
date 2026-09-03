@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import FileMemberQuestionReceiver, {
@@ -209,7 +209,8 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
       join(workspaceB2, cachedHtml),
       join(workspaceB2, cachedBinary),
     ].sort())
-    expect(openedFiles.every(path => path.includes(`/${MEMBER_QUESTION_DOCUMENT_CACHE_ROOT}/`))).toBe(true)
+    const cacheMarker = `${sep}${MEMBER_QUESTION_DOCUMENT_CACHE_ROOT.split('/').join(sep)}${sep}`
+    expect(openedFiles.every(path => path.includes(cacheMarker))).toBe(true)
     expect(questionB1).not.toHaveProperty('composer')
     expect(questionB2).not.toHaveProperty('composer')
     const settledAt = Date.now()

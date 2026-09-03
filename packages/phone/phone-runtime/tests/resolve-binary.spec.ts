@@ -1,11 +1,12 @@
 import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mobilecliInstallGuidance, resolveMobilecliExecutable } from '../src/resolve-binary.ts'
 
 const roots: string[] = []
+const electronMinimalPath = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter)
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
@@ -59,16 +60,19 @@ describe('PATH discovery', () => {
     const second = await stageDir()
     const wanted = await writeExecutable(second, 'mobilecli')
     await writeExecutable(first, 'unrelated')
-    const found = resolveMobilecliExecutable({ env: { PATH: `${first}:${second}` } })
+    const found = resolveMobilecliExecutable({ env: { PATH: [first, second].join(delimiter) } })
     expect(found).toBe(wanted)
   })
 
-  it('skips non-executable and directory collisions', async () => {
+  it.skipIf(process.platform === 'win32')('skips non-executable and directory collisions under POSIX semantics', async () => {
     const dir = await stageDir()
     await writeFile(join(dir, 'mobilecli'), 'plain data')
     const real = await stageDir()
     const wanted = await writeExecutable(real, 'mobilecli')
-    expect(resolveMobilecliExecutable({ env: { PATH: `${dir}:${real}` } })).toBe(wanted)
+    expect(resolveMobilecliExecutable({
+      env: { PATH: [dir, real].join(delimiter) },
+      isWindows: false,
+    })).toBe(wanted)
   })
 
   it('skips a directory that shares the candidate name', async () => {
@@ -76,7 +80,7 @@ describe('PATH discovery', () => {
     await mkdir(join(dir, 'mobilecli'), { recursive: true })
     const real = await stageDir()
     const wanted = await writeExecutable(real, 'mobilecli')
-    expect(resolveMobilecliExecutable({ env: { PATH: `${dir}:${real}` } })).toBe(wanted)
+    expect(resolveMobilecliExecutable({ env: { PATH: [dir, real].join(delimiter) } })).toBe(wanted)
   })
 
   it('throws guidance naming every searched directory when nothing matches', async () => {
@@ -148,6 +152,7 @@ describe('PATH discovery', () => {
     const resolved = resolveMobilecliExecutable({
       env: { PATH: '/no/mobilecli/here', npm_config_prefix: dir },
       home: '',
+      isWindows: false,
     })
     expect(resolved).toBe(join(prefixBin, 'mobilecli'))
   })
@@ -174,8 +179,9 @@ describe('PATH discovery', () => {
     await mkdir(globalBin, { recursive: true })
     await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
     const resolved = resolveMobilecliExecutable({
-      env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+      env: { PATH: electronMinimalPath },
       home,
+      isWindows: false,
     })
     expect(resolved).toBe(join(globalBin, 'mobilecli'))
   })
@@ -183,7 +189,7 @@ describe('PATH discovery', () => {
   it('adds Homebrew and /usr/local prefixes only for an Electron-minimal PATH', async () => {
     const empty = (() => {
       try {
-        resolveMobilecliExecutable({ env: {}, home: '' })
+        resolveMobilecliExecutable({ env: {}, home: '', isWindows: false })
         return undefined
       } catch (error) {
         return (error as Error).message
@@ -193,18 +199,22 @@ describe('PATH discovery', () => {
     expect(empty).not.toContain('/opt/homebrew/bin')
     const electron = (() => {
       try {
-        resolveMobilecliExecutable({
-          env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+        return { resolved: resolveMobilecliExecutable({
+          env: { PATH: electronMinimalPath },
           home: '',
-        })
-        return undefined
+          isWindows: false,
+        }) }
       } catch (error) {
-        return (error as Error).message
+        return { guidance: (error as Error).message }
       }
     })()
-    expect(electron).toContain('  /opt/homebrew/bin')
-    expect(electron).toContain('  /usr/local/bin')
-    expect(electron).toContain('npm install -g mobilecli@latest')
+    if ('resolved' in electron) {
+      expect(['/opt/homebrew/bin/mobilecli', '/usr/local/bin/mobilecli']).toContain(electron.resolved)
+    } else {
+      expect(electron.guidance).toContain('  /opt/homebrew/bin')
+      expect(electron.guidance).toContain('  /usr/local/bin')
+      expect(electron.guidance).toContain('npm install -g mobilecli@latest')
+    }
   })
 })
 

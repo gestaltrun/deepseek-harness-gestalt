@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-29-ui-phone-single-tab-h264.md
-2026-08-29-ui-phone-single-tab-h264.md: 92368cb3bb535ea1adc3835f4a27236651458020
-2026-08-29-ui-phone-single-tab-h264.zh.md: 8bac1e735f18c30c7487282ef230a4d0e9137b36
+2026-08-29-ui-phone-single-tab-h264.md: 6804176ea31c041681a2ac5b3203d324920dd15f
+2026-08-29-ui-phone-single-tab-h264.zh.md: 17d4be86eb5c94cd80c20127f7295cf57764ebed

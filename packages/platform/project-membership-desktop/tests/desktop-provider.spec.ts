@@ -92,7 +92,9 @@ describe('Desktop Project Membership Web Host provider', () => {
     await ctx.desktopProjectMembership.context({
       session: { header: { cwd: '/workspace/local' } },
     } as never)
-    const body = JSON.parse(String(fetch.mock.calls[0]?.[1]?.body)) as { cwd: string; workspaceId?: string }
+    const raw = fetch.mock.calls[0]?.[1]?.body
+    if (typeof raw !== 'string') throw new Error('expected string body')
+    const body = JSON.parse(raw) as { cwd: string; workspaceId?: string }
     expect(body).toEqual({ cwd: '/workspace/local', workspaceId: 'ws-local' })
   })
 

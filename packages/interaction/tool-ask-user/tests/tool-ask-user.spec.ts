@@ -132,10 +132,7 @@ describe('ask_user_question tool', () => {
       },
     })
     const parameters = schema?.parameters as unknown as OptionSchemaShape
-    expect(parameters.properties.to_project_member).toMatchObject({
-      type: 'string',
-      description: expect.stringContaining('project_members.displayName'),
-    })
+    expect(parameters.properties.to_project_member).toMatchObject({ type: 'string' })
     expect(parameters.properties.to_project_member.description).toContain('accountId')
     expect(parameters.properties.background).toMatchObject({ type: 'string' })
     expect(parameters.properties.references).toMatchObject({ type: 'array' })

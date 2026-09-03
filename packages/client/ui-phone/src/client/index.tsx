@@ -19,6 +19,7 @@ import { PhoneTab } from './PhoneTab.tsx'
 import { PhoneSettingsSection } from './PhoneSettingsSection.tsx'
 import { PhoneSettingsCardController } from './phone-settings-controller.ts'
 import { createListingPhoneEnvironmentSource } from './phone-environment-listing.ts'
+import { createHttpPhoneRuntimeSource } from './phone-runtime-source.ts'
 import { PhoneConnectionController } from './phone-connection.ts'
 import { createHttpPhoneGateway } from './phone-stream-client.ts'
 import { createHttpPhoneListingSource } from './phone-listing.ts'
@@ -101,6 +102,7 @@ export function apply(ctx: ClientContext, config: Config): void {
     scope,
     createListingPhoneEnvironmentSource(listing),
     globalThis.navigator.clipboard,
+    createHttpPhoneRuntimeSource(),
   )
   ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings section')
 

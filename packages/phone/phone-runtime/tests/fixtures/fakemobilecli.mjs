@@ -13,6 +13,10 @@ import { fileURLToPath } from 'node:url'
 import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
 const args = process.argv.slice(2)
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('mobilecli version 1.0.5\n')
+  process.exit(0)
+}
 const listenIndex = args.indexOf('--listen')
 const address = listenIndex >= 0 ? (args[listenIndex + 1] ?? '127.0.0.1:12000') : '127.0.0.1:12000'
 const port = Number(address.split(':').at(-1))
@@ -60,6 +64,7 @@ const state = {
 let requests = 0
 
 const listDelayMs = knobs.listDelayMs ?? 0
+const listDelayAfterRequests = knobs.listDelayAfterRequests ?? 0
 const hangEveryResponse = knobs.hang === true
 const exitAfter = typeof knobs.exitAfter === 'number' ? knobs.exitAfter : null
 // When set, the named RPC method answers with this JSON-RPC error instead of
@@ -181,7 +186,7 @@ async function handleRpc(req, res) {
     reply(res, id, { error: { code: failArm.code ?? -32000, message: failArm.message } })
     return
   }
-  if (listDelayMs > 0 && method === 'devices.list') {
+  if (listDelayMs > 0 && requests > listDelayAfterRequests && method === 'devices.list') {
     await new Promise(resolveDelay => setTimeout(resolveDelay, listDelayMs))
   }
   // The exit knob fires only after the real method reply, so response content

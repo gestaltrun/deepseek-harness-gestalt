@@ -4,6 +4,8 @@
 
 这是 `ctx.phoneDevices` 的模型 Consumer。它把 `device_list`、`device_open`、`device_close`、`device_observe`、`device_act` 与 `device_screenshot` 注册为普通延迟工具。`device_act` 只接受封闭的 tap、swipe、type 或硬件按钮动作；没有任意 `adb` 或 shell 路径。`device_list` 与 `device_observe` 的应答每项携带 `id`/`name`/`kind`/`state`/`online`/`platform`。
 
+只有 `phoneDevices.isReady()` 为 true 时，六个 definition 才存在。Consumer 订阅 generation readiness，在激活时注册完整集合，并在 generation 停止或替换前 dispose 完整集合。缺少 readiness 方法的树外 fleet 实现保留静态注册约定以维持兼容。
+
 ## 配置
 
 `timeoutMs` 是每次调用的正安全整数协作超时，默认值为 `30000`。无效值会让插件加载失败。Consumer 依赖手机设备群 Service 与工具注册表；禁用 `toolSearch` 时注册会明确失败。

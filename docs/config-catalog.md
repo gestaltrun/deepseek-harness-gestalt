@@ -1677,6 +1677,24 @@ export interface Config {
 
 Source: [`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
 
+<a id="deepseek-aidsh-phone-environment"></a>
+
+## `@deepseek-ai/dsh-phone-environment`
+
+Requires: `phoneDevices` · `webServer`
+
+```ts config-catalog
+/** Host-specific configuration; release trust facts remain fixed in source. */
+export interface Config {
+  /** Private phone state root; defaults to `$DSH_HOME/phone`. */
+  readonly root?: string
+  /** Explicit operator executable override, ahead of managed and system discovery. */
+  readonly executablePath?: string
+}
+```
+
+Source: [`packages/phone/phone-environment/src/index.ts:40`](../packages/phone/phone-environment/src/index.ts)
+
 <a id="deepseek-aidsh-phone-runtime"></a>
 
 ## `@deepseek-ai/dsh-phone-runtime`
@@ -1695,11 +1713,15 @@ export interface Config {
    * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
    */
   executablePath?: string
+  /** Wait for the environment owner to select and activate an executable. */
+  deferStart?: boolean
   /** Loopback TCP port the spawned server listens on. */
   serverPort?: number
   /** Interval between health probes and device-list polls, in milliseconds. */
   pollIntervalMs?: number
-  /** Total window granted to the first readiness probe, in milliseconds. */
+  /** Stable-child interval required after the first valid device listing, in milliseconds. */
+  readyStabilityMs?: number
+  /** Total window granted to readiness probing, baseline listing, and stability, in milliseconds. */
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number
@@ -1717,7 +1739,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-runtime/src/index.ts:97`](../packages/phone/phone-runtime/src/index.ts)
+Source: [`packages/phone/phone-runtime/src/index.ts:98`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 

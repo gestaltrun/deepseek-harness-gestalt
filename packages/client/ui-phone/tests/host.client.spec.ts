@@ -3,7 +3,7 @@
  * is the join key the Plugins tab uses to dispatch this package's card.
  */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SettingsProvider, settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { apply } from '../src/index.ts'
 import {
@@ -39,5 +39,20 @@ describe('ui-phone host settings', () => {
   it('leaves the Host running when no settings provider is composed', async () => {
     const ctx = new Context()
     await expect(ctx.plugin({ apply }).await()).resolves.toBeDefined()
+  })
+
+  it('projects the durable enable gate into the Host phone environment', async () => {
+    const ctx = new Context()
+    await ctx.plugin(MemorySettings).await()
+    const enabled: boolean[] = []
+    ctx.provide('phoneEnvironment', {
+      async setEnabled(value: boolean) { enabled.push(value) },
+    } as never)
+    const fiber = ctx.plugin({ apply })
+    await fiber.await()
+    await vi.waitFor(() => { expect(enabled).toEqual([false]) })
+    await ctx.settings.update(settingsNamespace(PHONE_SETTINGS_NAMESPACE), { enabled: true })
+    await vi.waitFor(() => { expect(enabled).toEqual([false, true]) })
+    await fiber.dispose()
   })
 })

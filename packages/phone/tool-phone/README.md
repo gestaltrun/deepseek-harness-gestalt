@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Model-facing Consumer for `ctx.phoneDevices`. It registers `device_list`, `device_open`, `device_close`, `device_observe`, `device_act`, and `device_screenshot` as ordinary deferred tools. `device_act` accepts exactly one closed tap, swipe, type, or hardware-button action; there is no arbitrary `adb` or shell path. `device_list` and `device_observe` answers carry `id`/`name`/`kind`/`state`/`online`/`platform` per entry.
 
+All six definitions exist only while `phoneDevices.isReady()` is true. The Consumer subscribes to generation readiness, registers the complete set on activation, and disposes the complete set before a generation stops or is replaced. A fleet implementation without the readiness methods retains the static registration contract for out-of-tree compatibility.
+
 ## Configuration
 
 `timeoutMs` is the positive safe-integer cooperative timeout for every call and defaults to `30000`. Invalid values fail plugin load. The Consumer requires the phone fleet Service and tool registry; registration fails loud when `toolSearch` is disabled.

@@ -8,6 +8,10 @@ import {
   MISSING_PHONE_ENVIRONMENT_SOURCE, resolvePhoneCardView,
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from './phone-environment.ts'
+import {
+  MISSING_PHONE_ENVIRONMENT, MISSING_PHONE_RUNTIME, type PhoneManagedRuntimeView,
+  type PhonePlatformView, type PhoneRuntimeSource,
+} from './phone-runtime-source.ts'
 
 /** What the phone settings card renders. */
 export interface PhoneSettingsCardState {
@@ -17,6 +21,10 @@ export interface PhoneSettingsCardState {
   readonly writable: boolean
   /** Environment view the card switches on. */
   readonly view: PhoneEnvironmentView
+  /** Shared Host-managed mobilecli runtime state. */
+  readonly runtime: PhoneManagedRuntimeView
+  /** Host platform capabilities, including unsupported reasons. */
+  readonly platforms: { readonly android: PhonePlatformView; readonly ios: PhonePlatformView }
 }
 
 /** The registration-side face the card's slot entry injects. */
@@ -33,6 +41,12 @@ export interface PhoneSettingsCardFace {
   copyCommand: (command: string) => void
   /** Fire the unified next-action verb for one error row. */
   nextAction: (kind: string) => void
+  /** Start trusted managed mobilecli preparation. */
+  prepareRuntime: () => void
+  /** Cancel the active preparation operation. */
+  cancelRuntime: () => void
+  /** Refresh runtime discovery. */
+  refreshRuntime: () => void
 }
 
 /**
@@ -43,10 +57,13 @@ export class PhoneSettingsCardController {
     enabled: false,
     writable: false,
     view: { kind: 'off' },
+    runtime: MISSING_PHONE_RUNTIME,
+    platforms: MISSING_PHONE_ENVIRONMENT.platforms,
   })
   private readonly unsubscribeScope: () => void
   private unsubscribeSource: () => void
   private source: PhoneEnvironmentSource
+  private readonly unsubscribeRuntime: () => void
 
   /**
    * @param scope - bound settings scope for the `ui-phone` namespace.
@@ -57,10 +74,12 @@ export class PhoneSettingsCardController {
     private readonly scope: SettingsScope<PhoneSettings>,
     source: PhoneEnvironmentSource = MISSING_PHONE_ENVIRONMENT_SOURCE,
     private readonly clipboard?: { writeText(text: string): Promise<void> },
+    private readonly runtime?: PhoneRuntimeSource,
   ) {
     this.source = source
     this.unsubscribeScope = scope.subscribe(() => { this.publish() })
     this.unsubscribeSource = source.subscribe(() => { this.publish() })
+    this.unsubscribeRuntime = runtime?.subscribe(() => { this.publish() }) ?? (() => {})
     this.publish()
   }
 
@@ -79,6 +98,7 @@ export class PhoneSettingsCardController {
   dispose(): void {
     this.unsubscribeScope()
     this.unsubscribeSource()
+    this.unsubscribeRuntime()
   }
 
   /**
@@ -96,6 +116,9 @@ export class PhoneSettingsCardController {
           void this.source.redetect()
         }
       },
+      prepareRuntime: () => { void this.runtime?.prepare().catch(() => {}) },
+      cancelRuntime: () => { void this.runtime?.cancel().catch(() => {}) },
+      refreshRuntime: () => { void this.runtime?.refresh().catch(() => {}) },
     }
   }
 
@@ -117,11 +140,15 @@ export class PhoneSettingsCardController {
       // An enabled card must not settle on the probe-failed arm while its
       // first detection is still in flight: kick it when it has not run.
       if (this.isEnabled()) this.source.ensureDetected?.()
+      this.runtime?.ensureDetected()
       const enabled = snapshot.value?.enabled === true
+      const environment = this.runtime?.getSnapshot() ?? MISSING_PHONE_ENVIRONMENT
       this.store.set({
         enabled,
         writable: snapshot.writable,
         view: resolvePhoneCardView(enabled, this.source),
+        runtime: environment.runtime,
+        platforms: environment.platforms,
       })
     } finally {
       this.publishing = false

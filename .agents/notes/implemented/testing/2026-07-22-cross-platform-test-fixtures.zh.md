@@ -20,6 +20,8 @@ Status: implemented
 
 phone-runtime 套件通过 `stageFake` 暂存唯一的 `fakemobilecli.mjs` 实现。POSIX 宿主执行无扩展名的 shebang 副本。Windows 宿主执行名为 `fakemobilecli.exe`、指向当前原生 Node 可执行文件的文件符号链接；测试专用 `NODE_OPTIONS` preload 通过 `process.argv0` 识别稳定的调用文件名，把同目录 fake 模块插入为主脚本，对其余 Node 子进程不产生作用。`stageFake` 会持续持有占位端口，直到调用方在启动进程前等待 `claim()`，或由 `dispose()` 释放；两条路径共用同一个幂等结算。所有场景都接收该 helper 的 `executablePath`，因此服务启动、一次性 agent 命令、stderr 保留与完全停稳的资源清理继续经过生产解析器与进程持有者。POSIX 证明忽略 SIGTERM 后升级到 SIGKILL；Windows 证明宿主终止以 SIGTERM 结束原生 launcher 后达到完全停稳，因为该 launcher 无法在 Windows 终止后保留 JavaScript 信号处理器。
 
+phone-environment 服务把选定的版本探针传入托管安装，因此本地 ZIP 生命周期测试可以在所有受支持宿主上运行，而无需执行归档载荷。`createMobilecliVersionProbe` 把解析、清洁环境、超时与取消归一绑定到 Promise 形式的 `execFile` 适配器；独立测试只替换这个子进程适配器。文件系统模式位断言仍只在 POSIX 上运行，准备、激活、取消、teardown 与 HTTP 冲突覆盖保持跨平台。
+
 对于真正仅存在于 POSIX 的原语，测试只在该用例上排除 Windows。相邻的跨平台用例仍会固定拒绝非普通文件、不可用命令和无法访问的工作目录的行为。Windows 上受支持的路径仍受逐文件覆盖率门禁约束，不会随测试文件一起排除。
 
 ## 曾考虑的替代方案

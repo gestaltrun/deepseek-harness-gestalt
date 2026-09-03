@@ -10,6 +10,7 @@
 - `startCapture(request)` — 对应上游 `device.screencapture`。`h264` 映射为上游 `avc`；返回的 `PhoneCaptureStream` 是尚未读取的 body，`contentType` 为上游响应头。两种已发布应答形态均被接受：裸流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封——信封形态下会话 URL 相对服务器源归一，并在打开流之前强制回到回环栅栏内。`requestTimeoutMs` 只约束等待响应头的时间；body 取消由调用方持有。最新清单中不存在的 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。
 - `agentStatus(id, signal?)` / `installAgent(id, options?)` — iOS 真机链路，以对同一可执行文件的一次性 `agent status` / `agent install` 子进程驱动。安装幂等：不带 `force` 时先做 status 探测，已安装的 agent 直接应答而不触发任何安装子进程；`reinstalled` 标示一次强制重装。真机通过所配置的 `provisioningProfilePath` 重签（上游要求真机 iOS 安装必须提供）。凡关于已安装、已重签真机的应答都携带 `FREE_SIGNING_PROFILE_REMINDER`——免费团队签名 7 天过期的主动提示，并指明 `installAgent(id, { force: true })` 这一复跑入口。
 - `onChanged(sub)` — 返回 disposer 的订阅；每条已提交的 `PhoneDeviceChange` 携带完整新清单以及相对上一条已发布清单的 `added`/`removed` id 数组。通知在提交轮询后同步投递，抛错的订阅者被拦截并记日志，订阅绝不比 Service 更长寿。
+- `isReady()` / `onReadinessChanged(sub)` — 当前 generation 的就绪状态与返回 disposer 的迁移订阅。`activateExecutable(path)` 会 abort 并排空上一代、停止其 child、发布其清单的 removals，再在同一 Service 身份后启动替代 generation。`deactivate()` 对称停止，并让后续操作保持 `PHONE_UNRESOLVED`，直到再次激活。
 
 所有操作接受可选 `AbortSignal` 并执行经校验的时间上限；一切失败归一为 `PhoneDevicesError`（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`、`PHONE_REAL_DEVICE_ISSUE`）。`PHONE_REAL_DEVICE_ISSUE` 在 `issue` 上携带结构化错误臂——`device-locked`、`cert-untrusted`、`profile-expired`、`tunnel-failed`、`device-unplugged`——由 agent 命令输出与上游 JSON-RPC 错误消息共同分类得出；上游 `-32010` 仍保持 `PHONE_DEVICE_NOT_FOUND`，Host 的 404 语义不受影响。
 
@@ -18,9 +19,11 @@
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `executablePath` | — | 绝对路径或相对 cwd 的覆盖；缺省时先搜 `PATH`，再搜 npm 全局、npx 缓存和 `npm_config_prefix`。Electron 极简 PATH 还会探测 `/opt/homebrew/bin` 与 `/usr/local/bin`。 |
+| `deferStart` | `false` | 让稳定 Service 保持未解析，直到环境 owner 调用 `activateExecutable(path, signal?)`；运行时选择或托管准备发生在 Host 组合之后时使用。 |
 | `serverPort` | `12000` | 以 `--listen 127.0.0.1:<port>` 传入的回环端口；对齐上游默认。 |
 | `pollIntervalMs` | `5000` | 健康探测与设备轮询节奏。 |
-| `readyTimeoutMs` | `60000` | 首次就绪探测的总窗口；超时就绪失败将使插件响亮失败。 |
+| `readyStabilityMs` | `50` | 首份有效设备清单之后，发布就绪前要求子进程保持存活的时间。 |
+| `readyTimeoutMs` | `60000` | 就绪探测、首份设备清单与稳定期的总窗口；超时就绪失败将使插件响亮失败。 |
 | `requestTimeoutMs` | `30000` | boot 之外每次 JSON-RPC 往返的上限；对齐上游 RPC 超时。 |
 | `bootTimeoutMs` | `180000` | `device.boot` 的上限；对齐上游为慢启动授予的扩展写超时。 |
 | `agentTimeoutMs` | `120000` | 单次 `agent status` / `agent install` 子进程的上限。 |
@@ -28,7 +31,7 @@
 
 ## 扩展点
 
-缺失或不可用的 mobilecli 仍会激活 Service；`listDevices`、`boot`、`shutdown`、`io`、`startCapture` 与 agent 动词随后以 `PHONE_UNRESOLVED` 拒绝并附带安装指引（`npm install -g mobilecli@latest`；上游没有 Homebrew formula）。Host 保持存活。本包同时导出 `./invariant` 伴生插件：它必须伴随每一个真实 Service 生成，并校验每条变更通知所标注的差异与其自身清单相对已发布清单的差异完全一致。
+初始 mobilecli 缺失或不可用时 Service 仍会激活；`listDevices`、`boot`、`shutdown`、`io`、`startCapture` 与 agent 动词随后以 `PHONE_UNRESOLVED` 拒绝。Host 保持运行，`activateExecutable` 可在不替换 Service、不重启 Host 的情况下装入就绪 child。本包同时导出 `./invariant` 伴生插件：它必须伴随稳定 Service，并校验普通 poll 与 generation removal 通知所标注的差异与其自身清单相对已发布清单的差异完全一致。
 
 ## 模型体验
 
@@ -40,8 +43,8 @@
 
 ## 已知限制与后续工作
 
-- **外部 FSL-1.1-Apache-2.0 依赖边界** — mobilecli 只被执行、绝不 vendor 或拷贝；其二进制不进入本仓库，行为随用户安装的版本而定，本包不锁定版本。
+- **外部 FSL-1.1-Apache-2.0 依赖边界** — mobilecli 只被执行，绝不 vendor 或拷入本仓库或 Desktop Bundle。任何固定上游下载及其发布阻塞项由 `phone-environment` 持有。
 - **仅限回环** — 启动的服务始终绑定 `127.0.0.1:<serverPort>`；另一主机上 mobilecli 服务背后的远程设备群不在范围内。
-- **需用户预装** — 未安装 mobilecli 时 Service 按设计仍会组合，但一切操作以 `PHONE_UNRESOLVED` 拒绝；无自动下载、上游无 Homebrew formula，Android 还需 `adb` 在 PATH，iOS 模拟器需 Xcode Command Line Tools。
+- **平台工具链仍为外部依赖** — mobilecli 可在运行时激活；Android 仍需 `adb`，iOS 模拟器仍需 macOS 与 Xcode。其准备归属平台环境包。
 - **真机覆盖需显式开启** — 硬件在环套件仅在 `DSH_PHONE_REAL_UDID` 指明已连接真机（`DSH_PHONE_REAL_PROFILE` 指明其签名 profile）时运行；其余环境一律自跳过，因此 CI 只通过 fake mobilecli 垫片钉住真机链路。设备端 agent 工件由 mobilecli 在 `agent install` 时自行下载，本包绝不下载；iOS 设备隧道始终由 mobilecli 服务持有，隧道失败仅通过结构化的 `tunnel-failed` 臂暴露。
 - **Windows npm shim 缺口** — 原生 Windows 套件通过指向当前 Node 可执行文件的测试专用 `fakemobilecli.exe` 符号链接，覆盖生产解析器与进程生命周期。npm 全局 `.cmd` shim 仍未验证；在进程持有者支持批处理 shim 之前，`executablePath` 应指向原生 `mobilecli.exe`。

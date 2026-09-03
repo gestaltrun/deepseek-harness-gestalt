@@ -20,9 +20,9 @@ const tsconfigPath = fileURLToPath(new URL('../../../tsconfig.json', import.meta
 const refreshing = process.env.DSH_SNAPSHOT === 'refresh'
 
 const TASK =
-  'Load the deferred phone device tools, list the phone fleet, attempt one tap on the Android emulator, and report the approval outcome.'
-const FINAL_TEXT = 'PHONE_ACT_REJECTED_KEYLESS'
-const REJECTION_MARKER = 'the user rejected tool "device_act"'
+  'Load the deferred phone device tools, list the phone fleet, attempt one tap on the Android emulator, and report the runtime outcome.'
+const FINAL_TEXT = 'PHONE_TOOL_REVOKED_KEYLESS'
+const REVOKED_MARKER = 'the user rejected tool "device_act"'
 const DEVICE_TOOLS = [
   'device_act',
   'device_close',
@@ -82,7 +82,7 @@ async function prepareFixture(cwd: string): Promise<void> {
 }
 
 describe('deferred phone tools assembled snapshot', () => {
-  it('reconstructs deferred device schemas and refuses the unattended act without touching the fleet', async () => {
+  it('revalidates durable deferred schemas after runtime readiness is lost', async () => {
     const result = await runLoaderSmoke({
       label: 'deferred phone tools headless assembled snapshot',
       tempDirPrefix: 'headless-snapshot-deferred-phone-tools-',
@@ -124,9 +124,12 @@ describe('deferred phone tools assembled snapshot', () => {
         expect(headers[0]?.tools).toContain('tool_search')
         expect(headers[0]?.tools.filter(name => typeof name === 'string' && DEVICE_TOOLS.includes(name)))
           .toEqual([])
-        for (const header of headers.slice(1)) {
+        expect(headers[1]?.reason).toBe('change')
+        expect(headers[1]?.tools).toContain('device_act')
+        for (const header of headers.slice(2)) {
           expect(header.reason).toBe('change')
-          expect(header.tools).toContain('device_act')
+          expect(header.tools?.filter(name => typeof name === 'string' && DEVICE_TOOLS.includes(name)))
+            .toEqual([])
         }
 
         const resultTexts = records
@@ -141,12 +144,10 @@ describe('deferred phone tools assembled snapshot', () => {
                 .map(inner => typeof inner.text === 'string' ? inner.text : '')
             })
           })
-        expect(resultTexts.filter(text => text.includes(REJECTION_MARKER))).toHaveLength(1)
+        expect(resultTexts.filter(text => text.includes(REVOKED_MARKER))).toHaveLength(1)
         expect(resultTexts.some(text => text.includes(FINAL_TEXT))).toBe(false)
         expect(records.some(record => record.type === 'approval/asked'
           && (record.data as JsonObject | undefined)?.toolName === 'device_act')).toBe(true)
-        expect(records.some(record => record.type === 'approval/decided'
-          && (record.data as JsonObject | undefined)?.outcome === 'rejected')).toBe(true)
 
         const session = normalizeSessionSnapshot(log, contextFromLogs([log]))
         if (refreshing) await writeFile(sessionExpected, session)

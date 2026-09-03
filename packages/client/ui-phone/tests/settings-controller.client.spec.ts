@@ -9,6 +9,7 @@ import {
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
+import type { PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
 import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
 import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
@@ -143,6 +144,82 @@ describe('PhoneSettingsCardController publish re-entrancy', () => {
 })
 
 describe('PhoneSettingsCardController', () => {
+  it('keeps the runtime subscription across environment-source replacement and disposes it', () => {
+    const runtimeListeners = new Set<() => void>()
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => ({
+        revision: 0,
+        enabled: false,
+        runtime: { kind: 'missing', targetVersion: '1.0.5' },
+        platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+      }),
+      refresh: async () => {},
+      prepare: async () => {},
+      cancel: async () => {},
+      ensureDetected: () => {},
+      subscribe: (listener) => {
+        runtimeListeners.add(listener)
+        return () => { runtimeListeners.delete(listener) }
+      },
+    }
+    const controller = new PhoneSettingsCardController(
+      readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
+    )
+    expect(runtimeListeners.size).toBe(1)
+    controller.setSource(MISSING_PHONE_ENVIRONMENT_SOURCE)
+    expect(runtimeListeners.size).toBe(1)
+    controller.dispose()
+    expect(runtimeListeners.size).toBe(0)
+  })
+
+  it('republishes runtime snapshots and contains rejected runtime operations', async () => {
+    const runtimeListeners = new Set<() => void>()
+    let runtimeSnapshot: ReturnType<PhoneRuntimeSource['getSnapshot']> = {
+      revision: 0,
+      enabled: false,
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+    }
+    const refresh = vi.fn(async () => { throw new Error('refresh failed') })
+    const prepare = vi.fn(async () => { throw new Error('prepare failed') })
+    const cancel = vi.fn(async () => { throw new Error('cancel failed') })
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => runtimeSnapshot,
+      refresh,
+      prepare,
+      cancel,
+      ensureDetected: vi.fn(),
+      subscribe: (listener) => {
+        runtimeListeners.add(listener)
+        return () => { runtimeListeners.delete(listener) }
+      },
+    }
+    const controller = new PhoneSettingsCardController(
+      readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
+    )
+    const face = controller.inject()
+    runtimeSnapshot = {
+      revision: 1,
+      enabled: false,
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'unsupported', reason: 'macOS required' } },
+    }
+    for (const listener of runtimeListeners) listener()
+    expect(face.hooks.phoneSettingsCard.getSnapshot()).toMatchObject({
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { ios: { kind: 'unsupported', reason: 'macOS required' } },
+    })
+
+    face.prepareRuntime()
+    face.cancelRuntime()
+    face.refreshRuntime()
+    await flush()
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
+    controller.dispose()
+  })
+
   it('projects the durable enable flag onto the off / probe-failed views', () => {
     const host = readyScope(false)
     const controller = new PhoneSettingsCardController(host.scope)
@@ -151,6 +228,8 @@ describe('PhoneSettingsCardController', () => {
       enabled: false,
       writable: true,
       view: { kind: 'off' },
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
     })
     face.setEnabled(true)
     expect(host.set).toHaveBeenCalledWith('enabled', true)

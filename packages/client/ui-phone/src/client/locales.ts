@@ -8,6 +8,7 @@ export const zh = {
   nav: '手机设备',
   title: '手机设备',
   intro: '把 Android / iOS 模拟器与 USB 真机接入会话，供 Agent 操作、你在侧栏观看并接管。这与「移动伴侣」不同：伴侣是人用手机连桌面，这里是设备被控调试。',
+  iosUnsupported: 'iOS 模拟器需要在安装 Xcode 的 macOS 上使用。',
 } satisfies Record<string, string>
 
 /** The Phone Devices settings namespace key union. */
@@ -18,4 +19,5 @@ export const en = {
   nav: 'Phone Devices',
   title: 'Phone Devices',
   intro: 'Attach Android / iOS simulators and USB handsets to the session so the agent can operate them and you can watch or take over in the sidebar. This is not Mobile Companion: Companion is a person connecting a phone to the desktop; this page is device-under-test debugging.',
+  iosUnsupported: 'iOS simulators require macOS with Xcode installed.',
 } satisfies Record<PhoneSettingsKey, string>

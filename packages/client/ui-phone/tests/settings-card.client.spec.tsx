@@ -290,6 +290,11 @@ describe('PhoneSettingsSection', () => {
       enabled: false,
       writable: true,
       view: { kind: 'off' },
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: {
+        android: { kind: 'deferred' },
+        ios: { kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' },
+      },
     })
     const props = {
       t: (key: keyof typeof zh) => zh[key],
@@ -298,10 +303,14 @@ describe('PhoneSettingsSection', () => {
       redetect: vi.fn(),
       copyCommand: vi.fn(),
       nextAction: vi.fn(),
+      prepareRuntime: vi.fn(),
+      cancelRuntime: vi.fn(),
+      refreshRuntime: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     render(<PhoneSettingsSection {...props} />)
     expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()
     expect(screen.getByText(/这与「移动伴侣」不同/)).toBeTruthy()
     expect(screen.getByRole('switch', { name: '启用手机设备' })).toBeTruthy()
+    expect(screen.getByText('iOS 模拟器需要在安装 Xcode 的 macOS 上使用。')).toBeTruthy()
   })
 })

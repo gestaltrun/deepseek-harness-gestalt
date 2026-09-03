@@ -41,6 +41,8 @@ const LISTING = {
 const JOURNAL_PATH = join(process.cwd(), 'phone-fleet-journal.json')
 
 const calls: { op: string; deviceId?: string }[] = []
+const readinessListeners = new Set<(ready: boolean) => void>()
+let ready = true
 
 function record(op: string, deviceId?: string): void {
   calls.push(deviceId === undefined ? { op } : { op, deviceId })
@@ -50,8 +52,15 @@ function record(op: string, deviceId?: string): void {
 /** Provide the recording fake under the `phoneDevices` service name tool-phone injects. */
 export function apply(ctx: Context): void {
   ctx.provide('phoneDevices', {
+    isReady() { return ready },
+    onReadinessChanged(listener: (next: boolean) => void) {
+      readinessListeners.add(listener)
+      return () => { readinessListeners.delete(listener) }
+    },
     async listDevices() {
       record('listDevices')
+      ready = false
+      for (const listener of [...readinessListeners]) listener(false)
       return LISTING
     },
     async boot(deviceId: string) { record('boot', deviceId) },

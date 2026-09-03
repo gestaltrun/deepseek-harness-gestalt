@@ -31,6 +31,8 @@ interface FakeAgentKnobs {
 export interface FakeKnobs {
   devices?: Array<Record<string, unknown>>
   listDelayMs?: number
+  /** Apply listDelayMs only after this many total RPC requests. */
+  listDelayAfterRequests?: number
   screencaptureDelayMs?: number
   hang?: boolean
   exitAfter?: number

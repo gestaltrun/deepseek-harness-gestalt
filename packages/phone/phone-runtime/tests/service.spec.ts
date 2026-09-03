@@ -80,6 +80,152 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 }
 
 describe('phone runtime service lifecycle', () => {
+  it('hot-activates and deactivates replaceable generations behind one Service', async () => {
+    const fake = await stageFake({
+      devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
+    })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const removedReadiness: boolean[] = []
+    const removeReadiness = context.phoneDevices.onReadinessChanged(ready => removedReadiness.push(ready))
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    removeReadiness()
+    expect((await context.phoneDevices.listDevices()).android.map(device => device.id))
+      .toEqual(['emulator-5554'])
+
+    await context.phoneDevices.deactivate()
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await expect(context.phoneDevices.listDevices()).rejects.toMatchObject({ code: 'PHONE_UNRESOLVED' })
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect(readiness).toEqual([true, false, true])
+    expect(removedReadiness).toEqual([true])
+  })
+
+  it('rejects activation whose caller is already cancelled', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath, controller.signal))
+      .rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+  })
+
+  it('rejects a queued deactivation when teardown owns the Service first', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    let release!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const captured = context.phoneDevices as unknown as {
+      activationTail: Promise<void>
+      deactivate(): Promise<void>
+    }
+    captured.activationTail = blocked
+    const deactivating = captured.deactivate()
+    const disposing = context.fiber.dispose()
+    release()
+    await expect(deactivating).rejects.toMatchObject({ code: 'PHONE_DISPOSED' })
+    await disposing
+  })
+
+  it('does not publish readiness when activation is cancelled during the baseline hold', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyStabilityMs: 200,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await waitFor(async () => (await fake.counters()).requests >= 2)
+    controller.abort(new Error('cancel during baseline hold'))
+
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
+  it('rejects a timed-out baseline listing without publishing readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 300 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      requestTimeoutMs: 50,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_TIMEOUT' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
+  it('cancels the in-flight baseline listing without publishing readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 5_000 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      requestTimeoutMs: 6_000,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await waitFor(async () => (await fake.counters()).requests >= 2)
+    const abortedAt = Date.now()
+    controller.abort(new Error('cancel during baseline listing'))
+
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    // The five-second fake response delay makes sub-second rejection prove
+    // that caller cancellation reached the in-flight RPC.
+    expect(Date.now() - abortedAt).toBeLessThan(1_000)
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
   it('activates with an unavailable service when PATH carries no mobilecli', async () => {
     const context = new Context()
     contexts.push(context)
@@ -421,7 +567,7 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('bounds a hung upstream answer with the configured method ceiling', async () => {
-    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 1_500 })
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 1_500, listDelayAfterRequests: 2 })
     fakes.push(fake)
     const context = await mountWith(fake, { requestTimeoutMs: 60, pollIntervalMs: 60_000 })
     const timedOut = await errorOf(() => context.phoneDevices.listDevices())
@@ -494,14 +640,239 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('turns an unexpected child exit into persistent unavailability', async () => {
-    // The fake answers the readiness probe and the baseline listing, then exits.
-    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
+    // The fake survives readiness, answers the first background poll, then exits.
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 3 })
     fakes.push(fake)
     const context = await mountWith(fake)
-    await new Promise(resolveSettle => setTimeout(resolveSettle, 200))
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
     const unavailable = await errorOf(() => context.phoneDevices.listDevices())
     expect(unavailable.code).toBe('PHONE_UNAVAILABLE')
     expect(unavailable.message).toMatch(/exited unexpectedly|socket is gone/)
+  })
+
+  it('does not publish readiness when the first device listing violates the protocol', async () => {
+    const fake = await stageFake({ devices: [{ id: 'malformed' }] as never })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    const fiber = context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+    })
+    const outcome = await fiber.await().then(() => undefined, (error: unknown) => error)
+    expect(outcome).toBeInstanceOf(PhoneDevicesError)
+    expect((outcome as PhoneDevicesError).code).toBe('PHONE_PROTOCOL')
+  })
+
+  it('fails when the child exits after the baseline listing response but before readiness commits', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    const fiber = context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+    })
+    const outcome = await fiber.await().then(() => undefined, (error: unknown) => error)
+    expect(outcome).toBeInstanceOf(PhoneDevicesError)
+    expect((outcome as PhoneDevicesError).code).toBe('PHONE_UNAVAILABLE')
+  })
+
+  it('publishes removals when a ready child is lost', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const changes: PhoneDeviceChange[] = []
+    context.phoneDevices.onChanged(change => changes.push(change))
+    const pidResponse = await fetch(`${fake.baseUrl}/__test/pid`)
+    const { pid } = await pidResponse.json() as { pid: number }
+    process.kill(pid, 'SIGKILL')
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
+    expect(changes.at(-1)?.removed).toEqual([
+      ANDROID_EMULATOR, IOS_SIMULATOR, IOS_REAL,
+    ])
+    expect(changes.at(-1)?.list).toEqual({
+      android: [], ios: { simulators: [], reals: [] },
+    })
+  })
+
+  it('cancels a replacement while its child is waiting for readiness', async () => {
+    const initial = await stageFake({ devices: BASE_DEVICES })
+    const hanging = await stageFake({ hang: true })
+    fakes.push(initial, hanging)
+    const context = await mountWith(initial)
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    const activating = context.phoneDevices.activateExecutable(hanging.executablePath, controller.signal)
+    controller.abort()
+    await expect(activating).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(Date.now() - startedAt).toBeLessThan(500)
+    expect(context.phoneDevices.isReady()).toBe(false)
+  })
+
+  it('observes caller cancellation from inside the readiness probe loop', async () => {
+    const fake = await stageFake({ hang: true })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await new Promise(resolveWait => setTimeout(resolveWait, 30))
+    controller.abort()
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+  })
+
+  it('lets a committed loss and readiness-window expiry win during the stability hold', async () => {
+    const lostFake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(lostFake)
+    await lostFake.claim()
+    const lostContext = new Context()
+    contexts.push(lostContext)
+    await lostContext.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyStabilityMs: 200,
+      serverPort: lostFake.port,
+    }).await()
+    const lostActivation = lostContext.phoneDevices.activateExecutable(lostFake.executablePath)
+    await lostFake.awaitOnline()
+    await waitFor(async () => (await lostFake.counters()).requests >= 2)
+    ;(lostContext.phoneDevices as unknown as { lost?: PhoneDevicesError }).lost =
+      new PhoneDevicesError('PHONE_UNAVAILABLE', 'lost during readiness hold')
+    await expect(lostActivation).rejects.toMatchObject({ code: 'PHONE_UNAVAILABLE' })
+
+    const timeoutFake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(timeoutFake)
+    await timeoutFake.claim()
+    const timeoutContext = new Context()
+    contexts.push(timeoutContext)
+    await timeoutContext.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyTimeoutMs: 1_000,
+      readyStabilityMs: 1_500,
+      serverPort: timeoutFake.port,
+    }).await()
+    await expect(timeoutContext.phoneDevices.activateExecutable(timeoutFake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_TIMEOUT' })
+  })
+
+  it('normalizes an unexpected startup exception as a protocol failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const captured = context.phoneDevices as unknown as {
+      pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
+    }
+    captured.pollAttempt = async () => { throw 'unexpected startup value' }
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_PROTOCOL' })
+  })
+
+  it('halts after a malformed background listing', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await fake.setDevices([{ id: 'malformed' }])
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
+    await expect(context.phoneDevices.listDevices()).rejects.toMatchObject({ code: 'PHONE_PROTOCOL' })
+  })
+
+  it.each([false, true])('rejects an initial listing refused by publication (pre-lost: %s)', async (preLost) => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const captured = context.phoneDevices as unknown as {
+      lost?: PhoneDevicesError
+      publish(change: PhoneDeviceChange): boolean
+    }
+    captured.publish = () => {
+      if (preLost) captured.lost = new PhoneDevicesError('PHONE_UNAVAILABLE', 'publisher stopped')
+      return false
+    }
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath)).rejects.toMatchObject({
+      code: preLost ? 'PHONE_UNAVAILABLE' : 'PHONE_PROTOCOL',
+    })
+  })
+
+  it('contains lost-child stop failure and readiness subscriber failure', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const warnings: unknown[] = []
+    vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const survivor = vi.fn()
+    context.phoneDevices.onReadinessChanged(() => { throw new Error('bad readiness observer') })
+    context.phoneDevices.onReadinessChanged(survivor)
+    const captured = context.phoneDevices as unknown as {
+      child?: { stop(): Promise<void> }
+      markLost(reason: PhoneDevicesError): void
+    }
+    if (captured.child === undefined) throw new Error('ready runtime did not retain its child')
+    captured.child.stop = vi.fn(async () => { throw new Error('stop failed') })
+    captured.markLost(new PhoneDevicesError('PHONE_UNAVAILABLE', 'synthetic loss'))
+    await vi.waitFor(() => {
+      expect(warnings).toContain('phone-runtime: failed to stop the lost mobilecli child')
+    })
+    expect(warnings).toContain('phone-runtime: a readiness observer failed')
+    expect(survivor).toHaveBeenCalledWith(false)
+  })
+
+  it('records teardown stop failure on the activation tail', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as { child?: { stop(): Promise<void> } }
+    if (captured.child === undefined) throw new Error('ready runtime did not retain its child')
+    const originalStop = captured.child.stop.bind(captured.child)
+    const stop = vi.fn(async () => { throw new Error('teardown stop failed') })
+    captured.child.stop = stop
+    await context.fiber.dispose()
+    expect(stop).toHaveBeenCalledOnce()
+    await originalStop()
+  })
+
+  it('drains a replacement racing service disposal without leaving a child', async () => {
+    const fake = await stageFake({ hang: true })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const activating = context.phoneDevices.activateExecutable(fake.executablePath)
+    const disposing = context.fiber.dispose()
+    await expect(activating).rejects.toMatchObject({ code: 'PHONE_DISPOSED' })
+    await disposing
+    await expect(fetch(`${fake.baseUrl}/__test/pid`)).rejects.toThrow()
   })
 
   it('fails initialization loudly when the server exits before answering readiness', async () => {
@@ -574,5 +945,10 @@ describe('phone runtime service lifecycle', () => {
     contexts.push(badInterval)
     await expect(badInterval.plugin(PhoneDevices, { ...FAST_CONFIG, pollIntervalMs: -5 }).await())
       .rejects.toThrow(/pollIntervalMs/)
+
+    const badStability = new Context()
+    contexts.push(badStability)
+    await expect(badStability.plugin(PhoneDevices, { ...FAST_CONFIG, readyStabilityMs: 0 }).await())
+      .rejects.toThrow(/readyStabilityMs/)
   })
 })

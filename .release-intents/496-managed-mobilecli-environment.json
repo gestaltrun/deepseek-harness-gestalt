@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "496-managed-mobilecli-environment",
+  "summary": {
+    "en": "Let Desktop prepare, verify, and hot-activate the pinned mobilecli runtime from Phone Devices settings.",
+    "zh": "让 Desktop 从「手机设备」设置中准备、校验并热激活固定版本的 mobilecli 运行时。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The managed runtime, trusted Host routes, Desktop composition, and Electron evidence do not change Mobile source, build inputs, or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The managed runtime remains local to Desktop and does not change Platform services, deployment inputs, or wire formats."
+    }
+  ]
+}

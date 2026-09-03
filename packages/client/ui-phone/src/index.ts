@@ -21,6 +21,15 @@ const PHONE_NAMESPACE = settingsNamespace(PHONE_SETTINGS_NAMESPACE)
  */
 export function apply(ctx: Context): void {
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.register(PHONE_NAMESPACE, PhoneSettingsSchema)
+    const scope = settingsCtx.settings.register(PHONE_NAMESPACE, PhoneSettingsSchema)
+    settingsCtx.inject(['phoneEnvironment'], (environmentCtx) => {
+      const environment = environmentCtx.get('phoneEnvironment') as {
+        setEnabled(enabled: boolean): Promise<void>
+      }
+      void environment.setEnabled(scope.get().enabled)
+      environmentCtx.effect(() => scope.watch(async (next) => {
+        await environment.setEnabled(next.enabled)
+      }), 'ui-phone environment enable bridge')
+    })
   })
 }

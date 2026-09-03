@@ -239,7 +239,7 @@ describe('workspace settings and invite wizard (M4)', () => {
     />)
     await flush()
     expect(screen.getByRole('alert').textContent).toBe('lookup error')
-    expect((screen.getByLabelText('Git remote 地址') as HTMLInputElement).value).toBe(SAME_REMOTE)
+    expect(screen.getByLabelText<HTMLInputElement>('Git remote 地址').value).toBe(SAME_REMOTE)
     fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(false)
   })

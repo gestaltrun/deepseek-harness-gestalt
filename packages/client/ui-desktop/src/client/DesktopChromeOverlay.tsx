@@ -18,7 +18,22 @@ export type OverlayDesktopBridge = Pick<
 >
 
 /**
+ * Overlay-local handset matching `PhoneTabIcon` (16×16, 1.3 stroke,
+ * currentColor). ui-phone already depends on this package, so the glyph
+ * cannot be imported from there.
+ */
+function OverlayPhoneIcon(): ReactNode {
+  return (
+    <svg width={16} height={16} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="8" cy="12" r=".95" fill="currentColor" />
+    </svg>
+  )
+}
+
+/**
  * Map a tab-descriptor id onto the same glyph the in-page + menu uses.
+ * Known ids: editor, git, subagent, sidechat, browser, terminal, phone.
  * @param id - serialized `icon` from the Host chrome request.
  * @returns the glyph, or undefined when the id is unknown.
  */
@@ -29,6 +44,7 @@ export function overlayMenuIcon(id: string | undefined): ReactNode {
   if (id === 'sidechat') return <IconNewChatOutline16 size={16} />
   if (id === 'browser') return <IconGlobeOutline14 size={16} />
   if (id === 'terminal') return <IconCodeOutline16 size={16} />
+  if (id === 'phone') return <OverlayPhoneIcon />
   return undefined
 }
 

@@ -35,6 +35,7 @@ describe('overlayMenuIcon', () => {
     expect(overlayMenuIcon('sidechat')).toBeTruthy()
     expect(overlayMenuIcon('browser')).toBeTruthy()
     expect(overlayMenuIcon('terminal')).toBeTruthy()
+    expect(overlayMenuIcon('phone')).toBeTruthy()
   })
 })
 
@@ -88,6 +89,31 @@ describe('DesktopChromeOverlay', () => {
     }
     await act(async () => { mount() })
     expect(screen.getByRole('menu')).toBeTruthy()
+  })
+
+  it('paints an svg for a phone overlay row', async () => {
+    ;(globalThis as { dshDesktop?: unknown }).dshDesktop = {
+      chromeOverlayGetState: async () => ({
+        kind: 'menu',
+        requestId: 'req',
+        items: [
+          { id: 'phone', label: '手机', icon: 'phone' },
+          { id: 'mystery', label: 'Mystery', icon: 'mystery' },
+        ],
+        anchor: { x: 0, y: 0, width: 16, height: 16 },
+      }),
+      chromeOverlayResult: () => {},
+      onChromeOverlayState: () => () => {},
+    }
+    await act(async () => { mount() })
+    const phone = screen.getByRole('menuitem', { name: '手机' })
+    const svg = phone.querySelector('svg')
+    expect(svg).not.toBeNull()
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 16 16')
+    expect(svg?.getAttribute('width')).toBe('16')
+    expect(svg?.getAttribute('height')).toBe('16')
+    expect(phone.querySelector('rect')?.getAttribute('stroke-width')).toBe('1.3')
+    expect(screen.getByRole('menuitem', { name: 'Mystery' }).querySelector('svg')).toBeNull()
   })
 
   it('closes a menu from the Menu onClose path', async () => {

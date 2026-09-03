@@ -162,6 +162,25 @@ describe('ProjectMembershipHttpTransport', () => {
     await expect(transport.projectByRemote(AUTH, 'https://github.com/o/missing')).resolves.toBeUndefined()
   })
 
+  it('resolves a production unbound remote 404 to undefined', async () => {
+    const { transport } = wire({
+      'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fmissing': { status: 404 },
+    })
+    await expect(transport.projectByRemote(AUTH, 'https://github.com/o/missing')).resolves.toBeUndefined()
+  })
+
+  it('rejects a non-unbound projectByRemote failure', async () => {
+    const { transport } = wire({
+      'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fr': {
+        status: 500,
+        body: { error: { code: 'INTERNAL', message: 'lookup failed' } },
+      },
+    })
+    const failure = await transport.projectByRemote(AUTH, 'https://github.com/o/r').catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(ProjectMembershipClientError)
+    expect(failure).toMatchObject({ code: 'INTERNAL', status: 500 })
+  })
+
   it('uses the ambient fetch adapter when none is supplied', async () => {
     const ambient = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
     const transport = new ProjectMembershipHttpTransport({ origin: ORIGIN })

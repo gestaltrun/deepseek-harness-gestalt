@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ProjectMembershipError } from '../src/errors.ts'
-import { normalizeGitRemoteUrl } from '../src/remote-url.ts'
+import { localWorkspaceRemoteUrl, normalizeGitRemoteUrl } from '../src/remote-url.ts'
 
 describe('normalizeGitRemoteUrl', () => {
   it('lower-cases https scheme and host while keeping the path exact and dropping one .git suffix', () => {
@@ -14,6 +14,21 @@ describe('normalizeGitRemoteUrl', () => {
   it('maps scp-like ssh spellings onto a canonical user@host:path form without rewriting the user', () => {
     expect(normalizeGitRemoteUrl('git@github.com:Org/Repo.git')).toBe('git@github.com:Org/Repo')
     expect(normalizeGitRemoteUrl('deploy@Enterprise.Example.NET:team/repo')).toBe('deploy@enterprise.example.net:team/repo')
+  })
+
+  it('keeps a Git-less Workspace sentinel as local://workspace/<id>', () => {
+    expect(localWorkspaceRemoteUrl('ws-1')).toBe('local://workspace/ws-1')
+    expect(normalizeGitRemoteUrl('LOCAL://workspace/Ws-1')).toBe('local://workspace/Ws-1')
+  })
+
+  it('rejects an empty Workspace identity on the Git-less sentinel', () => {
+    expect(() => localWorkspaceRemoteUrl('')).toThrow(ProjectMembershipError)
+    expect(() => normalizeGitRemoteUrl('local://workspace/')).toThrow(ProjectMembershipError)
+    try {
+      localWorkspaceRemoteUrl('')
+    } catch (error) {
+      expect((error as ProjectMembershipError).code).toBe('INVALID_REMOTE_URL')
+    }
   })
 
   it('keeps a mid-path .git directory distinct from a terminal repository suffix', () => {
@@ -37,6 +52,9 @@ describe('normalizeGitRemoteUrl', () => {
     'https://',
     'https://host.example/',
     'file:///srv/repo',
+    'local://workspace/',
+    'local://workspace/a/b',
+    'local://other/ws-1',
   ])('rejects %j with INVALID_REMOTE_URL', (input) => {
     expect(() => normalizeGitRemoteUrl(input)).toThrow(ProjectMembershipError)
     try {

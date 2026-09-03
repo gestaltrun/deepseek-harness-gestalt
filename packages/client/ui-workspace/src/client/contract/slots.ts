@@ -86,7 +86,10 @@ export interface WorkspacePendingInvitation {
  */
 export interface ProjectMembershipGateway {
   createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
-  /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
+  /**
+   * Recover the current Account's Cloud Project without replacing an existing exact binding.
+   * A Workspace without origin recovers through its `local://workspace/<id>` Platform remote.
+   */
   projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
   roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
   invite(input: { projectId: string; githubLogin: string; grantedRole: WorkspaceProjectRole }): Promise<WorkspaceIssuedInvitation>
@@ -107,7 +110,7 @@ export interface ProjectMembershipGateway {
   removeMember(membershipId: string): Promise<void>
   /** Invitations addressed to the local account; polled while the browser is open. */
   pendingInvitations(): Promise<readonly WorkspacePendingInvitation[]>
-  /** Normalized git remote of one local workspace checkout, when known. */
+  /** Normalized git origin of one local workspace checkout, when present and supported. */
   localRemoteFor(workspaceId: WorkspaceId): Promise<string | undefined>
   /** Pick a parent, clone the invited remote, and register the new Workspace; undefined means user cancellation. */
   cloneWorkspace(input: {

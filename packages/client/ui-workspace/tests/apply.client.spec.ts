@@ -185,8 +185,8 @@ describe('ui-workspace apply', () => {
     await browser.projectMembership?.createProject({ name: 'SCP', localWorkspaceId: 'ws' as never })
     expect(createProject).toHaveBeenLastCalledWith({ name: 'SCP', remoteUrl: 'git@github.com:o/scp-repo' })
     b.gitRemote.mockResolvedValueOnce(undefined)
-    await expect(browser.projectMembership?.createProject({ name: 'Missing', localWorkspaceId: 'ws' as never }))
-      .rejects.toThrow('must be a Git checkout with an origin remote')
+    await browser.projectMembership?.createProject({ name: 'Gitless', localWorkspaceId: 'ws' as never })
+    expect(createProject).toHaveBeenLastCalledWith({ name: 'Gitless', remoteUrl: 'local://workspace/ws' })
     await expect(browser.projectMembership?.projectForWorkspace('ws' as never)).resolves.toMatchObject({
       id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
     })
@@ -218,6 +218,11 @@ describe('ui-workspace apply', () => {
       .resolves.toBe('https://github.com/o/r')
     b.gitRemote.mockResolvedValueOnce('file:///tmp/not-platform-safe')
     await expect(browser.projectMembership?.localRemoteFor('ws' as never)).resolves.toBeUndefined()
+    b.gitRemote.mockResolvedValueOnce(undefined)
+    await expect(browser.projectMembership?.projectForWorkspace('ws' as never)).resolves.toMatchObject({
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
+    })
+    expect(projectByRemote).toHaveBeenCalledWith('local://workspace/ws')
     await expect(browser.projectMembership?.cloneWorkspace({
       remoteUrl: 'https://github.com/o/r.git', directoryName: 'cloned',
     })).resolves.toEqual({

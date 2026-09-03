@@ -1,7 +1,7 @@
 /**
  * Workspace settings modal (workspace row ⋯ → 工作区设置) and the invite
  * wizard. The settings body carries the workspace-upgrade block — cloud
- * project creation with name/remote validation plus member management
+ * project creation with a required name and optional Git remote plus member management
  * (display name, role, function tags, presence dot, removal, GitHub-login
  * invitations with a grantable-role picker, retractable pending rows). Every
  * action routes through the {@link ProjectMembershipGateway} the composition
@@ -51,20 +51,23 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const trimmedName = name.trim()
-  const createBlocked = creating || trimmedName === '' || remote === undefined || remote === null
-  const visibleCreateError = createError ?? (project === null && remote === null ? t('upgrade.missingRemote') : null)
+  const createBlocked = creating || trimmedName === ''
+  const visibleCreateError = createError
   useEffect(() => {
     let alive = true
-    Promise.all([
-      gateway.projectForWorkspace(workspaceId),
-      gateway.localRemoteFor(workspaceId),
-    ]).then(([existing, localRemote]) => {
+    gateway.projectForWorkspace(workspaceId).then((existing) => {
       if (!alive) return
       setProject(existing ?? null)
-      setRemote(localRemote ?? null)
     }).catch((reason: unknown) => {
       if (!alive) return
       setProject(null)
+      setCreateError(reason instanceof Error ? reason.message : String(reason))
+    })
+    gateway.localRemoteFor(workspaceId).then((localRemote) => {
+      if (!alive) return
+      setRemote(localRemote ?? null)
+    }).catch((reason: unknown) => {
+      if (!alive) return
       setRemote(null)
       setCreateError(reason instanceof Error ? reason.message : String(reason))
     })
@@ -83,8 +86,11 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
       setCreateError(reason instanceof Error ? reason.message : String(reason))
     })
   }
+  const dialogClass = css.settingsDialog
+  /* v8 ignore next -- CSS Modules emit .settingsDialog from WorkspaceSettings.module.css. */
+  if (dialogClass === undefined) throw new Error('WorkspaceSettings.module.css is missing .settingsDialog')
   return (
-    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')}>
+    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')} className={dialogClass}>
       <div className={css.section}>
         <div className={css.sectionTitle}>{t('upgrade.title')}</div>
         {project === undefined

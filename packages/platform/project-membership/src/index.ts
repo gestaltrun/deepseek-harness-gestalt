@@ -1,7 +1,8 @@
 /**
  * Service Definition for cloud-project membership: projects bound to a
- * workspace's git remote, owner/admin/member roles, project-defined function
- * tags, and invitations whose acceptance is atomic with workspace linking.
+ * workspace Git origin or `local://workspace/<id>` sentinel, owner/admin/member
+ * roles, project-defined function tags, and invitations whose acceptance is
+ * atomic with workspace linking.
  * Providers own durable environment-namespaced state behind this interface.
  * @module @deepseek-ai/dsh-project-membership
  */
@@ -38,7 +39,7 @@ declare module '@deepseek-ai/cordis' {
 export interface CreateProjectInput {
   /** Caller-chosen unique name within the environment namespace. */
   readonly name: string
-  /** Git remote URL of the workspace this project projects; stored normalized. */
+  /** Git origin or `local://workspace/<id>` sentinel of the workspace this project projects; stored normalized. */
   readonly remoteUrl: string
 }
 

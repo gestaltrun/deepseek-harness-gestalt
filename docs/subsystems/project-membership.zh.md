@@ -230,9 +230,10 @@ Authenticated current-installation client used by product UI consumers.
 createProject(input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>
 
 /**
- * Resolve the current Account's Project membership for one normalized Git remote.
- * @param normalizedRemoteUrl - canonical Workspace origin remote.
+ * Resolve the current Account's Project membership for one normalized remote.
+ * @param normalizedRemoteUrl - canonical Workspace origin or `local://workspace/<id>` sentinel.
  * @returns authorized Project context, or no value when this Account has no membership.
+ *   HTTP 204 and HTTP 404 are both unbound; other non-OK answers reject.
  */
 projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>
 

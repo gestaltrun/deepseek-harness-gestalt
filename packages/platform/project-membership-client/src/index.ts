@@ -7,7 +7,8 @@
  * token plus installation proof); this client never touches the signing key.
  * Error answers keep the domain envelope: non-OK responses reject with the
  * stable code and HTTP status, so a 403 role gate surfaces as
- * `ROLE_REQUIRED`/403 rather than a generic failure.
+ * `ROLE_REQUIRED`/403 rather than a generic failure. `projectByRemote` treats
+ * HTTP 204 and HTTP 404 as unbound.
  * @module @deepseek-ai/dsh-project-membership-client
  */
 
@@ -27,7 +28,7 @@ import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 export {
   type FunctionTag, type InvitationId, type InvitationView, type MemberView,
   type MembershipId, type ProjectId, type ProjectRole, type ProjectView,
-  type WorkspaceLink, normalizeGitRemoteUrl,
+  type WorkspaceLink, localWorkspaceRemoteUrl, normalizeGitRemoteUrl,
 } from '@deepseek-ai/dsh-project-membership'
 export type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 
@@ -139,9 +140,10 @@ export interface ProjectMembershipClient {
    */
   createProject(input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>
   /**
-   * Resolve the current Account's Project membership for one normalized Git remote.
-   * @param normalizedRemoteUrl - canonical Workspace origin remote.
+   * Resolve the current Account's Project membership for one normalized remote.
+   * @param normalizedRemoteUrl - canonical Workspace origin or `local://workspace/<id>` sentinel.
    * @returns authorized Project context, or no value when this Account has no membership.
+   *   HTTP 204 and HTTP 404 are both unbound; other non-OK answers reject.
    */
   projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>
   /**
@@ -242,8 +244,11 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
     normalizedRemoteUrl: string,
   ): Promise<AuthenticatedProjectView | undefined> {
     const path = `/v1/projects/by-remote?remoteUrl=${encodeURIComponent(normalizedRemoteUrl)}`
-    const response = await this.request(path, { method: 'GET', headers: authorization })
-    if (response.status === 204) return undefined
+    const response = await this.fetch(`${this.origin}${path}`, jsonRequest({ method: 'GET', headers: authorization }))
+    // Production Platform answers an unbound remote with 404; the development
+    // HTTP consumer answers 204. Neither is a dialog-blocking failure.
+    if (response.status === 204 || response.status === 404) return undefined
+    if (!response.ok) throw await projectMembershipRequestError(response)
     return parseAuthenticatedProjectView(await response.json())
   }
 

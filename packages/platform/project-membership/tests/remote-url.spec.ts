@@ -21,6 +21,16 @@ describe('normalizeGitRemoteUrl', () => {
     expect(normalizeGitRemoteUrl('LOCAL://workspace/Ws-1')).toBe('local://workspace/Ws-1')
   })
 
+  it('rejects an empty Workspace identity on the Git-less sentinel', () => {
+    expect(() => localWorkspaceRemoteUrl('')).toThrow(ProjectMembershipError)
+    expect(() => normalizeGitRemoteUrl('local://workspace/')).toThrow(ProjectMembershipError)
+    try {
+      localWorkspaceRemoteUrl('')
+    } catch (error) {
+      expect((error as ProjectMembershipError).code).toBe('INVALID_REMOTE_URL')
+    }
+  })
+
   it('keeps a mid-path .git directory distinct from a terminal repository suffix', () => {
     expect(normalizeGitRemoteUrl('https://host.example/team/repo.git/sub'))
       .toBe('https://host.example/team/repo.git/sub')

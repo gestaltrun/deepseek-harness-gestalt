@@ -87,7 +87,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
     })
   }
   return (
-    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')} className={css.settingsDialog ?? ''}>
+    <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')} className={css.settingsDialog}>
       <div className={css.section}>
         <div className={css.sectionTitle}>{t('upgrade.title')}</div>
         {project === undefined

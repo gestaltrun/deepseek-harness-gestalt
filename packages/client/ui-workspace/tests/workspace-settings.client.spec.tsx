@@ -475,6 +475,39 @@ describe('workspace settings and invite wizard (M4)', () => {
     })
   })
 
+  it('contains local-remote lookup failure after unmount and reports active Error and string failures', async () => {
+    for (const reason of [new Error('remote error'), 'remote string']) {
+      const membership = gateway({
+        projectForWorkspace: vi.fn().mockResolvedValue(undefined),
+        localRemoteFor: vi.fn().mockRejectedValue(reason),
+      })
+      render(<WorkspaceSettingsModal
+        workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+      />)
+      await flush()
+      expect(screen.getByRole('alert').textContent).toBe(reason instanceof Error ? reason.message : reason)
+      expect(screen.getByLabelText<HTMLInputElement>('Git remote 地址').value).toBe('')
+      cleanup()
+    }
+
+    const remoteLookup = deferred<string | undefined>()
+    const rejected = render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="proj"
+      gateway={gateway({
+        projectForWorkspace: vi.fn(async () => undefined),
+        localRemoteFor: vi.fn(() => remoteLookup.promise),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    rejected.unmount()
+    await act(async () => {
+      remoteLookup.reject(new Error('late remote'))
+      await Promise.resolve()
+    })
+  })
+
   it('reports Error and string failures while creating a Cloud Project', async () => {
     const createProject = vi.fn<ProjectMembershipGateway['createProject']>()
       .mockRejectedValueOnce(new Error('create error'))

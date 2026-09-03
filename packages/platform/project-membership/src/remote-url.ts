@@ -14,7 +14,7 @@ const invalidRemote = (input: string): ProjectMembershipError =>
     `"${input}" is not a normalized git remote URL (use https://host/path, user@host:path, or local://workspace/<id>)`,
   )
 
-const LOCAL_WORKSPACE_REMOTE = /^local:\/\/workspace\/([^/?#]+)$/i
+const LOCAL_WORKSPACE_REMOTE = /^local:\/\/workspace\/([^/?#]+)?$/i
 
 /** One scp-like spelling's parsed components. */
 interface ScpLikeRemote {

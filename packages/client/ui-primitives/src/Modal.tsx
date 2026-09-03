@@ -38,8 +38,8 @@ export function Modal({
   description?: string
   children?: ReactNode
   footer?: ReactNode
-  className?: string
-  contentClassName?: string
+  className?: string | undefined
+  contentClassName?: string | undefined
   headless?: boolean
 }) {
   useOverlayLock(open)

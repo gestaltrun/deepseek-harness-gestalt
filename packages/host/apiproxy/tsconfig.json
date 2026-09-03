@@ -9,6 +9,18 @@
   ],
   "references": [
     {
+      "path": "../../interaction/member-question-receiver"
+    },
+    {
+      "path": "../../platform/remote-protocol"
+    },
+    {
+      "path": "../../platform/project-membership"
+    },
+    {
+      "path": "../../platform/platform-account"
+    },
+    {
       "path": "../../goal/goal"
     },
     {
@@ -103,6 +115,9 @@
     },
     {
       "path": "../../util/native-command"
+    },
+    {
+      "path": "../../subprocess/subprocess"
     }
   ]
 }

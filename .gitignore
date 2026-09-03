@@ -42,6 +42,7 @@ apps/desktop/out/
 apps/desktop/release/
 apps/desktop/resources/
 .artifacts/
+apps/desktop/tests/member-question-e2e/prepare-handoff.ts
 .dsh-build/
 /scripts/noise-security-path/target/
 /scripts/noise-security-path/runtimes/android/.gradle/

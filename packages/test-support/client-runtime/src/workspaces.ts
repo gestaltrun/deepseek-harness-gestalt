@@ -89,6 +89,40 @@ export class TestWorkspaces implements IWorkspaces {
   }
 
   /**
+   * Read a Workspace Git origin (recorded). The default reports no origin.
+   * @param workspaceId - target Workspace.
+   * @returns configured origin, or undefined.
+   */
+  async gitRemote(workspaceId: WorkspaceId): Promise<string | undefined> {
+    this.calls.push({ method: 'gitRemote', args: [workspaceId] })
+    const stub = this.stubs.get('gitRemote')
+    if (stub !== undefined) return await (stub(workspaceId) as Promise<string | undefined>)
+    return undefined
+  }
+
+  /**
+   * Clone and register a Workspace (recorded). The default echoes the target child path.
+   * @param input - remote and validated parent-child destination.
+   * @returns the registered Workspace view.
+   */
+  async cloneGit(input: {
+    remoteUrl: string
+    parentPath: string
+    directoryName: string
+  }): Promise<WorkspaceView> {
+    this.calls.push({ method: 'cloneGit', args: [input] })
+    const stub = this.stubs.get('cloneGit')
+    if (stub !== undefined) return await (stub(input) as Promise<WorkspaceView>)
+    const path = `${input.parentPath}/${input.directoryName}`
+    return {
+      workspaceId: `ws-${path}` as WorkspaceId,
+      title: input.directoryName,
+      path,
+      sessionIds: [],
+    } as unknown as WorkspaceView
+  }
+
+  /**
    * Open a path with the host OS default application (recorded; default no-op).
    * @param path - host-resolvable path.
    */

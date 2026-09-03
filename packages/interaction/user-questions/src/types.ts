@@ -20,16 +20,62 @@ export interface AskUserQuestionOption {
  * not know a tag renders the generic flow, and the answer encoding is identical
  * either way — an intent changes presentation only, never the protocol.
  */
-export type AskUserQuestionIntent = {
-  /** A plan submitted for review: `detail` is the plan markdown `ask()` requires, and the decision approves or declines it. */
-  kind: 'plan-review'
-  /**
-   * The option label that approves the plan; every other option declines it.
-   * Named rather than positional so no UI infers the verdict from option order.
-   * An `approve` naming no option of its own question is rejected at `ask()`.
-   */
-  approve: string
-}
+export type AskUserQuestionIntent =
+  | {
+    /** A plan submitted for review: `detail` is the plan markdown `ask()` requires, and the decision approves or declines it. */
+    kind: 'plan-review'
+    /**
+     * The option label that approves the plan; every other option declines it.
+     * Named rather than positional so no UI infers the verdict from option order.
+     * An `approve` naming no option of its own question is rejected at `ask()`.
+     */
+    approve: string
+  }
+  | {
+    /**
+     * A question about one project member: the question IS one member-directed
+     * decision routed from a paired installation, and the intent carries the
+     * whole Decision Brief — origin identity, agent-authored background,
+     * referenced materials, and the expiry instant — aligned field-for-field
+     * with the Companion `member-question` codec bounds (T4) and the sender's
+     * `MemberQuestionSendPayload` (T5). A UI that does not know the kind still
+     * renders the generic option list; the answer encoding is identical either
+     * way — an intent changes presentation only, never the protocol.
+     */
+    kind: 'member-question'
+    /** Branded question identity the settlement correlates across endpoints. */
+    questionId: string
+    /** Originating remote session id — one half of the receiver's supersede route key. */
+    originSessionId: string
+    /** Account reference of the receiving member (the local user on the receiver). */
+    toProjectMember: string
+    /** Public origin identity rendered on the receiver's brief banner (T4 bounds). */
+    origin: {
+      /** Display name of the cloud project the asking workspace is bound to. */
+      projectName: string
+      /** One-line title of the originating session; never carries conversation content. */
+      originSessionTitle: string
+      /** Platform account reference of the asking member. */
+      askerAccountId: string
+      askerRole: 'owner' | 'admin' | 'member'
+      /** Public display name shown beside the asker avatar. */
+      askerDisplayName: string
+      /** Avatar image URL rendered by the receiver's brief banner. */
+      askerAvatarUrl: string
+    }
+    /** Agent-authored decision background; bounded at the sender (T4 bound). */
+    background: string
+    /**
+     * Workspace-relative referenced documents with their rendering reasons.
+     * `cachedPath` is the receiver-owned hidden Workspace copy the Files
+     * viewer opens. A chip without it is a no-op and never opens `path`.
+     * `content` is optional inline body for tests and older payloads; the
+     * product Files viewer reads the cache path instead.
+     */
+    references: readonly { path: string; reason: string; cachedPath?: string; content?: string }[]
+    /** Epoch milliseconds after which the routed ask expires on both endpoints. */
+    expiresAt: number
+  }
 
 /** One question in a user-questions request. */
 export interface AskUserQuestionItem {

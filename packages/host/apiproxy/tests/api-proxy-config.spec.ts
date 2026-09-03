@@ -32,8 +32,26 @@ import type { RpcRequest, RpcResponse } from '../src/api/rpc.ts'
 import { RpcId } from '../src/api/rpc.ts'
 import { AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-agent-default-model'
 import { createApiProxy } from '../src/api-proxy.ts'
+import ApiProxyService from '../src/index.ts'
 
 const DEFAULTS = { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' }
+
+describe('member-question settlement identity config', () => {
+  it('rejects partial and empty development Installation identities at load', () => {
+    expect(() => new ApiProxyService(new Context(), {
+      memberQuestionInstallationId: 'installation-1',
+    })).toThrow(/configured together/u)
+    expect(() => new ApiProxyService(new Context(), {
+      memberQuestionDeviceName: 'Desk A',
+    })).toThrow(/configured together/u)
+    expect(() => new ApiProxyService(new Context(), {
+      memberQuestionInstallationId: ' ', memberQuestionDeviceName: 'Desk A',
+    })).toThrow(/id must be non-empty/u)
+    expect(() => new ApiProxyService(new Context(), {
+      memberQuestionInstallationId: 'installation-1', memberQuestionDeviceName: ' ',
+    })).toThrow(/device name must be non-empty/u)
+  })
+})
 
 let nextRpc = 1
 function request<P>(payload: P): RpcRequest<P> {

@@ -120,7 +120,7 @@ export class UserQuestionService extends Service {
     // the mistake is, rather than in each UI.
     for (const question of request.questions) {
       const intent = question.intent
-      if (intent === undefined) continue
+      if (intent === undefined || intent.kind === 'member-question') continue
       if (!(question.options ?? []).some(option => option.label === intent.approve)) {
         throw new UserQuestionError(
           `question ${question.id} declares intent ${intent.kind} whose approve label `

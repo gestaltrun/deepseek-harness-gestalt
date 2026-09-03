@@ -1,13 +1,42 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import UserQuestionService, { type AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
+import CompanionMemberQuestionSender, {
+  MemoryMemberQuestionDelivery,
+  type MemberQuestionSettlement,
+} from '@deepseek-ai/dsh-member-question-sender'
 import * as toolAskUser from '@deepseek-ai/dsh-tool-ask-user'
+import { BACKGROUND_MAX_CODE_POINTS } from '@deepseek-ai/dsh-tool-ask-user'
 
 const testToolSignal = new AbortController().signal
+
+function humanSettlement(
+  outcome: 'declined' | { answers: Extract<MemberQuestionSettlement, { outcome: 'answered' }>['answers'] },
+): MemberQuestionSettlement {
+  const metadata = {
+    settledByInstallationId: 'installation-studio' as never,
+    settledByDeviceName: 'Ada Studio',
+    settledAt: 1_788_089_400_000,
+  }
+  return outcome === 'declined'
+    ? { outcome, ...metadata }
+    : { outcome: 'answered', answers: outcome.answers, ...metadata }
+}
+
+async function waitForDelivery(delivery: MemoryMemberQuestionDelivery): Promise<void> {
+  const deadline = Date.now() + 1000
+  while (delivery.delivered.length === 0) {
+    if (Date.now() >= deadline) throw new Error('member-question delivery never started')
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+}
 
 interface OptionSchemaShape {
   properties: {
@@ -22,7 +51,17 @@ interface OptionSchemaShape {
         } & Record<string, unknown>
       }
     }
+    to_project_member: { type: string; description?: string }
+    background: { type: string }
+    references: {
+      type: string
+      items: {
+        properties: Record<string, { type: string }>
+        required?: string[]
+      }
+    }
   }
+  required: string[]
 }
 
 async function setup() {
@@ -35,12 +74,46 @@ async function setup() {
   return ctx
 }
 
-function stubAgent(id: string, delegationDepth = 0): Agent {
+function stubAgent(id: string, delegationDepth = 0, cwd?: string, extras: Record<string, unknown> = {}): Agent {
   const agentId = id as Agent['id']
   return {
     id: agentId,
-    session: { id: agentId, header: { delegationDepth } },
+    session: {
+      id: agentId,
+      header: { delegationDepth, ...cwd !== undefined ? { cwd } : {} },
+      deriveMessages: () => [],
+      ...extras,
+    },
   } as unknown as Agent
+}
+
+const routedOrigin = {
+  projectName: 'Atlas',
+  originSessionTitle: 'Refactor the ingest pipeline',
+  askerAccountId: 'account-asker',
+  askerRole: 'admin' as const,
+  askerDisplayName: 'Ada',
+  askerAvatarUrl: 'https://example.test/ada.png',
+}
+
+async function setupRouted(delivery = new MemoryMemberQuestionDelivery()) {
+  const ctx = new Context()
+  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(UserQuestionService)
+  await ctx.plugin(CompanionMemberQuestionSender, { delivery })
+  await ctx.plugin(toolAskUser, {
+    routeResolver: ({ toProjectMember }) => Promise.resolve(
+      toProjectMember.toLowerCase() === 'grace'
+        ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer' }
+        : toProjectMember.toLowerCase() === 'ada'
+          ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: routedOrigin.askerAccountId }
+          : undefined,
+    ),
+    boundProjectResolver: () => Promise.resolve('project-atlas'),
+  })
+  return { ctx, delivery }
 }
 
 describe('ask_user_question tool', () => {
@@ -59,6 +132,18 @@ describe('ask_user_question tool', () => {
       },
     })
     const parameters = schema?.parameters as unknown as OptionSchemaShape
+    expect(parameters.properties.to_project_member).toMatchObject({ type: 'string' })
+    expect(parameters.properties.to_project_member.description).toContain('accountId')
+    expect(parameters.properties.background).toMatchObject({ type: 'string' })
+    expect(parameters.properties.references).toMatchObject({ type: 'array' })
+    expect(parameters.properties.references.items.properties).toMatchObject({
+      path: { type: 'string' },
+      reason: { type: 'string' },
+    })
+    expect(parameters.required).toEqual(['questions'])
+    expect(parameters.required).not.toContain('to_project_member')
+    expect(parameters.required).not.toContain('background')
+    expect(parameters.required).not.toContain('references')
     expect(parameters.properties.questions.items.properties).toMatchObject({
       id: { type: 'string' },
       question: { type: 'string' },
@@ -316,5 +401,478 @@ describe('ask_user_question tool', () => {
     await fiber.dispose()
 
     expect(ctx.tools.get('ask_user_question')).toBeUndefined()
+  })
+
+  it('accepts local asks with workspace-bounded references without routing', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-ask-user-refs-'))
+    writeFileSync(join(workspace, 'plan.md'), '# plan\n')
+    const ctx = await setup()
+    const seen: AskUserQuestionRequest[] = []
+    ctx.userQuestions.registerProvider({
+      async ask(request) {
+        seen.push(request)
+        return { answers: [{ id: 'pkg', selected: ['pnpm'] }] }
+      },
+    })
+    const agent = stubAgent('local-root', 0, workspace)
+    ctx.agents.enter(agent, undefined)
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-refs-local'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Which package manager should I use?' }],
+        references: [{ path: 'plan.md', reason: 'Current rollout plan' }],
+      },
+      agent,
+    })
+
+    expect(result).toMatchObject({
+      isError: false,
+      content: [{ type: 'text', text: '{"answers":[{"id":"pkg","selected":["pnpm"]}]}' }],
+    })
+    expect(seen).toHaveLength(1)
+  })
+
+  it('rejects a routed ask without background at construction', async () => {
+    const { ctx } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-missing-background'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'BACKGROUND_REQUIRED' } },
+    })
+  })
+
+  it('rejects a routed ask whose background exceeds 600 code points', async () => {
+    const { ctx } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-long-background'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+        background: '文'.repeat(BACKGROUND_MAX_CODE_POINTS + 1),
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'BACKGROUND_TOO_LONG' } },
+    })
+  })
+
+  it('rejects an addressee absent from the current Project roster before delivery', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-ineligible-addressee'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'nobody',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'INELIGIBLE_ADDRESSEE' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects an injected Account id that skips live roster login matching', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-account-id-skip'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'account-peer',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'INELIGIBLE_ADDRESSEE' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects routing a question to the asking account', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-self-addressee'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Ada',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'SELF_ADDRESSEE' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects references that leave the workspace or carry an overlong reason', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-ask-user-bad-refs-'))
+    writeFileSync(join(workspace, 'inside.md'), 'ok\n')
+    mkdirSync(join(workspace, 'nested'))
+    const ctx = await setup()
+    ctx.userQuestions.registerProvider({
+      async ask() {
+        return { answers: [{ id: 'pkg', selected: ['ok'] }] }
+      },
+    })
+    const agent = stubAgent('local-root', 0, workspace)
+    ctx.agents.enter(agent, undefined)
+
+    const outside = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-refs-outside'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        references: [{ path: '../secret.md' }],
+      },
+      agent,
+    })
+    expect(outside).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'REFERENCES_INVALID' } },
+    })
+
+    const missing = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-refs-missing'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        references: [{ path: 'missing.md' }],
+      },
+      agent,
+    })
+    expect(missing).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'REFERENCES_INVALID' } },
+    })
+
+    const longReason = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-refs-reason'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        references: [{ path: 'inside.md', reason: 'x'.repeat(101) }],
+      },
+      agent,
+    })
+    expect(longReason).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'REFERENCES_INVALID' } },
+    })
+  })
+
+  it('routes to_project_member through the member-question sender and skips the local provider', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-ask-user-routed-'))
+    writeFileSync(join(workspace, 'plan.md'), '# plan\n')
+    const { ctx, delivery } = await setupRouted()
+    const seen: AskUserQuestionRequest[] = []
+    ctx.userQuestions.registerProvider({
+      async ask(request) {
+        seen.push(request)
+        return { answers: [{ id: 'pkg', selected: ['local'] }] }
+      },
+    })
+    const events: Array<{ type: string; data: unknown }> = []
+    const agent = stubAgent('routed-root', 0, workspace, {
+      append: (type: string, data: unknown) => {
+        events.push({ type, data })
+        return { type, data }
+      },
+    })
+    ctx.agents.enter(agent, undefined)
+
+    const executing = ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?', options: [{ label: 'yes' }] }],
+        to_project_member: 'Grace',
+        background: 'Need a rollback window before Friday.',
+        references: [{ path: 'plan.md' }, { path: 'plan.md', reason: 'Current rollout plan' }],
+      },
+      agent,
+    })
+    await waitForDelivery(delivery)
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      humanSettlement({ answers: [{ id: 'pkg', selected: ['yes'] }] }),
+    )
+    const result = await executing
+
+    expect(result.isError).toBe(false)
+    expect(result.content).toEqual([{ type: 'text', text: '{"answers":[{"id":"pkg","selected":["yes"]}]}' }])
+    expect(seen).toHaveLength(0)
+    const message = delivery.delivered[0]?.message
+    expect(message?.type).toBe('operation')
+    if (message?.type !== 'operation') throw new Error('expected member-question operation')
+    expect(message.operation.type).toBe('member-question')
+    if (message.operation.type !== 'member-question') throw new Error('expected member-question operation')
+    expect(message.operation.background).toBe('Need a rollback window before Friday.')
+    expect(message.operation.origin).toEqual(routedOrigin)
+    expect(message.operation.references).toEqual([
+      { path: 'plan.md', reason: 'plan.md' },
+      { path: 'plan.md', reason: 'Current rollout plan' },
+    ])
+    expect(events.map(event => event.type)).toEqual(['member-question/asked', 'member-question/outcome'])
+  })
+
+  it('returns empty answers when the member declines', async () => {
+    const { ctx, delivery } = await setupRouted()
+    const executing = ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-declined'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'grace',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    await waitForDelivery(delivery)
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await ctx.memberQuestionSender.settle(questionId!, humanSettlement('declined'))
+    const result = await executing
+    expect(result.isError).toBe(false)
+    expect(result.content).toEqual([{ type: 'text', text: '{"answers":[]}' }])
+  })
+
+  it('rejects a routed ask when the sender is not composed', async () => {
+    const ctx = await setup()
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-no-sender'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'SENDER_UNAVAILABLE' } },
+    })
+  })
+
+  it('hides to_project_member from assembled prompts when the workspace is unbound', async () => {
+    const ctx = await setup()
+    ctx.tools.register(defineTool({
+      name: 'echo',
+      description: 'Echo.',
+      parameters: {},
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      execute: () => Promise.resolve('ok'),
+    }))
+    const assembly = await ctx.systemPrompt.assemble()
+    const schema = assembly.tools.find(tool => tool.name === 'ask_user_question')
+    const parameters = schema?.parameters as { properties?: Record<string, unknown> } | undefined
+    expect(parameters?.properties).not.toHaveProperty('to_project_member')
+    expect(parameters?.properties).toHaveProperty('questions')
+    expect(parameters?.properties).toHaveProperty('references')
+    expect(assembly.tools.some(tool => tool.name === 'echo')).toBe(true)
+    expect(ctx.tools.schemas().find(tool => tool.name === 'ask_user_question')?.parameters)
+      .toHaveProperty('properties.to_project_member')
+  })
+
+  it('surfaces to_project_member in assembled prompts when the workspace is bound', async () => {
+    const { ctx } = await setupRouted()
+    const assembly = await ctx.systemPrompt.assemble({ agent: stubAgent('session-atlas') })
+    const schema = assembly.tools.find(tool => tool.name === 'ask_user_question')
+    const parameters = schema?.parameters as { properties?: Record<string, unknown> } | undefined
+    expect(parameters?.properties).toHaveProperty('to_project_member')
+  })
+
+  it('hides to_project_member when the bound-project resolver rejects', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(toolAskUser, {
+      boundProjectResolver: () => Promise.reject(new Error('no project')),
+    })
+    const assembly = await ctx.systemPrompt.assemble()
+    const schema = assembly.tools.find(tool => tool.name === 'ask_user_question')
+    const parameters = schema?.parameters as { properties?: Record<string, unknown> } | undefined
+    expect(parameters?.properties).not.toHaveProperty('to_project_member')
+  })
+
+  it('cancels a pending bound-project read with prompt assembly', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(toolAskUser, {
+      boundProjectResolver: ({ signal } = {}) => new Promise((_resolve, reject) => {
+        const rejectAbort = (): void => { reject(new Error(String(signal?.reason ?? 'aborted'))) }
+        if (signal?.aborted === true) {
+          rejectAbort()
+          return
+        }
+        signal?.addEventListener('abort', rejectAbort, { once: true })
+      }),
+    })
+    const controller = new AbortController()
+    const assembly = ctx.systemPrompt.assemble({ signal: controller.signal })
+    controller.abort(new Error('prompt cancelled'))
+
+    await expect(assembly).rejects.toThrow('prompt cancelled')
+  })
+
+  it('cancels a pending routeResolver through the tool signal', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(CompanionMemberQuestionSender, { delivery })
+    await ctx.plugin(toolAskUser, {
+      routeResolver: ({ signal }) => new Promise((_resolve, reject) => {
+        const rejectAbort = (): void => { reject(new Error(String(signal.reason ?? 'aborted'))) }
+        if (signal.aborted) {
+          rejectAbort()
+          return
+        }
+        signal.addEventListener('abort', rejectAbort, { once: true })
+      }),
+      boundProjectResolver: () => Promise.resolve('project-atlas'),
+    })
+    const controller = new AbortController()
+    const executing = ctx.tools.execute({
+      signal: controller.signal,
+      callId: CallId('ask-route-cancelled'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    controller.abort(new Error('route cancelled'))
+    const result = await executing
+    expect(result.isError).toBe(true)
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects a non-function injected resolver at construction', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await expect(ctx.plugin(toolAskUser, { routeResolver: {} as never }))
+      .rejects.toThrow(/routeResolver must be a resolver function/)
+    await expect(ctx.plugin(toolAskUser, { boundProjectResolver: {} as never }))
+      .rejects.toThrow(/boundProjectResolver must be a resolver function/)
+  })
+
+  it('uses the authoritative route project when boundProjectResolver is omitted', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    const addressees: string[] = []
+    const deliver = delivery.deliver.bind(delivery)
+    delivery.deliver = (encoded) => {
+      addressees.push(encoded.toProjectMember)
+      return deliver(encoded)
+    }
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(CompanionMemberQuestionSender, { delivery })
+    await ctx.plugin(toolAskUser, {
+      routeResolver: ({ toProjectMember }) => Promise.resolve(
+        toProjectMember.toLowerCase() === 'grace'
+          ? { projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer' }
+          : undefined,
+      ),
+    })
+    const executing = ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-no-bound'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    await waitForDelivery(delivery)
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    expect(addressees).toEqual(['account-peer'])
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      humanSettlement({ answers: [{ id: 'pkg', selected: [], custom: 'later' }] }),
+    )
+    const result = await executing
+    expect(result.isError).toBe(false)
+    expect(result.content).toEqual([{
+      type: 'text',
+      text: '{"answers":[{"id":"pkg","selected":[],"custom":"later"}]}',
+    }])
+  })
+
+  it('retains MEMBER_OFFLINE as an ordinary tool result', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(UserQuestionService)
+    await ctx.plugin(CompanionMemberQuestionSender, {
+      delivery: new MemoryMemberQuestionDelivery(),
+      presenceLookup: () => Promise.resolve('offline'),
+    })
+    await ctx.plugin(toolAskUser, {
+      routeResolver: () => Promise.resolve({
+        projectId: 'project-atlas', origin: routedOrigin, toProjectMember: 'account-peer',
+      }),
+      boundProjectResolver: () => Promise.resolve('project-atlas'),
+    })
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-offline'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'Grace',
+        background: 'Need a rollback window before Friday.',
+      },
+    })
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'MemberQuestionSenderError', code: 'MEMBER_OFFLINE' } },
+    })
   })
 })

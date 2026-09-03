@@ -853,6 +853,47 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'desktopProjectMembership',
+    summary: 'Client-side Service Provider over the Desktop Host\'s token-protected loopback projection.',
+    description: 'Client-side Service Provider over the Desktop Host\'s token-protected loopback projection.',
+    methods: [
+      {
+        signature: 'async context(agent?: Agent, signal?: AbortSignal): Promise<DesktopProjectMembershipContext | undefined>',
+        description: 'Resolve the signed-in Account and the current session Workspace\'s optional Cloud Project.',
+        parameters: [{ name: 'agent', description: 'live Agent whose immutable session cwd selects the Workspace.' }, { name: 'signal', description: 'optional cancellation for the loopback read.' }],
+        returns: 'current Desktop context, or no value for diagnostics without a cwd.',
+      },
+      {
+        signature: 'async currentAccount(signal?: AbortSignal): Promise<DesktopProjectMembershipContext[\'account\']>',
+        description: 'Read the current signed-in Desktop Account independently of any Workspace.',
+        parameters: [{ name: 'signal', description: 'optional cancellation for the loopback read.' }],
+        returns: 'current public Account identity.',
+        throws: ['when Desktop has no signed-in Account or the bridge response is invalid.'],
+      },
+      {
+        signature: 'async roster(actor: PlatformAccountId, projectId: ProjectId, signal?: AbortSignal): Promise<RosterView>',
+        description: 'Read one complete authoritative roster and retain its identity/presence decorations for the presenter.',
+        parameters: [{ name: 'actor', description: 'current Desktop Account id.' }, { name: 'projectId', description: 'Cloud Project to read.' }, { name: 'signal', description: 'optional cancellation for the loopback read.' }],
+        returns: 'canonical stored roster fields.',
+        throws: ['when the actor differs from Desktop Account or the roster response is invalid.'],
+      },
+      {
+        signature: 'present(view: RosterView): Promise<readonly DesktopMemberPresentation[]>',
+        description: 'Project the decorations retained by the exact roster read.',
+        parameters: [{ name: 'view', description: 'roster returned by {@link roster}.' }],
+        returns: 'one presentation per member in stored order.',
+        throws: ['when `view` was not returned by this service instance.'],
+      },
+      {
+        signature: 'async questionRoute( agent: Agent | undefined, addresseeLogin: string, originSessionTitle: string, signal?: AbortSignal, ): Promise<DesktopMemberQuestionRoute | undefined>',
+        description: 'Resolve one member-question route from the current bound-Project roster.',
+        parameters: [{ name: 'agent', description: 'live asking Agent.' }, { name: 'addresseeLogin', description: 'public GitHub login from `to_project_member`.' }, { name: 'originSessionTitle', description: 'latest public Session title, or the product fallback.' }, { name: 'signal', description: 'optional cancellation for both route-authority reads.' }],
+        returns: 'authenticated Project, matched Account, and origin, or no value when the login is not a current member. A match that is the asking Account still returns a route; `ask_user_question` rejects that route as `SELF_ADDRESSEE`.',
+        throws: ['when the Workspace is unbound or the current Account is absent from the roster.'],
+      },
+    ],
+  },
+  {
     key: 'directoryPicker',
     summary: 'Abstract directory-picking service.',
     description: 'Abstract directory-picking service. Subclass, implement `capability()`, and load the subclass as a plugin — it registers as `ctx.directoryPicker` (one implementation per context; loading a second throws, cordis\' standard duplicate-service behavior). The capability object must be stable for the service lifetime: consumers may capture it across calls.',
@@ -1228,6 +1269,162 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'memberQuestionReceiver',
+    summary: 'Host authority for member-question arrival, Host Session materialization, projection, settlement, expiry, and one-step explicit human admission.',
+    description: 'Host authority for member-question arrival, Host Session materialization, projection, settlement, expiry, and one-step explicit human admission.',
+    methods: [
+      {
+        signature: 'abstract ingest(envelope: AuthenticatedMemberQuestionEnvelope): Promise<MemberQuestionIngestResult>',
+        description: 'Persist or replay one authenticated arrival.',
+        parameters: [{ name: 'envelope', description: 'endpoint authority beside the decoded operation.' }],
+        returns: 'Host receiving identity and committed revision.',
+      },
+      {
+        signature: 'abstract snapshot(): Promise<MemberQuestionReceiverSnapshot>',
+        description: 'Read one complete committed projection.',
+        parameters: [],
+        returns: 'the complete authoritative pending and terminal projection.',
+      },
+      {
+        signature: 'abstract changes(listener: MemberQuestionReceiverListener): () => void',
+        description: 'Subscribe to complete projections published after durable commits.',
+        parameters: [{ name: 'listener', description: 'projection observer; its exceptions are contained.' }],
+        returns: 'disposer that removes this exact observer.',
+      },
+      {
+        signature: 'abstract settle( questionId: MemberQuestionId, settlement: MemberQuestionReceiverSettlement, ): Promise<CompanionMemberQuestionSettledResult>',
+        description: 'Apply an explicit decline or authoritative first terminal.',
+        parameters: [{ name: 'questionId', description: 'routed question identity.' }, { name: 'settlement', description: 'local decline metadata or retained global claim.' }],
+        returns: 'the canonical persisted terminal.',
+      },
+      {
+        signature: 'abstract admitHumanTurn( input: AdmitMemberQuestionHumanTurnInput, ): Promise<AdmitMemberQuestionHumanTurnResult>',
+        description: 'Reserve and admit one explicit human turn under one rpc id.',
+        parameters: [{ name: 'input', description: 'Host receiving identity, observed revision, rpc id, content, and mode.' }],
+        returns: 'the durable idempotent admission result.',
+      },
+      {
+        signature: 'abstract resumeReservedHumanTurns(): Promise<void>',
+        description: 'Resume every durable human action left reserved by an interrupted Host.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract resumeReservedSessionMaterializations(): Promise<void>',
+        description: 'Resume every durable Host Session materialization left reserved by an interrupted Host.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract registerSessionMaterializer(materializer: MemberQuestionSessionMaterializer): () => void',
+        description: 'Install the single Host arrival materializer.',
+        parameters: [{ name: 'materializer', description: 'high-level Host Session creation adapter.' }],
+        returns: 'disposer for this exact registration.',
+      },
+      {
+        signature: 'abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void',
+        description: 'Install the single Host human-turn adapter.',
+        parameters: [{ name: 'admitter', description: 'high-level Host transaction adapter.' }],
+        returns: 'disposer for this exact registration.',
+      },
+      {
+        signature: 'abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void',
+        description: 'Install the single first-claim terminal authority used by this Host.',
+        parameters: [{ name: 'authority', description: 'transport-backed first-claim adapter.' }],
+        returns: 'disposer for this exact registration.',
+      },
+      {
+        signature: 'abstract bind( accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<void>',
+        description: 'Persist or replace one exact Account/Project to local Workspace association.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project being joined.' }, { name: 'workspaceId', description: 'exact local Workspace selected or cloned.' }],
+      },
+      {
+        signature: 'abstract lookup( accountId: PlatformAccountId, projectId: ProjectId, ): Promise<Branded<\'WorkspaceId\'> | undefined>',
+        description: 'Read one exact association without requiring it to exist.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project whose local association is being inspected.' }],
+        returns: 'persisted local Workspace identity, or undefined before binding.',
+      },
+      {
+        signature: 'abstract bindIfCurrent( accountId: PlatformAccountId, projectId: ProjectId, expectedWorkspaceId: Branded<\'WorkspaceId\'> | undefined, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<boolean>',
+        description: 'Replace one association only if its current value matches an observation.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project whose association is being repaired.' }, { name: 'expectedWorkspaceId', description: 'observed current Workspace id, including undefined.' }, { name: 'workspaceId', description: 'exact live replacement Workspace id.' }],
+        returns: 'whether the replacement committed.',
+      },
+      {
+        signature: 'abstract resolve( accountId: PlatformAccountId, projectId: ProjectId, ): Promise<Branded<\'WorkspaceId\'>>',
+        description: 'Resolve one exact Account/Project association.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project carried by the received question.' }],
+        returns: 'persisted local Workspace identity.',
+      },
+    ],
+  },
+  {
+    key: 'memberQuestionSender',
+    summary: 'Member-question sender capability.',
+    description: 'Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation, delivers it, and waits for a terminal settlement or a stable lifetime error.',
+    methods: [
+      {
+        signature: 'abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendOptions, ): Promise<MemberQuestionSendResult>',
+        description: 'Encode one member-directed question, deliver it, and wait for settlement.',
+        parameters: [{ name: 'payload', description: 'Decision Brief origin, background, question batch, and references.' }, { name: 'options', description: 'optional asking session and withdrawal signal.' }],
+        returns: 'the answered or declined settlement plus the encoded Companion bytes.',
+        throws: ['{MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no delivery port is composed, `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant, `ENCODE_FAILED` when the T4 codec rejects the payload, `MEMBER_OFFLINE` when presence is offline at send time, `QUESTION_EXPIRED` when the configured TTL elapses unanswered, `QUESTION_WITHDRAWN` when the initiator cancels the turn, `QUESTION_SUPERSEDED` when a newer same-route ask replaces this one, or `REVOKED_DURING_FLIGHT` when membership is withdrawn while waiting.'],
+      },
+      {
+        signature: 'abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>',
+        description: 'Apply one answered or declined settlement to a pending question. Unknown or already-settled question ids are ignored (idempotent).',
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }, { name: 'settlement', description: 'answered answers or a declined verdict with the settling Installation metadata and epoch.' }],
+        returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>',
+        description: 'Apply one authoritative first-claim terminal published by transport. Unknown or already-settled question ids are ignored.',
+        parameters: [{ name: 'terminal', description: 'Companion member-question settled result.' }],
+        returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract withdraw(questionId: MemberQuestionId): Promise<void>',
+        description: 'Withdraw one pending question as initiator cancellation. Unknown or already-settled question ids are ignored.',
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }],
+        returns: 'fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>',
+        description: 'Query the authoritative first terminal retained for reconnect replay.',
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }],
+        returns: 'the retained terminal, or undefined while pending or unknown.',
+      },
+    ],
+  },
+  {
+    key: 'memberQuestionWorkspaceBinding',
+    summary: 'Local project-member Workspace association supplied by the Host composition.',
+    description: 'Local project-member Workspace association supplied by the Host composition.',
+    methods: [
+      {
+        signature: 'bind(accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<\'WorkspaceId\'>): Promise<void>',
+        description: 'Persist or replace the exact local Workspace selected during invitation acceptance.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project being joined.' }, { name: 'workspaceId', description: 'exact local Workspace selected or cloned.' }],
+      },
+      {
+        signature: 'lookup(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<\'WorkspaceId\'> | undefined>',
+        description: 'Read the persisted local Workspace selection without requiring one to exist.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'cloud Project whose local association is being inspected.' }],
+        returns: 'exact local Workspace identity, or undefined before the first binding.',
+      },
+      {
+        signature: 'bindIfCurrent( accountId: PlatformAccountId, projectId: ProjectId, expectedWorkspaceId: Branded<\'WorkspaceId\'> | undefined, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<boolean>',
+        description: 'Replace a binding only when its current value still matches the caller\'s observation.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'cloud Project whose local association is being repaired.' }, { name: 'expectedWorkspaceId', description: 'exact current value observed by the caller, including undefined.' }, { name: 'workspaceId', description: 'exact live Workspace proposed as the replacement.' }],
+        returns: 'whether the comparison matched and the replacement committed.',
+      },
+      {
+        signature: 'resolve(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<\'WorkspaceId\'>>',
+        description: 'Resolve one authenticated receiver/project pair to an existing Workspace id.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'cloud Project carried by the received operation.' }],
+        returns: 'exact local Workspace identity.',
+      },
+    ],
+  },
+  {
     key: 'messageFeedback',
     summary: 'Storage-domain sidecar service.',
     description: 'Storage-domain sidecar service. It inspects persisted Session history and never creates or resumes an Agent or Session.',
@@ -1363,6 +1560,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'provider-owned Account and Installation identity, including authenticated Mobile presentation.',
       },
       {
+        signature: 'abstract publicIdentitiesByIds( accountIds: readonly PlatformAccountId[], ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>>',
+        description: 'Read the public identity of many accounts in one batch.',
+        parameters: [{ name: 'accountIds', description: 'accounts to resolve, typically one roster.' }],
+        returns: 'the public identity per known account; unknown accounts are absent.',
+      },
+      {
+        signature: 'abstract publicIdentityByGithubLogin(githubLogin: string): Promise<PublicAccountIdentity | undefined>',
+        description: 'Resolve one unambiguous current public GitHub login.',
+        parameters: [{ name: 'githubLogin', description: 'case-insensitive public login entered by an operator.' }],
+        returns: 'the matching public Account identity, or undefined when absent or ambiguous.',
+      },
+      {
         signature: 'abstract signOut(input: { accessToken: string; proof: AccountProof }): Promise<void>',
         description: 'Revoke only the current installation Account Session.',
         parameters: [{ name: 'input', description: 'access token and installation proof.' }],
@@ -1373,6 +1582,188 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'sessionId', description: 'Account Session owning the connection.' }, { name: 'close', description: 'idempotent close callback.' }],
         returns: 'disposer removing the tracked connection.',
         throws: ['AccountError `QUOTA` with a 60-second `retryAfter` when the Account already has twenty tracked closers.', 'AccountError `SESSION_REVOKED` when the session is missing or inactive.'],
+      },
+    ],
+  },
+  {
+    key: 'projectMembership',
+    summary: 'Project-membership capability.',
+    description: 'Project-membership capability. Every mutation executes its role gate inside the operation itself: schema omission or listener order never substitutes for the check that decides the outcome.',
+    methods: [
+      {
+        signature: 'abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Promise<ProjectView>',
+        description: 'Create one project; the actor becomes its first owner.',
+        parameters: [{ name: 'actor', description: 'authenticated account performing the mutation.' }, { name: 'input', description: 'unique project name and git remote to bind.' }],
+        returns: 'the stored project view.',
+        throws: ['{ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, `PROJECT_REMOTE_TAKEN` when another Project owns the normalized remote, or `INVALID_REMOTE_URL` when normalization fails.'],
+      },
+      {
+        signature: 'abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>',
+        description: 'Issue one invitation to a platform account.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner on the project.' }, { name: 'input', description: 'target project, invitee account, and the role granted at accept time.' }],
+        returns: 'the invitation in `pending` state, carrying that granted role.',
+        throws: ['{ProjectMembershipError} `ROLE_REQUIRED` below admin or when the actor cannot grant the requested role, `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.'],
+      },
+      {
+        signature: 'abstract retractInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>',
+        description: 'Retract one invitation issued by the caller while it is still pending.',
+        parameters: [{ name: 'actor', description: 'authenticated account; must be the invitation\'s issuer or an owner of the project.' }, { name: 'invitationId', description: 'invitation to retract.' }],
+        returns: 'nothing; the stored state moves to `retracted`.',
+        throws: ['{ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, or `ROLE_REQUIRED`.'],
+      },
+      {
+        signature: 'abstract acceptInvitation(actor: PlatformAccountId, input: AcceptInvitationInput): Promise<MemberView>',
+        description: 'Accept one pending invitation; joining and workspace linking commit atomically, so no joined-but-unlinked state can exist.',
+        parameters: [{ name: 'actor', description: 'authenticated account; must be the invitation\'s addressee.' }, { name: 'input', description: 'invitation id plus the mandatory workspace link.' }],
+        returns: 'the created member view.',
+        throws: ['{ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, `DUPLICATE_INVITEE`, or `INVALID_LINK` when the link omits a workspace name.'],
+      },
+      {
+        signature: 'abstract declineInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>',
+        description: 'Decline one pending invitation addressed to the caller.',
+        parameters: [{ name: 'actor', description: 'authenticated account; must be the invitation\'s addressee.' }, { name: 'invitationId', description: 'invitation to decline.' }],
+        returns: 'nothing; the stored state moves to `declined`.',
+        throws: ['{ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, or `ROLE_REQUIRED`.'],
+      },
+      {
+        signature: 'abstract changeRole(actor: PlatformAccountId, input: ChangeRoleInput): Promise<void>',
+        description: 'Change one membership\'s role. Rows whose current or target role is owner answer only to owners; admins may move members between `member` and `admin`.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner.' }, { name: 'input', description: 'membership row and new role.' }],
+        returns: 'nothing; the stored row carries the new role.',
+        throws: ['{ProjectMembershipError} `MEMBERSHIP_NOT_FOUND`, `ROLE_REQUIRED`, or `LAST_OWNER` when demoting the final owner.'],
+      },
+      {
+        signature: 'abstract setMemberTags(actor: PlatformAccountId, input: SetMemberTagsInput): Promise<void>',
+        description: 'Replace one membership\'s project-defined function tags; tags are display and routing metadata and never gate permissions.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner.' }, { name: 'input', description: 'membership row and replacement tags.' }],
+        returns: 'nothing; the stored row carries the new tags.',
+        throws: ['{ProjectMembershipError} `MEMBERSHIP_NOT_FOUND` or `ROLE_REQUIRED`.'],
+      },
+      {
+        signature: 'abstract removeMember(actor: PlatformAccountId, membershipId: MembershipId): Promise<void>',
+        description: 'Remove one membership. Removing an owner answers only to owners; when members remain after removal, every cached roster projection for the project is invalidated by the same operation.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner.' }, { name: 'membershipId', description: 'membership row to remove.' }],
+        returns: 'nothing.',
+        throws: ['{ProjectMembershipError} `MEMBERSHIP_NOT_FOUND`, `ROLE_REQUIRED`, or `LAST_OWNER` when removing the final owner.'],
+      },
+      {
+        signature: 'abstract roster(actor: PlatformAccountId, projectId: ProjectId): Promise<RosterView>',
+        description: 'Read one project\'s full roster; both caller and readers require an active membership, so removed accounts lose enumeration immediately.',
+        parameters: [{ name: 'actor', description: 'authenticated account whose active membership gates the read.' }, { name: 'projectId', description: 'project to project.' }],
+        returns: 'the roster view derived from current authority, not a stale cache.',
+        throws: ['{ProjectMembershipError} `PROJECT_NOT_FOUND` or `NOT_A_MEMBER`.'],
+      },
+      {
+        signature: 'abstract pendingInvitationsFor(actor: PlatformAccountId): Promise<readonly InvitationView[]>',
+        description: 'List invitations addressed to the caller that still await a decision.',
+        parameters: [{ name: 'actor', description: 'authenticated account.' }],
+        returns: 'pending invitations in issuance order.',
+      },
+      {
+        signature: 'abstract pendingInvitationsIssuedBy( actor: PlatformAccountId, projectId: ProjectId, ): Promise<readonly InvitationView[]>',
+        description: 'List pending invitations issued for one Project after an admin-or-owner gate.',
+        parameters: [{ name: 'actor', description: 'authenticated Project administrator.' }, { name: 'projectId', description: 'Project whose pending invitations are requested.' }],
+        returns: 'pending invitations in issuance order.',
+      },
+      {
+        signature: 'abstract pendingInvitationContextsFor(actor: PlatformAccountId): Promise<readonly PendingInvitationContext[]>',
+        description: 'List pending invitations with their authoritative project name and remote.',
+        parameters: [{ name: 'actor', description: 'authenticated invitee account.' }],
+        returns: 'pending invitation/project pairs in issuance order.',
+      },
+      {
+        signature: 'abstract projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined>',
+        description: 'Find the project bound to a normalized git remote, if the actor holds a membership there.',
+        parameters: [{ name: 'actor', description: 'authenticated account whose memberships scope the search.' }, { name: 'normalizedRemoteUrl', description: 'normalized remote URL recorded at creation.' }],
+        returns: 'the project view, or undefined when no such membership exists.',
+      },
+      {
+        signature: 'abstract rosterVersion(projectId: ProjectId): Promise<number>',
+        description: 'Read one project\'s current roster projection version. Consumers key caches on it; every committed membership-set or role-or-tag mutation publishes a new strictly increasing value for that project.',
+        parameters: [{ name: 'projectId', description: 'project to read.' }],
+        returns: 'the project\'s roster projection version.',
+        throws: ['{ProjectMembershipError} `PROJECT_NOT_FOUND`.'],
+      },
+    ],
+  },
+  {
+    key: 'projectMembershipClient',
+    summary: 'Authenticated current-installation client used by product UI consumers.',
+    description: 'Authenticated current-installation client used by product UI consumers.',
+    methods: [
+      {
+        signature: 'createProject(input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>',
+        description: 'Create one Cloud Project for a Workspace remote.',
+        parameters: [{ name: 'input', description: 'unique name and Workspace remote.' }],
+        returns: 'created Cloud Project.',
+      },
+      {
+        signature: 'projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>',
+        description: 'Resolve the current Account\'s Project membership for one normalized remote.',
+        parameters: [{ name: 'normalizedRemoteUrl', description: 'canonical Workspace origin or `local://workspace/<id>` sentinel.' }],
+        returns: 'authorized Project context, or no value when this Account has no membership. HTTP 204 and HTTP 404 are both unbound; other non-OK answers reject.',
+      },
+      {
+        signature: 'roster(projectId: ProjectId): Promise<RosterReadView>',
+        description: 'Read one Project roster with public identity and presence.',
+        parameters: [{ name: 'projectId', description: 'Project to read.' }],
+        returns: 'Project and complete decorated roster.',
+      },
+      {
+        signature: 'heartbeat(): Promise<void>',
+        description: 'Refresh this Desktop Installation\'s live presence heartbeat.',
+        parameters: [],
+        returns: 'fulfillment after Platform records the beat.',
+      },
+      {
+        signature: 'closePresence(): Promise<void>',
+        description: 'Clear this Desktop Installation immediately so roster readers see Offline without waiting for presence TTL.',
+        parameters: [],
+        returns: 'fulfillment after Platform drops this installation.',
+      },
+      {
+        signature: 'invite(input: { projectId: ProjectId; githubLogin: string; grantedRole: ProjectRole }): Promise<InvitationView>',
+        description: 'Invite one uniquely resolved public GitHub login.',
+        parameters: [{ name: 'input', description: 'Project, public GitHub login, and the role granted at accept time.' }],
+        returns: 'created pending invitation carrying that granted role.',
+      },
+      {
+        signature: 'decideInvitation(invitationId: InvitationId, input: InvitationDecisionInput): Promise<MemberView | undefined>',
+        description: 'Decline, or accept atomically with a local Workspace link.',
+        parameters: [{ name: 'invitationId', description: 'invitation to decide.' }, { name: 'input', description: 'decline or linked acceptance.' }],
+        returns: 'accepted member, or no value for decline.',
+      },
+      {
+        signature: 'retractInvitation(invitationId: InvitationId): Promise<void>',
+        description: 'Retract one pending invitation as its Project administrator.',
+        parameters: [{ name: 'invitationId', description: 'pending invitation to retract.' }],
+      },
+      {
+        signature: 'pendingInvitations(): Promise<readonly PendingInvitationView[]>',
+        description: 'List trusted pending invitation cards for the current Account.',
+        parameters: [],
+        returns: 'trusted pending invitation cards. HTTP 404 is an empty list; other non-OK answers reject.',
+      },
+      {
+        signature: 'issuedInvitations(projectId: ProjectId): Promise<readonly IssuedInvitationView[]>',
+        description: 'List pending invitations issued from one administered Project.',
+        parameters: [{ name: 'projectId', description: 'Project whose issued invitations are requested.' }],
+        returns: 'authoritative pending invitation rows.',
+      },
+      {
+        signature: 'changeRole(membershipId: MembershipId, role: ProjectRole): Promise<void>',
+        description: 'Replace one member\'s collaboration role.',
+        parameters: [{ name: 'membershipId', description: 'membership to change.' }, { name: 'role', description: 'replacement collaboration role.' }],
+      },
+      {
+        signature: 'setMemberTags(membershipId: MembershipId, tags: readonly FunctionTag[]): Promise<void>',
+        description: 'Replace one member\'s non-permission function tags.',
+        parameters: [{ name: 'membershipId', description: 'membership to relabel.' }, { name: 'tags', description: 'complete replacement function tags.' }],
+      },
+      {
+        signature: 'removeMember(membershipId: MembershipId): Promise<void>',
+        description: 'Remove one member from the Project.',
+        parameters: [{ name: 'membershipId', description: 'membership to remove.' }],
       },
     ],
   },
@@ -1530,6 +1921,33 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Release one blob reservation after receipt, expiry, or revocation.',
         parameters: [{ name: 'input', description: 'current-installation authorization and reservation id.' }],
         throws: ['TypeError when the reservation is missing or owned by another Account.'],
+      },
+      {
+        signature: 'abstract grantProjectPeer(input: { desktop: PairingAccountAuthentication projectId: ProjectPeerProjectId peerAccountId: PlatformAccountId peerInstallationId: InstallationId }): Promise<ProjectPeerGrantView>',
+        description: 'Issue one sealed Relay credential for a peer member\'s installation on this Desktop\'s route. Re-granting the same project and peer installation rotates the grant: the replacement digest is issued at the carried route revision first, then the superseded digest is revoked through the same compensation a removal tombstone uses.',
+        parameters: [{ name: 'input', description: 'granting Desktop authorization, project, and peer identity.' }],
+        returns: 'content-free grant projection including the carried route revision.',
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.', 'RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the grantor or peer holds no active membership.', 'RemoteAccessError `MOBILE_ACCESS_DISABLED` when the granting Desktop has no active route.'],
+      },
+      {
+        signature: 'abstract listProjectPeerGrants(input: { desktop: PairingAccountAuthentication projectId?: ProjectPeerProjectId }): Promise<readonly ProjectPeerGrantView[]>',
+        description: 'List the live project peer grants this Desktop Installation carries on its route.',
+        parameters: [{ name: 'input', description: 'granting Desktop authorization and optional project scope.' }],
+        returns: 'live grants ordered by issuance; revocation tombstones are excluded.',
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.'],
+      },
+      {
+        signature: 'abstract revokeProjectPeerGrant(input: { desktop: PairingAccountAuthentication projectId: ProjectPeerProjectId peerAccountId: PlatformAccountId peerInstallationId: InstallationId }): Promise<void>',
+        description: 'Revoke one grant this Desktop issued: the Relay digest and any superseded digest enter compensating revocation and the record keeps a tombstone. Revoking an absent or already-revoked grant is a no-op.',
+        parameters: [{ name: 'input', description: 'granting Desktop authorization and the addressed peer identity.' }],
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.', 'RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when the grant is carried by another Desktop.'],
+      },
+      {
+        signature: 'abstract getProjectPeerGrant(input: { peer: PairingAccountAuthentication projectId: ProjectPeerProjectId }): Promise<SealedProjectPeerGrant>',
+        description: 'Retrieve the sealed grant addressed to the authenticated installation. Membership is re-proven at read time and every live grant of the project is reconciled first, so a member removed from the project loses both the sealed envelope and the Relay authority.',
+        parameters: [{ name: 'input', description: 'peer installation authorization and project.' }],
+        returns: 'the sealed envelope with its content-free fingerprint.',
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.', 'RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the reading account holds no active membership.', 'RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when no live grant addresses this installation.'],
       },
     ],
   },
@@ -3159,6 +3577,22 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'member-question-receiver/changed',
+    mode: 'emit',
+    signature: '\'member-question-receiver/changed\'(change: MemberQuestionReceiverChange): void',
+    summary: 'The receiver ledger committed one authoritative question-state change.',
+    description: 'The receiver ledger committed one authoritative question-state change.',
+    parameters: [{ name: 'change', description: 'durable revision, question identity, and committed state.' }],
+  },
+  {
+    name: 'project-membership/roster-invalidated',
+    mode: 'emit',
+    signature: '\'project-membership/roster-invalidated\'(change: RosterInvalidation): void',
+    summary: 'A membership mutation committed durably and its project\'s roster view must be re-derived.',
+    description: 'A membership mutation committed durably and its project\'s roster view must be re-derived. One event per commit in write order.',
+    parameters: [{ name: 'change', description: 'project, membership, account, both roster versions, and the change discriminant with any post-state payload.' }],
+  },
+  {
     name: 'session-telemetry/record',
     mode: 'waterfall',
     signature: '\'session-telemetry/record\'(record: SessionTelemetryRecord, next: () => SessionTelemetryRecord): SessionTelemetryRecord',
@@ -3403,6 +3837,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'AcceptInvitationInput',
+    declaration: 'export interface AcceptInvitationInput {\n    readonly invitationId: InvitationId;\n    readonly link: WorkspaceLink;\n}',
+  },
+  {
     name: 'AccountProof',
     declaration: 'export interface AccountProof {\n    jti: AccountProofJti;\n    issuedAt: number;\n    signature: string;\n}',
   },
@@ -3421,6 +3859,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
+  },
+  {
+    name: 'AdmitMemberQuestionHumanTurnInput',
+    declaration: 'export interface AdmitMemberQuestionHumanTurnInput {\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n    readonly rpcId: MemberQuestionReceiverRpcId;\n    readonly content: readonly MemberQuestionHumanTurnContent[];\n    readonly mode: \'queue\' | \'steer\';\n}',
+  },
+  {
+    name: 'AdmitMemberQuestionHumanTurnResult',
+    declaration: 'export interface AdmitMemberQuestionHumanTurnResult {\n    readonly accepted: true;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n    readonly rpcId: MemberQuestionReceiverRpcId;\n}',
   },
   {
     name: 'AfterScheduleRecord',
@@ -3492,7 +3938,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AskUserQuestionIntent',
-    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n};',
+    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n} | {\n    kind: \'member-question\';\n    questionId: string;\n    originSessionId: string;\n    toProjectMember: string;\n    origin: {\n        projectName: string;\n        originSessionTitle: string;\n        askerAccountId: string;\n        askerRole: \'owner\' | \'admin\' | \'member\';\n        askerDisplayName: string;\n        askerAvatarUrl: string;\n    };\n    background: string;\n    references: readonly {\n        path: string;\n        reason: string;\n        cachedPath?: string;\n        content?: string;\n    }[];\n    expiresAt: number;\n};',
   },
   {
     name: 'AskUserQuestionItem',
@@ -3549,6 +3995,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AuthenticatedInstallationView',
     declaration: 'export interface AuthenticatedInstallationView {\n    account: PlatformAccountView;\n    installation: AuthenticatedInstallation;\n}',
+  },
+  {
+    name: 'AuthenticatedMemberQuestionEnvelope',
+    declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly documents?: readonly MemberQuestionTransferredDocument[];\n}',
+  },
+  {
+    name: 'AuthenticatedProjectView',
+    declaration: 'export type AuthenticatedProjectView = ProjectView & {\n    readonly receivingAccountId: PlatformAccountId;\n};',
   },
   {
     name: 'AuthorizationEntry',
@@ -3759,6 +4213,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
   },
   {
+    name: 'ChangeRoleInput',
+    declaration: 'export interface ChangeRoleInput {\n    readonly membershipId: MembershipId;\n    readonly role: ProjectRole;\n}',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -3841,6 +4299,50 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompactionTrigger',
     declaration: 'export type CompactionTrigger = \'pressure\' | \'context-overflow\';',
+  },
+  {
+    name: 'CompanionMemberQuestionAnswer',
+    declaration: 'export interface CompanionMemberQuestionAnswer {\n    id: string;\n    selected: readonly string[];\n    custom?: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionHumanSettledResult',
+    declaration: 'export type CompanionMemberQuestionHumanSettledResult = CompanionMemberQuestionSettledResultBase & ({\n    outcome: \'answered\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    answers: readonly CompanionMemberQuestionAnswer[];\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n});',
+  },
+  {
+    name: 'CompanionMemberQuestionItem',
+    declaration: 'export interface CompanionMemberQuestionItem {\n    id: string;\n    question: string;\n    header?: string;\n    options?: readonly CompanionMemberQuestionOption[];\n    multiSelect?: boolean;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOperation',
+    declaration: 'export interface CompanionMemberQuestionOperation {\n    type: \'member-question\';\n    operationId: CompanionOperationId;\n    questionId: MemberQuestionId;\n    projectId: ProjectId;\n    originSessionId: CompanionSessionId;\n    expiresAt: number;\n    origin: CompanionMemberQuestionOrigin;\n    background: string;\n    questions: readonly CompanionMemberQuestionItem[];\n    references: readonly CompanionMemberQuestionReference[];\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOption',
+    declaration: 'export interface CompanionMemberQuestionOption {\n    label: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOrigin',
+    declaration: 'export interface CompanionMemberQuestionOrigin {\n    projectName: string;\n    originSessionTitle: string;\n    askerAccountId: string;\n    askerRole: MemberQuestionRole;\n    askerDisplayName: string;\n    askerAvatarUrl: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionReference',
+    declaration: 'export interface CompanionMemberQuestionReference {\n    path: string;\n    reason: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionSettledResult',
+    declaration: 'export type CompanionMemberQuestionSettledResult = CompanionMemberQuestionHumanSettledResult | CompanionMemberQuestionSystemSettledResult;',
+  },
+  {
+    name: 'CompanionMemberQuestionSystemSettledResult',
+    declaration: 'export type CompanionMemberQuestionSystemSettledResult = CompanionMemberQuestionSettledResultBase & {\n    outcome: \'expired\' | \'withdrawn\' | \'superseded\';\n};',
+  },
+  {
+    name: 'CompanionOperationId',
+    declaration: 'export type CompanionOperationId = Branded<\'CompanionOperationId\'>;',
+  },
+  {
+    name: 'CompanionSessionId',
+    declaration: 'export type CompanionSessionId = Branded<\'CompanionSessionId\'>;',
   },
   {
     name: 'ConfinedArgv',
@@ -3931,6 +4433,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CreateGoalResult {\n    readonly ref: GoalRef;\n}',
   },
   {
+    name: 'CreateProjectInput',
+    declaration: 'export interface CreateProjectInput {\n    readonly name: string;\n    readonly remoteUrl: string;\n}',
+  },
+  {
     name: 'CreateSessionOptions',
     declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
   },
@@ -3965,6 +4471,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'DesktopInstallationPresentation',
     declaration: 'export interface DesktopInstallationPresentation {\n    name: string;\n    platform: \'macos\' | \'windows\' | \'linux\';\n}',
+  },
+  {
+    name: 'DesktopMemberPresentation',
+    declaration: 'export interface DesktopMemberPresentation {\n    readonly presence: \'online\' | \'offline\';\n    readonly displayName: string;\n    readonly avatarRef: string;\n}',
+  },
+  {
+    name: 'DesktopMemberQuestionOrigin',
+    declaration: 'export interface DesktopMemberQuestionOrigin {\n    readonly projectName: string;\n    readonly originSessionTitle: string;\n    readonly askerAccountId: string;\n    readonly askerRole: \'owner\' | \'admin\' | \'member\';\n    readonly askerDisplayName: string;\n    readonly askerAvatarUrl: string;\n}',
+  },
+  {
+    name: 'DesktopMemberQuestionRoute',
+    declaration: 'export interface DesktopMemberQuestionRoute {\n    readonly projectId: ProjectId;\n    readonly toProjectMember: string;\n    readonly origin: DesktopMemberQuestionOrigin;\n}',
+  },
+  {
+    name: 'DesktopProjectMembershipContext',
+    declaration: 'export interface DesktopProjectMembershipContext {\n    readonly account: {\n        readonly id: PlatformAccountId;\n        readonly githubLogin: string;\n        readonly avatarUrl: string;\n    };\n    readonly project?: RosterView[\'project\'];\n}',
   },
   {
     name: 'DevicePrincipalId',
@@ -4187,6 +4709,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface FsWriteOutcome {\n    operation: \'create\' | \'update\';\n    version: FsVersion;\n    before: string | null;\n    after: string;\n}',
   },
   {
+    name: 'FunctionTag',
+    declaration: 'export type FunctionTag = Branded<\'FunctionTag\'>;',
+  },
+  {
     name: 'GenerateOptions',
     declaration: 'export interface GenerateOptions {\n    provider: string;\n    model: string;\n    reasoningEffort?: ReasoningEffortId;\n    messages: Message[];\n    system?: string;\n    tools?: ToolSchema[];\n    temperature?: number;\n    maxTokens?: number;\n    stop?: string[];\n    signal?: AbortSignal;\n    sessionId?: Branded<\'SessionId\'>;\n    purpose?: \'compaction\' | \'session-title\';\n}',
   },
@@ -4225,6 +4751,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'GoalView',
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
+  },
+  {
+    name: 'GrantableInviteRole',
+    declaration: 'export type GrantableInviteRole = Exclude<ProjectRole, \'owner\'>;',
   },
   {
     name: 'GrantRecord',
@@ -4291,6 +4821,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InvariantInstaller {\n    (ctx: Context, fail: InvariantFailure): void | Promise<void>;\n    readonly inject?: Inject;\n}',
   },
   {
+    name: 'InvitationDecisionInput',
+    declaration: 'export type InvitationDecisionInput = {\n    decision: \'decline\';\n} | {\n    decision: \'accept-with-link\';\n    link: WorkspaceLink;\n};',
+  },
+  {
+    name: 'InvitationId',
+    declaration: 'export type InvitationId = Branded<\'InvitationId\'>;',
+  },
+  {
+    name: 'InvitationState',
+    declaration: 'export type InvitationState = \'pending\' | \'accepted\' | \'declined\' | \'retracted\';',
+  },
+  {
+    name: 'InvitationView',
+    declaration: 'export interface InvitationView {\n    readonly id: InvitationId;\n    readonly projectId: ProjectId;\n    readonly inviterAccountId: PlatformAccountId;\n    readonly inviteeAccountId: PlatformAccountId;\n    readonly state: InvitationState;\n    readonly grantedRole: GrantableInviteRole;\n    readonly invitedAt: number;\n    readonly settledAt?: number;\n}',
+  },
+  {
+    name: 'InviteInput',
+    declaration: 'export interface InviteInput {\n    readonly projectId: ProjectId;\n    readonly inviteeAccountId: PlatformAccountId;\n    readonly grantedRole: ProjectRole;\n}',
+  },
+  {
     name: 'InvocationDescriptor',
     declaration: 'export interface InvocationDescriptor {\n    readonly id: string;\n    readonly service: string;\n    readonly namespace: string;\n    readonly method: string;\n    readonly implementation?: string;\n    readonly invocation: {\n        readonly kind: \'direct\';\n    } | {\n        readonly kind: \'context\';\n        readonly context: string;\n        readonly wire: string;\n        readonly codec: TypertCodec;\n    };\n    readonly scope?: {\n        readonly context: string;\n        readonly wire: string;\n    };\n    readonly parameters: readonly InvocationParameterDescriptor[];\n    readonly cancellation?: {\n        readonly parameter: \'signal\';\n    };\n    readonly result: TypertCodec;\n    readonly sourceLocation?: InvocationSourceLocation;\n}',
   },
@@ -4305,6 +4855,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvokeRemoteRequest',
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'IssuedInvitationView',
+    declaration: 'export interface IssuedInvitationView {\n    readonly invitationId: InvitationId;\n    readonly inviteeName: string;\n    readonly grantedRole: InvitationView[\'grantedRole\'];\n    readonly invitedAt: number;\n}',
   },
   {
     name: 'JobDoneListener',
@@ -4499,6 +5053,118 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
   },
   {
+    name: 'MaterializeMemberQuestionSessionInput',
+    declaration: 'export interface MaterializeMemberQuestionSessionInput {\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n    readonly questionId: MemberQuestionId;\n}',
+  },
+  {
+    name: 'MemberQuestionAnswer',
+    declaration: 'export type MemberQuestionAnswer = CompanionMemberQuestionAnswer;',
+  },
+  {
+    name: 'MemberQuestionAnsweredResult',
+    declaration: 'export interface MemberQuestionAnsweredResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'answered\';\n    readonly answers: readonly MemberQuestionAnswer[];\n}',
+  },
+  {
+    name: 'MemberQuestionCachedReference',
+    declaration: 'export interface MemberQuestionCachedReference {\n    readonly path: string;\n    readonly reason: string;\n    readonly cachedPath: string;\n}',
+  },
+  {
+    name: 'MemberQuestionDeclinedResult',
+    declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
+  },
+  {
+    name: 'MemberQuestionDocument',
+    declaration: 'export interface MemberQuestionDocument {\n    readonly path: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'MemberQuestionHumanTurnAdmissionContext',
+    declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly workspaceId: Branded<\'WorkspaceId\'>;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n    readonly documents: readonly MemberQuestionTransferredDocument[];\n}',
+  },
+  {
+    name: 'MemberQuestionHumanTurnAdmitter',
+    declaration: 'export type MemberQuestionHumanTurnAdmitter = (input: AdmitMemberQuestionHumanTurnInput, context: MemberQuestionHumanTurnAdmissionContext) => Promise<MemberQuestionHumanTurnAdmissionReceipt>;',
+  },
+  {
+    name: 'MemberQuestionHumanTurnContent',
+    declaration: 'export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent;',
+  },
+  {
+    name: 'MemberQuestionId',
+    declaration: 'export type MemberQuestionId = Branded<\'MemberQuestionId\'>;',
+  },
+  {
+    name: 'MemberQuestionIngestResult',
+    declaration: 'export interface MemberQuestionIngestResult {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n}',
+  },
+  {
+    name: 'MemberQuestionItem',
+    declaration: 'export type MemberQuestionItem = CompanionMemberQuestionItem;',
+  },
+  {
+    name: 'MemberQuestionReceiverAuthority',
+    declaration: 'export interface MemberQuestionReceiverAuthority {\n    readonly accountId: PlatformAccountId;\n}',
+  },
+  {
+    name: 'MemberQuestionReceiverChange',
+    declaration: 'export interface MemberQuestionReceiverChange {\n    readonly revision: number;\n    readonly questionId: MemberQuestionId;\n    readonly state: \'pending\' | CompanionMemberQuestionSettledResult[\'outcome\'];\n}',
+  },
+  {
+    name: 'MemberQuestionReceiverListener',
+    declaration: 'export type MemberQuestionReceiverListener = (snapshot: MemberQuestionReceiverSnapshot) => void;',
+  },
+  {
+    name: 'MemberQuestionReceiverRpcId',
+    declaration: 'export type MemberQuestionReceiverRpcId = Branded<\'MemberQuestionReceiverRpcId\'>;',
+  },
+  {
+    name: 'MemberQuestionReceiverSettlement',
+    declaration: 'export type MemberQuestionReceiverSettlement = {\n    readonly kind: \'answered\';\n    readonly answers: readonly CompanionMemberQuestionAnswer[];\n    readonly settledByInstallationId: InstallationId;\n    readonly settledByDeviceName: string;\n    readonly settledAt: number;\n} | {\n    readonly kind: \'declined\';\n    readonly settledByInstallationId: InstallationId;\n    readonly settledByDeviceName: string;\n    readonly settledAt: number;\n} | {\n    readonly kind: \'authoritative\';\n    readonly claim: MemberQuestionTerminalClaim;\n};',
+  },
+  {
+    name: 'MemberQuestionReceiverSnapshot',
+    declaration: 'export interface MemberQuestionReceiverSnapshot {\n    readonly revision: number;\n    readonly pending: readonly PendingMemberQuestionView[];\n    readonly terminal: readonly TerminalMemberQuestionView[];\n}',
+  },
+  {
+    name: 'MemberQuestionReference',
+    declaration: 'export type MemberQuestionReference = CompanionMemberQuestionReference;',
+  },
+  {
+    name: 'MemberQuestionSendOptions',
+    declaration: 'export interface MemberQuestionSendOptions {\n    session?: Session;\n    signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'MemberQuestionSendPayload',
+    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: ProjectId;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly documents?: readonly MemberQuestionDocument[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: CompanionSessionId;\n}',
+  },
+  {
+    name: 'MemberQuestionSendResult',
+    declaration: 'export type MemberQuestionSendResult = MemberQuestionAnsweredResult | MemberQuestionDeclinedResult;',
+  },
+  {
+    name: 'MemberQuestionSessionMaterializer',
+    declaration: 'export type MemberQuestionSessionMaterializer = (input: MaterializeMemberQuestionSessionInput, context: MemberQuestionHumanTurnAdmissionContext) => Promise<MemberQuestionHumanTurnAdmissionReceipt>;',
+  },
+  {
+    name: 'MemberQuestionSettlement',
+    declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n};',
+  },
+  {
+    name: 'MemberQuestionTerminalAuthority',
+    declaration: 'export interface MemberQuestionTerminalAuthority {\n    claim(candidate: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>;\n}',
+  },
+  {
+    name: 'MemberQuestionTransferredDocument',
+    declaration: 'export interface MemberQuestionTransferredDocument {\n    readonly path: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'MembershipId',
+    declaration: 'export type MembershipId = Branded<\'MembershipId\'>;',
+  },
+  {
+    name: 'MemberView',
+    declaration: 'export interface MemberView {\n    readonly id: MembershipId;\n    readonly accountId: PlatformAccountId;\n    readonly role: ProjectRole;\n    readonly tags: readonly FunctionTag[];\n    readonly link?: WorkspaceLink;\n    readonly joinedAt: number;\n}',
+  },
+  {
     name: 'Message',
     declaration: 'export interface Message {\n    readonly id: MessageId;\n    readonly role: \'system\' | \'user\' | \'assistant\';\n    readonly content: ContentBlock[];\n    readonly source: MessageSource;\n}',
   },
@@ -4659,6 +5325,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PairingRendezvousId = Branded<\'PairingRendezvousId\'>;',
   },
   {
+    name: 'PendingInvitationContext',
+    declaration: 'export interface PendingInvitationContext {\n    readonly invitation: InvitationView;\n    readonly project: ProjectView;\n}',
+  },
+  {
+    name: 'PendingInvitationView',
+    declaration: 'export interface PendingInvitationView {\n    readonly invitationId: InvitationId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly projectName: string;\n    readonly remoteUrl: string;\n    readonly inviterName: string;\n    readonly grantedRole: InvitationView[\'grantedRole\'];\n    readonly invitedAt: number;\n}',
+  },
+  {
+    name: 'PendingMemberQuestionView',
+    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly cachedReferences?: readonly MemberQuestionCachedReference[];\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
+  },
+  {
     name: 'PendingPairingId',
     declaration: 'export type PendingPairingId = Branded<\'PendingPairingId\'>;',
   },
@@ -4727,6 +5405,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PreToolDecision = {\n    kind: \'allow\';\n} | {\n    kind: \'deny\';\n    reason: string;\n} | {\n    kind: \'ask\';\n    reason?: string;\n};',
   },
   {
+    name: 'ProjectId',
+    declaration: 'export type ProjectId = Branded<\'ProjectId\'>;',
+  },
+  {
     name: 'ProjectionChangeListener',
     declaration: 'export type ProjectionChangeListener = (session: Session, key: Extract<keyof SessionProjectionMap, string>, value: unknown, seq: number) => void;',
   },
@@ -4745,6 +5427,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ProjectionSnapshot',
     declaration: 'export interface ProjectionSnapshot {\n    asOfSeq: number;\n    values: Partial<SessionProjectionMap>;\n}',
+  },
+  {
+    name: 'ProjectPeerGrantId',
+    declaration: 'export type ProjectPeerGrantId = Branded<\'ProjectPeerGrantId\'>;',
+  },
+  {
+    name: 'ProjectPeerGrantView',
+    declaration: 'export interface ProjectPeerGrantView {\n    grantId: ProjectPeerGrantId;\n    projectId: ProjectPeerProjectId;\n    routeId: RelayRouteId;\n    peerAccountId: PlatformAccountId;\n    peerInstallationId: InstallationId;\n    credentialFingerprint: RelayCredentialFingerprint;\n    revision: number;\n    grantedAt: number;\n}',
+  },
+  {
+    name: 'ProjectPeerProjectId',
+    declaration: 'export type ProjectPeerProjectId = Branded<\'ProjectId\'>;',
+  },
+  {
+    name: 'ProjectRole',
+    declaration: 'export type ProjectRole = \'owner\' | \'admin\' | \'member\';',
+  },
+  {
+    name: 'ProjectView',
+    declaration: 'export interface ProjectView {\n    readonly id: ProjectId;\n    readonly name: string;\n    readonly boundRemoteUrl: string;\n    readonly createdAt: number;\n}',
   },
   {
     name: 'PromptAssembly',
@@ -4771,6 +5473,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
   },
   {
+    name: 'PublicAccountIdentity',
+    declaration: 'export interface PublicAccountIdentity {\n    readonly id: PlatformAccountId;\n    readonly githubLogin: string;\n    readonly avatarUrl: string;\n}',
+  },
+  {
     name: 'ReadFileLine',
     declaration: 'export interface ReadFileLine {\n    number: number;\n    text: string;\n}',
   },
@@ -4785,6 +5491,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReasoningEffortId',
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
+  },
+  {
+    name: 'ReceivingSessionId',
+    declaration: 'export type ReceivingSessionId = Branded<\'ReceivingSessionId\'>;',
   },
   {
     name: 'RedactedSecret',
@@ -4809,6 +5519,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RelayCredential',
     declaration: 'export type RelayCredential = Branded<\'RelayCredential\'>;',
+  },
+  {
+    name: 'RelayCredentialFingerprint',
+    declaration: 'export type RelayCredentialFingerprint = Branded<\'RelayCredentialFingerprint\'>;',
   },
   {
     name: 'RelayCredentialGrant',
@@ -4919,6 +5633,34 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
+    name: 'RosterInvalidation',
+    declaration: 'export type RosterInvalidation = RosterInvalidationBase & (RosterTagsChanged | RosterRoleChanged | {\n    readonly reason: \'joined\';\n} | {\n    readonly reason: \'removed\';\n});',
+  },
+  {
+    name: 'RosterInvalidationBase',
+    declaration: 'export interface RosterInvalidationBase {\n    readonly projectId: ProjectId;\n    readonly membershipId: MembershipId;\n    readonly accountId: PlatformAccountId;\n    readonly rosterVersionBefore: number;\n    readonly rosterVersionAfter: number;\n}',
+  },
+  {
+    name: 'RosterMemberView',
+    declaration: 'export type RosterMemberView = MemberView & {\n    readonly presence: \'online\' | \'offline\';\n    readonly displayName: string;\n    readonly avatarRef: string;\n};',
+  },
+  {
+    name: 'RosterReadView',
+    declaration: 'export interface RosterReadView {\n    readonly project: ProjectView;\n    readonly members: readonly RosterMemberView[];\n}',
+  },
+  {
+    name: 'RosterRoleChanged',
+    declaration: 'export interface RosterRoleChanged {\n    readonly reason: \'role-changed\';\n    readonly role: ProjectRole;\n}',
+  },
+  {
+    name: 'RosterTagsChanged',
+    declaration: 'export interface RosterTagsChanged {\n    readonly reason: \'tags-changed\';\n    readonly tags: readonly FunctionTag[];\n}',
+  },
+  {
+    name: 'RosterView',
+    declaration: 'export interface RosterView {\n    readonly project: ProjectView;\n    readonly members: readonly MemberView[];\n}',
+  },
+  {
     name: 'RpcError',
     declaration: 'export type RpcError = {\n    [C in RpcErrorCode]: {\n        code: C;\n        message: string;\n        details: RpcErrorDetailsMap[C];\n    };\n}[RpcErrorCode];',
   },
@@ -4928,7 +5670,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RpcErrorDetailsMap',
-    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n        existingPreset?: string;\n    };\n    \'agent-preset-not-found\': {\n        agentPreset: string;\n      /* …truncated — full shape in source */',
+    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-clone-failed\': {\n        parentPath: string;\n        directoryName: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n         /* …truncated — full shape in source */',
   },
   {
     name: 'RpcId',
@@ -5017,6 +5759,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ScopeKey',
     declaration: 'export type ScopeKey = object;',
+  },
+  {
+    name: 'SealedProjectPeerGrant',
+    declaration: 'export interface SealedProjectPeerGrant {\n    projectId: ProjectPeerProjectId;\n    grantId: ProjectPeerGrantId;\n    credentialFingerprint: RelayCredentialFingerprint;\n    sealedCredential: Uint8Array;\n}',
   },
   {
     name: 'SearchFileMatches',
@@ -5289,6 +6035,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionTitleUserMessage',
     declaration: 'export interface SessionTitleUserMessage {\n    readonly seq: number;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'SetMemberTagsInput',
+    declaration: 'export interface SetMemberTagsInput {\n    readonly membershipId: MembershipId;\n    readonly tags: readonly FunctionTag[];\n}',
   },
   {
     name: 'SettingsApplies',
@@ -5641,6 +6391,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TerminalCallView',
     declaration: 'export interface TerminalCallView {\n    card: \'terminal\';\n    title: string;\n    description?: string;\n    cwd?: string;\n}',
+  },
+  {
+    name: 'TerminalMemberQuestionView',
+    declaration: 'export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, \'operation\'> {\n    readonly terminal: CompanionMemberQuestionSettledResult;\n    readonly brief: Omit<CompanionMemberQuestionOperation, \'questions\'> & {\n        readonly questions: CompanionMemberQuestionOperation[\'questions\'];\n    };\n}',
   },
   {
     name: 'TerminalReadRequest',
@@ -6045,6 +6799,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkspaceLink',
+    declaration: 'export interface WorkspaceLink {\n    readonly workspaceName: string;\n    readonly normalizedRemoteUrl?: string;\n}',
   },
 ]
 

@@ -21,8 +21,10 @@ import {
 } from '../src/api/host.schema.ts'
 import {
   workspaceArchiveSessionRequestSchema, workspaceArchiveSessionValueSchema,
+  workspaceCloneGitRequestSchema, workspaceCloneGitValueSchema,
   workspaceCreateRequestSchema, workspaceCreateValueSchema, workspaceIdSchema,
   workspaceDeleteRequestSchema, workspaceDeleteValueSchema,
+  workspaceGitRemoteRequestSchema, workspaceGitRemoteValueSchema,
   workspaceInsertBeforeRequestSchema, workspaceInsertBeforeValueSchema,
   workspaceInsertSessionBeforeRequestSchema, workspaceInsertSessionBeforeValueSchema,
   workspaceListRequestSchema, workspaceListValueSchema,
@@ -37,6 +39,12 @@ import { approvalRequestIdSchema, approvalResponsePayloadSchema } from '../src/a
 import { askUserQuestionAnswerSchema, questionResponsePayloadSchema } from '../src/api/questions.schema.ts'
 import { goalEditRequestSchema } from '../src/api/goals.schema.ts'
 import { subagentPromptRequestSchema } from '../src/api/subagents.schema.ts'
+import {
+  memberQuestionBindWorkspaceRequestSchema, memberQuestionBindWorkspaceValueSchema,
+  memberQuestionEnsureWorkspaceBindingRequestSchema, memberQuestionEnsureWorkspaceBindingValueSchema,
+  memberQuestionWorkspaceBindingRequestSchema, memberQuestionWorkspaceBindingValueSchema,
+  memberQuestionSettleRequestSchema, memberQuestionSnapshotRequestSchema,
+} from '../src/api/member-questions.schema.ts'
 
 describe('RpcId', () => {
   it('brands a raw string at zero runtime cost', () => {
@@ -65,6 +73,9 @@ describe('rpcErrorSchema', () => {
     expect(rpcErrorSchema.parse({ code: 'workspace-attach-failed', message: 'm', details: { sessionId: 's', workspaceId: 'w' } }).code).toBe('workspace-attach-failed')
     expect(rpcErrorSchema.parse({ code: 'workspace-not-found', message: 'm', details: { workspaceId: 'w' } }).code).toBe('workspace-not-found')
     expect(rpcErrorSchema.parse({ code: 'workspace-invalid-path', message: 'm', details: { path: '/x' } }).code).toBe('workspace-invalid-path')
+    expect(rpcErrorSchema.parse({
+      code: 'workspace-clone-failed', message: 'm', details: { parentPath: '/x', directoryName: 'r' },
+    }).code).toBe('workspace-clone-failed')
     expect(rpcErrorSchema.parse({ code: 'workspace-name-conflict', message: 'm', details: { name: 'x' } }).code).toBe('workspace-name-conflict')
     expect(rpcErrorSchema.parse({ code: 'workspace-move-invalid', message: 'm', details: { workspaceId: 'w', sessionId: 's' } }).code).toBe('workspace-move-invalid')
     expect(rpcErrorSchema.parse({
@@ -386,6 +397,20 @@ describe('workspace domain schemas', () => {
     expect(workspaceCreateValueSchema.parse({ workspace: view, created: false }).created).toBe(false)
   })
 
+  it('validates Git origin and clone payloads', () => {
+    expect(workspaceGitRemoteRequestSchema.parse({ workspaceId: 'w1' }).workspaceId).toBe('w1')
+    expect(workspaceGitRemoteValueSchema.parse({ remoteUrl: 'https://github.com/o/r.git' }).remoteUrl)
+      .toBe('https://github.com/o/r.git')
+    expect(workspaceGitRemoteValueSchema.parse({})).toEqual({})
+    expect(workspaceCloneGitRequestSchema.parse({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: 'repo',
+    }).directoryName).toBe('repo')
+    expect(() => workspaceCloneGitRequestSchema.parse({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: '../repo',
+    })).toThrow(/one path segment/)
+    expect(workspaceCloneGitValueSchema.parse({ workspace: view }).workspace.workspaceId).toBe('w1')
+  })
+
   it('rename requires a non-blank title (both refine arms)', () => {
     expect(workspaceRenameRequestSchema.parse({ workspaceId: 'w1', title: 'new' }).title).toBe('new')
     expect(() => workspaceRenameRequestSchema.parse({ workspaceId: 'w1', title: '  ' })).toThrow(/non-blank/)
@@ -440,6 +465,40 @@ describe('goals domain schemas', () => {
 })
 
 describe('events frame schemas', () => {
+  it('keeps member-question RPC and Host-frame fields exact', () => {
+    const binding = {
+      receivingAccountId: 'account-2', projectId: 'project-1', workspaceId: 'workspace-1',
+    }
+    expect(memberQuestionBindWorkspaceRequestSchema.parse(binding)).toEqual(binding)
+    expect(memberQuestionBindWorkspaceValueSchema.parse({ bound: true })).toEqual({ bound: true })
+    expect(memberQuestionWorkspaceBindingRequestSchema.parse({
+      receivingAccountId: binding.receivingAccountId,
+      projectId: binding.projectId,
+    })).toEqual({ receivingAccountId: 'account-2', projectId: 'project-1' })
+    expect(memberQuestionWorkspaceBindingValueSchema.parse({ state: 'live', workspaceId: 'workspace-1' }))
+      .toEqual({ state: 'live', workspaceId: 'workspace-1' })
+    expect(memberQuestionWorkspaceBindingValueSchema.parse({ state: 'missing' }))
+      .toEqual({ state: 'missing' })
+    expect(memberQuestionEnsureWorkspaceBindingRequestSchema.parse(binding)).toEqual(binding)
+    expect(memberQuestionEnsureWorkspaceBindingValueSchema.parse({ state: 'repaired', workspaceId: 'workspace-1' }))
+      .toEqual({ state: 'repaired', workspaceId: 'workspace-1' })
+    expect(memberQuestionSnapshotRequestSchema.parse({})).toEqual({})
+    expect(() => memberQuestionSnapshotRequestSchema.parse({ unexpected: true })).toThrow()
+    const settle = {
+      receivingSessionId: 'receiving-1', revision: 2, questionId: 'question-1',
+      response: { kind: 'declined' },
+    }
+    expect(memberQuestionSettleRequestSchema.parse(settle)).toEqual(settle)
+    expect(() => memberQuestionSettleRequestSchema.parse({ ...settle, unexpected: true })).toThrow()
+    const hostFrame = {
+      type: 'host/member-question-snapshot',
+      currentInstallationId: 'installation-1',
+      snapshot: { revision: 0, pending: [], terminal: [] },
+    }
+    expect(hostFrameSchema.parse(hostFrame)).toEqual(hostFrame)
+    expect(() => hostFrameSchema.parse({ ...hostFrame, unexpected: true })).toThrow()
+  })
+
   it('accepts every mux frame branch', () => {
     const frames = [
       { type: 'session/event', sessionId: 's', event: { type: 't', seq: 0, time: 1, data: null } },
@@ -495,6 +554,57 @@ describe('events frame schemas', () => {
       expect(() => askUserQuestionItemSchema.parse({ id: 'q', question: 'Q?', intent: invalid })).toThrow()
     }
   })
+
+  it('carries a member-question intent and its Decision Brief, and rejects an incomplete or mislabelled one', () => {
+    const intent = memberQuestionIntent()
+    const parsed = askUserQuestionItemSchema.parse({
+      id: 'member-q', question: 'Remove this member?',
+      options: [{ label: 'Remove' }, { label: 'Keep' }], intent,
+    })
+    expect(parsed.intent).toEqual(intent)
+    // The whole question/requested frame accepts the carried brief.
+    expect(muxFrameSchema.parse({
+      type: 'question/requested', sessionId: 's', questions: [{ id: 'member-q', question: 'Q?', intent }],
+    }).type).toBe('question/requested')
+    // Fail loud: an unknown member-question-ish tag, and every required
+    // carried field missing or out of bound (an incomplete Decision Brief
+    // never degrades to a generic render).
+    for (const invalid of [
+      { ...intent, kind: 'member-questions' },
+      { ...intent, questionId: '' },
+      { ...intent, originSessionId: '' },
+      { ...intent, toProjectMember: '' },
+      { ...intent, origin: { ...intent.origin, projectName: '' } },
+      { ...intent, origin: { ...intent.origin, askerRole: 'guest' } },
+      { ...intent, origin: { ...intent.origin, askerAvatarUrl: undefined } },
+      { ...intent, background: undefined },
+      { ...intent, references: [{ path: '', reason: 'x' }] },
+      { ...intent, expiresAt: 'soon' },
+    ]) {
+      expect(() => askUserQuestionItemSchema.parse({ id: 'q', question: 'Q?', intent: invalid })).toThrow()
+    }
+  })
+
+  /** A fully carried member-question intent (the T4/T5 aligned Decision Brief). */
+  function memberQuestionIntent() {
+    return {
+      kind: 'member-question',
+      questionId: 'mq-1',
+      originSessionId: 'remote-session-1',
+      toProjectMember: 'member-b',
+      origin: {
+        projectName: 'Atlas',
+        originSessionTitle: 'Offboard planning',
+        askerAccountId: 'member-a',
+        askerRole: 'member',
+        askerDisplayName: 'Alice',
+        askerAvatarUrl: 'https://example.com/a.png',
+      },
+      background: 'We are offboarding this member.',
+      references: [{ path: 'docs/subsystems/project-membership.md', reason: 'Checklist' }],
+      expiresAt: 1_000,
+    } as const
+  }
 
   it('accepts every queue placement and rejects unknown placements', () => {
     const item = (placement: string) => ({ type: 'session/queue', sessionId: 's', items: [{

@@ -326,6 +326,20 @@ export class PostgresAccountBackend implements AccountBackend {
     return result.rows[0] === undefined ? undefined : accountFromRow(result.rows[0])
   }
 
+  async findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]> {
+    const result = await this.pool.query<AccountRow>(
+      `SELECT * FROM account_accounts
+        WHERE identity_namespace = $1 AND lower(github_login) = $2
+        ORDER BY id
+        LIMIT 2`,
+      [identityNamespace, normalizedGithubLogin],
+    )
+    return result.rows.map(accountFromRow)
+  }
+
   async hasActiveSessionByInstallation(
     identityNamespace: string,
     installationId: InstallationId,

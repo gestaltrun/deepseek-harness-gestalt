@@ -35,8 +35,10 @@ import {
 } from '../api/sessions.schema.ts'
 import {
   workspaceArchiveSessionValueSchema,
+  workspaceCloneGitValueSchema,
   workspaceCreateValueSchema,
   workspaceDeleteValueSchema,
+  workspaceGitRemoteValueSchema,
   workspaceInsertBeforeValueSchema,
   workspaceInsertSessionBeforeValueSchema,
   workspaceListValueSchema,
@@ -69,6 +71,14 @@ import {
   subagentListValueSchema,
   subagentPromptValueSchema,
 } from '../api/subagents.schema.ts'
+import {
+  memberQuestionBindWorkspaceValueSchema,
+  memberQuestionEnsureWorkspaceBindingValueSchema,
+  memberQuestionWorkspaceBindingValueSchema,
+  memberQuestionSettleValueSchema,
+  memberQuestionSnapshotValueSchema,
+  memberQuestionAdmitHumanTurnValueSchema,
+} from '../api/member-questions.schema.ts'
 
 /**
  * Client consumption face of the contract (shape a): same domain tree as ApiProxy, but unary
@@ -87,6 +97,14 @@ import {
  * Derived per method key from RpcMethodMap so a map row addition updates this mechanically.
  */
 export interface IApiClient {
+  memberQuestions: {
+    workspaceBinding(payload: RequestPayload<'memberQuestion.workspaceBinding'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.workspaceBinding'>>>
+    ensureWorkspaceBinding(payload: RequestPayload<'memberQuestion.ensureWorkspaceBinding'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.ensureWorkspaceBinding'>>>
+    bindWorkspace(payload: RequestPayload<'memberQuestion.bindWorkspace'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.bindWorkspace'>>>
+    snapshot(payload: RequestPayload<'memberQuestion.snapshot'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.snapshot'>>>
+    settle(payload: RequestPayload<'memberQuestion.settle'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.settle'>>>
+    admitHumanTurn(payload: RequestPayload<'memberQuestion.admitHumanTurn'>, signal?: AbortSignal, rpcId?: RpcId): Promise<RpcResponse<ResponseValue<'memberQuestion.admitHumanTurn'>>>
+  }
   sessions: {
     list(payload: RequestPayload<'session.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.list'>>>
     search(payload: RequestPayload<'session.search'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.search'>>>
@@ -119,6 +137,8 @@ export interface IApiClient {
   workspace: {
     list(payload: RequestPayload<'workspace.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.list'>>>
     create(payload: RequestPayload<'workspace.create'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.create'>>>
+    gitRemote(payload: RequestPayload<'workspace.gitRemote'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.gitRemote'>>>
+    cloneGit(payload: RequestPayload<'workspace.cloneGit'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.cloneGit'>>>
     rename(payload: RequestPayload<'workspace.rename'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.rename'>>>
     delete(payload: RequestPayload<'workspace.delete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.delete'>>>
     insertBefore(payload: RequestPayload<'workspace.insertBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertBefore'>>>
@@ -175,6 +195,12 @@ export interface IApiClient {
  * mirror of the handler's request table; key coverage compiler-enforced against RpcMethodMap).
  */
 const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseValue<K>>> } = {
+  'memberQuestion.workspaceBinding': memberQuestionWorkspaceBindingValueSchema,
+  'memberQuestion.ensureWorkspaceBinding': memberQuestionEnsureWorkspaceBindingValueSchema,
+  'memberQuestion.bindWorkspace': memberQuestionBindWorkspaceValueSchema,
+  'memberQuestion.snapshot': memberQuestionSnapshotValueSchema,
+  'memberQuestion.settle': memberQuestionSettleValueSchema,
+  'memberQuestion.admitHumanTurn': memberQuestionAdmitHumanTurnValueSchema,
   'session.list': sessionListValueSchema,
   'session.search': sessionSearchValueSchema,
   'session.create': sessionCreateValueSchema,
@@ -200,6 +226,8 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'host.openPath': hostOpenPathValueSchema,
   'workspace.list': workspaceListValueSchema,
   'workspace.create': workspaceCreateValueSchema,
+  'workspace.gitRemote': workspaceGitRemoteValueSchema,
+  'workspace.cloneGit': workspaceCloneGitValueSchema,
   'workspace.rename': workspaceRenameValueSchema,
   'workspace.delete': workspaceDeleteValueSchema,
   'workspace.insertBefore': workspaceInsertBeforeValueSchema,
@@ -343,8 +371,9 @@ export abstract class AbstractApiClient implements IApiClient {
     payload: RequestPayload<K>,
     signal?: AbortSignal,
     timeoutPolicy: UnaryTimeoutPolicy = 'default',
+    rpcId?: RpcId,
   ): Promise<RpcResponse<ResponseValue<K>>> {
-    const message: ClientRequest = { type: 'client-request', rpcId: this.mintRpcId(), method, payload }
+    const message: ClientRequest = { type: 'client-request', rpcId: rpcId ?? this.mintRpcId(), method, payload }
     this.onEnvelope(message)
     const response = await this.postJson(`/api/${method}`, message, signal, timeoutPolicy)
     const full = serverResponseSchema.parse(await response.json())
@@ -417,6 +446,17 @@ export abstract class AbstractApiClient implements IApiClient {
 
   // ---- IApiClient API (arrow properties so destructured/passed references stay bound) ----
 
+  readonly memberQuestions: IApiClient['memberQuestions'] = {
+    workspaceBinding: (payload, signal) => this.callUnary('memberQuestion.workspaceBinding', payload, signal),
+    ensureWorkspaceBinding: (payload, signal) => this.callUnary('memberQuestion.ensureWorkspaceBinding', payload, signal),
+    bindWorkspace: (payload, signal) => this.callUnary('memberQuestion.bindWorkspace', payload, signal),
+    snapshot: (payload, signal) => this.callUnary('memberQuestion.snapshot', payload, signal),
+    settle: (payload, signal) => this.callUnary('memberQuestion.settle', payload, signal),
+    admitHumanTurn: (payload, signal, rpcId) => this.callUnary(
+      'memberQuestion.admitHumanTurn', payload, signal, 'default', rpcId,
+    ),
+  }
+
   readonly sessions: IApiClient['sessions'] = {
     list: (payload, signal) => this.callUnary('session.list', payload, signal),
     search: (payload, signal) => this.callUnary('session.search', payload, signal),
@@ -456,6 +496,8 @@ export abstract class AbstractApiClient implements IApiClient {
   readonly workspace: IApiClient['workspace'] = {
     list: (payload, signal) => this.callUnary('workspace.list', payload, signal),
     create: (payload, signal) => this.callUnary('workspace.create', payload, signal),
+    gitRemote: (payload, signal) => this.callUnary('workspace.gitRemote', payload, signal),
+    cloneGit: (payload, signal) => this.callUnary('workspace.cloneGit', payload, signal),
     rename: (payload, signal) => this.callUnary('workspace.rename', payload, signal),
     delete: (payload, signal) => this.callUnary('workspace.delete', payload, signal),
     insertBefore: (payload, signal) => this.callUnary('workspace.insertBefore', payload, signal),

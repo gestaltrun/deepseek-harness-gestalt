@@ -202,6 +202,28 @@ export class WorkspaceRuntime implements IWorkspaces {
     return result.value.workspace
   }
 
+  /** Read the configured origin of one local Workspace checkout. */
+  async gitRemote(workspaceId: WorkspaceId): Promise<string | undefined> {
+    const response = await this.api.workspace.gitRemote({ workspaceId })
+    if (!response.result.ok) {
+      throw new Error(`workspace remote inspection failed: ${response.result.error.code}: ${response.result.error.message}`)
+    }
+    return response.result.value.remoteUrl
+  }
+
+  /** Clone and register one Workspace through the Host-owned Git operation. */
+  async cloneGit(input: { remoteUrl: string; parentPath: string; directoryName: string }): Promise<WorkspaceView> {
+    const response = await this.api.workspace.cloneGit(input)
+    if (!response.result.ok) {
+      throw new Error(`workspace clone failed: ${response.result.error.code}: ${response.result.error.message}`)
+    }
+    this.manager.handleHostEnvelope({
+      rpcId: response.rpcId,
+      payload: { type: 'host/workspace-changed', workspace: response.result.value.workspace },
+    })
+    return response.result.value.workspace
+  }
+
   /**
    * Open the Host's native directory picker (the `native` capability).
    * @returns the selected path, or null when the user cancelled.

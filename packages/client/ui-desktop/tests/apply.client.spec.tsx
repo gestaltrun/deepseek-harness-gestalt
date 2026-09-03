@@ -106,6 +106,21 @@ describe('ui-desktop apply', () => {
       chromeOverlayResult: () => {},
       onChromeOverlayState: () => () => {},
       onChromeOverlayResult: () => () => {},
+      projectMembership: {
+        createProject: vi.fn(),
+        projectByRemote: vi.fn(),
+        roster: vi.fn(),
+        heartbeat: vi.fn(),
+        closePresence: vi.fn(),
+        invite: vi.fn(),
+        decideInvitation: vi.fn(),
+        retractInvitation: vi.fn(),
+        pendingInvitations: vi.fn(),
+        issuedInvitations: vi.fn(),
+        changeRole: vi.fn(),
+        setMemberTags: vi.fn(),
+        removeMember: vi.fn(),
+      },
     }
     window.dshDesktop = desktop
     const b = await bench()
@@ -117,6 +132,7 @@ describe('ui-desktop apply', () => {
     expect(desktop.onAccountSnapshot).toHaveBeenCalledOnce()
     expect(desktop.pairingGetSnapshot).toHaveBeenCalledOnce()
     expect(desktop.onPairingSnapshot).toHaveBeenCalledOnce()
+    expect(b.ctx.get('projectMembershipClient')).toBe(desktop.projectMembership)
     expect(desktop.sub2ApiGetSnapshot).toHaveBeenCalledOnce()
     expect(desktop.onSub2ApiSnapshot).toHaveBeenCalledOnce()
     const brand = b.slots.entries('sidebar.brand')[0]
@@ -132,5 +148,6 @@ describe('ui-desktop apply', () => {
     await Promise.resolve()
     await Promise.resolve()
     await fiber.dispose()
+    expect(b.ctx.get('projectMembershipClient')).toBeUndefined()
   })
 })

@@ -16,6 +16,32 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
     }
   }
   return {
+    memberQuestions: {
+      workspaceBinding: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { state: 'missing' as const } },
+      }),
+      ensureWorkspaceBinding: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { state: 'created' as const, workspaceId: request.payload.workspaceId } },
+      }),
+      bindWorkspace: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { bound: true as const } },
+      }),
+      snapshot: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { revision: 0, pending: [], terminal: [] } },
+      }),
+      settle: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } },
+      }),
+      admitHumanTurn: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { accepted: true, sessionId: request.payload.receivingSessionId } },
+      }),
+    },
     sessions: {
       async list(request) {
         if (overrides.crashOn === 'session.list') throw new Error('impl crashed')
@@ -179,6 +205,20 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
           result: { ok: true, value: { workspace: { workspaceId: 'w1' as never, path: '/w', title: 'w', sessionIds: [], createdAt: 't', updatedAt: 't' }, created: true } },
         }
       },
+      async gitRemote(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: {} } }
+      },
+      async cloneGit(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { workspace: {
+            workspaceId: 'w-clone' as never,
+            path: `${request.payload.parentPath}/${request.payload.directoryName}`,
+            title: request.payload.directoryName,
+            sessionIds: [], createdAt: 't', updatedAt: 't',
+          } } },
+        }
+      },
       async rename(request) {
         return {
           rpcId: request.rpcId,
@@ -320,6 +360,41 @@ async function collect<F>(stream: AsyncIterable<RpcRequest<F>>): Promise<RpcRequ
 }
 
 describe('unary round trip (handler ⇄ client, no network)', () => {
+  it('round-trips member-question binding, snapshot, and settlement methods', async () => {
+    const c = client()
+    expect((await c.memberQuestions.workspaceBinding({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+    })).result).toEqual({ ok: true, value: { state: 'missing' } })
+    expect((await c.memberQuestions.ensureWorkspaceBinding({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+      workspaceId: 'workspace-1' as never,
+    })).result).toEqual({ ok: true, value: { state: 'created', workspaceId: 'workspace-1' } })
+    expect((await c.memberQuestions.bindWorkspace({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+      workspaceId: 'workspace-1' as never,
+    })).result).toEqual({ ok: true, value: { bound: true } })
+    expect((await c.memberQuestions.snapshot({})).result).toEqual({
+      ok: true, value: { revision: 0, pending: [], terminal: [] },
+    })
+    expect((await c.memberQuestions.settle({
+      receivingSessionId: 'receiving-1' as never,
+      revision: 1,
+      questionId: 'question-1' as never,
+      response: { kind: 'declined' },
+    })).result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect((await c.memberQuestions.admitHumanTurn({
+      receivingSessionId: 'receiving-1' as never,
+      revision: 1,
+      content: [{ type: 'text', text: 'Help me decide.' }],
+      mode: 'queue',
+    })).result).toEqual({
+      ok: true, value: { accepted: true, sessionId: 'receiving-1' },
+    })
+  })
+
   it('carries a success result and echoes the minted rpcId', async () => {
     const response = await client().sessions.list({})
     expect(response.result).toEqual({ ok: true, value: { items: [] } })

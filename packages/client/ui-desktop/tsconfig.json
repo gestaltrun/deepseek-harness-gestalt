@@ -36,6 +36,9 @@
       "path": "../../platform/platform-account"
     },
     {
+      "path": "../../platform/project-membership-client"
+    },
+    {
       "path": "../../platform/remote-access"
     },
     {

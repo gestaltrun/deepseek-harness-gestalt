@@ -4,9 +4,9 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -85,9 +85,17 @@ import type { SettingsDescriptor, SettingsNamespace, SettingsPathOp } from '@dee
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 // Value edge: the rename impl narrows the title service's validation failure; the import also resolves `ctx.get('sessionTitle')`.
 import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
-import type { CallId } from '@deepseek-ai/dsh-llm/brand'
+import { MessageId, type CallId } from '@deepseek-ai/dsh-llm/brand'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-approval'
+import type { InstallationId } from '@deepseek-ai/dsh-remote-protocol'
+import type {
+  MemberQuestionHumanTurnAdmissionContext,
+  MemberQuestionHumanTurnContent,
+  TerminalMemberQuestionView,
+} from '@deepseek-ai/dsh-member-question-receiver'
+import { writeMemberQuestionDocumentCache } from '@deepseek-ai/dsh-member-question-receiver'
+import type {} from '@deepseek-ai/dsh-project-membership'
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -101,6 +109,8 @@ import type {
 } from '@deepseek-ai/dsh-user-questions'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
+import type { NativeCommandRunner } from '@deepseek-ai/dsh-native-command'
+import type { SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import {
   ApiRemoteSessionNotFound as SessionNotFound,
   ApiRemoteSubagentSessionOwnership as SubagentSessionOwnership,
@@ -137,6 +147,19 @@ async function durablePromptContent(ctx: Context, content: readonly PromptConten
     ? { type: 'text', text: part.text }
     // admitEncodedImages returns one reference per image part in order.
     : { type: 'image', attachment: refs[next++] as ImageAttachmentRef })
+}
+
+/** Promote browser bytes before the receiver journal owns a crash-safe human action. */
+async function durableMemberQuestionContent(
+  ctx: Context,
+  content: readonly PromptContentPart[],
+): Promise<MemberQuestionHumanTurnContent[]> {
+  const durable = await durablePromptContent(ctx, content)
+  return durable.map((block): MemberQuestionHumanTurnContent => {
+    if (block.type === 'text') return { type: 'text', text: block.text }
+    if (block.type === 'image') return { type: 'image', attachment: block.attachment }
+    throw new Error(`member-question human admission produced unsupported durable content ${JSON.stringify(block.type)}`)
+  })
 }
 
 /** Search durable content for an image reference, including nested tool results. */
@@ -474,12 +497,12 @@ function jobViews(snapshots: readonly JobSnapshot[]): JobView[] {
  * (list-hidden, reusable).
  */
 function sessionBlank(session: Session): boolean {
-  return !session.events.some(event => event.type === 'turn/start')
+  return !session.events.some(event => event.type === 'turn/start' || event.type === 'member-question/received')
 }
 
 /** Advance the Session-list hint projection by one committed event. */
 function applySessionListMetadata(state: SessionListMetadata, event: SessionEvent): SessionListMetadata {
-  const blank = state.blank && event.type !== 'turn/start'
+  const blank = state.blank && event.type !== 'turn/start' && event.type !== 'member-question/received'
   const lastPromptAt = event.type === 'user/message' && event.data.source.kind === 'user'
     ? event.time
     : state.lastPromptAt
@@ -624,6 +647,8 @@ export interface ApiProxyDefaults {
   openPath?: (path: string, signal: AbortSignal) => Promise<void>
   /** Native text-editor handoff; injectable for settings-document tests. */
   openTextFile?: (path: string, signal: AbortSignal) => Promise<void>
+  /** No-shell Git command boundary; injectable for Workspace Git tests. */
+  workspaceGitCommand?: NativeCommandRunner
   /** Validated DEFLATE level for session-log ZIP entries; defaults to 6. */
   sessionExportCompressionLevel?: SessionLogCompressionLevel
   /** Maximum artifact size eligible for one cold blankness read. */
@@ -636,6 +661,60 @@ export interface ApiProxyDefaults {
    * falls back to platform detection ({@link canOpenNativePath}).
    */
   canOpenPath?: () => boolean
+  /** Authenticated Host Installation used for receiver settlements. */
+  memberQuestionInstallation?: { id: InstallationId; deviceName: string }
+}
+
+const WORKSPACE_GIT_OUTPUT_MAX_BYTES = 1024 * 1024
+const WORKSPACE_GIT_GRACE_MS = 1_000
+const WORKSPACE_GIT_ENV_ALLOWLIST = new Set([
+  'COMSPEC', 'HOME', 'LANG', 'LC_ALL', 'PATH', 'PATHEXT', 'SYSTEMROOT', 'TEMP', 'TMP', 'TMPDIR', 'USERPROFILE',
+])
+
+/** Build the production Git boundary over the managed subprocess tree service. */
+function createWorkspaceGitCommand(ctx: Context, cwd: string): NativeCommandRunner {
+  return async (command, args, signal) => {
+    if (command !== 'git') throw new TypeError(`workspace Git runner rejects executable ${JSON.stringify(command)}`)
+    const subprocess = ctx.get('subprocess')
+    if (subprocess === undefined) throw new Error('workspace Git operations require the subprocess service')
+    const env: NodeJS.ProcessEnv = {}
+    for (const key of Object.keys(process.env)) {
+      if (!WORKSPACE_GIT_ENV_ALLOWLIST.has(key.toUpperCase())) env[key] = undefined
+    }
+    env.GCM_INTERACTIVE = 'Never'
+    env.GIT_CONFIG_COUNT = '1'
+    env.GIT_CONFIG_KEY_0 = 'credential.interactive'
+    env.GIT_CONFIG_VALUE_0 = 'never'
+    env.GIT_TERMINAL_PROMPT = '0'
+    const handle = subprocess.spawn({
+      argv: [command, ...args],
+      cwd,
+      stdio: {
+        stdin: 'ignore',
+        stdout: { maxBytes: WORKSPACE_GIT_OUTPUT_MAX_BYTES },
+        stderr: { maxBytes: WORKSPACE_GIT_OUTPUT_MAX_BYTES },
+      },
+      graceMs: WORKSPACE_GIT_GRACE_MS,
+      signal,
+      env,
+    })
+    let outcome: SubprocessOutcome
+    try {
+      outcome = await handle.done
+    } finally {
+      if (signal.aborted) handle.terminate()
+      await handle.waitForExit()
+    }
+    const stdout = handle.collected.stdout?.readFrom(0)
+    const stderr = handle.collected.stderr?.readFrom(0)
+    if (stdout === undefined || stderr === undefined || stdout.lossy || stderr.lossy) {
+      throw new Error('workspace Git output exceeded the bounded capture')
+    }
+    if (outcome.exitCode !== 0) {
+      throw new Error(`workspace Git exited with ${outcome.exitCode === null ? outcome.signal ?? 'unknown signal' : `code ${String(outcome.exitCode)}`}`)
+    }
+    return { stdout: stdout.text, stderr: stderr.text }
+  }
 }
 
 /** The tool/call payload fields the presenter path reads. */
@@ -1099,6 +1178,8 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ?? DEFAULT_SESSION_LOG_COMPRESSION_LEVEL
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
+  const memberQuestionReceiver = ctx.get('memberQuestionReceiver')
+  const workspaceGitCommand = defaults.workspaceGitCommand ?? createWorkspaceGitCommand(ctx, defaults.cwd)
   /** The seed model each create/resume declares; re-read so it never goes stale. */
   const agentOptions = (): AgentOptions => {
     const { provider, model } = defaults.defaultModelSelection()
@@ -1699,15 +1780,289 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return agent
   }
 
-  /** Resolve or create one path while holding the Host's workspace-create chain. */
+  /** Run one operation in the Host Workspace registry mutation order. */
+  function serializeWorkspaceMutation<T>(run: () => Promise<T>): Promise<T> {
+    const operation = workspaceCreationChain.then(run)
+    workspaceCreationChain = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  /** Resolve or create one path while holding the Host Workspace mutation order. */
   function ensureWorkspace(path: string): Promise<{ workspace: Workspace; created: boolean }> {
-    const operation = workspaceCreationChain.then(async () => {
+    return serializeWorkspaceMutation(async () => {
       const existing = await ctx.workspaceRegistry.resolveByPath(path)
       if (existing !== undefined) return { workspace: existing, created: false }
       return { workspace: await ctx.workspaceRegistry.create(path), created: true }
     })
-    workspaceCreationChain = operation.then(() => undefined, () => undefined)
-    return operation
+  }
+
+  /** Resolve one exact local Workspace identity carried by receiver state. */
+  function workspaceFromId(workspaceId: MemberQuestionHumanTurnAdmissionContext['workspaceId']): Workspace {
+    const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId))
+    if (workspace === undefined) {
+      throw new Error(`member-question binding references unknown Workspace ${workspaceId}`)
+    }
+    return workspace
+  }
+
+  /** Resolve one receiving account/project association outside the receiver transaction. */
+  async function receivingWorkspace(
+    admission: Pick<MemberQuestionHumanTurnAdmissionContext, 'receivingAccountId' | 'projectId'>,
+  ): Promise<Workspace> {
+    const binding = ctx.get('memberQuestionWorkspaceBinding')
+    if (binding === undefined) {
+      throw new Error('member-question admission requires exact local Workspace binding authority')
+    }
+    return workspaceFromId(await binding.resolve(admission.receivingAccountId, admission.projectId))
+  }
+
+  /** Whether one stable message identity already entered this Session or remains pending. */
+  function hasMessage(session: Session, messageId: string): boolean {
+    return session.events.some((event) => {
+      if (event.type === 'user/message') return event.data.id === messageId
+      return event.type === 'agent/inbox/spliced'
+        && event.data.inserted.some(message => message.id === messageId)
+    })
+  }
+
+  /** Compact model-visible Decision Brief for one received operation. */
+  function decisionBrief(operation: MemberQuestionHumanTurnAdmissionContext['questions'][number]): string {
+    const brief = 'operation' in operation ? operation.operation : operation.brief
+    const questions = brief.questions.map((question) => {
+      const options = question.options?.map(option => option.label).join(' | ')
+      return options === undefined ? `- ${question.question}` : `- ${question.question}\n  Options: ${options}`
+    }).join('\n')
+    const references = brief.references.length === 0
+      ? 'None'
+      : brief.references.map(reference => `- ${reference.path}: ${reference.reason}`).join('\n')
+    return [
+      `Decision Brief from ${brief.origin.askerDisplayName} (${brief.origin.askerRole})`,
+      `Project: ${brief.origin.projectName}`,
+      `Origin Session: ${brief.origin.originSessionTitle}`,
+      `Background: ${brief.background}`,
+      'Questions:', questions,
+      'References:', references,
+    ].join('\n')
+  }
+
+  /** Preserve browser content at the ordinary attachment admission seam. */
+  function admissionContent(content: readonly MemberQuestionHumanTurnContent[]): ContentBlock[] {
+    return content.map(block => structuredClone(block))
+  }
+
+  async function materializeReceivingSession(
+    sessionId: SessionId,
+    admission: MemberQuestionHumanTurnAdmissionContext,
+  ): Promise<{
+    agent: Agent
+    cachedReferences: MemberQuestionHumanTurnAdmissionContext['questions'][number]['cachedReferences']
+  }> {
+    const workspace = workspaceFromId(admission.workspaceId)
+    const agent = await ensureSession(sessionId, workspace.path, true)
+    await workspace.attachSession(sessionId)
+    const titles = ctx.get('sessionTitle')
+    const origin = admission.questions[0] === undefined
+      ? undefined
+      : ('operation' in admission.questions[0] ? admission.questions[0].operation : admission.questions[0].brief).origin
+    if (titles !== undefined && origin !== undefined && titles.get(agent.session) === undefined) {
+      titles.rename(agent.session, `${origin.projectName} — ${origin.originSessionTitle}`)
+    }
+    const cachedByQuestion = new Map<string, NonNullable<typeof admission.questions[number]['cachedReferences']>>()
+    for (const question of admission.questions) {
+      if (question.cachedReferences !== undefined) {
+        cachedByQuestion.set(String(question.questionId), question.cachedReferences)
+      }
+    }
+    const currentQuestion = admission.questions.find((question): question is Extract<
+      typeof admission.questions[number],
+      { operation: unknown }
+    > => !('terminal' in question) && question.cachedReferences === undefined)
+    if (currentQuestion !== undefined) {
+      cachedByQuestion.set(String(currentQuestion.questionId), await writeMemberQuestionDocumentCache({
+        workspacePath: workspace.path,
+        questionId: currentQuestion.questionId,
+        references: currentQuestion.operation.references,
+        documents: admission.documents,
+      }))
+    }
+    for (const question of admission.questions) {
+      const operation = 'operation' in question ? question.operation : question.brief
+      const cachedReferences = cachedByQuestion.get(String(operation.questionId))
+      if (!agent.session.events.some(event => event.type === 'member-question/received'
+        && event.data.questionId === operation.questionId)) {
+        agent.session.append('member-question/received', {
+          questionId: operation.questionId,
+          projectId: operation.projectId,
+          originSessionId: operation.originSessionId as unknown as SessionId,
+          arrivedAt: question.arrivedAt,
+          expiresAt: operation.expiresAt,
+          origin: operation.origin,
+          background: operation.background,
+          questions: operation.questions,
+          references: operation.references,
+          ...(cachedReferences === undefined ? {} : { cachedReferences }),
+        }, { ignorable: true })
+      }
+      if ('terminal' in question && !agent.session.events.some(event =>
+        event.type === 'member-question/settled'
+        && event.data.questionId === question.terminal.questionId)) {
+        agent.session.append('member-question/settled', question.terminal, { ignorable: true })
+      }
+      const briefId = MessageId(`member-question-brief:${operation.questionId}`)
+      if (!hasMessage(agent.session, briefId)) {
+        agent.inject(freezeMessage({
+          id: briefId,
+          role: 'user',
+          content: [{ type: 'text', text: decisionBrief(question) }],
+          source: { kind: 'plugin', plugin: 'member-question-receiver', form: 'relay' },
+        }))
+      }
+    }
+    await ctx.sessions.flush(agent.session)
+    return {
+      agent,
+      cachedReferences: currentQuestion === undefined
+        ? undefined
+        : cachedByQuestion.get(String(currentQuestion.questionId)),
+    }
+  }
+
+  if (memberQuestionReceiver !== undefined) {
+    ctx.effect(() => memberQuestionReceiver.registerSessionMaterializer(async (input, admission) => {
+      const materialized = await materializeReceivingSession(
+        input.receivingSessionId as unknown as SessionId, admission,
+      )
+      return {
+        accepted: true as const,
+        ...(materialized.cachedReferences === undefined ? {} : { cachedReferences: materialized.cachedReferences }),
+      }
+    }), 'api-proxy: member-question Session materialization')
+    ctx.effect(() => memberQuestionReceiver.registerHumanTurnAdmitter(async (input, admission) => {
+      const { agent } = await materializeReceivingSession(
+        input.receivingSessionId as unknown as SessionId, admission,
+      )
+      const humanId = MessageId(`member-question-human:${input.rpcId}`)
+      if (!hasMessage(agent.session, humanId)) {
+        const message = freezeMessage({
+          id: humanId,
+          role: 'user' as const,
+          content: admissionContent(input.content),
+          source: { kind: 'user' as const, rpcId: input.rpcId as unknown as RpcId },
+        })
+        if (input.mode === 'steer') agent.steer(message)
+        else agent.followup(message)
+      }
+      await ctx.sessions.flush(agent.session)
+      return { accepted: true }
+    }), 'api-proxy: member-question human admission')
+  }
+
+  const terminalSyncs = new Map<string, Promise<void>>()
+  const terminalRetryPending = new Map<string, TerminalMemberQuestionView>()
+  const terminalOwnedTasks = new Set<Promise<unknown>>()
+  let terminalRetryTimer: ReturnType<typeof setTimeout> | undefined
+  let receiverRecoveryTimer: ReturnType<typeof setTimeout> | undefined
+  let receiverLifecycleDisposed = false
+
+  function trackReceiverTask<T>(task: Promise<T>, cleanup?: () => void): Promise<T> {
+    terminalOwnedTasks.add(task)
+    const settle = (): void => {
+      terminalOwnedTasks.delete(task)
+      cleanup?.()
+    }
+    void task.then(settle, settle)
+    return task
+  }
+
+  async function syncMaterializedTerminal(view: TerminalMemberQuestionView): Promise<void> {
+    if (view.hostSessionId === undefined) return
+    const workspace = await receivingWorkspace({
+      receivingAccountId: view.receivingAccountId,
+      projectId: view.brief.projectId,
+    })
+    const sessionId = view.hostSessionId
+    const agent = await ensureSession(sessionId, workspace.path, true)
+    await workspace.attachSession(sessionId)
+    if (!agent.session.events.some(event => event.type === 'member-question/settled'
+      && event.data.questionId === view.questionId)) {
+      agent.session.append('member-question/settled', view.terminal, { ignorable: true })
+    }
+    // A preceding attempt may have appended the event before its flush failed.
+    await ctx.sessions.flush(agent.session)
+  }
+
+  function scheduleTerminalSync(view: TerminalMemberQuestionView): Promise<void> {
+    if (receiverLifecycleDisposed) return Promise.reject(new Error('member-question terminal sync is disposed'))
+    const key = view.questionId
+    const task = (terminalSyncs.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => syncMaterializedTerminal(view))
+    terminalSyncs.set(key, task)
+    return trackReceiverTask(task, () => {
+      if (terminalSyncs.get(key) === task) terminalSyncs.delete(key)
+    })
+  }
+
+  function queueTerminalRetry(view: TerminalMemberQuestionView): void {
+    if (receiverLifecycleDisposed) return
+    terminalRetryPending.set(view.questionId, view)
+    if (terminalRetryTimer !== undefined) return
+    terminalRetryTimer = setTimeout(() => {
+      terminalRetryTimer = undefined
+      const task = drainTerminalRetries()
+      void trackReceiverTask(task)
+    }, 1_000)
+  }
+
+  async function drainTerminalRetries(): Promise<void> {
+    for (const [questionId, view] of [...terminalRetryPending]) {
+      if (receiverLifecycleDisposed) return
+      try {
+        await scheduleTerminalSync(view)
+        terminalRetryPending.delete(questionId)
+      } catch (error: unknown) {
+        console.error('member-question terminal Session sync retry failed:', error)
+      }
+    }
+    const next = terminalRetryPending.values().next().value
+    if (next !== undefined) queueTerminalRetry(next)
+  }
+
+  if (memberQuestionReceiver !== undefined) {
+    ctx.effect(() => {
+      const disposeChanges = memberQuestionReceiver.changes((snapshot) => {
+        for (const view of snapshot.terminal) {
+          void scheduleTerminalSync(view).catch((error: unknown) => {
+            console.error('member-question terminal Session sync failed:', error)
+            queueTerminalRetry(view)
+          })
+        }
+      })
+      const recover = async (): Promise<void> => {
+        try {
+          await memberQuestionReceiver.resumeReservedSessionMaterializations()
+          await memberQuestionReceiver.resumeReservedHumanTurns()
+          const snapshot = await memberQuestionReceiver.snapshot()
+          for (const view of snapshot.terminal) await scheduleTerminalSync(view)
+        } catch (error: unknown) {
+          if (receiverLifecycleDisposed) return
+          console.error('member-question Host recovery failed:', error)
+          receiverRecoveryTimer = setTimeout(() => {
+            receiverRecoveryTimer = undefined
+            void trackReceiverTask(recover())
+          }, 1_000)
+        }
+      }
+      void trackReceiverTask(recover())
+      return async () => {
+        receiverLifecycleDisposed = true
+        disposeChanges()
+        if (terminalRetryTimer !== undefined) clearTimeout(terminalRetryTimer)
+        if (receiverRecoveryTimer !== undefined) clearTimeout(receiverRecoveryTimer)
+        terminalRetryPending.clear()
+        await Promise.allSettled([...terminalOwnedTasks])
+      }
+    }, 'api-proxy: member-question recovery and terminal Session sync')
   }
 
   /**
@@ -1988,6 +2343,177 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   return {
+    memberQuestions: {
+      async workspaceBinding(request) {
+        const binding = ctx.get('memberQuestionWorkspaceBinding')
+        if (binding === undefined) {
+          return err(request, { code: 'internal', message: 'member-question Workspace binding is unavailable', details: {} })
+        }
+        try {
+          const workspaceId = await binding.lookup(
+            request.payload.receivingAccountId,
+            request.payload.projectId,
+          )
+          if (workspaceId === undefined) return ok(request, { state: 'missing' as const })
+          return ok(request, {
+            state: ctx.workspaceRegistry.get(workspaceId) === undefined ? 'stale' as const : 'live' as const,
+            workspaceId,
+          })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `member-question Workspace binding lookup failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
+      async ensureWorkspaceBinding(request) {
+        const binding = ctx.get('memberQuestionWorkspaceBinding')
+        if (binding === undefined) {
+          return err(request, { code: 'internal', message: 'member-question Workspace binding is unavailable', details: {} })
+        }
+        try {
+          const workspaceId = brandWorkspaceId(request.payload.workspaceId)
+          const ensured = await serializeWorkspaceMutation(async () => {
+            if (ctx.workspaceRegistry.get(workspaceId) === undefined) return undefined
+            let observed = await binding.lookup(
+              request.payload.receivingAccountId,
+              request.payload.projectId,
+            )
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+              if (observed !== undefined && ctx.workspaceRegistry.get(observed) !== undefined) {
+                return { state: 'existing' as const, workspaceId: observed }
+              }
+              const state = observed === undefined ? 'created' as const : 'repaired' as const
+              if (await binding.bindIfCurrent(
+                request.payload.receivingAccountId,
+                request.payload.projectId,
+                observed,
+                workspaceId,
+              )) {
+                return { state, workspaceId }
+              }
+              observed = await binding.lookup(
+                request.payload.receivingAccountId,
+                request.payload.projectId,
+              )
+            }
+            throw new Error('binding changed during every repair attempt')
+          })
+          return ensured === undefined
+            ? workspaceNotFound(request, request.payload.workspaceId)
+            : ok(request, ensured)
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `member-question Workspace binding ensure failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
+      async bindWorkspace(request) {
+        const binding = ctx.get('memberQuestionWorkspaceBinding')
+        if (binding === undefined) {
+          return err(request, { code: 'internal', message: 'member-question Workspace binding is unavailable', details: {} })
+        }
+        try {
+          const workspaceId = brandWorkspaceId(request.payload.workspaceId)
+          const bound = await serializeWorkspaceMutation(async () => {
+            if (ctx.workspaceRegistry.get(workspaceId) === undefined) return false
+            await binding.bind(
+              request.payload.receivingAccountId,
+              request.payload.projectId,
+              workspaceId,
+            )
+            return true
+          })
+          if (!bound) return workspaceNotFound(request, request.payload.workspaceId)
+          return ok(request, { bound: true as const })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `member-question Workspace binding failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
+      async snapshot(request) {
+        if (memberQuestionReceiver === undefined) {
+          return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
+        }
+        return ok(request, await memberQuestionReceiver.snapshot())
+      },
+
+      async settle(request) {
+        if (memberQuestionReceiver === undefined) {
+          return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
+        }
+        const installation = defaults.memberQuestionInstallation
+        if (installation === undefined) {
+          return err(request, { code: 'internal', message: 'member-question settlement identity is unavailable', details: {} })
+        }
+        const snapshot = await memberQuestionReceiver.snapshot()
+        const pending = snapshot.pending.find(row => row.questionId === request.payload.questionId)
+        if (pending === undefined
+          || pending.receivingSessionId !== request.payload.receivingSessionId
+          || pending.revision !== request.payload.revision) {
+          return err(request, { code: 'internal', message: 'member-question receiver revision is stale', details: {} })
+        }
+        const response = request.payload.response
+        const settledAt = Date.now()
+        const terminal = await memberQuestionReceiver.settle(
+          request.payload.questionId,
+          response.kind === 'answered'
+            ? {
+              kind: 'answered', answers: response.answers,
+              settledByInstallationId: installation.id,
+              settledByDeviceName: installation.deviceName, settledAt,
+            }
+            : {
+              kind: 'declined',
+              settledByInstallationId: installation.id,
+              settledByDeviceName: installation.deviceName, settledAt,
+            },
+        )
+        const terminalView = (await memberQuestionReceiver.snapshot()).terminal.find(
+          view => view.questionId === terminal.questionId,
+        )
+        if (terminalView !== undefined) await scheduleTerminalSync(terminalView)
+        return ok(request, terminal)
+      },
+
+      async admitHumanTurn(request) {
+        if (memberQuestionReceiver === undefined) {
+          return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
+        }
+        try {
+          const content = await durableMemberQuestionContent(ctx, request.payload.content)
+          const admitted = await memberQuestionReceiver.admitHumanTurn({
+            ...request.payload,
+            content,
+            rpcId: request.rpcId as never,
+          })
+          return ok(request, { accepted: true as const, sessionId: admitted.receivingSessionId })
+        } catch (error: unknown) {
+          if (error instanceof AttachmentError) {
+            return err(request, {
+              code: 'attachment-error',
+              message: error.message,
+              details: { reason: error.code },
+            })
+          }
+          return err(request, {
+            code: 'internal',
+            message: `member-question human turn admission failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+    },
+
     sessions: {
       // Attached sessions summarize from memory; persisted-but-unattached (cold)
       // sessions merge in from the persistence store so history survives restarts.
@@ -2834,6 +3360,71 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
+      async gitRemote(request, signal) {
+        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(request.payload.workspaceId))
+        if (workspace === undefined) return workspaceNotFound(request, request.payload.workspaceId)
+        try {
+          const { stdout } = await workspaceGitCommand(
+            'git', ['-C', workspace.path, 'remote', 'get-url', 'origin'], signal,
+          )
+          const remoteUrl = stdout.trim()
+          return ok(request, remoteUrl === '' ? {} : { remoteUrl })
+        } catch (_error: unknown) {
+          if (signal.aborted) {
+            return err(request, { code: 'cancelled', message: 'workspace remote inspection was aborted', details: {} })
+          }
+          // A non-Git directory and a checkout without origin are valid local
+          // Workspaces. Both project as an unknown remote to the invite UI.
+          return ok(request, {})
+        }
+      },
+
+      async cloneGit(request, signal) {
+        const { remoteUrl, parentPath, directoryName } = request.payload
+        const target = join(parentPath, directoryName)
+        let ownsTarget = false
+        try {
+          const parent = await stat(parentPath)
+          if (!parent.isDirectory()) throw new Error('parent path is not a directory')
+          await mkdir(target)
+          ownsTarget = true
+          await workspaceGitCommand('git', ['clone', '--', remoteUrl, target], signal)
+          const { workspace } = await ensureWorkspace(target)
+          return ok(request, { workspace: workspaceView(workspace) })
+        } catch (error: unknown) {
+          let cleanupError: unknown
+          if (ownsTarget) {
+            try {
+              await rm(target, { recursive: true, force: true })
+            } catch (reason: unknown) {
+              cleanupError = reason
+            }
+          }
+          if (signal.aborted) {
+            return err(request, {
+              code: 'cancelled',
+              message: cleanupError === undefined
+                ? 'workspace clone was aborted'
+                : `workspace clone was aborted and cleanup failed: ${cleanupError instanceof Error
+                  ? cleanupError.message
+                  : typeof cleanupError === 'string' ? cleanupError : 'unknown cleanup failure'}`,
+              details: {},
+            })
+          }
+          return err(request, {
+            code: 'workspace-clone-failed',
+            message: `cannot clone Workspace into "${target}": ${error instanceof Error ? error.message : String(error)}${
+              cleanupError === undefined
+                ? ''
+                : `; cleanup failed: ${cleanupError instanceof Error
+                  ? cleanupError.message
+                  : typeof cleanupError === 'string' ? cleanupError : 'unknown cleanup failure'}`
+            }`,
+            details: { parentPath, directoryName },
+          })
+        }
+      },
+
       async rename(request) {
         const { payload } = request
         const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))
@@ -3567,6 +4158,29 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       host(_request, signal) {
         const queue = new FrameQueue<RpcRequest<HostFrame>>()
+        const receiverDisposer = memberQuestionReceiver?.changes((snapshot) => {
+          queue.push(frame({
+            type: 'host/member-question-snapshot',
+            snapshot,
+            ...(defaults.memberQuestionInstallation === undefined
+              ? {}
+              : { currentInstallationId: defaults.memberQuestionInstallation.id }),
+          }))
+        })
+        if (memberQuestionReceiver !== undefined) {
+          void memberQuestionReceiver.snapshot().then(
+            (snapshot) => { queue.push(frame({
+              type: 'host/member-question-snapshot',
+              snapshot,
+              ...(defaults.memberQuestionInstallation === undefined
+                ? {}
+                : { currentInstallationId: defaults.memberQuestionInstallation.id }),
+            })) },
+            (error: unknown) => { queue.push(frame({ type: 'stream/error', error: {
+              code: 'internal', message: error instanceof Error ? error.message : String(error), details: {},
+            } })) },
+          )
+        }
         const committedWorkspaces = ctx.workspaceRegistry.list()
         const committedWorkspaceIds = new Set(
           committedWorkspaces.map(workspace => String(workspace.id)),
@@ -3666,7 +4280,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             }),
           )),
         ]
-        return queue.iterate(signal, () => { for (const dispose of disposers) dispose() })
+        return queue.iterate(signal, () => {
+          receiverDisposer?.()
+          for (const dispose of disposers) dispose()
+        })
       },
     },
 

@@ -15,7 +15,8 @@ This table connects model-visible tool names to the plugin package and service s
 
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
-| `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
+| `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question, or after member-question sender delivery` | - | ask_user_question pauses a local call until the active UI provider returns a human answer. `to_project_member` routes through `ctx.memberQuestionSender` instead. Runtime eligibility hides that parameter from assembled prompts unless the workspace is bound to a cloud project; the catalog records the static schema including the routing parameters because the sender is optional at harvest. |
+| `@deepseek-ai/dsh-tool-project-members` | `project_members` | `ctx.tools`, `ctx.projectMembership` | `tool/call`, `tool/result` | - | The tool reads the membership seam only and owns no permission decision. The composition injects the session-bound account, the workspace→project binding, and the presence/identity presentation through Config; without those faces the tool still registers and answers the stable `ACCOUNT_UNAVAILABLE` / `PROJECT_UNBOUND` errors at call time. |
 | `@deepseek-ai/dsh-tools` | `run_code`, `tool_search` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
@@ -49,7 +50,7 @@ This table connects model-visible tool names to the plugin package and service s
 
 ### `ask_user_question`
 
-Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer.
+Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer. Pass to_project_member to route the question to one project member instead of the local user; copy that value from project_members.displayName of a row whose self is false, never accountId and never the asking account. routed asks require background (1 to 600 characters). references attaches workspace files that support the decision, locally or routed.
 
 ```json
 {
@@ -105,6 +106,35 @@ Ask the user a concise question when you need confirmation, a choice, or missing
           "question"
         ]
       }
+    },
+    "to_project_member": {
+      "type": "string",
+      "description": "Public GitHub login of one current member other than the asking account. Copy project_members.displayName from a row whose self is false (case-insensitive match). Do not pass project_members.accountId or a row whose self is true. When present, the question is routed to that member instead of the local user and background is required."
+    },
+    "background": {
+      "type": "string",
+      "description": "Agent-authored Decision Brief background. Required with to_project_member; 1 to 600 characters, enforced at construction."
+    },
+    "references": {
+      "type": "array",
+      "description": "Workspace files that support the decision. Available for local and routed asks; each path must exist inside the asking session workspace.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path resolved inside the asking session workspace; the file must exist."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional one-liner (at most 100 characters) explaining why this file matters."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
     }
   },
   "required": [
@@ -115,7 +145,31 @@ Ask the user a concise question when you need confirmation, a choice, or missing
 
 Source: [`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)
 
-ask_user_question pauses the tool call until the active UI provider returns a human answer.
+ask_user_question pauses a local call until the active UI provider returns a human answer. `to_project_member` routes through `ctx.memberQuestionSender` instead. Runtime eligibility hides that parameter from assembled prompts unless the workspace is bound to a cloud project; the catalog records the static schema including the routing parameters because the sender is optional at harvest.
+
+<a id="deepseek-aidsh-tool-project-members"></a>
+
+## `@deepseek-ai/dsh-tool-project-members`
+
+### `project_members`
+
+Query the roster of a cloud project: every member with their account reference, display name, avatar, permission role, function tags, and presence. displayName is the public GitHub login to copy into ask_user_question.to_project_member from a row whose self is false; accountId is the durable Platform id and is not that addressee. Omit projectId to query the project bound to the current workspace. Use it when coordination, review, or task routing needs to know who is on the project, what each member covers, and who is online.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "Cloud project to query; omit to read the project bound to the current workspace."
+    }
+  }
+}
+```
+
+Source: [`packages/interaction/tool-project-members/src/index.ts`](../packages/interaction/tool-project-members/src/index.ts)
+
+The tool reads the membership seam only and owns no permission decision. The composition injects the session-bound account, the workspace→project binding, and the presence/identity presentation through Config; without those faces the tool still registers and answers the stable `ACCOUNT_UNAVAILABLE` / `PROJECT_UNBOUND` errors at call time.
 
 <a id="deepseek-aidsh-tools"></a>
 

@@ -15,11 +15,22 @@ import type {
   RpcError, SessionId, SubagentAddress, ToolCallView, ToolResultView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { PendingInteraction } from './pending.ts'
+import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import type { ContextProvenanceView, KnownContextForm } from './context-provenance.ts'
 import type {
   ChatConversationViewNode, ConversationTimelineSnapshot, ConversationViewSnapshotStore,
 } from '../contract/conversation.ts'
 export type { TodoItem }
+
+/** Host-projected terminal member-question record rendered by receiving Sessions. */
+export interface MemberQuestionRecordView {
+  readonly questionId: string
+  readonly state: 'answered' | 'answered-elsewhere' | 'declined' | 'expired' | 'withdrawn' | 'superseded'
+  readonly askedAt: number
+  readonly terminalAt: number
+  readonly intent: Extract<NonNullable<AskUserQuestionItem['intent']>, { kind: 'member-question' }>
+  readonly settledByDeviceName?: string
+}
 
 /** Request configuration recorded for one provider call. */
 export interface AssistantRequestConfig {
@@ -356,7 +367,7 @@ export type OpenState = 'cold' | 'loading' | 'open' | 'error'
  * jurisdiction: consumers branch on {@link ConversationSnapshot.openState}
  * first.
  */
-export type ComposerPhase = 'blank' | 'engaging' | 'active'
+export type ComposerPhase = 'blank' | 'engaging' | 'active' | 'disabled'
 
 /** Send/stop failure surfaced in the input error strip; op picks the user-facing copy (发送失败 vs 停止失败). */
 export interface PromptError {
@@ -459,6 +470,8 @@ export interface ConversationSnapshot {
   subagent: { address: SubagentAddress; parentAvailable: boolean } | null
   /** Input-area shape (see {@link ComposerPhase}); derived here, switched on by consumers. */
   composerPhase: ComposerPhase
+  /** Host terminal records; present only on receiver-projected Sessions. */
+  memberQuestionRecords?: readonly MemberQuestionRecordView[]
   /** Set after host/session-removed; the UI grays out and disables input. */
   removed: boolean
   openState: OpenState

@@ -72,6 +72,40 @@ export function fakeRemote(): SessionRemotes {
 export class FakeApiClient implements IApiClient {
   /** Chronological call record: [method, payload]. */
   readonly calls: { method: string; payload: unknown }[] = []
+  readonly memberQuestionAdmissionRpcIds: string[] = []
+
+  onMemberQuestionSnapshot: IApiClient['memberQuestions']['snapshot'] = () => Promise.resolve(ok({
+    revision: 0, pending: [], terminal: [],
+  }))
+  onMemberQuestionSettle: IApiClient['memberQuestions']['settle'] = () => Promise.resolve(ok({
+    type: 'member-question-settled', operationId: 'fake-operation' as never,
+    questionId: 'fake-question' as never, outcome: 'declined',
+    settledByInstallationId: 'fake-installation' as never,
+    settledByDeviceName: 'Fake', settledAt: 1,
+  }))
+  onMemberQuestionAdmit: IApiClient['memberQuestions']['admitHumanTurn'] = payload => Promise.resolve(ok({
+    accepted: true, sessionId: payload.receivingSessionId,
+  }))
+  readonly memberQuestions: IApiClient['memberQuestions'] = {
+    workspaceBinding: payload => this.record(
+      'memberQuestion.workspaceBinding', payload, Promise.resolve(ok({ state: 'missing' as const })),
+    ),
+    ensureWorkspaceBinding: payload => this.record(
+      'memberQuestion.ensureWorkspaceBinding', payload,
+      Promise.resolve(ok({ state: 'created' as const, workspaceId: payload.workspaceId })),
+    ),
+    bindWorkspace: payload => this.record(
+      'memberQuestion.bindWorkspace', payload, Promise.resolve(ok({ bound: true as const })),
+    ),
+    snapshot: (payload, signal) => this.record('memberQuestion.snapshot', payload, this.onMemberQuestionSnapshot(payload, signal)),
+    settle: (payload, signal) => this.record('memberQuestion.settle', payload, this.onMemberQuestionSettle(payload, signal)),
+    admitHumanTurn: (payload, signal, rpcId) => {
+      if (rpcId !== undefined) this.memberQuestionAdmissionRpcIds.push(rpcId)
+      return this.record(
+        'memberQuestion.admitHumanTurn', payload, this.onMemberQuestionAdmit(payload, signal, rpcId),
+      )
+    },
+  }
 
   // Programmable slots (defaults answer OK-empty); reassign per case.
   onList: (payload: unknown) => Promise<RpcResponse<{ items: never[] }>> = () => Promise.resolve(ok({ items: [] }))
@@ -202,6 +236,12 @@ export class FakeApiClient implements IApiClient {
   onWorkspaceCreate: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView; created: boolean }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws'), created: true }))
 
+  onWorkspaceGitRemote: (payload: unknown) => Promise<RpcResponse<{ remoteUrl?: string }>> =
+    () => Promise.resolve(ok({}))
+
+  onWorkspaceCloneGit: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView }>> =
+    () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-clone') }))
+
   onWorkspaceRename: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws') }))
 
@@ -224,6 +264,8 @@ export class FakeApiClient implements IApiClient {
         : response
     )) as ReturnType<IApiClient['workspace']['list']>),
     create: (payload: unknown) => this.record('workspace.create', payload, this.onWorkspaceCreate(payload)),
+    gitRemote: (payload: unknown) => this.record('workspace.gitRemote', payload, this.onWorkspaceGitRemote(payload)),
+    cloneGit: (payload: unknown) => this.record('workspace.cloneGit', payload, this.onWorkspaceCloneGit(payload)),
     rename: (payload: unknown) => this.record('workspace.rename', payload, this.onWorkspaceRename(payload)),
     delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
     insertBefore: (payload: unknown) =>

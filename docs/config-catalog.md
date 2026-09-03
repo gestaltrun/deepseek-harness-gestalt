@@ -950,7 +950,7 @@ Source: [`packages/hooks/hooks-codex/src/index.ts:44`](../packages/hooks/hooks-c
 
 ## `@deepseek-ai/dsh-host-apiproxy`
 
-Requires: `agentDefaultModel` · `agents` · `attachments` · `directoryPicker` · `llm` · `sessions` · `subagents` · `sessionQuery` · `tools` · `userQuestions` · `workspaceRegistry`
+Requires: `agentDefaultModel` · `agents` · `attachments` · `directoryPicker` · `llm` · `sessions` · `subagents` · `sessionQuery` · `tools` · `userQuestions` · `workspaceRegistry` · `memberQuestionReceiver`
 
 ```ts config-catalog
 /** Gateway plugin configuration. */
@@ -975,10 +975,14 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /** Development-only Host Installation id for keyless receiver settlement. */
+  memberQuestionInstallationId?: string
+  /** Development-only user-facing Host Installation name. */
+  memberQuestionDeviceName?: string
 }
 ```
 
-Source: [`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
+Source: [`packages/host/apiproxy/src/index.ts:42`](../packages/host/apiproxy/src/index.ts)
 
 <a id="deepseek-aidsh-host-directory-picker-browse"></a>
 
@@ -1600,6 +1604,375 @@ export interface ReconnectConfig {
 
 Source: [`packages/mcp/mcp-client/src/index.ts:103`](../packages/mcp/mcp-client/src/index.ts)
 
+<a id="deepseek-aidsh-member-question-receiver"></a>
+
+## `@deepseek-ai/dsh-member-question-receiver`
+
+```ts config-catalog
+/** Loader-facing receiver Provider configuration. */
+export type Config = MemberQuestionReceiverConfig
+
+/** File Provider configuration and injected Host authority adapters. */
+export interface MemberQuestionReceiverConfig {
+  /** Root directory whose environment child contains the receiver ledger. */
+  readonly storagePath: string
+  /** Deployment namespace isolating development from production state. */
+  readonly environment: 'development' | 'production'
+  /** Maximum durable question records retained before arrival fails loud. */
+  readonly maxRecords: number
+  /** Retry delay after authoritative expiry publication fails. */
+  readonly terminalRetryMs: number
+  /** First-claim authority shared by every receiving Installation. */
+  readonly terminalAuthority?: MemberQuestionTerminalAuthority
+  /** Explicit terminal provider selection; development-local is forbidden in production. */
+  readonly terminalAuthorityMode?: 'deferred' | 'development-local'
+  /** Authoritative wall clock; production uses Date.now. */
+  readonly clock?: () => number
+  /** High-level arrival adapter; absent keeps Host Session creation fail-closed. */
+  readonly materializer?: MemberQuestionSessionMaterializer
+  /** High-level human-turn adapter; absent keeps human turns fail-closed. */
+  readonly admitter?: MemberQuestionHumanTurnAdmitter
+  /** Injectable expiry scheduler; production uses platform timers. */
+  readonly timer?: MemberQuestionReceiverTimer
+  /** Atomic state writer override for storage-boundary verification. */
+  readonly stateWriter?: MemberQuestionReceiverStateWriter
+}
+
+/** Authority adapter retaining exactly one global terminal per question id. */
+export interface MemberQuestionTerminalAuthority {
+  /**
+   * Commit or replay the first terminal for one question.
+   * @param candidate - terminal proposed by this Host.
+   * @returns the canonical retained terminal, including when another Installation won.
+   */
+  claim(candidate: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+}
+
+/**
+ * High-level Host adapter that creates the receiving Session, attaches the
+ * invitation-bound Workspace, and injects bounded Decision Brief context
+ * without starting a model turn.
+ */
+export type MemberQuestionSessionMaterializer = (
+  input: MaterializeMemberQuestionSessionInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/**
+ * High-level Host adapter that admits one explicit human turn under `rpcId`
+ * idempotency after the receiving Session already exists.
+ */
+export type MemberQuestionHumanTurnAdmitter = (
+  input: AdmitMemberQuestionHumanTurnInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/** Injectable scheduler used for the one earliest authoritative expiry. */
+export interface MemberQuestionReceiverTimer {
+  set(callback: () => void, delayMs: number): unknown
+  clear(handle: unknown): void
+}
+
+/** Atomic durable replacement adapter; production uses `writeFileAtomic`. */
+export type MemberQuestionReceiverStateWriter = (path: string, content: string) => Promise<void>
+
+/** Result of one global first-terminal claim. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this candidate committed the first global terminal. */
+  readonly claimed: boolean
+  /** Canonical first terminal, whether this candidate won or lost. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
+/** One authenticated arrival that must materialize or continue a Host Session. */
+export interface MaterializeMemberQuestionSessionInput {
+  /** Host-owned receiving thread to create or continue. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Durable receiver revision that published this arrival. */
+  readonly revision: number
+  /** Authenticated question identity being recorded. */
+  readonly questionId: MemberQuestionId
+}
+
+/** Durable receiver facts needed by Host Session materialization or a later human turn. */
+export interface MemberQuestionHumanTurnAdmissionContext {
+  /** Account whose local workspace receives the Host Session. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Cloud project whose accepted membership selects that workspace. */
+  readonly projectId: ProjectId
+  /** Exact bound local Workspace selected for the receiving Account and Project. */
+  readonly workspaceId: Branded<'WorkspaceId'>
+  /** Every retained question on this receiving thread, in arrival order. */
+  readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
+  /** Transferred document bytes for the question currently being materialized. */
+  readonly documents: readonly MemberQuestionTransferredDocument[]
+}
+
+/** Successful high-level Host adapter receipt. */
+interface MemberQuestionHumanTurnAdmissionReceipt {
+  /** The adapter completed without starting a second Session. */
+  readonly accepted: true
+  /** Receiver-owned hidden Workspace paths assigned while materializing documents. */
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
+}
+
+/** One explicit human turn addressed to a receiving Session. */
+export interface AdmitMemberQuestionHumanTurnInput {
+  /** Host-owned receiving thread that already exists after arrival. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Exact receiving-thread revision the human observed. */
+  readonly revision: number
+  /** Stable idempotency identity retained across retries. */
+  readonly rpcId: MemberQuestionReceiverRpcId
+  /** Human-authored content retained durably for crash-safe admission replay. */
+  readonly content: readonly MemberQuestionHumanTurnContent[]
+  /** Ordinary Host queue or steering admission mode. */
+  readonly mode: 'queue' | 'steer'
+}
+
+/** Host-owned durable identity of one member-question receiving thread. */
+export type ReceivingSessionId = Branded<'ReceivingSessionId'>
+
+/** Pending receiver projection retained without referenced document bodies. */
+export interface PendingMemberQuestionView {
+  /** Stable question identity from the authenticated operation. */
+  readonly questionId: MemberQuestionId
+  /** Opaque Host identity of the receiving thread. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Account whose endpoint accepted the operation. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Durable receiver revision that published this row. */
+  readonly revision: number
+  /** Absolute Unix epoch milliseconds when the Host accepted the operation. */
+  readonly arrivedAt: number
+  /** Bounded authenticated member-question operation. */
+  readonly operation: CompanionMemberQuestionOperation
+  /** Ordinary Host Session identity after authenticated arrival materializes the Session. */
+  readonly hostSessionId?: HostSessionId
+  /** Receiver-owned hidden Workspace paths for transferred documents. */
+  readonly cachedReferences?: readonly MemberQuestionCachedReference[]
+  /** Durable retry identity while a human-turn admission remains reserved. */
+  readonly reservedAdmission?: {
+    /** Envelope identity the Client must reuse for the reserved action. */
+    readonly rpcId: MemberQuestionReceiverRpcId
+    /** Original admission mode retained even if the Session begins running. */
+    readonly mode: 'queue' | 'steer'
+  }
+}
+
+/** Terminal receiver record retaining the globally authoritative first claim. */
+export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, 'operation'> {
+  /** Globally authoritative first-claim terminal. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+  /** Bounded received operation retained for passive record rendering. */
+  readonly brief: Omit<CompanionMemberQuestionOperation, 'questions'> & {
+    /** Original question batch retained with the terminal record. */
+    readonly questions: CompanionMemberQuestionOperation['questions']
+  }
+}
+
+/** One transferred document written beside its Decision Brief metadata. */
+export interface MemberQuestionTransferredDocument {
+  /** Workspace-relative path named by the asking Session. */
+  readonly path: string
+  /** Exact transferred bytes; never written over a same-named Workspace file. */
+  readonly bytes: Uint8Array
+}
+
+/** Decision Brief reference after the receiver-owned cache path is assigned. */
+export interface MemberQuestionCachedReference {
+  /** Workspace-relative path named by the asking Session. */
+  readonly path: string
+  /** Why this document matters, rendered as the chip subtitle. */
+  readonly reason: string
+  /** Receiver-owned hidden Workspace path of the transferred copy. */
+  readonly cachedPath: string
+}
+
+/** Stable caller idempotency identity for one explicit human turn. */
+export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
+
+/** Durable human content handed to the Host Session adapter. */
+export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
+
+/** Human-authored text handed to the future Host Session adapter. */
+interface MemberQuestionHumanTextContent {
+  /** Content discriminant. */
+  readonly type: 'text'
+  /** Human-authored text. */
+  readonly text: string
+}
+
+/** Human-selected image committed by the Host attachment service before reservation. */
+interface MemberQuestionHumanImageContent {
+  /** Content discriminant. */
+  readonly type: 'image'
+  /** Durable normalized attachment; raw browser bytes never enter the receiver ledger. */
+  readonly attachment: ImageAttachmentRef
+}
+```
+
+Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`HostSessionId`](subsystems/core.md) · [`ImageAttachmentRef`](subsystems/attachment.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.md) · [`ProjectId`](subsystems/project-membership.md)
+
+Source: [`packages/interaction/member-question-receiver/src/index.ts:117`](../packages/interaction/member-question-receiver/src/index.ts)
+
+<a id="deepseek-aidsh-member-question-sender"></a>
+
+## `@deepseek-ai/dsh-member-question-sender`
+
+```ts config-catalog
+/** Construction-owned faces injected into the sender Provider. */
+export interface Config {
+  /**
+   * Delivers encoded Companion bytes to the addressed member's route. Absent,
+   * `send()` answers the stable `DELIVERY_UNAVAILABLE` error — the same
+   * fail-closed stance as the deferred registry transport.
+   */
+  delivery?: MemberQuestionDeliveryPort
+  /**
+   * Retrieves the sealed project-peer grant addressed to the member. Absent,
+   * encoding still proceeds so a keyless assembly can round-trip the codec
+   * without a Platform Instance.
+   */
+  lookupGrant?: ProjectPeerGrantLookup
+  /**
+   * Reads live presence for the addressed member. Absent, send skips the
+   * offline fail-fast so a keyless assembly can round-trip without a presence
+   * registry. Present, an `offline` verdict answers `MEMBER_OFFLINE` before
+   * encoding.
+   */
+  presenceLookup?: MemberPresenceLookup
+  /**
+   * Resolves when the addressed member's membership is revoked while an ask
+   * is in flight. Absent, in-flight revocation is not observed.
+   */
+  watchMembership?: MemberMembershipWatch
+  /**
+   * Routed-question lifetime in milliseconds. Default 1_800_000 (30 minutes).
+   * Expiry answers `QUESTION_EXPIRED` and records the expired outcome.
+   */
+  ttlMs?: number
+}
+
+/**
+ * Delivery seam for member-question operations and their first-claim terminal
+ * results. Cross-machine registry transport is deferred; tests and keyless
+ * assemblies inject an in-memory implementation, while production remains fail-closed.
+ */
+export interface MemberQuestionDeliveryPort {
+  /**
+   * Deliver one encoded member-question operation to the addressed member.
+   * @param encoded - codec output plus the addressee and project identity.
+   * @returns fulfillment after the port accepts the encoded bytes.
+   */
+  deliver(encoded: EncodedMemberQuestion & {
+    toProjectMember: string
+    projectId: ProjectId
+    documents: readonly EncodedMemberQuestionDocument[]
+  }): Promise<void>
+
+  /**
+   * Atomically publish one terminal candidate; the first claim remains authoritative.
+   * @param terminal - candidate encoded by the sender or receiving Installation.
+   * @returns whether this candidate won and the authoritative retained terminal.
+   */
+  publishTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+
+  /**
+   * Query the retained first terminal for reconnect replay.
+   * @param questionId - member-question identity to replay.
+   * @returns the authoritative terminal, or undefined while still pending or unknown.
+   */
+  queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>
+}
+
+/**
+ * B-side retrieval of one sealed project-peer grant. Compositions wire this
+ * to `ctx.remoteAccess.getProjectPeerGrant`; tests inject a stub.
+ * @param input - project and peer account identity.
+ * @returns the sealed grant addressed to that peer.
+ */
+export type ProjectPeerGrantLookup = (input: ProjectPeerGrantLookupInput) => Promise<SealedProjectPeerGrant>
+
+/**
+ * Live presence of one project member. Compositions wire this to the
+ * membership HTTP presence registry; tests inject a stub.
+ * @param input - project and peer account identity.
+ * @returns `online` when any installation holds a live heartbeat, else `offline`.
+ */
+export type MemberPresenceLookup = (input: MemberPresenceLookupInput) => Promise<'online' | 'offline'>
+
+/**
+ * Resolves when the addressed member's membership is revoked during flight.
+ * Aborting `signal` cancels the watch without treating that as a revocation.
+ * @param input - project, peer account, and settlement cancellation.
+ * @returns fulfillment when membership is revoked while the ask is pending.
+ */
+export type MemberMembershipWatch = (input: MemberMembershipWatchInput) => Promise<void>
+
+/** Encoded Companion operation ready for the injected delivery port. */
+export interface EncodedMemberQuestion {
+  /** Companion mutation identity used by status replay. */
+  readonly operationId: CompanionOperationId
+  /** Branded question identity correlated with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion `member-question` operation message. */
+  readonly message: CompanionMessage
+  /** Bounded Companion application bytes produced by the T4 codec. */
+  readonly encoded: Uint8Array
+}
+
+/** Bounded Companion frames carrying one routed reference document. */
+export interface EncodedMemberQuestionDocument {
+  /** Workspace-relative path matching the operation's reference entry. */
+  readonly path: string
+  /** Transfer identity derived from the question and reference position. */
+  readonly transferId: DocumentTransferId
+  /** Typed Companion messages in chunk order. */
+  readonly messages: readonly CompanionMessage[]
+  /** Encoded Companion application frames in chunk order. */
+  readonly encoded: readonly Uint8Array[]
+}
+
+/** Result of one atomic terminal publication attempt. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this publication committed the first terminal for the question. */
+  readonly claimed: boolean
+  /** Authoritative first terminal, equal to the candidate only when this publication won. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
+/** Inputs for retrieving one sealed project-peer grant on the B side. */
+export interface ProjectPeerGrantLookupInput {
+  /** Cloud project whose grant records are searched. */
+  projectId: ProjectId
+  /** Account the sealed grant must address. */
+  peerAccountId: string
+}
+
+/** Inputs for a live presence verdict of one project member. */
+export interface MemberPresenceLookupInput {
+  /** Cloud project whose roster presence is queried. */
+  projectId: ProjectId
+  /** Account whose installations are aggregated. */
+  peerAccountId: string
+}
+
+/** Inputs for watching one membership row until it is revoked or the ask settles. */
+export interface MemberMembershipWatchInput {
+  /** Cloud project whose roster is watched. */
+  projectId: ProjectId
+  /** Account whose membership is watched. */
+  peerAccountId: string
+  /** Aborts the watch when the ask settles for any other reason. */
+  signal: AbortSignal
+}
+```
+
+Depends on: [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`DocumentTransferId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
+
+Source: [`packages/interaction/member-question-sender/src/index.ts:176`](../packages/interaction/member-question-sender/src/index.ts)
+
 <a id="deepseek-aidsh-message-feedback"></a>
 
 ## `@deepseek-ai/dsh-message-feedback`
@@ -1738,6 +2111,11 @@ export interface AccountBackend {
   getSession(id: AccountSessionId): Promise<SessionRecord | undefined>
   /** Read one Platform Account by id. */
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined>
+  /** Find current Account rows whose public GitHub login matches case-insensitively. */
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]>
   /** Atomically rotate the matching refresh token generation. */
   rotateRefresh(sessionId: AccountSessionId, expectedHash: string, replacementHash: string): Promise<SessionRecord | undefined>
   /** Revoke one session and report whether it was active. */
@@ -1868,9 +2246,9 @@ export interface AccountRecord extends PlatformAccountView {
 }
 ```
 
-Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
+Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](subsystems/platform-account.md) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-Source: [`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
+Source: [`packages/platform/platform-account-core/src/index.ts:522`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -1887,6 +2265,61 @@ export interface Config {
 ```
 
 Source: [`packages/platform/platform-account-http/src/index.ts:31`](../packages/platform/platform-account-http/src/index.ts)
+
+<a id="deepseek-aidsh-project-membership-core"></a>
+
+## `@deepseek-ai/dsh-project-membership-core`
+
+```ts config-catalog
+/** Plugin config: where committed state lives and which environment owns it. */
+export interface Config {
+  /**
+   * Directory holding this deployment's durable membership corpus. Each
+   * validated environment keeps its own subdirectory below it.
+   */
+  storagePath: string
+  /** Deployment identity isolating project and account namespaces. */
+  environment: 'development' | 'production'
+}
+```
+
+Source: [`packages/platform/project-membership-core/src/index.ts:50`](../packages/platform/project-membership-core/src/index.ts)
+
+<a id="deepseek-aidsh-project-membership-desktop"></a>
+
+## `@deepseek-ai/dsh-project-membership-desktop`
+
+```ts config-catalog
+/** Desktop bridge location injected by the Desktop-only Web Host patch. */
+export interface Config {
+  /** Absolute loopback HTTP origin published by Desktop Host. */
+  readonly baseUrl: string
+  /** Owner-only bearer-token file read immediately before each request. */
+  readonly tokenFile: string
+}
+```
+
+Source: [`packages/platform/project-membership-desktop/src/index.ts:64`](../packages/platform/project-membership-desktop/src/index.ts)
+
+<a id="deepseek-aidsh-project-membership-http"></a>
+
+## `@deepseek-ai/dsh-project-membership-http`
+
+Requires: `platformAccount` · `projectMembership` · `webServer`
+
+```ts config-catalog
+/** HTTP consumer configuration, as resolved by the Config schema's defaults. */
+export interface Config {
+  /** Exact product origins allowed to call Project Membership routes. */
+  origins: string[]
+  /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
+  presenceHeartbeatIntervalMs: number
+  /** Heartbeat liveness window in milliseconds (default: 90000); crash and partition expiry, not last-window close. */
+  presenceTtlMs: number
+}
+```
+
+Source: [`packages/platform/project-membership-http/src/index.ts:56`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -2895,6 +3328,70 @@ export type TokenMeterConfig = Record<string, never>
 
 Source: [`packages/llm/token-meter/src/types.ts:12`](../packages/llm/token-meter/src/types.ts)
 
+<a id="deepseek-aidsh-tool-ask-user"></a>
+
+## `@deepseek-ai/dsh-tool-ask-user`
+
+Requires: `tools` · `userQuestions`
+
+```ts config-catalog
+/** Injected faces for routed asks. Local asks ignore every field. */
+export interface Config {
+  /**
+   * Resolves the current Project and authenticated Decision Brief origin only
+   * when its current roster contains the addressee. Absent, the tool answers
+   * `SENDER_UNAVAILABLE`; resolving no value answers `INELIGIBLE_ADDRESSEE`.
+   */
+  routeResolver?: RouteResolver
+  /**
+   * Resolves the workspace-bound cloud project for a routed ask and for
+   * runtime eligibility of `to_project_member`. Absent or resolving to
+   * undefined hides the parameter from assembled prompts; a present id
+   * surfaces it. It never authorizes execution.
+   */
+  boundProjectResolver?: BoundProjectResolver
+}
+
+/** Resolve one authenticated route, or no value when the addressee is absent from the current Project roster. */
+export type RouteResolver = (input: OriginResolverInput) => Promise<MemberQuestionRoute | undefined>
+
+/**
+ * Resolves the current Workspace's cloud project for runtime eligibility. An
+ * unbound (undefined) result hides `to_project_member` from assembled prompts;
+ * execution uses {@link RouteResolver} as the addressee authority.
+ */
+export type BoundProjectResolver = (input?: {
+  /** Agent whose immutable Session cwd selects the Workspace. */
+  readonly agent?: Agent
+  /** Prompt-assembly or tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<string | undefined>
+
+/** Inputs for resolving one authenticated member-question route. */
+export interface OriginResolverInput {
+  /** Single project-member addressee from `to_project_member`. */
+  toProjectMember: string
+  /** Calling agent, when the tool ran from a live session. */
+  agent?: Agent
+  /** Tool cancellation signal for every route-authority read. */
+  signal: AbortSignal
+}
+
+/** Authenticated Project, Decision Brief origin, and live-roster Account for one eligible addressee. */
+export interface MemberQuestionRoute {
+  /** Cloud Project whose current roster contains the addressee. */
+  readonly projectId: string
+  /** Authenticated Decision Brief origin from the same roster read. */
+  readonly origin: MemberQuestionOrigin
+  /** Durable Account id matched from the live roster, never the model-supplied login. */
+  readonly toProjectMember: string
+}
+```
+
+Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
+
+Source: [`packages/interaction/tool-ask-user/src/index.ts:91`](../packages/interaction/tool-ask-user/src/index.ts)
+
 <a id="deepseek-aidsh-tool-bash"></a>
 
 ## `@deepseek-ai/dsh-tool-bash`
@@ -3075,6 +3572,107 @@ export interface Config {
 ```
 
 Source: [`packages/lsp/tool-lsp/src/index.ts:58`](../packages/lsp/tool-lsp/src/index.ts)
+
+<a id="deepseek-aidsh-tool-project-members"></a>
+
+## `@deepseek-ai/dsh-tool-project-members`
+
+Requires: `tools`
+
+```ts config-catalog
+/**
+ * Model-facing tool configuration: the injected provider faces. A call
+ * resolves the account first and the workspace binding second, so a
+ * composition with neither face answers `ACCOUNT_UNAVAILABLE`.
+ */
+export interface Config {
+  /**
+   * Resolves the current session-bound account; the platform provider face
+   * wires it to the Account Service Definition. Absent, rejecting, or
+   * resolving to undefined answers the stable `ACCOUNT_UNAVAILABLE` error.
+   */
+  currentAccountResolver?: CurrentAccountResolver
+  /**
+   * Resolves the workspace-bound cloud project for calls that omit
+   * `projectId`; a workspace-face resolver derives it from the workspace
+   * remote. Absent, rejecting, or resolving to undefined answers the stable
+   * `PROJECT_UNBOUND` error.
+   */
+  boundProjectResolver?: BoundProjectResolver
+  /**
+   * Attaches presence and public display identity to one read; the platform
+   * provider face wires it to the presence registry and public identities.
+   * Absent, every member reads `offline` with no identity fields — the same
+   * verdict a composed presence registry with no live heartbeats produces.
+   */
+  rosterPresenter?: RosterPresenter
+  /**
+   * Reads the canonical roster through a composition-owned authenticated bridge.
+   * Absent, the tool uses `ctx.projectMembership.roster()` as before.
+   */
+  rosterResolver?: RosterResolver
+}
+
+/** Resolves the session-bound platform account that reads the roster. */
+export type CurrentAccountResolver = (input?: {
+  /** Agent making the tool call, when one is live. */
+  readonly agent?: Agent
+  /** Tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<AccountRef | undefined>
+
+/** Resolves the workspace-bound cloud project for calls that omit `projectId`. */
+export type BoundProjectResolver = (input?: {
+  /** Agent whose immutable Session cwd selects the Workspace. */
+  readonly agent?: Agent
+  /** Tool cancellation signal for provider I/O. */
+  readonly signal?: AbortSignal
+}) => Promise<Branded<'ProjectId'> | undefined>
+
+/**
+ * Attaches presence and public display identity to one stored roster read.
+ * Implementations return exactly one presentation per input member, in the
+ * same order; the tool owns every stored roster field.
+ */
+export type RosterPresenter = (view: RosterView) => Promise<readonly MemberPresentation[]>
+
+/** Provider face for compositions whose authoritative roster is behind another process boundary. */
+export type RosterResolver = (
+  actor: AccountRef,
+  projectId: Branded<'ProjectId'>,
+  input?: {
+    /** Agent making the tool call, when one is live. */
+    readonly agent?: Agent
+    /** Tool cancellation signal for provider I/O. */
+    readonly signal?: AbortSignal
+  },
+) => Promise<RosterView>
+
+/**
+ * Durable platform account reference, resolvable only by the provider face.
+ * Spelled through the shared brand key so a resolver typed against the
+ * Account Service Definition's id is directly assignable here without this
+ * package importing any platform package.
+ */
+export type AccountRef = Branded<'PlatformAccountId'>
+
+/** Presence and public display identity attached to one stored member. */
+export interface MemberPresentation {
+  /** Presence verdict of the composition's aggregation plane. */
+  readonly presence: MemberPresence
+  /** Current public display name; omitted when the composition does not resolve identities. */
+  readonly displayName?: string
+  /** Current public avatar reference; omitted when the composition does not resolve identities. */
+  readonly avatarRef?: string
+}
+
+/** Whether any of a member's installations held a live heartbeat at the read. */
+export type MemberPresence = 'online' | 'offline'
+```
+
+Depends on: [`Agent`](subsystems/core.md) · [`Branded`](../packages/util/brand/src/index.ts) · [`RosterView`](subsystems/project-membership.md)
+
+Source: [`packages/interaction/tool-project-members/src/index.ts:124`](../packages/interaction/tool-project-members/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
@@ -3692,6 +4290,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-member-questions` ([`packages/client/ui-member-questions/src/index.ts`](../packages/client/ui-member-questions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-model-selection` ([`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-permission-presets` ([`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts))
@@ -3738,7 +4337,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-subagent` ([`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts))
 - `@deepseek-ai/dsh-subprocess-local` ([`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts))
 - `@deepseek-ai/dsh-terminal` ([`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts))
-- `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
@@ -3759,6 +4357,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-host-directory-picker` — abstract `DirectoryPicker` ([`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts))
 - `@deepseek-ai/dsh-jobs` — abstract `JobRegistry` ([`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts))
 - `@deepseek-ai/dsh-platform-account` — abstract `AccountService` ([`packages/platform/platform-account/src/index.ts`](../packages/platform/platform-account/src/index.ts))
+- `@deepseek-ai/dsh-project-membership` — abstract `ProjectMembershipService` ([`packages/platform/project-membership/src/index.ts`](../packages/platform/project-membership/src/index.ts))
 - `@deepseek-ai/dsh-remote-access` — abstract `RemoteAccessService` ([`packages/platform/remote-access/src/index.ts`](../packages/platform/remote-access/src/index.ts))
 - `@deepseek-ai/dsh-sandbox` — abstract `SandboxProvider` ([`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts))
 - `@deepseek-ai/dsh-session-persistence` — abstract `SessionPersistence` ([`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts))
@@ -3795,6 +4394,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-noise-channel` ([`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
 - `@deepseek-ai/dsh-platform-account-client` ([`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts))
+- `@deepseek-ai/dsh-project-membership-client` ([`packages/platform/project-membership-client/src/index.ts`](../packages/platform/project-membership-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-client` ([`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-redis` ([`packages/platform/remote-access-redis/src/index.ts`](../packages/platform/remote-access-redis/src/index.ts))
 - `@deepseek-ai/dsh-remote-protocol` ([`packages/platform/remote-protocol/src/index.ts`](../packages/platform/remote-protocol/src/index.ts))

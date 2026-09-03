@@ -44,6 +44,7 @@ An e2e assertion re-runs the command or re-reads the file externally; a keyword 
 - Protocol and operating-system fixtures that do not load Cordis run erasable `.ts` directly with Node, without tsx or the root paths map.
 - Only a test whose subject is source-path resolution may select `src`; state that contract in the test.
 - Real Chromium Browser Runtime e2e runs only through `pnpm run test:electron-runtime-e2e`. Do not set `ELECTRON_RUN_AS_NODE`. Node `test:e2e` keeps the named skip ([launcher note](../.agents/notes/implemented/testing/2026-08-20-electron-runtime-e2e-launcher.md)).
+- Project Members feature-level assembled acceptance is `apps/desktop/tests/member-question-e2e/assembled-project-members.spec.ts` (keyless two-account, three-installation walk over real listeners). Visible Electron coverage is `pnpm run test:e2e-project-members-electron`; Linux requires a visible `DISPLAY`.
 
 ## When a snapshot test is required
 

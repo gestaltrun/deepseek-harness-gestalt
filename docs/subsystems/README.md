@@ -21,13 +21,14 @@ One page per subsystem of the DeepSeek Harness: what it is, the data structures 
 | [session-query.md](session-query.md) | logical records, bounded exact-event reads, relationship traces, semantic filters/documents, and full-text result pages |
 | [feedback.md](feedback.md) | lifecycle-bound per-message feedback records, optimistic versions, sidecar persistence, and the Host Remote contract |
 | [platform-account.md](platform-account.md) | GitHub public identity, signed Login Attempts, installation proof-of-possession Account Sessions, and cross-instance invalidation |
+| [project-membership.md](project-membership.md) | cloud projects bound to git remotes, owner/admin/member role gates, function tags, atomic invitations with workspace linking, and roster invalidation events |
 | [remote-protocol.md](remote-protocol.md) | independent Relay Transport and encrypted Companion negotiation, codecs, branded ids, stable errors, and wire limits |
 | [personal-pairing.md](personal-pairing.md) | Settings-owned Mobile Access, same-account Pairing Challenges, authentication words, and Companion-only Device Principals |
 | [session-title.md](session-title.md) | durable title snapshots, cited source-message seqs, and the asynchronous provider contract |
 | [session-reference.md](session-reference.md) | structured cross-session references: `SessionReferenceInput`/`Candidate`, prepared message contexts, the stable error taxonomy |
 | [system-prompt.md](system-prompt.md) | per-assembly context, tool-provider results, prompt sections, and cooperative assembly |
 | [tools.md](tools.md) | `ToolDefinition` full fields, the schema DSL, `ToolExecution`/`ToolResult`, tool-presentation UI types, and the guarded execution pipeline |
-| [user-questions.md](user-questions.md) | the UI-backed human question/answer seam: `AskUserQuestionRequest`, answer/options vocabulary, provider API, error taxonomy |
+| [user-questions.md](user-questions.md) | the UI-backed human question/answer seam: `AskUserQuestionRequest`, answer/options vocabulary, provider API, error taxonomy, and member-directed sender payload |
 | [approval.md](approval.md) | the one-shot user-approval seam: `ApprovalRequest`, `ApprovalOutcome`, per-session policy, audit events, and answerer contracts |
 | [attachment.md](attachment.md) | durable image identity and metadata, validation inputs, verified reads, and the `AttachmentStore` seam |
 | [shell.md](shell.md) | the bash executor seam: `ShellExecRequest`/`Spec`, `ShellRunResult`, background `ShellProcess` handles |

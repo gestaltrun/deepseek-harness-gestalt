@@ -314,6 +314,26 @@ describe('WorkspaceRuntime', () => {
     await expect(rejected).rejects.toBeInstanceOf(WorkspaceCreateError)
   })
 
+  it('reads local Git origins and adopts a Host-cloned Workspace', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const workspaces = new WorkspaceRuntime(ctx, api, new SessionRuntime(ctx, api, fakeRemote()))
+    api.onWorkspaceGitRemote = () => Promise.resolve(ok({ remoteUrl: 'https://github.com/o/r.git' }))
+    await expect(workspaces.gitRemote(wid('alpha'))).resolves.toBe('https://github.com/o/r.git')
+    expect(api.callsOf('workspace.gitRemote')).toEqual([{ workspaceId: 'alpha' }])
+
+    api.onWorkspaceCloneGit = () => Promise.resolve(ok({
+      workspace: { ...workspace('cloned'), path: '/projects/cloned', title: 'cloned' },
+    }))
+    await expect(workspaces.cloneGit({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: 'cloned',
+    })).resolves.toMatchObject({ workspaceId: 'cloned', path: '/projects/cloned' })
+    expect(api.callsOf('workspace.cloneGit')).toEqual([{
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: 'cloned',
+    }])
+    expect(workspaces.list.getSnapshot().items[0]).toMatchObject({ workspaceId: 'cloned' })
+  })
+
   it('passes native directory selection and cancellation through without local state', async () => {
     const ctx = new Context()
     const api = new FakeApiClient()

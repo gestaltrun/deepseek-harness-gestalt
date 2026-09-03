@@ -3,7 +3,9 @@ import { fileURLToPath } from 'node:url'
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import { spawnWebHost, type RunningWebHost } from '../src/spawn-web-host.ts'
+import {
+  redactWebHostDiagnostic, spawnWebHost, type RunningWebHost, webHostDiagnosticSummary,
+} from '../src/spawn-web-host.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const children: RunningWebHost[] = []
@@ -14,6 +16,33 @@ afterEach(async () => {
 })
 
 describe('spawnWebHost', () => {
+  it('redacts credential values from startup diagnostics', () => {
+    const output = [
+      'provider key: exact-secret-value',
+      'SERVICE_TOKEN=dynamic-token',
+      'fetch https://user:password@example.test failed',
+    ].join('\n')
+
+    const diagnostic = redactWebHostDiagnostic(output, { PROVIDER_API_KEY: 'exact-secret-value' })
+
+    expect(diagnostic).not.toContain('exact-secret-value')
+    expect(diagnostic).not.toContain('dynamic-token')
+    expect(diagnostic).not.toContain('user:password')
+    expect(diagnostic).toContain('[REDACTED]')
+  })
+
+  it('redacts before truncating across a credential boundary', () => {
+    const secret = 'credential-prefix-and-visible-suffix'
+    const output = `SERVICE_API_KEY=${secret}\n${'x'.repeat(900)}\ntail diagnostic`
+
+    const diagnostic = webHostDiagnosticSummary(output, { SERVICE_API_KEY: secret })
+
+    expect(diagnostic).not.toContain('visible-suffix')
+    expect(diagnostic).toContain('[REDACTED]')
+    expect(diagnostic).toContain('tail diagnostic')
+    expect(diagnostic.length).toBeLessThanOrEqual(800)
+  })
+
   it('resolves the loopback URL from mixed stdout', async () => {
     const running = await spawnWebHost({
       node: process.execPath,
@@ -76,7 +105,24 @@ describe('spawnWebHost', () => {
     const pid = await waitForPid(pidFile)
 
     expect((await outcome)?.message).toContain('within 1000ms')
+    expect((await outcome)?.message).toContain('fixture waiting without a URL')
     expect(processExists(pid)).toBe(false)
+  })
+
+  it('redacts child credential output from timeout errors', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gestalt-timeout-redaction-'))
+    const pidFile = join(dir, 'pid')
+    const outcome: Promise<Error | undefined> = spawnWebHost({
+      node: process.execPath,
+      args: [join(here, 'fixtures', 'wait-for-url.mjs')],
+      cwd: here,
+      env: { DSH_TEST_PID_FILE: pidFile, DSH_TEST_API_KEY: 'fixture-secret-value' },
+    }, 1_000).then(() => undefined).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)))
+    await waitForPid(pidFile)
+
+    const message = (await outcome)?.message ?? ''
+    expect(message).toContain('[REDACTED]')
+    expect(message).not.toContain('fixture-secret-value')
   })
 })
 

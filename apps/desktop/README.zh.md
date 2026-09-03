@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[产品发布](../../docs/product-releases.zh.md)定义共用的 release intent、Product Release Plan、审批、持久资产与恢复流程；本页只拥有 Desktop 特定打包与更新行为。
+[产品发布](../../docs/product-releases.zh.md)定义共用的 Product Release Plan、审批、持久资产与恢复流程；本页只拥有 Desktop 特定打包与更新行为。
 
 DeepSeek Gestalt 的 Desktop Host。Electron 拥有窗口、菜单、GitHub 自动更新，以及进程内 Browser Runtime `webContents`。它启动捆绑的官方 Node 加上 `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0`，并打开该环回 URL。`--no-open` 阻止再唤起系统默认浏览器，因为 Desktop Host 已经拥有窗口。叠加层加入 Schedule、GESTALT 次标、拖拽带、Update Control，以及指向 Host loopback Browser origin 的 Tandem 形态 HTTP 客户端；只有更新可操作或发现版本后发生错误时，控件才会出现。浏览器 `dsh web` 不加载这层，并继续使用确定性 Browser Runtime。这层还会加入 phone runtime、stream 与 tool 三行，它们在 `DSH_PHONE_MOBILECLI` 指向 `mobilecli` 可执行文件之前保持关闭：桌面上的手机设备是 opt-in 的，未设置时该 tab 渲染缺失态。「手机」tab 这一行本身来自 web-app roster，而非这层叠加——重复插入会撞出重复 loader entry id 并中止启动，组合 boot 规格测试正是对此的回归防护。
 
@@ -21,6 +21,14 @@ Window Chrome 在 Desktop 侧栏、Session 内容与顶部 Workbench 上统一�
 Desktop 将 `build/icon.icns`、`build/icon.ico` 和 `build/icon.png` 作为自有资源，其字节与千机·Gestalt 已跟踪的生产图标一致。electron-builder 在 macOS 使用 ICNS，并将 ICO 资源写入未签名的 Windows 可执行文件；发布 workflow 会校验该 PE 文件包含最大的源 ICO 帧。main build 会把 PNG 复制到未打包 Electron application path 下，供 macOS Dock 与 Windows 窗口使用；打包则把同一 PNG 安装为显式 extra resource。
 
 Dock / 开始菜单的 cwd 是 Launch Directory（Application Support / `%APPDATA%` 下的 `defaultWorkspace`）。用户数据仍在 `~/.dsh`。
+
+## 可选组件
+
+Sub2API 账号池是 Settings 里 Desktop-only 的 offer 卡（`账号池` 分区，排在手机配对之后）。卡片只负责渲染：Host 把 `missing → downloading → verifying → installed → starting → running / error` 相位机经与 updater、pairing 快照相同的 preload 桥推送过来，卡片渲染当前快照，因此没有 `window.dshDesktop` 时它什么都不画。未启用时卡片说明启用做什么、代价是什么：首次启用会下载组件 bundle 与对应平台的 runtime pack（sub2api 加便携 PostgreSQL/Redis，数百 MB——安装包体积不变），账号数据落在 `~/.dsh/sub2api/data`，卸载时询问是否删除，运行时文件可随时重新下载。Release 下载与环回健康探针使用 Electron session-aware 的流式 `net.fetch`，可跟随公开资产跳转，又不放宽 Platform HTTPS helper 的禁跳转与有界响应约束。启用会先发布 `starting` 再等待 Web Host 完成替换；每次由控制器发起的组件替换，以及已安装且启用组件的普通启动，均有 180 秒启动预算；其余普通启动与崩溃恢复保持 30 秒预算。原生 Settings overlay 会先重载到每一个替换后的 Host origin，再恢复提供方请求。运行中卡片默认展示同源原生账号工作区（`/plugins/dsh-sub2api/ui/admin/accounts?embed=desktop`），把状态、停用和卸载放在右上标题区，跟随 Desktop 主题与语言，并且不导航 Session Surface；错误态携带 Host 给出的可操作信息，并提供重试与卸载出口。
+
+Desktop Host 主进程就是安装器，且绝不调用用户 PATH 上的 pnpm 或 `dsh` CLI。它把两个归档下载到私有 staging 目录，各自对照自身 SHA256SUMS 校验（runtime pack 解压后再验内部 sums），把 bundle 包放到 `web` profile 的 `node_modules` 下，并恰好追加一行 `dsh.profile.bundles`——即 `dsh plugin add` 的语义，manifest 其余条目原样保留。runtime pack 解压到 `$DSH_HOME/sub2api/runtime`（supervisor 的 `binaryDir` 默认值）。profile patch 之后的任何失败都会回滚该行与本次解压产物；全新安装后首次重启失败同样回滚，并以回滚前缀上报。启用经 Web Host 子进程的常规生命周期重启——窗口保持不动、会话在磁盘保活——随后轮询 sidecar 的 quota-snapshot 路由，直到 2xx 将卡片推至 running。停用把精确的 patch 行 `{ id: 'dsh-sub2api-sidecar', disabled: true }` 写入 profile 自己的 `cordis.patch.yml`，并拒绝触碰该 id 上用户自有的行。
+
+下载源来自 `DSH_DESKTOP_SUB2API_SOURCES`（绝对 JSON 文件路径）或打包主入口旁的 `sub2api-sources.json`；文件内写明 bundle 压缩包、runtime pack 压缩包及各自 SHA256SUMS 的 URL。未携带该文件的部署没有经批准的组件源，因此启用动词会报告缺少配置。文件存在但非法会作为该分区的可操作错误显示，而不是砸掉 Desktop 启动。
 
 ## Schedule 与能力默认值
 
@@ -43,9 +51,10 @@ Pairing-scoped Companion operation ledger 会 single-flight 并发重试，在�
 ```sh
 pnpm install
 DSH_DESKTOP_OPERATED_PLATFORM_CONFIG=/absolute/path/to/operated-platform.json pnpm gestalt:dev
+DSH_SUB2API_E2E_SOURCES=/absolute/path/to/public-sub2api-sources.json DSH_SUB2API_E2E_SIDECAR_SHA=<release-commit> DSH_SUB2API_E2E_CREDENTIALS_SOURCE=/absolute/path/to/read-only-credentials.yaml pnpm --dir apps/desktop test:e2e-sub2api
 ```
 
-配置文件包含 `production` 标记、上文所述六个公开身份字段、附件 Host deadline，以及公开的 Relay WSS endpoint 与 limit；它不包含 OAuth secret。进程还需要 `DSH_NODE` 或 `npm_node_execpath` 上的真正 Node（pnpm 会设置后者）。不要让 Electron 用自己的 execPath 去跑 `dsh`。
+配置文件包含 `production` 标记、上文所述六个公开身份字段、附件 Host deadline，以及公开的 Relay WSS endpoint 与 limit；它不包含 OAuth secret。进程还需要 `DSH_NODE` 或 `npm_node_execpath` 上的真正 Node（pnpm 会设置后者）。不要让 Electron 用自己的 execPath 去跑 `dsh`。Sub2API Electron lane 在 macOS 或具有 GUI display 的 Linux 上运行，并要求一个绝对路径的公开四 URL source manifest、精确的 40 位 sidecar Release commit，以及包含 `ZAI_CODING_CN_API_KEY` 的只读 credentials YAML。它强制重建 Host、Client、Web 与 main 产物；只将该 credentials 文件盲拷贝到全新的 `0700` DSH home 并设为 `0600`；安装公开产物；经 Host 注入面创建临时 Z.AI 账号与 composite route；打开嵌入控制台；在 Desktop 输入区选择 Sub2API 模型；并要求真实模型回答。artifact 记录两个仓库身份、source manifest、公开 checksum 文档、已安装 package/runtime 证据、主窗口结果与 sidecar 日志，但绝不记录 credentials 文件。若 Electron、Web Host、PostgreSQL、临时目录或 CDP 端口在 teardown 后仍存活，测试即失败。
 
 ESM 主进程 bundle 会内联工作区代码，但把 Electron、`electron-updater` 和 CommonJS 运行时包 `https-proxy-agent` 与 `ws` 保留为外部依赖。Relay 与单请求 HTTPS helper 是分别捆绑的 CommonJS extra resource，使官方 Node 运行时无需依赖打包应用的依赖图即可加载其网络依赖。packaged 冒烟测试会隔离 `DSH_HOME` 与 Electron userData；在 macOS 上保留已登录用户的 home，使 `safeStorage` 能访问 login Keychain。
 

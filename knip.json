@@ -8,11 +8,14 @@
     "gh",
     "icacls",
     "initdb",
+    "ipcrm",
+    "ipcs",
     "jar",
     "javac",
     "keytool",
     "musl-gcc",
     "openssl",
+    "ps",
     "postgres",
     "python3",
     "postgres",
@@ -733,7 +736,8 @@
         "src/main.ts",
         "src/preload.cjs",
         "scripts/**/*.mjs",
-        "tests/**/*.spec.ts"
+        "tests/**/*.spec.ts",
+        "tests/e2e-sub2api/**/*.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -744,7 +748,13 @@
         "@deepseek-ai/dsh-client-ui-phone",
         "@deepseek-ai/dsh-phone-runtime",
         "@deepseek-ai/dsh-phone-stream",
-        "@deepseek-ai/dsh-tool-phone"
+        "@deepseek-ai/dsh-tool-phone",
+        "@wdio/cli",
+        "@wdio/electron-service",
+        "@wdio/local-runner",
+        "@wdio/mocha-framework",
+        "@wdio/spec-reporter",
+        "@wdio/types"
       ]
     },
     "apps/platform": {

@@ -15,11 +15,14 @@ const MAX_ID = 128
 /** Overlay `WebContentsView` verbs used to show, hide, and restack. */
 export interface ChromeOverlayView {
   setBackgroundColor?(color: string): void
+  getVisible?(): boolean
   setVisible?(visible: boolean): void
   setBounds?(bounds: { x: number; y: number; width: number; height: number }): void
   webContents?: {
     send?(channel: string, payload: unknown): void
     focus?(): void
+    getURL?(): string
+    loadURL?(url: string): Promise<void>
   }
 }
 
@@ -38,6 +41,22 @@ export function overlayUrlFromHost(hostUrl: string): string {
   const url = new URL(hostUrl)
   url.searchParams.set(DESKTOP_OVERLAY_PARAM, '1')
   return url.href
+}
+
+/**
+ * Keep an existing overlay document on the current Web Host origin.
+ * @param view - Desktop overlay `WebContentsView`.
+ * @param hostUrl - current loopback Web Host URL.
+ * @returns after the overlay document is ready on the current Host.
+ */
+export async function bindChromeOverlayHost(view: ChromeOverlayView, hostUrl: string): Promise<void> {
+  const target = overlayUrlFromHost(hostUrl)
+  const webContents = view.webContents
+  if (webContents?.getURL?.() === target) return
+  if (webContents?.loadURL === undefined) throw new Error('Desktop overlay view cannot load the current Web Host')
+  const visible = view.getVisible?.()
+  await webContents.loadURL(target)
+  if (visible !== undefined) view.setVisible?.(visible)
 }
 
 /**
@@ -78,8 +97,8 @@ export function prepareChromeOverlayView(view: ChromeOverlayView): void {
 export function showChromeOverlayView(window: ChromeOverlayWindow, view: ChromeOverlayView): void {
   const bounds = overlayBoundsFromContentSize(window.getContentSize?.() ?? [])
   if (bounds !== undefined) view.setBounds?.(bounds)
-  view.setVisible?.(true)
   window.contentView?.addChildView?.(view)
+  view.setVisible?.(true)
   view.webContents?.focus?.()
 }
 
@@ -166,6 +185,22 @@ export function parseChromeOverlayResult(value: unknown): ChromeOverlayResult | 
  */
 export function isOverlaySender(senderId: number, overlayId: number | undefined): boolean {
   return overlayId !== undefined && senderId === overlayId
+}
+
+/**
+ * Admit Settings navigation from the overlay document without granting it a
+ * new overlay request or a menu request.
+ * @param current - Host-owned request currently shown.
+ * @param next - Parsed request sent by the overlay document.
+ * @returns whether `next` only changes the section of the live Settings request.
+ */
+export function isOverlaySettingsUpdate(
+  current: ChromeOverlayShowRequest | null | undefined,
+  next: ChromeOverlayShowRequest,
+): boolean {
+  return current?.kind === 'settings'
+    && next.kind === 'settings'
+    && current.requestId === next.requestId
 }
 
 function parseItems(value: unknown): ChromeOverlayMenuItem[] | undefined {

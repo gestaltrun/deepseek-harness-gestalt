@@ -172,6 +172,50 @@ describe('member-question sender', () => {
     await expect(ctx.memberQuestionSender.queryTerminal('mqmissing' as never)).resolves.toBeUndefined()
   })
 
+  it('applies an authoritative transport terminal to a pending ask', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending } = await startSend(ctx)
+    const questionId = delivery.delivered[0]?.questionId
+    const operationId = delivery.delivered[0]?.operationId
+    expect(questionId).toBeDefined()
+    expect(operationId).toBeDefined()
+    await ctx.memberQuestionSender.applyTerminal({
+      type: 'member-question-settled',
+      operationId: operationId!,
+      questionId: questionId!,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })
+    await expect(pending).rejects.toMatchObject({ code: 'QUESTION_EXPIRED' })
+  })
+
+  it('ignores an unknown authoritative terminal and rejects a mismatched operation', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending } = await startSend(ctx)
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await expect(ctx.memberQuestionSender.applyTerminal({
+      type: 'member-question-settled',
+      operationId: 'op-other' as never,
+      questionId: 'mq-unknown' as never,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })).resolves.toBeUndefined()
+    await expect(ctx.memberQuestionSender.applyTerminal({
+      type: 'member-question-settled',
+      operationId: 'op-other' as never,
+      questionId: questionId!,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })).rejects.toThrow('different operation')
+    await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
+    await expect(pending).resolves.toMatchObject({ outcome: 'declined' })
+  })
+
   it('wraps a rejecting grant lookup as GRANT_UNAVAILABLE', async () => {
     const ctx = new Context()
     const delivery = new MemoryMemberQuestionDelivery()
@@ -184,6 +228,15 @@ describe('member-question sender', () => {
       code: 'GRANT_UNAVAILABLE',
     })
     expect(delivery.delivered).toHaveLength(0)
+  })
+
+  it('rejects document bytes that do not align with references', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    await expect(ctx.memberQuestionSender.send(payload({
+      documents: [{ path: 'other.bin', bytes: Uint8Array.of(1) }],
+    }))).rejects.toMatchObject({ code: 'ENCODE_FAILED' })
   })
 
   it('wraps a codec rejection as ENCODE_FAILED', () => {

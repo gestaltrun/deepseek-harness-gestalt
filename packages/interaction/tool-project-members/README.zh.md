@@ -61,6 +61,6 @@ Native 渲染器保持规范值的紧凑 JSON 形态。本工具不声明自定�
 
 ## Known Limitations and Deferred Work
 
-- **在线状态与展示身份依赖平台提供方一侧** — 未注入 `rosterPresenter` 的组合会将所有成员报告为 `offline` 且不带身份字段；装配完成的提供方接线随 project-members 工作的平台组合侧落地。
+- **在线状态与展示身份依赖平台提供方一侧** — 未注入 `rosterPresenter` 的组合会将所有成员报告为 `offline` 且不带身份字段。Desktop Host 通过受 token 保护的 loopback projection 提供该 presenter。
 - **设计上只读** — 本工具不暴露任何成员关系变更；邀请、角色调整与标签编辑留在 project-membership HTTP 面之后，不进入模型工具集。
 - **工作区绑定由组合定义** — 工具自身无法解析绑定的项目；未注入 `boundProjectResolver` 时，所有省略 `projectId` 的调用都返回 `PROJECT_UNBOUND`。

@@ -8,16 +8,17 @@ Service Definition and codec-backed Provider for member-directed questions. `ctx
 
 ### Public API
 
-- `ctx.memberQuestionSender.send(payload, options?): Promise<MemberQuestionSendResult>` Encode one Decision Brief (origin, background, question batch, references) as a Companion `member-question` operation, deliver the encoded bytes, and wait for an answered or declined settlement. Lifetime failures reject as `MemberQuestionSenderError`.
+- `ctx.memberQuestionSender.send(payload, options?): Promise<MemberQuestionSendResult>` Encode one Decision Brief (origin, background, question batch, references, optional aligned document bytes) as a Companion `member-question` operation plus `document-chunk` frames, deliver the encoded bytes, and wait for an answered or declined settlement. Lifetime failures reject as `MemberQuestionSenderError`.
 - `ctx.memberQuestionSender.settle(questionId, settlement): Promise<void>` Publish an answered or declined settlement with the claimant `InstallationId`, user-facing device name, and absolute settlement epoch. The delivery port retains the first claim; a losing local settlement applies the retained terminal instead.
+- `ctx.memberQuestionSender.applyTerminal(terminal): Promise<void>` Apply one authoritative first-claim terminal published by transport.
 - `ctx.memberQuestionSender.withdraw(questionId): Promise<void>` Cancel one pending question as initiator withdrawal.
 - `ctx.memberQuestionSender.queryTerminal(questionId): Promise<CompanionMemberQuestionSettledResult | undefined>` Query the delivery port's retained first terminal for reconnect replay.
 
 ### Key Types
 
-- `MemberQuestionSendPayload` — `{ toProjectMember, projectId, background, questions, references, origin, originSessionId }`. `projectId` and `originSessionId` use the existing branded Platform and Companion ids. The sender derives the absolute operation `expiresAt` from `ttlMs`. Origin, questions, and references reuse the T4 Companion fields; this package does not invent a second protocol.
+- `MemberQuestionSendPayload` — `{ toProjectMember, projectId, background, questions, references, documents?, origin, originSessionId }`. `projectId` and `originSessionId` use the existing branded Platform and Companion ids. The sender derives the absolute operation `expiresAt` from `ttlMs`. Origin, questions, and references reuse the T4 Companion fields; `documents` are the aligned file bytes encoded as Companion `document-chunk` frames. This package does not invent a second protocol.
 - `MemberQuestionSendResult` — `{ questionId, encoded, outcome: 'answered', answers }` or `{ questionId, encoded, outcome: 'declined' }`.
-- `MemberQuestionDeliveryPort` — injected port with `deliver(encoded)`, atomic `publishTerminal(terminal)`, and `queryTerminal(questionId)`. `publishTerminal` returns `{ claimed, terminal }`; `terminal` is always the retained first claim. Cross-machine registry transport is deferred, so compositions inject the port; tests use `MemoryMemberQuestionDelivery`.
+- `MemberQuestionDeliveryPort` — injected port with `deliver(encoded)`, atomic `publishTerminal(terminal)`, and `queryTerminal(questionId)`. `deliver` carries the encoded `member-question` operation plus the ordered `document-chunk` frame groups. `publishTerminal` returns `{ claimed, terminal }`; `terminal` is always the retained first claim. Cross-machine registry transport is deferred, so compositions inject the port; tests use `MemoryMemberQuestionDelivery`.
 - `ProjectPeerGrantLookup` — injected B-side retrieval of the sealed project-peer grant addressed to the member.
 - `MemberPresenceLookup` — injected live-presence verdict. An `offline` result answers `MEMBER_OFFLINE` before encoding; nothing is queued.
 - `MemberMembershipWatch` — injected in-flight membership watch. Resolving it answers `REVOKED_DURING_FLIGHT`.
@@ -51,5 +52,4 @@ No direct token cost or invalidation. `dsh-tool-ask-user` owns schema growth for
 
 ## Known Limitations and Deferred Work
 
-- **Cross-machine delivery rides the deferred project-registry transport** — encoding and the delivery interface are defined; keyless tests inject the in-memory implementation, while compositions without a production port fail closed. Opening a sealed peer grant on the addressee's installation and carrying it across machines remain the [Remote Access Known Limitation](../../platform/remote-access/README.md#known-limitations-and-deferred-work). Production sealing stays behind the independent encryption review recorded there. This package does not invent a new protocol.
-- **Referenced documents stay path metadata on `member-question`** — the T4 codec owns `document-chunk` frames and treats reassembly as a consumer duty; this sender encodes only the `member-question` operation and does not transfer file bytes.
+- **Cross-machine delivery rides the deferred project-registry transport** — encoding, chunk frames, and the delivery interface are defined; keyless tests inject the in-memory implementation, while compositions without a production port fail closed. Opening a sealed peer grant on the addressee's installation and carrying it across machines remain the [Remote Access Known Limitation](../../platform/remote-access/README.md#known-limitations-and-deferred-work). Production sealing stays behind the independent encryption review recorded there. This package does not invent a new protocol.

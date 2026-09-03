@@ -105,8 +105,10 @@ import {
   startDesktopProjectMembershipAgentRuntime,
   type DesktopProjectMembershipAgentRuntime,
 } from './project-membership-agent-runtime.ts'
+import { applyDesktopE2EProfile, resolveDesktopNetworkProxy } from './e2e-profile.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
+applyDesktopE2EProfile({ packaged: app.isPackaged, argv: process.argv, environment: process.env })
 let systemFetch: typeof globalThis.fetch
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
@@ -202,7 +204,12 @@ async function boot(): Promise<void> {
   systemFetch = createDesktopSystemNodeFetch({
     nodePath: relayRuntime.node,
     helperPath: relayRuntime.fetchHelper,
-    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    resolveProxy: async url => await resolveDesktopNetworkProxy({
+      packaged: app.isPackaged,
+      environment: process.env,
+      url,
+      resolve: async target => await session.defaultSession.resolveProxy(target),
+    }),
     timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
   })
   account = createDesktopAccount(accountEnvironment)
@@ -214,7 +221,12 @@ async function boot(): Promise<void> {
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
-    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    resolveProxy: async url => await resolveDesktopNetworkProxy({
+      packaged: app.isPackaged,
+      environment: process.env,
+      url,
+      resolve: async target => await session.defaultSession.resolveProxy(target),
+    }),
     connectWithProxy: async (url, signal, limits, proxyUrl) => await connectDesktopRelayNodeHelper({
       nodePath: relayRuntime.node,
       helperPath: relayRuntime.relayHelper,
@@ -1002,7 +1014,18 @@ function createDesktopAccount(environment: SelectedPlatformEnvironment): Desktop
     transport,
     store,
     presentation: desktopInstallationPresentation({ hostname: hostname(), platform: process.platform }),
-    systemBrowser: { open: async (url) => { await shell.openExternal(url) } },
+    systemBrowser: {
+      open: async (url) => {
+        if (!app.isPackaged && process.env.DSH_DESKTOP_E2E_AUTO_AUTHORIZE === '1') {
+          const response = await systemFetch(url)
+          if (!response.ok) {
+            throw new Error(`Desktop E2E authorization callback failed with HTTP ${String(response.status)}`)
+          }
+          return
+        }
+        await shell.openExternal(url)
+      },
+    },
   })
 }
 

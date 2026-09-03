@@ -610,6 +610,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   AdmitMemberQuestionHumanTurnResult: 'user-questions.md',
   MemberQuestionHumanTurnAdmitter: 'user-questions.md',
   MemberQuestionSessionMaterializer: 'user-questions.md',
+  MemberQuestionTerminalAuthority: 'user-questions.md',
   CompanionMemberQuestionSettledResult: 'remote-protocol.md',
   WebFetchProvider: 'web.md',
   WebFetchRequest: 'web.md',

@@ -240,6 +240,26 @@ export function parseDocumentTransferId(value: unknown): DocumentTransferId {
 }
 
 /**
+ * Derive the transfer identity for one reference position in a member question.
+ * The convention lets a receiver associate encrypted chunk frames with the
+ * bounded reference list without adding document paths to each frame.
+ * @param questionId - member question owning the reference list.
+ * @param referenceIndex - zero-based reference position.
+ * @returns protocol-native transfer identity for that position.
+ */
+export function deriveMemberQuestionDocumentTransferId(
+  questionId: MemberQuestionId,
+  referenceIndex: number,
+): DocumentTransferId {
+  if (!Number.isSafeInteger(referenceIndex)
+    || referenceIndex < 0
+    || referenceIndex >= REMOTE_PROTOCOL_LIMITS.memberQuestionReferences) {
+    invalid('Companion member-question reference index is outside its supported range')
+  }
+  return parseDocumentTransferId(`mqdoc_${questionId}_${String(referenceIndex)}`)
+}
+
+/**
  * Parse one transcript projection entry id at the encrypted wire boundary.
  * @param value - untrusted protocol-native identifier.
  * @returns branded transcript entry identifier.

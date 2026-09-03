@@ -15,6 +15,14 @@ import type {
   MemberQuestionTransferredDocument,
 } from './document-cache.ts'
 
+/** One complete reference document reconstructed before receiver admission. */
+export interface ReassembledMemberQuestionDocument {
+  /** Workspace-relative path matching one operation reference. */
+  readonly path: string
+  /** Exact arbitrary bytes reconstructed from authenticated chunks. */
+  readonly bytes: Uint8Array
+}
+
 /** Host-owned durable identity of one member-question receiving thread. */
 export type ReceivingSessionId = Branded<'ReceivingSessionId'>
 /** Stable caller idempotency identity for one explicit human turn. */

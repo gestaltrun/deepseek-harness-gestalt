@@ -1,11 +1,12 @@
 /**
  * Service Definition and codec-backed Provider for member-directed questions
  * (`ctx.memberQuestionSender`). The Provider encodes a Companion
- * `member-question` operation through the T4 remote-protocol codec and
- * delivers the bytes through an injected port. Peer credentials are
- * retrieved through an injected B-side lookup over Remote Access
- * `getProjectPeerGrant`. Cross-machine registry transport remains the T4
- * Known Limitation, so delivery is injectable and tests use an in-memory stub.
+ * `member-question` operation and aligned `document-chunk` frames through the
+ * T4 remote-protocol codec and delivers the bytes through an injected port.
+ * Peer credentials are retrieved through an injected B-side lookup over
+ * Remote Access `getProjectPeerGrant`. Cross-machine registry transport
+ * remains the T4 Known Limitation, so delivery is injectable and tests use
+ * an in-memory stub.
  * @module @deepseek-ai/dsh-member-question-sender
  */
 
@@ -16,11 +17,15 @@ import type { SealedProjectPeerGrant } from '@deepseek-ai/dsh-remote-access'
 import {
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
+  deriveMemberQuestionDocumentTransferId,
   encodeCompanionMessage,
+  encodeProtocolBase64Url,
   negotiateCompanionProtocol,
   parseCompanionOperationId,
   parseCompanionSessionId,
   parseMemberQuestionId,
+  REMOTE_PROTOCOL_LIMITS,
+  type CompanionDocumentChunkOperation,
   type CompanionMemberQuestionSettledResult,
   type CompanionMemberQuestionOperation,
   type CompanionMessage,
@@ -35,6 +40,8 @@ import { MemberQuestionSenderError } from './errors.ts'
 import type { MemberQuestionSenderErrorCode } from './errors.ts'
 import type {
   EncodedMemberQuestion,
+  EncodedMemberQuestionDocument,
+  MemberQuestionDocument,
   MemberQuestionAnswer,
   MemberQuestionAskedRecord,
   MemberQuestionDeliveryPort,
@@ -49,9 +56,11 @@ export { MemberQuestionSenderError } from './errors.ts'
 export type { MemberQuestionSenderErrorCode } from './errors.ts'
 export type {
   EncodedMemberQuestion,
+  EncodedMemberQuestionDocument,
   MemberQuestionAnswer,
   MemberQuestionAskedRecord,
   MemberQuestionDeliveryPort,
+  MemberQuestionDocument,
   MemberQuestionTerminalClaim,
   MemberQuestionItem,
   MemberQuestionLifetimeOutcome,
@@ -290,6 +299,14 @@ export abstract class MemberQuestionSenderService extends Service {
   abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
 
   /**
+   * Apply one authoritative first-claim terminal published by transport.
+   * Unknown or already-settled question ids are ignored.
+   * @param terminal - Companion member-question settled result.
+   * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
+   */
+  abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>
+
+  /**
    * Withdraw one pending question as initiator cancellation.
    * Unknown or already-settled question ids are ignored.
    * @param questionId - branded question identity returned by `send()`.
@@ -444,6 +461,20 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
       )
     }
     const encoded = encodeMemberQuestion(this.protocol, payload, Date.now() + this.ttlMs)
+    const documentPayloads = payload.documents
+    if (documentPayloads !== undefined
+      && (documentPayloads.length !== payload.references.length
+        || documentPayloads.some((document, index) => document.path !== payload.references[index]?.path))) {
+      throw new MemberQuestionSenderError(
+        'ENCODE_FAILED: document bytes must align with member-question references',
+        'ENCODE_FAILED',
+      )
+    }
+    const documents = encodeMemberQuestionDocuments(
+      this.protocol,
+      encoded.questionId,
+      documentPayloads ?? [],
+    )
     const pending = this.registerPending(
       encoded,
       routeKey,
@@ -457,6 +488,7 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         ...encoded,
         toProjectMember: payload.toProjectMember,
         projectId: payload.projectId,
+        documents,
       })
     } catch (cause: unknown) {
       await this.complete(pending, systemCompletion(
@@ -481,6 +513,15 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         ...settlement,
       },
     }).then(() => undefined)
+  }
+
+  override applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void> {
+    const pending = this.pendingById.get(terminal.questionId)
+    if (pending === undefined) return Promise.resolve()
+    if (terminal.operationId !== pending.operationId) {
+      return Promise.reject(new Error('member-question sender authoritative terminal names a different operation'))
+    }
+    return this.complete(pending, { terminal }).then(() => undefined)
   }
 
   override withdraw(questionId: MemberQuestionId): Promise<void> {
@@ -783,6 +824,66 @@ function routeKeyOf(originSessionId: string, toProjectMember: string): string {
 }
 
 /**
+ * Encode arbitrary reference bytes into bounded Companion document frames.
+ * @param protocol - negotiated Companion major 4 protocol.
+ * @param questionId - member question owning every document.
+ * @param documents - reference paths and bytes in operation reference order.
+ * @returns one ordered frame group per input document.
+ */
+export function encodeMemberQuestionDocuments(
+  protocol: NegotiatedCompanionProtocol,
+  questionId: MemberQuestionId,
+  documents: readonly MemberQuestionDocument[],
+): readonly EncodedMemberQuestionDocument[] {
+  if (documents.length > REMOTE_PROTOCOL_LIMITS.memberQuestionReferences) {
+    throw new MemberQuestionSenderError(
+      'ENCODE_FAILED: document count exceeds the member-question reference ceiling',
+      'ENCODE_FAILED',
+    )
+  }
+  return documents.map((document, referenceIndex) => {
+    if (document.bytes.byteLength > REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes) {
+      throw new MemberQuestionSenderError(
+        `ENCODE_FAILED: document exceeds the ${String(REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes)}-byte transfer ceiling`,
+        'ENCODE_FAILED',
+      )
+    }
+    const total = Math.max(1, Math.ceil(
+      document.bytes.byteLength / REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes,
+    ))
+    if (total > REMOTE_PROTOCOL_LIMITS.documentTransferChunks) {
+      throw new MemberQuestionSenderError(
+        `ENCODE_FAILED: document exceeds the ${String(REMOTE_PROTOCOL_LIMITS.documentTransferChunks)}-chunk transfer ceiling`,
+        'ENCODE_FAILED',
+      )
+    }
+    const transferId = deriveMemberQuestionDocumentTransferId(questionId, referenceIndex)
+    const messages: CompanionMessage[] = Array.from({ length: total }, (_, index) => {
+      const start = index * REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes
+      const operation: CompanionDocumentChunkOperation = {
+        type: 'document-chunk',
+        operationId: parseCompanionOperationId(`op${randomUUID().replaceAll('-', '')}`),
+        transferId,
+        questionId,
+        index,
+        total,
+        bytes: encodeProtocolBase64Url(document.bytes.slice(
+          start,
+          Math.min(document.bytes.byteLength, start + REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes),
+        )),
+      }
+      return { type: 'operation', operation }
+    })
+    return {
+      path: document.path,
+      transferId,
+      messages,
+      encoded: messages.map(message => encodeCompanionMessage(protocol, message)),
+    }
+  })
+}
+
+/**
  * Encode one member-question payload through the T4 Companion codec.
  * @param protocol - negotiated Companion major 4 protocol.
  * @param payload - Decision Brief origin, background, questions, and references.
@@ -850,7 +951,11 @@ export class MemoryMemberQuestionDelivery implements MemberQuestionDeliveryPort 
    * @param encoded - codec output plus addressee identity.
    * @returns fulfillment after the operation is recorded.
    */
-  deliver(encoded: EncodedMemberQuestion & { toProjectMember: string; projectId: MemberQuestionSendPayload['projectId'] }): Promise<void> {
+  deliver(encoded: EncodedMemberQuestion & {
+    toProjectMember: string
+    projectId: MemberQuestionSendPayload['projectId']
+    documents: readonly EncodedMemberQuestionDocument[]
+  }): Promise<void> {
     this.delivered.push({
       operationId: encoded.operationId,
       questionId: encoded.questionId,

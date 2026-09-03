@@ -12,6 +12,7 @@ import type {
   CompanionMessage,
   CompanionOperationId,
   CompanionSessionId,
+  DocumentTransferId,
   MemberQuestionId,
   ProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -27,6 +28,26 @@ export type MemberQuestionOrigin = CompanionMemberQuestionOrigin
 
 /** One settling answer echoed by question id. */
 export type MemberQuestionAnswer = CompanionMemberQuestionAnswer
+
+/** Source bytes for one routed reference document. */
+export interface MemberQuestionDocument {
+  /** Workspace-relative path matching the operation's reference entry. */
+  readonly path: string
+  /** Arbitrary file bytes read before the routed ask leaves its Workspace. */
+  readonly bytes: Uint8Array
+}
+
+/** Bounded Companion frames carrying one routed reference document. */
+export interface EncodedMemberQuestionDocument {
+  /** Workspace-relative path matching the operation's reference entry. */
+  readonly path: string
+  /** Transfer identity derived from the question and reference position. */
+  readonly transferId: DocumentTransferId
+  /** Typed Companion messages in chunk order. */
+  readonly messages: readonly CompanionMessage[]
+  /** Encoded Companion application frames in chunk order. */
+  readonly encoded: readonly Uint8Array[]
+}
 
 /**
  * Application payload of one member-directed question. The sender encodes it
@@ -44,6 +65,8 @@ export interface MemberQuestionSendPayload {
   readonly questions: readonly MemberQuestionItem[]
   /** Workspace-validated references; an empty list is admitted. */
   readonly references: readonly MemberQuestionReference[]
+  /** File bytes aligned 1:1 with references; omission is valid only when references is empty. */
+  readonly documents?: readonly MemberQuestionDocument[]
   /** Public identity fields rendered on the receiver's Decision Brief. */
   readonly origin: MemberQuestionOrigin
   /** Originating session identity used as one half of the supersede route key. */
@@ -84,6 +107,7 @@ export interface MemberQuestionDeliveryPort {
   deliver(encoded: EncodedMemberQuestion & {
     toProjectMember: string
     projectId: ProjectId
+    documents: readonly EncodedMemberQuestionDocument[]
   }): Promise<void>
 
   /**

@@ -1,8 +1,28 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { REFERENCES_MAX_COUNT, validateReferences } from '@deepseek-ai/dsh-tool-ask-user'
+import { describe, expect, it, vi } from 'vitest'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
+import { REFERENCES_MAX_COUNT, validateReferences, validateRoutedReferences } from '@deepseek-ai/dsh-tool-ask-user'
+
+const fsHarness = vi.hoisted(() => ({
+  nextReadError: undefined as NodeJS.ErrnoException | undefined,
+}))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    readFile: (async (path: unknown, ...rest: never[]) => {
+      const error = fsHarness.nextReadError
+      if (error !== undefined) {
+        fsHarness.nextReadError = undefined
+        throw error
+      }
+      return (actual.readFile as (path: unknown, ...args: never[]) => Promise<unknown>)(path, ...rest)
+    }) as typeof actual.readFile,
+  }
+})
 
 function workspaceFixture(): { workspace: string; inside: string } {
   const parent = mkdtempSync(join(tmpdir(), 'dsh-ask-user-validate-refs-'))
@@ -103,6 +123,15 @@ describe('validateReferences', () => {
     )
   })
 
+  it('rejects a missing file', async () => {
+    const { workspace } = workspaceFixture()
+    await expectInvalid(
+      [{ path: 'missing.md' }],
+      workspace,
+      'REFERENCES_INVALID: references[0]: path "missing.md" is unreadable or does not exist inside the session workspace',
+    )
+  })
+
   it('rejects a directory', async () => {
     const { workspace } = workspaceFixture()
     await expectInvalid(
@@ -119,5 +148,54 @@ describe('validateReferences', () => {
       workspace,
       'REFERENCES_INVALID: references[0]: reason must contain 1-100 code points',
     )
+  })
+})
+
+describe('validateRoutedReferences', () => {
+  it('returns no documents when the model omits references', async () => {
+    await expect(validateRoutedReferences(undefined, workspaceFixture().workspace)).resolves.toEqual({
+      references: undefined,
+      documents: [],
+    })
+  })
+
+  it('reads admitted file bytes for a routed ask', async () => {
+    const { workspace, inside } = workspaceFixture()
+    await expect(validateRoutedReferences([{ path: 'inside.md' }], workspace)).resolves.toEqual({
+      references: [{ path: 'inside.md' }],
+      documents: [{ path: 'inside.md', bytes: new Uint8Array(Buffer.from('ok\n')) }],
+    })
+    await expect(validateRoutedReferences([{ path: inside, reason: 'Rollout plan' }], workspace)).resolves.toEqual({
+      references: [{ path: inside, reason: 'Rollout plan' }],
+      documents: [{ path: inside, bytes: new Uint8Array(Buffer.from('ok\n')) }],
+    })
+  })
+
+  it('rejects an oversize routed file', async () => {
+    const { workspace } = workspaceFixture()
+    writeFileSync(join(workspace, 'huge.bin'), Buffer.alloc(
+      Math.min(
+        REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+        REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+      ) + 1,
+    ))
+    await expect(validateRoutedReferences([{ path: 'huge.bin' }], workspace)).rejects.toMatchObject({
+      name: 'AskUserQuestionError',
+      code: 'REFERENCES_INVALID',
+      message: `REFERENCES_INVALID: references[0]: path "huge.bin" exceeds the ${String(Math.min(
+        REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+        REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+      ))}-byte transfer ceiling`,
+    })
+  })
+
+  it('rejects a routed file that disappears between path admission and read', async () => {
+    const { workspace } = workspaceFixture()
+    fsHarness.nextReadError = Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    await expect(validateRoutedReferences([{ path: 'inside.md' }], workspace)).rejects.toMatchObject({
+      name: 'AskUserQuestionError',
+      code: 'REFERENCES_INVALID',
+      message: 'REFERENCES_INVALID: references[0]: path "inside.md" is unreadable or does not exist inside the session workspace',
+    })
   })
 })

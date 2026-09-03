@@ -3,8 +3,9 @@
  * @module @deepseek-ai/dsh-tool-ask-user/references
  */
 
-import { lstat, realpath } from 'node:fs/promises'
+import { lstat, readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, resolve as resolvePath, sep } from 'node:path'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import { AskUserQuestionError, REFERENCE_REASON_MAX_CODE_POINTS, REFERENCES_MAX_COUNT } from './errors.ts'
 
 /** One model-supplied document reference. */
@@ -21,6 +22,20 @@ export interface ValidatedAskUserQuestionReference {
   readonly path: string
   /** Optional reason, present only when the model supplied one. */
   readonly reason?: string
+}
+
+/** One routed reference whose bytes were read after workspace validation. */
+export interface AskUserQuestionReferenceDocument {
+  /** Workspace-relative path matching the validated reference. */
+  readonly path: string
+  /** Arbitrary file bytes admitted for Companion document-chunk transfer. */
+  readonly bytes: Uint8Array
+}
+
+/** Validated routed references plus the aligned document bytes. */
+export interface ValidatedRoutedAskUserQuestionReferences {
+  readonly references: ValidatedAskUserQuestionReference[] | undefined
+  readonly documents: readonly AskUserQuestionReferenceDocument[]
 }
 
 /**
@@ -76,6 +91,54 @@ export async function validateReferences(
     throw new AskUserQuestionError(`REFERENCES_INVALID: ${failures.join('; ')}`, 'REFERENCES_INVALID')
   }
   return validated
+}
+
+/**
+ * Validate routed `references` and read each file's bytes for document-chunk
+ * transfer. Local asks keep {@link validateReferences} and do not load bodies.
+ * @param references - model-supplied reference list, or undefined when omitted.
+ * @param workspaceRoot - absolute session cwd.
+ * @returns validated references plus aligned document bytes.
+ */
+export async function validateRoutedReferences(
+  references: readonly AskUserQuestionReference[] | undefined,
+  workspaceRoot: string | undefined,
+): Promise<ValidatedRoutedAskUserQuestionReferences> {
+  const validated = await validateReferences(references, workspaceRoot)
+  if (validated === undefined) return { references: undefined, documents: [] }
+  const documents: AskUserQuestionReferenceDocument[] = []
+  const failures: string[] = []
+  const byteLimit = Math.min(
+    REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+    REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+  )
+  /* v8 ignore next -- validateReferences admits a non-empty list only with a workspace root. */
+  const root = workspaceRoot ?? ''
+  for (const [index, reference] of validated.entries()) {
+    const resolved = isAbsolute(reference.path)
+      ? reference.path
+      : resolvePath(root, reference.path)
+    try {
+      const bytes = await readFile(resolved)
+      if (bytes.byteLength > byteLimit) {
+        failures.push(
+          `references[${String(index)}]: path ${JSON.stringify(reference.path)} exceeds the ${String(byteLimit)}-byte transfer ceiling`,
+        )
+        continue
+      }
+      documents.push({ path: reference.path, bytes: new Uint8Array(bytes) })
+    } catch (error: unknown) {
+      /* ENOENT/EACCES/EISDIR: the path failed workspace-file reads after validatePath. */
+      void error
+      failures.push(
+        `references[${String(index)}]: path ${JSON.stringify(reference.path)} is unreadable or does not exist inside the session workspace`,
+      )
+    }
+  }
+  if (failures.length > 0) {
+    throw new AskUserQuestionError(`REFERENCES_INVALID: ${failures.join('; ')}`, 'REFERENCES_INVALID')
+  }
+  return { references: validated, documents }
 }
 
 function validateReason(reason: string | undefined): string | undefined {

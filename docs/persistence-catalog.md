@@ -532,7 +532,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 'member-question/asked': MemberQuestionAskedRecord
 ```
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:79`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:88`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="member-questionoutcome--log-only"></a>
 
@@ -547,7 +547,7 @@ Source: [`packages/interaction/member-question-sender/src/index.ts:79`](../packa
 'member-question/outcome': MemberQuestionOutcomeRecord
 ```
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:85`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:94`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="member-questionreceived--log-only"></a>
 
@@ -569,7 +569,7 @@ Source: [`packages/interaction/member-question-sender/src/index.ts:85`](../packa
 }
 ```
 
-Source: [`packages/interaction/member-question-receiver/src/types.ts:275`](../packages/interaction/member-question-receiver/src/types.ts)
+Source: [`packages/interaction/member-question-receiver/src/types.ts:283`](../packages/interaction/member-question-receiver/src/types.ts)
 
 <a id="member-questionsettled--log-only"></a>
 
@@ -580,7 +580,7 @@ Source: [`packages/interaction/member-question-receiver/src/types.ts:275`](../pa
 'member-question/settled': CompanionMemberQuestionSettledResult
 ```
 
-Source: [`packages/interaction/member-question-receiver/src/types.ts:288`](../packages/interaction/member-question-receiver/src/types.ts)
+Source: [`packages/interaction/member-question-receiver/src/types.ts:296`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

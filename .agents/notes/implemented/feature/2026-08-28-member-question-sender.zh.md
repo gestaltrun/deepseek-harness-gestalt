@@ -26,7 +26,7 @@ Project 与 origin 身份不由工具编造。路由提问需要注入的 `route
 
 ## Supersession check
 
-两篇 2026-08-28 协作笔记均未被取代。[名册工具 note](2026-08-28-project-members-roster-tool.zh.md) 仍拥有经 `project_members` 及其注入的账号、绑定、名册与 presenter 接口的面向模型成员枚举；本发送器对模型选定的收件人另做一次当前名册资格读取，不把该名册作为模型输出。[Desktop 名册路由 note](2026-09-02-desktop-roster-routing.zh.md) 拥有真实 Desktop 组合上的 Installation 取样身份与公开登录名匹配。[项目对等授权 note](2026-08-28-project-peer-relay-grants.zh.md) 仍拥有按对端密封的 Relay 凭证，以及投递止于密封信封的已记录 T4 缺环；本发送器在 B 侧查找该授权并注入投递，而不签发、打开或传输信封。[项目成员关系权威 note](2026-08-27-project-membership-core.zh.md) 仍拥有名册权威与不排队的离线立场；[presence 心跳 note](2026-08-28-member-presence-heartbeats.zh.md) 仍拥有存活心跳如何成为 `online`/`offline`。本 note 只拥有参数扩展后的 `ask_user_question` 到 T4 codec 的路由，包括运行期 schema 过滤、单待答占用、生命周期错误与持久提问记录。
+两篇 2026-08-28 协作笔记均未被取代。[名册工具 note](2026-08-28-project-members-roster-tool.zh.md) 仍拥有经 `project_members` 及其注入的账号、绑定、名册与 presenter 接口的面向模型成员枚举；本发送器对模型选定的收件人另做一次当前名册资格读取，不把该名册作为模型输出。[Desktop 名册路由 note](2026-09-02-desktop-roster-routing.zh.md) 拥有真实 Desktop 组合上的 Installation 取样身份与公开登录名匹配。[项目对等授权 note](2026-08-28-project-peer-relay-grants.zh.md) 仍拥有按对端密封的 Relay 凭证，以及投递止于密封信封的已记录 T4 缺环；本发送器在 B 侧查找该授权并注入投递，而不签发、打开或传输信封。[项目成员关系权威 note](2026-08-27-project-membership-core.zh.md) 仍拥有名册权威与不排队的离线立场；[presence 心跳 note](2026-08-28-member-presence-heartbeats.zh.md) 仍拥有存活心跳如何成为 `online`/`offline`。本 note 只拥有参数扩展后的 `ask_user_question` 到 T4 codec 的路由，包括运行期 schema 过滤、单待答占用、生命周期错误与持久提问记录。[组装验收 note](../testing/2026-09-04-project-members-assembled-acceptance.zh.md) 拥有无密钥 A1/B1/B2 走查，以及本发送器现在执行的消费方 `document-chunk` 编码与重组。
 
 ## Alternatives considered
 

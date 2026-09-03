@@ -61,6 +61,6 @@ Append-only; newly visible content follows the reusable request prefix and does 
 
 ## Known Limitations and Deferred Work
 
-- **Presence and display identity need the platform provider face** — a composition without an injected `rosterPresenter` reports every member `offline` with no identity fields; the assembled provider wiring lands with the platform composition side of the project-members work.
+- **Presence and display identity need the platform provider face** — a composition without an injected `rosterPresenter` reports every member `offline` with no identity fields. Desktop Host supplies that presenter through the token-protected loopback projection.
 - **Read-only by design** — the tool exposes no membership mutations; invitations, role changes, and tag edits stay behind the project-membership HTTP surface and out of the model's toolset.
 - **The workspace binding is composition-defined** — the tool cannot resolve a bound project on its own; without an injected `boundProjectResolver` every omitted-`projectId` call answers `PROJECT_UNBOUND`.

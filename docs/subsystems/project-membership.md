@@ -65,7 +65,7 @@ present(view: RosterView): Promise<readonly DesktopMemberPresentation[]>
  * @param addresseeLogin - public GitHub login from `to_project_member`.
  * @param originSessionTitle - latest public Session title, or the product fallback.
  * @param signal - optional cancellation for both route-authority reads.
- * @returns authenticated Project, matched Account, and origin, or no value when the login is not a current member.
+ * @returns authenticated Project, matched Account, and origin, or no value when the login is not a current member. A match that is the asking Account still returns a route; `ask_user_question` rejects that route as `SELF_ADDRESSEE`.
  * @throws when the Workspace is unbound or the current Account is absent from the roster.
  */
 async questionRoute( agent: Agent | undefined, addresseeLogin: string, originSessionTitle: string, signal?: AbortSignal, ): Promise<DesktopMemberQuestionRoute | undefined>
@@ -280,7 +280,7 @@ retractInvitation(invitationId: InvitationId): Promise<void>
 
 /**
  * List trusted pending invitation cards for the current Account.
- * @returns trusted pending invitation cards. HTTP 204 and HTTP 404 are an
+ * @returns trusted pending invitation cards. HTTP 404 is an
  *   empty list; other non-OK answers reject.
  */
 pendingInvitations(): Promise<readonly PendingInvitationView[]>

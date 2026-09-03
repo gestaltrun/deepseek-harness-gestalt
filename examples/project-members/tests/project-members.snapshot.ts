@@ -20,8 +20,8 @@ const refreshing = process.env.DSH_SNAPSHOT === 'refresh'
 
 /** The roster the in-memory membership provider seeds, as the model receives it. */
 const ROSTER_TEXT = JSON.stringify([
-  { accountId: 'acc-demo-owner', displayName: 'Demo Owner', role: 'owner', tags: ['founding'], presence: 'online' },
-  { accountId: 'acc-demo-dev', displayName: 'grace', role: 'member', tags: ['review'], presence: 'offline' },
+  { accountId: 'acc-demo-owner', displayName: 'Demo Owner', role: 'owner', tags: ['founding'], presence: 'online', self: true },
+  { accountId: 'acc-demo-dev', displayName: 'grace', role: 'member', tags: ['review'], presence: 'offline', self: false },
 ])
 const MEMBER_ANSWER_TEXT = '{"answers":[{"id":"rollout","selected":["approve"]}]}'
 const FINAL_TEXT = `PROJECT_MEMBERS_ROSTER ${ROSTER_TEXT} PROJECT_MEMBER_ANSWER ${MEMBER_ANSWER_TEXT}`

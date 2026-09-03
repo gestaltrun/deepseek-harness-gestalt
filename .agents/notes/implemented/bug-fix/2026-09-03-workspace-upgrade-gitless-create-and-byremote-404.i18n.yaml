@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-03-workspace-upgrade-gitless-create-and-byremote-404.md
-2026-09-03-workspace-upgrade-gitless-create-and-byremote-404.md: 20378d127008927e6a9f1648ec14e794d27ad99f
-2026-09-03-workspace-upgrade-gitless-create-and-byremote-404.zh.md: 09cf4cd5b3897cd1141eda94194d362c6ae538c1
+2026-09-03-workspace-upgrade-gitless-create-and-byremote-404.md: 38d0dba950abda3c2a02c3ccb7ff0104289c5846
+2026-09-03-workspace-upgrade-gitless-create-and-byremote-404.zh.md: 2013ebcf90560fcfad6cb38f5d2b7265403d20f4

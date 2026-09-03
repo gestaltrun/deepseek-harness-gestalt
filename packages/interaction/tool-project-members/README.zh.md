@@ -49,7 +49,7 @@ Native 渲染器保持规范值的紧凑 JSON 形态。本工具不声明自定�
 
 #### What the model sees
 
-调用参数很小——通常为空。成功时返回精确形态的紧凑 JSON `[{"accountId":"…","displayName":"…","avatarRef":"…","role":"owner|admin|member","tags":["…"],"presence":"online|offline"}]`；组合未解析身份时省略 `displayName` 与 `avatarRef`，`presence` 在同样条件下读作 `offline`。稳定失败逐字固定：`Error: PROJECT_UNBOUND: no cloud project is bound to this workspace; link the workspace to a project or pass projectId explicitly` 与 `Error: ACCOUNT_UNAVAILABLE: no account is bound to the current session; sign in before querying project members`。成员关系服务的拒绝（例如 `NOT_A_MEMBER`、`PROJECT_NOT_FOUND`）经同一错误通道透出，并携带其稳定代码。
+调用参数很小——通常为空。成功时返回精确形态的紧凑 JSON `[{"accountId":"…","displayName":"…","avatarRef":"…","role":"owner|admin|member","tags":["…"],"presence":"online|offline","self":false}]`；组合未解析身份时省略 `displayName` 与 `avatarRef`，`presence` 在同样条件下读作 `offline`，提问会话账号的 `self` 为 true。稳定失败逐字固定：`Error: PROJECT_UNBOUND: no cloud project is bound to this workspace; link the workspace to a project or pass projectId explicitly` 与 `Error: ACCOUNT_UNAVAILABLE: no account is bound to the current session; sign in before querying project members`。成员关系服务的拒绝（例如 `NOT_A_MEMBER`、`PROJECT_NOT_FOUND`）经同一错误通道透出，并携带其稳定代码。
 
 #### Token effect
 

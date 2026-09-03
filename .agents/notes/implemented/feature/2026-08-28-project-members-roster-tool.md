@@ -30,7 +30,7 @@ Neither platform note is superseded. [The project-membership authority note](202
 
 The tool is complete and testable today against stub faces. Desktop assemblies inject the loopback provider faces; browser-only `dsh web` still sees `ACCOUNT_UNAVAILABLE` or an omitted tool rather than a roster. The resolver contracts are plain functions in Config, so `cordis.yml` supplies them as `!!js` expressions and tests inject stubs without a plugin — but nothing validates a resolver's identity beyond its signature, and a composition that injects the wrong account's resolver gets that account's roster. The in-memory provider and stub resolvers in the package tests are the reference for the assembled platform face.
 
-`ask_user_question.to_project_member` matches `project_members.displayName` (public GitHub login) on a row whose `self` is false, never `accountId` and never the asking account. The roster marks the asking session account with `self: true`. Routing that login fails with `SELF_ADDRESSEE` before delivery.
+`ask_user_question.to_project_member` matches `project_members.displayName` (public GitHub login) on a row whose `self` is false, never `accountId`. The roster marks the asking session account with `self: true`. Desktop `questionRoute` still returns a route when the login is the asking Account; the tool then fails with `SELF_ADDRESSEE`. An unknown login or `accountId` fails with `INELIGIBLE_ADDRESSEE`.
 
 ## Testing
 

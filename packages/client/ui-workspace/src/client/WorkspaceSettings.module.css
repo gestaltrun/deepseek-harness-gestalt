@@ -106,13 +106,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
 .sectionTitle {
   font-size: 13px;
   font-weight: 600;
@@ -194,13 +187,7 @@
 }
 
 .visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
+  composes: visuallyHidden from './rows/Rows.module.css';
 }
 
 .offlineDot {

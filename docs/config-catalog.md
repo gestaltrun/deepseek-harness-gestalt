@@ -3388,7 +3388,7 @@ export interface MemberQuestionRoute {
 
 Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
 
-Source: [`packages/interaction/tool-ask-user/src/index.ts:90`](../packages/interaction/tool-ask-user/src/index.ts)
+Source: [`packages/interaction/tool-ask-user/src/index.ts:91`](../packages/interaction/tool-ask-user/src/index.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -3670,7 +3670,7 @@ export type MemberPresence = 'online' | 'offline'
 
 Depends on: [`Agent`](subsystems/core.md) · [`Branded`](../packages/util/brand/src/index.ts) · [`RosterView`](subsystems/project-membership.md)
 
-Source: [`packages/interaction/tool-project-members/src/index.ts:122`](../packages/interaction/tool-project-members/src/index.ts)
+Source: [`packages/interaction/tool-project-members/src/index.ts:124`](../packages/interaction/tool-project-members/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh"></a>
 

@@ -888,7 +888,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'async questionRoute( agent: Agent | undefined, addresseeLogin: string, originSessionTitle: string, signal?: AbortSignal, ): Promise<DesktopMemberQuestionRoute | undefined>',
         description: 'Resolve one member-question route from the current bound-Project roster.',
         parameters: [{ name: 'agent', description: 'live asking Agent.' }, { name: 'addresseeLogin', description: 'public GitHub login from `to_project_member`.' }, { name: 'originSessionTitle', description: 'latest public Session title, or the product fallback.' }, { name: 'signal', description: 'optional cancellation for both route-authority reads.' }],
-        returns: 'authenticated Project, matched Account, and origin, or no value when the login is not a current member.',
+        returns: 'authenticated Project, matched Account, and origin, or no value when the login is not a current member. A match that is the asking Account still returns a route; `ask_user_question` rejects that route as `SELF_ADDRESSEE`.',
         throws: ['when the Workspace is unbound or the current Account is absent from the roster.'],
       },
     ],
@@ -1742,7 +1742,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'pendingInvitations(): Promise<readonly PendingInvitationView[]>',
         description: 'List trusted pending invitation cards for the current Account.',
         parameters: [],
-        returns: 'trusted pending invitation cards. HTTP 204 and HTTP 404 are an empty list; other non-OK answers reject.',
+        returns: 'trusted pending invitation cards. HTTP 404 is an empty list; other non-OK answers reject.',
       },
       {
         signature: 'issuedInvitations(projectId: ProjectId): Promise<readonly IssuedInvitationView[]>',

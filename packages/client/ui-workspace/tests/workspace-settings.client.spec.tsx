@@ -186,9 +186,8 @@ describe('workspace settings and invite wizard (M4)', () => {
       fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
       await tick()
       fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
-      const remote = screen.getByLabelText('Git remote 地址') as HTMLInputElement
-      expect(remote.readOnly).toBe(true)
-      expect(remote.value).toBe(SAME_REMOTE)
+      expect(screen.getByText(SAME_REMOTE)).toBeTruthy()
+      expect(screen.queryByLabelText('Git remote 地址')).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
       await tick()
       expect(membership.createProject).toHaveBeenCalledWith({
@@ -225,9 +224,8 @@ describe('workspace settings and invite wizard (M4)', () => {
       openWorkspaceMenu()
       fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
       await tick()
-      const remote = screen.getByLabelText('Git remote 地址') as HTMLInputElement
-      expect(remote.readOnly).toBe(true)
-      expect(remote.value).toBe('')
+      expect(screen.getByText('未检测到 origin remote')).toBeTruthy()
+      expect(screen.queryByLabelText('Git remote 地址')).toBeNull()
       expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(true)
       fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
       expect(screen.queryByText('此工作区必须是带有 origin remote 的 Git checkout，才能升级为云项目。')).toBeNull()
@@ -251,8 +249,8 @@ describe('workspace settings and invite wizard (M4)', () => {
       workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
     />)
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('lookup error')
-    expect(screen.getByLabelText<HTMLInputElement>('Git remote 地址').value).toBe(SAME_REMOTE)
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
+    expect(screen.getByText(SAME_REMOTE)).toBeTruthy()
     fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(false)
   })
@@ -450,7 +448,7 @@ describe('workspace settings and invite wizard (M4)', () => {
         workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
       />)
       await flush()
-      expect(screen.getByRole('alert').textContent).toBe(reason instanceof Error ? reason.message : reason)
+      expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
       cleanup()
     }
 
@@ -498,8 +496,8 @@ describe('workspace settings and invite wizard (M4)', () => {
         workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
       />)
       await flush()
-      expect(screen.getByRole('alert').textContent).toBe(reason instanceof Error ? reason.message : reason)
-      expect(screen.getByLabelText<HTMLInputElement>('Git remote 地址').value).toBe('')
+      expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
+      expect(screen.getByText('未检测到 origin remote')).toBeTruthy()
       cleanup()
     }
 
@@ -534,11 +532,11 @@ describe('workspace settings and invite wizard (M4)', () => {
     fireEvent.change(name, { target: { value: 'Assembled' } })
     fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('create error')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     fireEvent.change(name, { target: { value: 'Assembled again' } })
     fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('create string')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
   })
 
   it('contains roster and issued-invitation completion after unmount and reports both failure forms', async () => {
@@ -676,20 +674,20 @@ describe('workspace settings and invite wizard (M4)', () => {
       projectId: 'project-1', githubLogin: 'octocat', grantedRole: 'admin',
     })
     expect((login as HTMLInputElement).value).toBe('')
-    for (const [value, message] of [['mona', 'invite error'], ['ada', 'invite string']] as const) {
+    for (const value of ['mona', 'ada'] as const) {
       fireEvent.change(login, { target: { value } })
       fireEvent.click(screen.getByRole('button', { name: t('members.invite') }))
       await flush()
-      expect(screen.getByRole('alert').textContent).toBe(message)
+      expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     }
 
     fireEvent.click(screen.getByRole('button', { name: t('invitations.retract') }))
     expect(screen.getByRole('button', { name: t('invitations.retracting') })).toBeTruthy()
     await act(async () => { retractRun.resolve(undefined); await retractRun.promise })
-    for (const message of ['retract error', 'retract string']) {
+    for (const _retract of [0, 1]) {
       fireEvent.click(screen.getByRole('button', { name: t('invitations.retract') }))
       await flush()
-      expect(screen.getByRole('alert').textContent).toBe(message)
+      expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     }
 
     const memberRole = screen.getAllByRole('combobox').find(node => (node as HTMLSelectElement).value === 'member')
@@ -706,10 +704,10 @@ describe('workspace settings and invite wizard (M4)', () => {
     fireEvent.keyDown(tags, { key: 'Enter' })
     await flush()
     expect(setMemberTags).toHaveBeenCalledWith('membership-1', ['triage', 'qa'])
-    expect(screen.getByRole('alert').textContent).toBe('tags error')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
     fireEvent.click(screen.getAllByRole('button', { name: t('members.remove') })[0]!)
     await flush()
-    expect(screen.getByRole('alert').textContent).toBe('remove string')
+    expect(screen.getByRole('alert').textContent).toBe(t('error.generic'))
   })
 
   it('contains retract completion after unmount', async () => {
@@ -888,14 +886,14 @@ describe('workspace settings and invite wizard (M4)', () => {
   it('maps Electron IPC prefixes and closes a retracted invitation without leaving the raw 409', async () => {
     const ipc = 'Error invoking remote method \'projectMembership:decide\': Error: Project Membership request failed (409 INVITATION_NOT_PENDING): invitation a74b233f-4f29-44e0-b09d-6ca68eb48b0 already reached retracted'
     expect(isInvitationNoLongerPending(new Error(ipc))).toBe(true)
-    expect(membershipUserMessage(new Error(ipc), t)).toBe(t('wizard.invitationGone'))
+    expect(membershipUserMessage(new Error(ipc), t)).toBe(t('error.INVITATION_NOT_PENDING'))
     expect(membershipUserMessage('ROLE_REQUIRED', t)).toBe(t('error.ROLE_REQUIRED'))
     expect(membershipUserMessage('INVALID_LINK', t)).toBe(t('error.INVALID_LINK'))
     expect(membershipUserMessage('DUPLICATE_INVITEE', t)).toBe(t('error.DUPLICATE_INVITEE'))
     expect(membershipUserMessage('PROJECT_NOT_FOUND', t)).toBe(t('error.PROJECT_NOT_FOUND'))
     expect(membershipUserMessage('NOT_A_MEMBER', t)).toBe(t('error.NOT_A_MEMBER'))
     expect(membershipUserMessage('LAST_OWNER', t)).toBe(t('error.LAST_OWNER'))
-    expect(membershipUserMessage('INVITATION_NOT_FOUND', t)).toBe(t('error.INVITATION_NOT_FOUND'))
+    expect(membershipUserMessage('INVITATION_NOT_FOUND', t)).toBe(t('error.INVITATION_NOT_PENDING'))
     expect(isInvitationNoLongerPending('INVITATION_NOT_FOUND')).toBe(true)
     expect(isInvitationNoLongerPending('already reached accepted')).toBe(true)
     expect(isInvitationNoLongerPending(new Error('lookup not found'))).toBe(false)

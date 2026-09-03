@@ -66,8 +66,11 @@ describe('Desktop Project Membership Web Host provider', () => {
     })
     await expect(ctx.desktopProjectMembership.questionRoute(agent, 'account-b', 'Acceptance session'))
       .resolves.toBeUndefined()
-    await expect(ctx.desktopProjectMembership.questionRoute(agent, 'Ada', 'Acceptance session'))
-      .resolves.toBeUndefined()
+    await expect(ctx.desktopProjectMembership.questionRoute(agent, 'Ada', 'Acceptance session')).resolves.toMatchObject({
+      projectId: 'project-atlas',
+      toProjectMember: 'account-a',
+      origin: { askerAccountId: 'account-a', askerDisplayName: 'ada' },
+    })
     await expect(ctx.desktopProjectMembership.questionRoute(agent, 'missing', 'Acceptance session'))
       .resolves.toBeUndefined()
   })

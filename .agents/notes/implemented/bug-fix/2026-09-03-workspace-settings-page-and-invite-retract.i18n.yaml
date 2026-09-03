@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-03-workspace-settings-page-and-invite-retract.md
-2026-09-03-workspace-settings-page-and-invite-retract.md: bbef1133ac8d44f8f1d6500f8b80970eeb20bac8
-2026-09-03-workspace-settings-page-and-invite-retract.zh.md: d04e3df67709c4ef2902e15d1aadca61fece9d0f
+2026-09-03-workspace-settings-page-and-invite-retract.md: 8e2d79dfbf6aef502f9e43b7e8742db3d4ace397
+2026-09-03-workspace-settings-page-and-invite-retract.zh.md: b88c0aaf3c4117a8b586a0587cf69045f07cb7f4

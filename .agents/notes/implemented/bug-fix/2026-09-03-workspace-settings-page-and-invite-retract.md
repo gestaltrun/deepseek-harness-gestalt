@@ -12,7 +12,7 @@ Workspace settings shipped as a compact `min(480px)` dialog while the accepted p
 
 The settings dialog is a headless page: `min(820px, calc(100vw - 64px))` by `min(760px, calc(100vh - 64px))`, named title, optional path, Git remote in a code row, collaboration card. Git-less create stays name-only; project and origin still load independently. Modal `className` remains `string`; the owner throws when `.settingsDialog` is missing.
 
-The wizard never submits or re-offers an invitation that left the pending pool. `decide` failures with `INVITATION_NOT_PENDING`, `INVITATION_NOT_FOUND`, or a retracted/not-pending message close the wizard, record that id, and skip it on later polls. Other decide failures map to short dictionary copy and never keep the Electron IPC prefix. Link radios use the checkout basename.
+The wizard never submits or re-offers an invitation that left the pending pool. `decide` failures with `INVITATION_NOT_PENDING`, `INVITATION_NOT_FOUND`, or a retracted/not-pending message close the wizard, record that id, and skip it on later polls. Create, invite, retract, roster, and other decide failures map to the same short dictionary copy and never keep the Electron IPC prefix. Link radios use the checkout basename.
 
 Roster presence is a 16px overflow-hidden slot: the green/offline dot is visible, and `members.online` / `members.offline` live only in `.visuallyHidden` plus the `title` tooltip. Without that clip, the two-character label wraps inside the slot and stacks next to the GitHub login.
 

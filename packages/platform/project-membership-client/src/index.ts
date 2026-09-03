@@ -125,7 +125,7 @@ export interface ProjectMembershipTransport {
   /**
    * List trusted pending invitation cards for the current Account.
    * @param authorization - current-installation Account session presentation.
-   * @returns trusted pending invitation cards. HTTP 204 and HTTP 404 are an
+   * @returns trusted pending invitation cards. HTTP 404 is an
    *   empty list; other non-OK answers reject.
    */
   pendingInvitations(authorization: MembershipAuthorization): Promise<readonly PendingInvitationView[]>
@@ -190,7 +190,7 @@ export interface ProjectMembershipClient {
   retractInvitation(invitationId: InvitationId): Promise<void>
   /**
    * List trusted pending invitation cards for the current Account.
-   * @returns trusted pending invitation cards. HTTP 204 and HTTP 404 are an
+   * @returns trusted pending invitation cards. HTTP 404 is an
    *   empty list; other non-OK answers reject.
    */
   pendingInvitations(): Promise<readonly PendingInvitationView[]>
@@ -310,9 +310,9 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
       `${this.origin}/v1/projects/invitations/pending`,
       jsonRequest({ method: 'GET', headers: authorization }),
     )
-    // Production Platform answers no pending rows with 404; the development
-    // HTTP consumer answers 200 []. Neither is a dialog-blocking failure.
-    if (response.status === 204 || response.status === 404) return []
+    // Production Platform answers no pending rows with 404. The development
+    // HTTP consumer answers 200 [].
+    if (response.status === 404) return []
     if (!response.ok) throw await projectMembershipRequestError(response)
     return parseArray(await response.json()).map(parsePendingInvitationView)
   }

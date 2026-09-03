@@ -30,7 +30,7 @@ Status: implemented
 
 工具今天即可针对桩接口完成测试。Desktop 组合注入 loopback 提供方接口；纯浏览器 `dsh web` 仍看到 `ACCOUNT_UNAVAILABLE` 或省略该工具，而不是名册。解析器契约是 Config 中的普通函数，`cordis.yml` 以 `!!js` 表达式提供、测试以桩注入，无需插件——但除签名外没有任何机制校验解析器的身份，注入错误账号解析器的组合会得到那个账号的名册。包测试中的内存 provider 与桩解析器是装配平台接口的参照。
 
-`ask_user_question.to_project_member` 对齐 `self` 为 false 的 `project_members.displayName`（公开 GitHub 登录名），从不对齐 `accountId`，也不对齐提问账号。名册用 `self: true` 标出提问会话账号。把该登录名路由出去会在投递前以 `SELF_ADDRESSEE` 失败。
+`ask_user_question.to_project_member` 对齐 `self` 为 false 的 `project_members.displayName`（公开 GitHub 登录名），从不对齐 `accountId`。名册用 `self: true` 标出提问会话账号。Desktop `questionRoute` 在登录名就是提问 Account 时仍返回路由；工具随后以 `SELF_ADDRESSEE` 失败。未知登录名或 `accountId` 以 `INELIGIBLE_ADDRESSEE` 失败。
 
 ## Testing
 

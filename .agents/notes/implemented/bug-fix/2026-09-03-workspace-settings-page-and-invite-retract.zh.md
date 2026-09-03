@@ -12,7 +12,7 @@ Workspace settings 以紧凑的 `min(480px)` 对话框上线，而验收产品�
 
 设置对话框是无默认 chrome 的页面：`min(820px, calc(100vw - 64px))` × `min(760px, calc(100vh - 64px))`，带名称的标题、可选路径、代码行中的 Git remote、协作卡片。无 Git 创建仍只看名称；Project 与 origin 仍独立加载。Modal `className` 保持 `string`；缺少 `.settingsDialog` 时 owner 抛错。
 
-向导不再提交或再次出示已离开 pending 池的邀请。`decide` 失败若带 `INVITATION_NOT_PENDING`、`INVITATION_NOT_FOUND` 或已撤回／非 pending 文案，则关闭向导、记录该 id，并在后续轮询中跳过。其他 decide 失败映射为短字典文案，不再保留 Electron IPC 前缀。关联候选项使用 checkout basename。
+向导不再提交或再次出示已离开 pending 池的邀请。`decide` 失败若带 `INVITATION_NOT_PENDING`、`INVITATION_NOT_FOUND` 或已撤回／非 pending 文案，则关闭向导、记录该 id，并在后续轮询中跳过。创建、邀请、撤回、名册与其他 decide 失败映射为同一套短字典文案，不再保留 Electron IPC 前缀。关联候选项使用 checkout basename。
 
 花名册在线状态是 16px、overflow hidden 的槽：绿点／离线点可见，`members.online` / `members.offline` 只放在 `.visuallyHidden` 与 `title` 提示里。不裁切时，两字标签会在槽内换行，竖排挤在 GitHub 登录名旁边。
 

@@ -10,7 +10,7 @@ Desktop 的 Workspace settings 无法完成 Cloud Project 创建。云项目名�
 
 ## Decision
 
-`projectByRemote` 把 HTTP 204 与生产环境的 HTTP 404 视为未绑定。其他非 OK 应答仍会拒绝。`pendingInvitations` 把 HTTP 204 与生产环境的 HTTP 404 视为空列表。Desktop 的官方 Node HTTPS helper 用 null Fetch body 重建 204/205/304，因此 heartbeat 与未绑定 `by-remote` 不会抛出 `Invalid response status code 204`。Workspace settings 独立加载当前 Account 的 Project 与本地 Git remote，因此未绑定的 404 不会清掉已成功读到的 origin。`createBlocked` 只看名称：Git remote 为可选项，有值时只读。
+`projectByRemote` 把 HTTP 204 与生产环境的 HTTP 404 视为未绑定。其他非 OK 应答仍会拒绝。`pendingInvitations` 把生产环境的 HTTP 404 视为空列表。Desktop 的官方 Node HTTPS helper 用 null Fetch body 重建 204/205/304，因此 heartbeat 与未绑定 `by-remote` 不会抛出 `Invalid response status code 204`。Workspace settings 独立加载当前 Account 的 Project 与本地 Git remote，因此未绑定的 404 不会清掉已成功读到的 origin。`createBlocked` 只看名称。Git remote 只出现在仓库卡片上，创建表单不再重复一份。
 
 没有 origin、或其 origin 未通过 `normalizeGitRemoteUrl` 的 Workspace，通过 `localWorkspaceRemoteUrl(workspaceId)` 创建并恢复，即规范化的 Platform remote `local://workspace/<id>`。identity 保持大小写原样；空 id 以及包含 `/`、`?` 或 `#` 的 id 仍是 `INVALID_REMOTE_URL`。浏览器 bundle 从 `@deepseek-ai/dsh-project-membership/remote-url` 导入该构造函数。创建仍会在名册渲染前持久化 founder 的 Account／Project／Workspace binding。在同一 Workspace 上重开设置时，优先用 origin 恢复，否则用该哨兵。
 

@@ -34,22 +34,21 @@ export interface WizardWorkspace {
   title: string
 }
 
-/** Domain codes that mean the invitation is no longer pending. */
-const GONE_INVITATION_CODES = new Set(['INVITATION_NOT_PENDING', 'INVITATION_NOT_FOUND'])
+const MEMBERSHIP_ERROR_COPY = {
+  INVITATION_NOT_PENDING: 'error.INVITATION_NOT_PENDING',
+  INVITATION_NOT_FOUND: 'error.INVITATION_NOT_PENDING',
+  ROLE_REQUIRED: 'error.ROLE_REQUIRED',
+  INVALID_LINK: 'error.INVALID_LINK',
+  DUPLICATE_INVITEE: 'error.DUPLICATE_INVITEE',
+  PROJECT_NOT_FOUND: 'error.PROJECT_NOT_FOUND',
+  NOT_A_MEMBER: 'error.NOT_A_MEMBER',
+  LAST_OWNER: 'error.LAST_OWNER',
+} as const
 
-const MEMBERSHIP_FAILURE_CODES = [
+const GONE_INVITATION_CODES = new Set<keyof typeof MEMBERSHIP_ERROR_COPY>([
   'INVITATION_NOT_PENDING',
   'INVITATION_NOT_FOUND',
-  'ROLE_REQUIRED',
-  'INVALID_LINK',
-  'DUPLICATE_INVITEE',
-  'PROJECT_NOT_FOUND',
-  'NOT_A_MEMBER',
-  'LAST_OWNER',
-] as const
-
-/** Known membership envelope codes that have mapped user copy. */
-const MEMBERSHIP_ERROR_CODES = new Set<string>(MEMBERSHIP_FAILURE_CODES)
+])
 
 /**
  * Map a membership/IPC failure to short user copy. Electron prefixes are
@@ -60,23 +59,8 @@ const MEMBERSHIP_ERROR_CODES = new Set<string>(MEMBERSHIP_FAILURE_CODES)
  * @returns localized user-facing copy.
  */
 export function membershipUserMessage(reason: unknown, t: SettingsTranslate): string {
-  const text = reason instanceof Error ? reason.message : String(reason)
-  const code = membershipFailureCode(text)
-  if (code !== undefined && MEMBERSHIP_ERROR_CODES.has(code)) {
-    switch (code) {
-      case 'INVITATION_NOT_PENDING': return t('error.INVITATION_NOT_PENDING')
-      case 'INVITATION_NOT_FOUND': return t('error.INVITATION_NOT_FOUND')
-      case 'ROLE_REQUIRED': return t('error.ROLE_REQUIRED')
-      case 'INVALID_LINK': return t('error.INVALID_LINK')
-      case 'DUPLICATE_INVITEE': return t('error.DUPLICATE_INVITEE')
-      case 'PROJECT_NOT_FOUND': return t('error.PROJECT_NOT_FOUND')
-      case 'NOT_A_MEMBER': return t('error.NOT_A_MEMBER')
-      case 'LAST_OWNER': return t('error.LAST_OWNER')
-      /* v8 ignore next -- MEMBERSHIP_ERROR_CODES only contains the mapped keys. */
-      default: return t('error.generic')
-    }
-  }
-  return t('error.generic')
+  const code = membershipFailureCode(reason instanceof Error ? reason.message : String(reason))
+  return code === undefined ? t('error.generic') : t(MEMBERSHIP_ERROR_COPY[code])
 }
 
 /**
@@ -90,8 +74,9 @@ export function isInvitationNoLongerPending(reason: unknown): boolean {
   return /already reached\s+\w+|not pending|retracted/i.test(text)
 }
 
-function membershipFailureCode(text: string): string | undefined {
-  return MEMBERSHIP_FAILURE_CODES.find(code => text.includes(code))
+function membershipFailureCode(text: string): keyof typeof MEMBERSHIP_ERROR_COPY | undefined {
+  const codes = Object.keys(MEMBERSHIP_ERROR_COPY) as Array<keyof typeof MEMBERSHIP_ERROR_COPY>
+  return codes.find(code => text.includes(code))
 }
 
 /**
@@ -116,7 +101,6 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, workspaceP
   const [createError, setCreateError] = useState<string | null>(null)
   const trimmedName = name.trim()
   const createBlocked = creating || trimmedName === ''
-  const visibleCreateError = createError
   useEffect(() => {
     let alive = true
     gateway.projectForWorkspace(workspaceId).then((existing) => {
@@ -125,7 +109,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, workspaceP
     }).catch((reason: unknown) => {
       if (!alive) return
       setProject(null)
-      setCreateError(reason instanceof Error ? reason.message : String(reason))
+      setCreateError(membershipUserMessage(reason, t))
     })
     gateway.localRemoteFor(workspaceId).then((localRemote) => {
       if (!alive) return
@@ -133,7 +117,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, workspaceP
     }).catch((reason: unknown) => {
       if (!alive) return
       setRemote(null)
-      setCreateError(reason instanceof Error ? reason.message : String(reason))
+      setCreateError(membershipUserMessage(reason, t))
     })
     return () => { alive = false }
   }, [gateway, workspaceId])
@@ -147,14 +131,14 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, workspaceP
       setProject(created)
     }).catch((reason: unknown) => {
       setCreating(false)
-      setCreateError(reason instanceof Error ? reason.message : String(reason))
+      setCreateError(membershipUserMessage(reason, t))
     })
   }
   const dialogClass = css.settingsDialog
   /* v8 ignore next -- CSS Modules emit .settingsDialog from WorkspaceSettings.module.css. */
   if (dialogClass === undefined) throw new Error('WorkspaceSettings.module.css is missing .settingsDialog')
   return (
-    <Modal open headless className={dialogClass} onClose={onClose} closeLabel={t('close')} title={t('settings.title')}>
+    <Modal open headless className={dialogClass} onClose={onClose} title={t('settings.title')}>
       <article className={css.settingsPage} data-workspace-settings-surface="page">
         <header className={css.settingsHeader}>
           <div>
@@ -188,16 +172,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, workspaceP
                       onChange={(e) => { setName(e.target.value); setCreateError(null) }}
                     />
                   </label>
-                  <label className={css.fieldLabel}>
-                    {t('upgrade.remoteUrl')}
-                    <input
-                      className={css.fieldInput}
-                      value={remote ?? ''}
-                      aria-label={t('upgrade.remoteUrl')}
-                      readOnly
-                    />
-                  </label>
-                  {visibleCreateError !== null && <div className={css.actionError} role="alert">{visibleCreateError}</div>}
+                  {createError !== null && <div className={css.actionError} role="alert">{createError}</div>}
                   <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
                     {creating ? t('upgrade.creating') : t('upgrade.create')}
                   </Button>
@@ -241,14 +216,14 @@ function MemberManagement({ gateway, project, t }: {
     gateway.roster(project.id).then((view) => {
       if (alive.current) setMembers(view.members)
     }).catch((reason: unknown) => {
-      if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
+      if (alive.current) setActionError(membershipUserMessage(reason, t))
     })
   }
   const reloadIssued = () => {
     gateway.issuedInvitations(project.id).then((rows) => {
       if (alive.current) setIssued(rows)
     }).catch((reason: unknown) => {
-      if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
+      if (alive.current) setActionError(membershipUserMessage(reason, t))
     })
   }
   useEffect(() => {
@@ -273,7 +248,7 @@ function MemberManagement({ gateway, project, t }: {
       reloadIssued()
     }).catch((reason: unknown) => {
       setInviting(false)
-      setActionError(reason instanceof Error ? reason.message : String(reason))
+      setActionError(membershipUserMessage(reason, t))
     })
   }
   const retract = (invitationId: string) => {
@@ -286,13 +261,13 @@ function MemberManagement({ gateway, project, t }: {
     }).catch((reason: unknown) => {
       if (!alive.current) return
       setRetractingId(null)
-      setActionError(reason instanceof Error ? reason.message : String(reason))
+      setActionError(membershipUserMessage(reason, t))
     })
   }
   const act = (run: () => Promise<void>) => {
     setActionError(null)
     run().then(reloadRoster).catch((reason: unknown) => {
-      setActionError(reason instanceof Error ? reason.message : String(reason))
+      setActionError(membershipUserMessage(reason, t))
       reloadRoster()
     })
   }

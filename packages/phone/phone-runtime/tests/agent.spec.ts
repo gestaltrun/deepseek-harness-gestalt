@@ -396,10 +396,10 @@ child.on('close', code => { process.exit(code ?? 1) })
   it('bounds a hung agent install with the configured agent ceiling', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES, agent: { installDelayMs: 6_000 } })
     fakes.push(fake)
-    // Two seconds also absorbs a loaded host's node cold start, so the status
-    // probe always clears its own ceiling and the install is what times out.
+    // force skips the status probe so the 2s ceiling applies to the hung install
+    // child. Without force, a loaded host can expire that ceiling on status spawn.
     const context = await mountWith(fake, { agentTimeoutMs: 2_000, provisioningProfilePath: fake.profilePath })
-    const timedOut = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL))
+    const timedOut = await errorOf(() => context.phoneDevices.installAgent(IOS_REAL, { force: true }))
     expect(timedOut.code).toBe('PHONE_TIMEOUT')
     expect(timedOut.message).toContain('agent install')
   })

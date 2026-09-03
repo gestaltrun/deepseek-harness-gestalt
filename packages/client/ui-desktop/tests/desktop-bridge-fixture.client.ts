@@ -65,6 +65,10 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
       notifyAccount(account)
       return account
     },
+    accountCancelLogin: async () => {
+      notifyAccount(account)
+      return account
+    },
     accountSignOut: async () => {
       notifyAccount(account)
       return account

@@ -184,6 +184,9 @@ function AccountPanel({ desktop, snapshot, t }: {
         <span className={css.spinner} />
         <strong>{t('account.finishBrowser')}</strong>
         <p>{t('account.polling')}</p>
+        <Button variant="outline" onClick={() => { void desktop.accountCancelLogin() }}>
+          {t('account.cancelLogin')}
+        </Button>
       </div>
     )
   }

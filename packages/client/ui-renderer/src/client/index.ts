@@ -97,31 +97,44 @@ function mountApp(container: HTMLElement, app: () => ReactNode): Root {
  */
 export function apply(ctx: Context): void {
   const slots = new SlotRegistry(ctx)
+  const roots = new Set<Root>()
   slots.install(createSlotRenderer())
+  ctx.effect(() => () => {
+    for (const root of [...roots]) {
+      roots.delete(root)
+      root.unmount()
+    }
+  }, 'ui-renderer: mounted React roots')
+
+  const ownRoot = (root: Root): (() => void) => {
+    roots.add(root)
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      roots.delete(root)
+      root.unmount()
+    }
+  }
+
   ctx.reflect.provide('uiRenderer', {
-    mount: (container: HTMLElement): (() => void) => {
-      const root = mountApp(container, buildRenderApp({ ctx }))
-      let disposed = false
-      return () => {
-        if (disposed) return
-        disposed = true
-        root.unmount()
-      }
-    },
+    mount: (container: HTMLElement): (() => void) =>
+      ownRoot(mountApp(container, buildRenderApp({ ctx }))),
     mountSession: (
       container: HTMLElement,
       slotKey: string,
       sessionId: SessionId,
       ownerProps: object,
     ): (() => void) => {
+      const element = slots.renderSessionSlot(slotKey, sessionId, ownerProps)
       const root = createRoot(container)
-      flushSync(() => { root.render(slots.renderSessionSlot(slotKey, sessionId, ownerProps)) })
-      let disposed = false
-      return () => {
-        if (disposed) return
-        disposed = true
+      try {
+        flushSync(() => { root.render(element) })
+      } catch (error) {
         root.unmount()
+        throw error
       }
+      return ownRoot(root)
     },
   })
 }

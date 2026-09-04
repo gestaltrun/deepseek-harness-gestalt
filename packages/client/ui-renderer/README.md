@@ -29,7 +29,7 @@ This package is infrastructure: the web shell and the boot kernel are its only d
 
 ### What mounting does
 
-`mount(container)` hydrates the existing boot DOM when present, renders the assembled application into the container before the next paint, and returns an idempotent disposer that unmounts the React root. `mountSession(container, slotKey, sessionId, ownerProps)` creates a separate React root for one declared non-root Session or Session-maybe slot, resolves that explicit identity through the installed Session adapter, and never changes shell selection. It fails when the target is root, undeclared, root-scoped, unresolved, or missing its adapter or renderer.
+`mount(container)` hydrates the existing boot DOM when present, renders the assembled application into the container before the next paint, and returns an idempotent disposer that unmounts the React root. `mountSession(container, slotKey, sessionId, ownerProps)` validates and resolves one declared non-root Session or Session-maybe slot before creating its separate React root, and never changes shell selection. Invalid targets acquire no root, render failures unmount before rethrowing, and plugin teardown unmounts every live root even when a caller omitted its disposer.
 
 ### For business plugins
 

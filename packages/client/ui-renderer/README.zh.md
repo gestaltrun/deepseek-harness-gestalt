@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 挂载做什么
 
-`mount(container)` 会在存在时 hydrate 现有启动 DOM、在下一次绘制前把组装后的应用渲染进容器，并返回幂等的 React 根卸载 disposer。`mountSession(container, slotKey, sessionId, ownerProps)` 会为一个已声明的非 root Session 或 Session-maybe slot 创建独立 React 根，通过已安装的 Session adapter 解析显式身份，并且绝不改变外壳选中项。目标为 root、未声明、root scope、无法解析，或缺少 adapter/renderer 时会失败。
+`mount(container)` 会在存在时 hydrate 现有启动 DOM、在下一次绘制前把组装后的应用渲染进容器，并返回幂等的 React 根卸载 disposer。`mountSession(container, slotKey, sessionId, ownerProps)` 会先验证并解析一个已声明的非 root Session 或 Session-maybe slot，再创建独立 React 根，并且绝不改变外壳选中项。无效目标不会取得 root，渲染失败会先卸载再重新抛出；即使调用方没有执行 disposer，插件 teardown 也会卸载所有仍存活的 root。
 
 ### 对业务插件
 

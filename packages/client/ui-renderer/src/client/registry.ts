@@ -370,10 +370,12 @@ export class SlotRegistry extends Service {
     sessionId: string,
     owner: object,
   ): ReturnType<SlotRenderer['renderSession']> {
-    if ((key as string) === 'root') throw new Error("explicit Session rendering cannot target 'root'")
+    if (key === 'root') throw new Error("explicit Session rendering cannot target 'root'")
     const spec = this._core.specDynamic(key)
     if (spec === undefined) throw new Error(`explicit Session slot '${key}' is not declared`)
-    if (spec.scope === 'root') throw new Error(`explicit Session slot '${key}' has root scope`)
+    if (spec.scope !== 'session' && spec.scope !== 'session-maybe') {
+      throw new Error(`explicit Session slot '${key}' has non-Session scope '${spec.scope}'`)
+    }
     if (this._renderer === undefined) {
       throw new Error(`slot renderer not installed — cannot render explicit Session slot '${key}'`)
     }

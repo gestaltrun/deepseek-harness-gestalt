@@ -152,7 +152,8 @@ describe('ui-workbench host apply', () => {
     await workbench.await()
     expect(settings.updates).toEqual([{
       tabsEnabled: { git: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 
@@ -249,7 +250,8 @@ describe('ui-workbench host apply', () => {
     await workbench.await()
     expect(settings.updates).toEqual([{
       tabsEnabled: { git: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 
@@ -271,7 +273,8 @@ describe('ui-workbench host apply', () => {
     await workbench.await()
     expect(settings.updates).toEqual([{
       tabsEnabled: { git: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 

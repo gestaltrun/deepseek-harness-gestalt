@@ -507,7 +507,7 @@ export class ClientSessions implements ISessions {
 
   /**
    * Resolve the stable session binding (scope-addressed assembly feed). Pure
-   * resolution — no staging, no window side effects.
+   * resolution — no Host history or catalog request, no change to `list.current`.
    * @param id - session id.
    * @returns binding, or undefined for a session neither listed nor already scoped.
    */
@@ -517,6 +517,7 @@ export class ClientSessions implements ISessions {
 
   /**
    * Stage a caller-supplied renderer-only Session identity until Host publication.
+   * Extends list eligibility and mints the ordinary binding without selecting it.
    * @param descriptor - preallocated identity, parent lineage, and display title.
    * @returns disposer that removes the unpublished row and its scope exactly once.
    */
@@ -528,6 +529,7 @@ export class ClientSessions implements ISessions {
   }): () => void {
     this.manager.stageProvisional(descriptor)
     this.projectList()
+    this.resolve(descriptor.sessionId)
     return () => {
       this.manager.dropProvisional(descriptor.sessionId)
       this.projectList()
@@ -536,6 +538,8 @@ export class ClientSessions implements ISessions {
 
   /**
    * Open one explicitly rendered Session without changing `list.current`.
+   * Published identities request Host history and refresh the subagent catalog;
+   * provisional identities do neither.
    * @param sessionId - listed, addressed, or staged Session identity.
    */
   openForRender(sessionId: SessionId): void {
@@ -574,9 +578,10 @@ export class ClientSessions implements ISessions {
 
   /**
    * Lazily mint the scope + binding for an eligible session. Eligibility and
-   * prune share one predicate: listed on the host or selected
-   * through a retained subagent address. Breadcrumb-only ancestors remain
-   * summary data and do not keep scopes alive.
+   * prune share one predicate: listed (Host or unpublished provisional) or
+   * selected through a retained subagent address. Breadcrumb-only ancestors
+   * remain summary data and do not keep scopes alive. Resolution is render-safe:
+   * it never opens Host history or refreshes a catalog.
    */
   private resolve(id: SessionId): ScopeRecord | undefined {
     const existing = this.scopes.get(id)
@@ -603,7 +608,7 @@ export class ClientSessions implements ISessions {
     return record
   }
 
-  /** The one aliveness predicate shared by scope mint and prune: host-listed or currently addressed. */
+  /** The one aliveness predicate shared by scope mint and prune: listed (Host or provisional) or currently addressed. */
   private eligible(id: SessionId): boolean {
     const { ids, current } = this.list.getSnapshot()
     return current === id || ids.includes(id)

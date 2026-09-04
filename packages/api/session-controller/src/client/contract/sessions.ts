@@ -116,6 +116,7 @@ export interface ISessions {
   sessionOf(ctx: Context): SessionFace | undefined
   /**
    * Resolve the stable session binding (scope-addressed assembly feed).
+   * Render-safe: no Host history or catalog request, and no change to `list.current`.
    * @param id - session id.
    * @returns binding, or undefined for a session neither listed nor already scoped.
    */

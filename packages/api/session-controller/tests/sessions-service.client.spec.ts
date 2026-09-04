@@ -140,6 +140,21 @@ describe('provisional identity lifecycle', () => {
     expect(b.api.callsOf('session.follow')).toHaveLength(1)
   })
 
+  it('keeps binding() free of Host I/O for staged and published-cold identities', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }, { id: 'child', parentId: 'parent', origin: 'subagent' }])
+    b.svc.stageProvisional(draft)
+    const staged = b.svc.binding(sid('draft'))
+    const cold = b.svc.binding(sid('child'))
+    expect(staged).toBeDefined()
+    expect(cold).toBeDefined()
+    expect(b.svc.binding(sid('draft'))).toBe(staged)
+    expect(b.svc.binding(sid('child'))).toBe(cold)
+    expect(b.svc.list.getSnapshot().current).toBeUndefined()
+    expect(b.api.followStarts).toEqual([])
+    expect(b.api.callsOf('subagents.list')).toEqual([])
+  })
+
   it('preserves an unpublished row across Host list refresh and releases it exactly once', async () => {
     const b = bench()
     await feedList(b, [{ id: 'parent' }])

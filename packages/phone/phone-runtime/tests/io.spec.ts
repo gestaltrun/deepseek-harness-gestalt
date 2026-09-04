@@ -4,6 +4,7 @@ import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phon
 import {
   ioParams,
   iosScreenScale,
+  iosScreenSize,
 } from '../src/io.ts'
 import { phoneSwipeActions } from '../src/swipe.ts'
 import { stageFake, wireDevice } from './helpers.ts'
@@ -21,6 +22,9 @@ describe('iOS input coordinate normalization', () => {
     expect(iosScreenScale({
       device: { screenSize: { width: 402, height: 874, scale: 3 } },
     })).toBe(3)
+    expect(iosScreenSize({
+      device: { screenSize: { width: 440, height: 956, scale: 3 } },
+    })).toEqual({ width: 440, height: 956, scale: 3 })
   })
 
   it.each([
@@ -32,11 +36,17 @@ describe('iOS input coordinate normalization', () => {
     { device: { screenSize: { width: 402, height: Number.NaN, scale: 3 } } },
     { device: { screenSize: { width: 402, height: 874, scale: '3' } } },
   ])('rejects malformed device.info result %#', (result) => {
-    expect(() => iosScreenScale(result)).toThrow(PhoneDevicesError)
+    expect(() => iosScreenSize(result)).toThrow(PhoneDevicesError)
   })
 
   it('scales tap and gesture coordinates while preserving other action fields', () => {
     expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 984, y: 1_228 }, 3)).toEqual({
+      deviceId: 'ios', x: 328, y: 409,
+    })
+    expect(ioParams(
+      { deviceId: deviceId('ios'), method: 'tap', x: 984, y: 1_228 },
+      { width: 402, height: 874, scale: 3 },
+    )).toEqual({
       deviceId: 'ios', x: 328, y: 409,
     })
     expect(ioParams({
@@ -53,6 +63,35 @@ describe('iOS input coordinate normalization', () => {
         { type: 'pointerDown', x: 1, y: 2, pressure: 0.5 },
         { type: 'pause', duration: 100 },
         { type: 'pointerUp', x: 'upstream-validates', y: null },
+      ],
+    })
+  })
+
+  it('maps landscape capture pixels onto swapped WDA logical bounds', () => {
+    const beibei = { width: 440, height: 956, scale: 3 }
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 99, y: 660 }, beibei)).toEqual({
+      deviceId: 'ios', x: 33, y: 220,
+    })
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 2_868, y: 660 }, beibei)).toEqual({
+      deviceId: 'ios', x: 956, y: 220,
+    })
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 3_000, y: 1_400 }, beibei)).toEqual({
+      deviceId: 'ios', x: 956, y: 440,
+    })
+    expect(ioParams({
+      deviceId: deviceId('ios'),
+      method: 'gesture',
+      actions: [
+        { type: 'pointerMove', x: 2_868, y: 0 },
+        { type: 'pointerDown' },
+        { type: 'pointerMove', x: 2_868, y: 1_320 },
+      ],
+    }, beibei)).toEqual({
+      deviceId: 'ios',
+      actions: [
+        { type: 'pointerMove', x: 956, y: 0 },
+        { type: 'pointerDown' },
+        { type: 'pointerMove', x: 956, y: 440 },
       ],
     })
   })
@@ -129,6 +168,21 @@ describe('iOS input coordinate normalization', () => {
     })
     expect(ioParams({ deviceId: deviceId('ios'), method: 'button', button: 'HOME' }, 3)).toEqual({
       deviceId: 'ios', button: 'HOME',
+    })
+    const beibei = { width: 440, height: 956, scale: 3 }
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'text', text: 'hello' }, beibei)).toEqual({
+      deviceId: 'ios', text: 'hello',
+    })
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'button', button: 'HOME' }, beibei)).toEqual({
+      deviceId: 'ios', button: 'HOME',
+    })
+    expect(ioParams({
+      deviceId: deviceId('ios'),
+      method: 'gesture',
+      actions: [{ type: 'pointerDown' }, { type: 'pause', duration: 16 }],
+    }, beibei)).toEqual({
+      deviceId: 'ios',
+      actions: [{ type: 'pointerDown' }, { type: 'pause', duration: 16 }],
     })
   })
 })

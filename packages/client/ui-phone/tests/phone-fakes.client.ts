@@ -144,7 +144,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
 /** One socket the fake gateway handed out; events fire explicitly. */
 export class FakeSocket implements PhoneIoSocket {
   readonly sent: string[] = []
-  private opened = false
+  opened = false
 
   constructor(private readonly handlers: PhoneIoHandlers) {}
 

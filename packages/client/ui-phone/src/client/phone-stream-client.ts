@@ -47,7 +47,7 @@ export interface PhoneStreamSessionView {
   readonly deviceId: string
   /** Exact-path WebSocket upgrade path for io frames. */
   readonly ioPath: string
-  /** Whether the device is a real iPhone whose control agent is product-managed. */
+  /** Whether picture or socket failures for this session can enter product-managed device-agent recovery. */
   readonly agentManaged: boolean
   /** Encoding the Host selected as the first attempt for this device class. */
   readonly preferredFormat: 'h264' | 'mjpeg'

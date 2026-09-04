@@ -127,7 +127,7 @@ export class PhoneStream extends Service {
   /**
    * Mint signed same-origin MJPEG and H264 URLs for one known device.
    * @param id - Branded device id present in the latest published listing.
-   * @param agentManaged - Whether control failures should enter the managed device-agent recovery flow.
+   * @param agentManaged - Whether picture or socket failures should enter the managed device-agent recovery flow.
    * @param preferredFormat - Encoding the browser should open first for this device class.
    * @returns the IO upgrade path plus both capture URLs and their expiry.
    */

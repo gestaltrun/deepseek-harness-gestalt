@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
@@ -92,6 +92,7 @@ async function harness(options: HarnessOptions = {}) {
     version: 0,
     id,
     createdAt: 0,
+    isSeeded: false,
     ...'cwd' in options
       ? options.cwd === undefined ? {} : { cwd: options.cwd }
       : { cwd: '/workspace' },
@@ -118,6 +119,7 @@ async function addSecondAgent(ctx: Context): Promise<Agent> {
     version: 0,
     id,
     createdAt: 0,
+    isSeeded: false,
     cwd: '/workspace',
   })
   const agent = { id, session } as Agent
@@ -132,6 +134,31 @@ async function addSecondAgent(ctx: Context): Promise<Agent> {
 }
 
 describe('allow-only tool eligibility', () => {
+  it('attaches an existing Agent when the resolver loads after registration', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime, {})
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(MemorySettings, {
+      [TOOL_ELIGIBILITY_SETTINGS_NAMESPACE]: { workspaces: {}, sessions: { existing: ['allowed'] } },
+    })
+    const id = SessionId('existing')
+    const session = Session.create(id, [], { version: 0, id, createdAt: 0, isSeeded: false })
+    const agent = { id, session } as Agent
+    let agentCtx!: Context
+    await ctx.plugin(Object.assign((inner: Context) => { agentCtx = createScope(inner, agent).ctx }, {
+      inject: ['tools', 'systemPrompt'],
+    }))
+    Object.assign(agent, { ctx: agentCtx, status: 'idle' })
+    ctx.agents.register(agent)
+    ctx.tools.register(tool('allowed'))
+    ctx.tools.register(tool('blocked'))
+
+    await ctx.plugin(ToolEligibility, { workspaces: {}, sessions: {} })
+
+    expect(ctx.tools.schemas(agent).map(schema => schema.name)).toEqual(['allowed'])
+  })
+
   it('unions preset, Workspace, and Session additions for schemas and execution', async () => {
     const { agent, ctx } = await harness()
     const blockedBody = vi.fn(() => Promise.resolve('blocked'))
@@ -156,7 +183,7 @@ describe('allow-only tool eligibility', () => {
 
     const blocked = await ctx.tools.execute({
       agent,
-      callId: CallId('blocked-call'),
+      callId: ToolCallId('blocked-call'),
       name: 'blocked-tool',
       arguments: {},
       signal,

@@ -7,7 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-settings'
 import { TOOL_ELIGIBILITY_CONTRIBUTIONS } from '@deepseek-ai/dsh-tools'
 import type { ToolEligibilityContribution } from '@deepseek-ai/dsh-tools'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
@@ -22,7 +22,7 @@ export const name = 'tool-eligibility'
 export const inject = ['agents', 'tools']
 
 /** User-settings namespace for Workspace and Session additions. */
-export const TOOL_ELIGIBILITY_SETTINGS_NAMESPACE = settingsNamespace('tool-eligibility')
+export const TOOL_ELIGIBILITY_SETTINGS_NAMESPACE = 'tool-eligibility'
 
 /** Positive user configuration layered above preset allowances. */
 export interface Config {
@@ -141,16 +141,18 @@ export function apply(ctx: Context, config: Config): void {
     states.delete(agent)
     state.contribution.dispose()
   })
-  installSettingsSection(ctx, TOOL_ELIGIBILITY_SETTINGS_NAMESPACE, Config, entry, {
-    setSource: (current) => { source = current },
-    onChange: () => {
-      const notifications: Array<() => readonly unknown[]> = []
-      for (const state of states.values()) {
-        const notify = commitRefresh(state)
-        if (notify !== undefined) notifications.push(notify)
-      }
-      notifyRefresh(notifications)
-    },
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, TOOL_ELIGIBILITY_SETTINGS_NAMESPACE, Config, entry, {
+      setSource: (current) => { source = current },
+      onChange: () => {
+        const notifications: Array<() => readonly unknown[]> = []
+        for (const state of states.values()) {
+          const notify = commitRefresh(state)
+          if (notify !== undefined) notifications.push(notify)
+        }
+        notifyRefresh(notifications)
+      },
+    })
   })
 
   for (const agent of ctx.agents.list()) attach(agent)

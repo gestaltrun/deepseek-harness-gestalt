@@ -721,6 +721,46 @@ describe('PTC mode native-tool denial through the agent loop', () => {
     return ctx
   }
 
+  it('persists successful deferred discovery metadata on the actual tool/result append', async () => {
+    const adapter = new MockAdapter([
+      [
+        ...multiCall([{ id: 'search-1', name: 'tool_search', args: { query: 'weather forecast' } }]),
+        ...textResponse('ok'),
+      ],
+    ])
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SystemPrompt, { persona: '' })
+    await ctx.plugin(ToolRuntime, { toolSearch: { maxResultBytes: 64 * 1024 } })
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.tools.register({
+      ...defineContentToolFixture({
+        name: 'weather_forecast',
+        description: 'Weather forecast by city.',
+        parameters: {},
+        async execute() { return [{ type: 'text', text: 'forecast' }] },
+      }),
+      deferLoading: true,
+    })
+
+    const agent = await ctx.agentLoop.create(SessionId('deferred-loop'), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'find weather' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    const results = events(agent).filter(event => event.type === 'tool/result')
+    expect(results).toHaveLength(1)
+    const block = results[0]!.data.message.content[0]
+    expect(block).toMatchObject({
+      type: 'tool-result',
+      isError: false,
+      loadedTools: [{ name: 'weather_forecast', description: 'Weather forecast by city.' }],
+    })
+  })
+
   it('denies a model-direct native-tool call under PTC mode: tool body never runs and session records UNKNOWN_TOOL', async () => {
     let toolInvoked = false
     const tool = defineContentToolFixture({

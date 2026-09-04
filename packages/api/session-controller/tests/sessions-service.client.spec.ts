@@ -421,7 +421,7 @@ describe('provisional identity lifecycle', () => {
     expect(b.api.callsOf('subagents.list')).toEqual([sid('parent')])
   })
 
-  it('does not apply a late openForRender catalog after Client Sessions disposal', async () => {
+  it('aborts an openForRender catalog on dispose without a Host response', async () => {
     const b = bench()
     const readiness = b.ctx.plugin(() => undefined)
     await readiness
@@ -429,24 +429,18 @@ describe('provisional identity lifecycle', () => {
       { id: 'parent' },
       { id: 'child', parentId: 'parent', origin: 'subagent' },
     ])
-    const gate = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
-    b.api.onSubagentList = (_payload, signal) => new Promise((resolve, reject) => {
+    b.api.onSubagentList = (_payload, signal) => new Promise((_resolve, reject) => {
       signal?.addEventListener('abort', () => {
         reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
       }, { once: true })
-      void gate.promise.then(resolve, reject)
     })
     b.svc.openForRender(sid('child'))
     await Promise.resolve()
     expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
     expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]?.state).toBe('loading')
 
-    const settled = vi.fn()
-    const disposal = b.ctx.fiber.dispose().then(settled)
-    await Promise.resolve()
+    await b.ctx.fiber.dispose()
     expect(b.api.lastSubagentListSignal?.aborted).toBe(true)
-    await disposal
-    expect(settled).toHaveBeenCalledOnce()
     expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]).toBeUndefined()
     expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
   })

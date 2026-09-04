@@ -32,4 +32,4 @@ Side Chat 与其他显式挂载可以暂存预分配 id、解析普通 Session-s
 
 ## 验证
 
-聚焦的 ClientSessions 测试固定不改变选中项的暂存、`binding()` 不发起 Host I/O、跳过 Host 历史、list 刷新存续、Host list 发布身份、进行中刷新竞态（含过期临时 upsert 或 remove 对发布 baseline）、pending 阶段释放、未知 `openForRender()` no-op、发布时身份稳定、恰好一次释放与发布后 no-op、重复暂存失败、已发布冷 `openForRender()`、HMR/插件卸载，以及 `openForRender` catalog 工作在 manager 销毁后结算时不产生迟到 notify 或额外请求。test-support 的 `TestSessions` double 会暂存可解析 binding，并在发布后把后续 disposer 视为 no-op。
+聚焦的 ClientSessions 测试固定不改变选中项的暂存、`binding()` 不发起 Host I/O、跳过 Host 历史、list 刷新存续、Host list 发布身份、进行中刷新竞态（含过期临时 upsert 或 remove 对发布 baseline）、pending 阶段释放、未知 `openForRender()` no-op、发布时身份稳定、恰好一次释放与发布后 no-op、重复暂存失败、已发布冷 `openForRender()`、HMR/插件卸载，以及挂起的 catalog RPC 在 dispose 时无需 Host 响应即可中止。test-support 的 `TestSessions` double 会暂存可解析 binding，并在发布后把后续 disposer 视为 no-op。

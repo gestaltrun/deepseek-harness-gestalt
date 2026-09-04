@@ -484,14 +484,12 @@ describe('subagent catalogs', () => {
     ])
   })
 
-  it('does not publish a late catalog after manager disposal', async () => {
+  it('aborts an in-flight catalog list on dispose without a Host response', async () => {
     const api = new FakeApiClient()
-    const gate = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
-    api.onSubagentList = (_payload, signal) => new Promise((resolve, reject) => {
+    api.onSubagentList = (_payload, signal) => new Promise((_resolve, reject) => {
       signal?.addEventListener('abort', () => {
         reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
       }, { once: true })
-      void gate.promise.then(resolve, reject)
     })
     const manager = new SessionManager(fakeRemote(api))
     const notified = vi.fn()
@@ -502,18 +500,22 @@ describe('subagent catalogs', () => {
     expect(api.lastSubagentListSignal?.aborted).toBe(false)
     notified.mockClear()
 
-    const settled = vi.fn()
-    const disposal = manager.dispose().then(settled)
-    await Promise.resolve()
-    expect(api.lastSubagentListSignal?.aborted).toBe(true)
-    await disposal
+    await manager.dispose()
     await expect(refresh).resolves.toBeUndefined()
-    expect(settled).toHaveBeenCalledOnce()
+    expect(api.lastSubagentListSignal?.aborted).toBe(true)
     expect(manager.getListSnapshot().subagentsByParent[S1]).toBeUndefined()
     expect(notified).not.toHaveBeenCalled()
     expect(api.callsOf('subagents.list')).toEqual([S1])
     await expect(manager.refreshSubagents(S1)).resolves.toBeUndefined()
     expect(api.callsOf('subagents.list')).toEqual([S1])
+  })
+
+  it('still throws a non-abort catalog failure while the manager is live', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = () => Promise.reject(new Error('catalog exploded'))
+    const manager = new SessionManager(fakeRemote(api))
+    await expect(manager.refreshSubagents(S1)).rejects.toThrow('catalog exploded')
+    expect(manager.getListSnapshot().subagentsByParent[S1]?.state).toBe('loading')
   })
 
   it('coalesces overlapping catalog reads without scheduling a trailing pull', async () => {

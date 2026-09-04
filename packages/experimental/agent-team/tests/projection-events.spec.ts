@@ -77,8 +77,8 @@ function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnaps
 }
 
 describe('Agent Teams projection events', () => {
-  it('invalidates v3-only cached state', () => {
-    expect(teamProjectionDefinition.stateVersion).toBe(4)
+  it('invalidates prior v2-only cached state', () => {
+    expect(teamProjectionDefinition.stateVersion).toBe(5)
   })
   it('normalizes mixed v1 and v2 records to current projected state', () => {
     const projected = projectTeam(ROOT, [

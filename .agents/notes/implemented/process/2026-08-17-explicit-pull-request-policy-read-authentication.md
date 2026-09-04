@@ -6,7 +6,7 @@ English | [中文](2026-08-17-explicit-pull-request-policy-read-authentication.z
 
 ## Problem
 
-Pull-request policy reads pull-request metadata, referenced Issues, and optionally Issue field values. The personal tracker has observed intermittent `504` responses for ordinary unauthenticated pull-request and Issue reads. Its workflow already declares pull-request and Issue read permissions, and the workflow token is the verified authorization path for these reads. Authentication remains an explicit deployment choice because other trackers can have different access requirements.
+Pull-request policy reads pull-request metadata, referenced Issues, and optionally Issue field values. The Gestalt organization tracker has observed intermittent `504` responses for ordinary unauthenticated pull-request and Issue reads. Its workflow already declares pull-request and Issue read permissions, and the workflow token is the verified authorization path for these reads. Authentication remains an explicit deployment choice because other trackers can have different access requirements.
 
 Review requests and reviews supply only an activation signal; they do not participate in metadata validation. Making them mandatory for activation adds endpoint availability and authorization requirements without strengthening the validation result.
 
@@ -18,7 +18,7 @@ Pull-request policy reads, Issue Priority integration, and Project lifecycle aut
 
 The same configuration declares `pullRequestPolicyActivation` as `non-draft` or `review-activity`. Both modes classify Draft, Bot, and App pull requests from the initial pull-request response and return before reading review activity, referenced Issues, or Priority. `non-draft` applies metadata policy to every remaining PR and never requests requested reviewers or reviews. `review-activity` retains activation after a review request or review and reads both endpoints. Invalid or blank values fail at startup.
 
-The personal tracker selects `token` because the workflow grants the required read permissions and that path has been verified for its ordinary pull-request and Issue reads. It selects `non-draft` independently because review activity does not contribute to metadata validation. These choices do not make API access infallible; failures remain visible.
+The Gestalt organization tracker selects `token` because the workflow grants the required read permissions and that path has been verified for its ordinary pull-request and Issue reads. It selects `non-draft` independently because review activity does not contribute to metadata validation. These choices do not make API access infallible; failures remain visible.
 
 API errors remain fatal for every authentication and activation combination. The policy never retries a failed authenticated request anonymously and never converts `404` into absent metadata.
 
@@ -30,7 +30,7 @@ Issue-management tests execute the real `policy.mjs pr` and `policy.mjs lifecycl
 
 ## Alternatives considered
 
-**Use `anonymous` with `non-draft` for the personal tracker.** Rejected because it would avoid review endpoints but retain dependence on public-only access for ordinary reads, which has shown intermittent `504` responses in this deployment. Anonymous mode remains available to deployments that verify their required endpoints.
+**Use `anonymous` with `non-draft` for the Gestalt organization tracker.** Rejected because it would avoid review endpoints but retain dependence on public-only access for ordinary reads, which has shown intermittent `504` responses in this deployment. Anonymous mode remains available to deployments that verify their required endpoints.
 
 **Store a personal access token secret.** Rejected because the workflow token already reads the required ordinary PR and Issue resources, while a PAT would expand secret ownership and rotation obligations.
 
@@ -42,4 +42,4 @@ Issue-management tests execute the real `policy.mjs pr` and `policy.mjs lifecycl
 
 ## Consequences
 
-The personal tracker enforces metadata from the first non-Draft human PR event using its workflow token and no review endpoint. Deployments that select `review-activity` retain the review-driven timing and its endpoint requirements. Anonymous mode remains confined to `pr` reads in deployments that verify every required endpoint supports it; lifecycle and audit operations always require a token.
+The Gestalt organization tracker enforces metadata from the first non-Draft human PR event using its workflow token and no review endpoint. Deployments that select `review-activity` retain the review-driven timing and its endpoint requirements. Anonymous mode remains confined to `pr` reads in deployments that verify every required endpoint supports it; lifecycle and audit operations always require a token.

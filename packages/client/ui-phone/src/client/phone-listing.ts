@@ -2,7 +2,9 @@
  * Listing source consuming the Host `GET /phone/devices` fleet route: one
  * fetch per refresh, wire validation at the response edge, and a
  * commit-only-on-success snapshot store with subscriber notification. The
- * strip badge and both tab bodies read the committed snapshot.
+ * strip badge and both tab bodies read the committed snapshot. PhoneTab
+ * and PhoneConnectedView poll this source on the Host interval while
+ * mounted; a failed refresh keeps the last committed listing.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-listing
  */
 import type { PhoneListingSnapshot, PhoneListingSource, PhoneDeviceSummary } from './registry.ts'

@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildPhoneTabDescriptor, installPhoneTab, PHONE_TAB_ID,
-  openPhoneDevicePanel, phoneDeviceTabMetaOf,
+  buildPhoneTabDescriptor, createPhoneTabSwitcher, installPhoneTab, PHONE_TAB_ID, PHONE_TAB_TITLE,
+  openPhoneDevicePanel, phoneDeviceTabMetaOf, showPhonePicker,
   type PhoneListingSource, type PhoneTabDescriptor, type PhoneTabView,
 } from '../src/client/registry.ts'
 
@@ -106,6 +106,7 @@ describe('single phone tab with in-place switching', () => {
           meta: { kind: 'device', serial, name },
         })
       },
+      showPicker: (tabId) => { showPhonePicker(sidebar, tabId) },
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -126,6 +127,7 @@ describe('single phone tab with in-place switching', () => {
           meta: { kind: 'device', serial, name },
         })
       },
+      showPicker: (tabId) => { showPhonePicker(sidebar, tabId) },
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -154,6 +156,7 @@ describe('single phone tab with in-place switching', () => {
       source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
       switchDevice: () => {},
+      showPicker: () => {},
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -176,6 +179,19 @@ describe('single phone tab with in-place switching', () => {
     expect(phoneDeviceTabMetaOf({ kind: 'device', serial: 'R3CN30', name: '' })).toBeUndefined()
     expect(phoneDeviceTabMetaOf('junk')).toBeUndefined()
     expect(phoneDeviceTabMetaOf(undefined)).toBeUndefined()
+  })
+
+  it('clears occupation meta so the picker body with 重新检测环境 can render', () => {
+    const sidebar = new ContractSidebar()
+    sidebar.openTab({ type: PHONE_TAB_ID })
+    const switchDevice = createPhoneTabSwitcher(sidebar, () => true)
+    switchDevice(PHONE_TAB_ID, 'emulator-5554', 'Pixel_6_API_35')
+    expect(phoneDeviceTabMetaOf(sidebar.tabs[0]!.meta)).toEqual({
+      kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35',
+    })
+    showPhonePicker(sidebar, PHONE_TAB_ID)
+    expect(sidebar.tabs[0]).toMatchObject({ title: PHONE_TAB_TITLE, meta: {} })
+    expect(phoneDeviceTabMetaOf(sidebar.tabs[0]!.meta)).toBeUndefined()
   })
 
   it('drops device switches while the deployment disables connections', async () => {
@@ -238,6 +254,7 @@ describe('single phone tab with in-place switching', () => {
     const env = seen[0]!.env as {
       isEnabled(): boolean
       switchDevice(tabId: string, serial: string, name: string): void
+      showPicker(tabId: string): void
     }
     expect(env.isEnabled()).toBe(true)
     env.switchDevice(PHONE_TAB_ID, 'emulator-5554', 'Pixel_6_API_35')
@@ -248,5 +265,8 @@ describe('single phone tab with in-place switching', () => {
     gate = false
     env.switchDevice(PHONE_TAB_ID, 'R3CN30', 'SM-S9310')
     expect(sidebar.tabs[0]!.meta).toMatchObject({ serial: 'emulator-5554' })
+    env.showPicker(PHONE_TAB_ID)
+    expect(phoneDeviceTabMetaOf(sidebar.tabs[0]!.meta)).toBeUndefined()
+    expect(sidebar.tabs[0]!.title).toBe(PHONE_TAB_TITLE)
   })
 })

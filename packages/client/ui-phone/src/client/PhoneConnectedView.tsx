@@ -17,6 +17,7 @@ import type {
   WheelEvent as ReactWheelEvent,
 } from 'react'
 import { h264SurfaceForHost, type PhoneConnectionController, type PhoneStreamFailureKind } from './phone-connection.ts'
+import { startPhoneListingPoll } from './phone-listing-poll.ts'
 import type { PhoneListingSource } from './registry.ts'
 import { measureMjpegCurrentFrame } from './measure-mjpeg-current-frame.ts'
 import { PhoneH264PlaybackOwner, PhoneH264Surface } from './PhoneH264Surface.tsx'
@@ -35,6 +36,8 @@ export interface PhoneConnectedViewProps {
   readonly source: PhoneListingSource
   /** Switch the single tab onto another listed device in place (U1). */
   readonly onOpenDevice: (serial: string, name: string) => void
+  /** Clear occupation so the picker with 重新检测环境 renders again. */
+  readonly onShowPicker: () => void
   /** Controller factory; the tab owns the created instance for its lifetime. */
   readonly createController: (serial: string) => PhoneConnectionController
 }
@@ -182,7 +185,7 @@ function ReconnectAlert({
  * @returns the live view, its in-flight notes, or the error card.
  */
 export function PhoneConnectedView({
-  serial, name, visible, source, onOpenDevice, createController,
+  serial, name, visible, source, onOpenDevice, onShowPicker, createController,
 }: PhoneConnectedViewProps): ReactNode {
   const createControllerRef = useRef(createController)
   const h264PlaybackOwnerRef = useRef<PhoneH264PlaybackOwner | undefined>(undefined)
@@ -255,6 +258,7 @@ export function PhoneConnectedView({
     // committed listing.
     source.refresh().catch(() => undefined)
   }, [source])
+  useEffect(() => startPhoneListingPoll(source), [source])
 
   const applyMjpegSurface = useCallback((img: HTMLImageElement): void => {
     const token = ++mjpegMeasureGeneration.current
@@ -504,6 +508,14 @@ export function PhoneConnectedView({
           />
           {name}
           <ChevronDown />
+        </button>
+        <button
+          type="button"
+          className={shared.minibtnSecondary}
+          aria-label="选择设备"
+          onClick={onShowPicker}
+        >
+          选择设备
         </button>
         <span className={css.devbarSpacer} />
         {/* The H264 cadence is the locked mockup's caption; the stream

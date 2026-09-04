@@ -1,7 +1,9 @@
 /**
  * Phone tab body: the not-connected empty state of the locked design —
  * state with the platform selector, the grouped device list, and the
- * 重新检测环境 control that pulls the fleet listing. The same tab
+ * 重新检测环境 control that pulls the fleet listing. While the tab is
+ * mounted and enabled it also polls `GET /phone/devices` on the Host
+ * interval so USB reals appear without that click. The same tab
  * instance renders the live view once a device occupies it; every fact
  * this component reads arrives through plain props (the enable gate, the
  * listing source, the in-place device switcher), never through a service
@@ -9,6 +11,7 @@
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
+import { startPhoneListingPoll } from './phone-listing-poll.ts'
 import {
   PHONE_PLATFORMS, type PhoneDeviceSummary, type PhoneGateSource, type PhoneListingSource, type PhonePlatform,
 } from './registry.ts'
@@ -105,6 +108,10 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
     if (!enabled) return
     refresh()
   }, [enabled, refresh])
+  useEffect(() => {
+    if (!enabled) return
+    return startPhoneListingPoll(source)
+  }, [enabled, source])
   const devices = listing[platform]
   const listingFailure = listingError === undefined ? undefined : listingErrorCopy(listingError)
   return (

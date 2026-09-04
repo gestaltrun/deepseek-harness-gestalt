@@ -10,9 +10,8 @@ import {
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
 import { MISSING_PHONE_ENVIRONMENT, type PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
-import {
-  createListingPhoneEnvironmentSource, PHONE_LISTING_POLL_INTERVAL_MS,
-} from '../src/client/phone-environment-listing.ts'
+import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
+import { PHONE_LISTING_POLL_INTERVAL_MS } from '../src/client/phone-listing-poll.ts'
 import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
 

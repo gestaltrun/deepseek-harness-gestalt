@@ -84,9 +84,11 @@ export interface PhoneGateSource {
 /**
  * Device abstraction backing the strip badge and both tab bodies' lists.
  * The shipped implementation consumes the Host `GET /phone/devices` route
- * (see `phone-listing.ts`). `getBadge` sits on the per-render hot path and
- * must stay cheap and synchronous; `snapshot` keeps its reference stable
- * between commits so it can seat `useSyncExternalStore`.
+ * (see `phone-listing.ts`). PhoneTab and PhoneConnectedView poll
+ * `refresh` on the Host 5000 ms interval while mounted and enabled; a
+ * failed refresh keeps this snapshot. `getBadge` sits on the per-render
+ * hot path and must stay cheap and synchronous; `snapshot` keeps its
+ * reference stable between commits so it can seat `useSyncExternalStore`.
  */
 export interface PhoneListingSource {
   /** Current badge snapshot (strip pill value). */
@@ -230,6 +232,18 @@ export function createPhoneTabSwitcher(
 }
 
 /**
+ * Return the singleton Phone tab to the picker body (no `kind: 'device'`
+ * meta). Occupation is not a dead end: the picker keeps 「重新检测环境」.
+ * An empty object is the picker payload because `updateTab` only writes
+ * `meta` when the patch field is present.
+ * @param sidebar - the better-sidebar face resolved from the client context.
+ * @param tabId - Phone tab instance id (`phone`).
+ */
+export function showPhonePicker(sidebar: PhoneTabSwitchFace, tabId: string): void {
+  sidebar.updateTab(tabId, { title: PHONE_TAB_TITLE, meta: {} })
+}
+
+/**
  * Create or focus the singleton Phone tab, select one device, and reveal it.
  * @param sidebar - Better Sidebar projection owned by the active renderer.
  * @param isEnabled - Current durable Phone gate.
@@ -261,6 +275,8 @@ export interface PhoneTabEnvironment {
   readonly source: PhoneListingSource
   /** Switch the single tab onto one device in place (U1). */
   readonly switchDevice: (tabId: string, serial: string, name: string) => void
+  /** Clear device occupation so the picker body with 重新检测环境 renders. */
+  readonly showPicker: (tabId: string) => void
   /** Create the live connection controller for the occupying device. */
   readonly createController: (serial: string) => PhoneConnectionController
 }
@@ -311,6 +327,8 @@ interface SidebarRegistry {
 export interface PhoneTabDescriptorOptions extends PhoneTabOptions {
   /** The switcher {@link installPhoneTab} wired against the resolved sidebar. */
   readonly switchDevice: (tabId: string, serial: string, name: string) => void
+  /** Return the occupying tab to the picker body. */
+  readonly showPicker: (tabId: string) => void
 }
 
 /** What {@link installPhoneTab} needs beyond the cordis context. */
@@ -342,6 +360,7 @@ export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): Pho
     gate: options.gate,
     source: options.source,
     switchDevice: options.switchDevice,
+    showPicker: options.showPicker,
     createController: options.createController,
   }
   return {
@@ -371,5 +390,9 @@ export function installPhoneTab(ctx: Context, options: PhoneTabOptions): void {
     throw new Error('ui-phone: betterSidebar is not published; mount the Side card client first')
   }
   const switchDevice = createPhoneTabSwitcher(sidebar, options.isEnabled)
-  ctx.effect(() => sidebar.registerTab(buildPhoneTabDescriptor({ ...options, switchDevice })), PHONE_TAB_EFFECT)
+  const showPicker = (tabId: string): void => { showPhonePicker(sidebar, tabId) }
+  ctx.effect(
+    () => sidebar.registerTab(buildPhoneTabDescriptor({ ...options, switchDevice, showPicker })),
+    PHONE_TAB_EFFECT,
+  )
 }

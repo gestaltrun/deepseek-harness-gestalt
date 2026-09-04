@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { PHONE_LISTING_POLL_INTERVAL_MS } from '../src/client/phone-listing-poll.ts'
 import { PhoneTab } from '../src/client/PhoneTab.tsx'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
@@ -256,5 +257,55 @@ describe('PhoneTab re-detect', () => {
     })
     expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
     expect(redetect().disabled).toBe(false)
+  })
+})
+
+describe('PhoneTab live listing', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  const IPHONE: PhoneDeviceSummary = {
+    id: '00008150-0008545C2608401C',
+    name: '贝贝猫的iPhone',
+    channel: 'usb',
+    state: 'online',
+    online: true,
+  }
+
+  it('shows a later USB real in the USB group without 重新检测环境', async () => {
+    vi.useFakeTimers()
+    const source = new FakeListingSource()
+    render(<PhoneTab gate={new FakeGate(true)} source={source} onOpenDevice={openDevice} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(source.refreshCount).toBe(1)
+    fireEvent.click(screen.getByRole('button', { name: 'iOS' }))
+    expect(screen.queryByText('贝贝猫的iPhone')).toBeNull()
+    expect(screen.getByText(/用数据线连接 iPhone/)).toBeTruthy()
+    source.scriptNext(listingOf([], [IPHONE]))
+    await act(async () => { await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS) })
+    expect(source.refreshCount).toBe(2)
+    expect(screen.getByText('贝贝猫的iPhone')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开' })).toBeTruthy()
+    expect(screen.queryByText(/用数据线连接 iPhone/)).toBeNull()
+  })
+
+  it('keeps the committed USB row when a poll refresh fails', async () => {
+    vi.useFakeTimers()
+    const source = new FakeListingSource().seed(listingOf([], [IPHONE]))
+    render(<PhoneTab gate={new FakeGate(true)} source={source} onOpenDevice={openDevice} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    fireEvent.click(screen.getByRole('button', { name: 'iOS' }))
+    expect(screen.getByText('贝贝猫的iPhone')).toBeTruthy()
+    source.scriptNext(new Error('host down'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS) })
+    expect(screen.getByText('贝贝猫的iPhone')).toBeTruthy()
+    expect(redetect().disabled).toBe(false)
+  })
+
+  it('does not poll while the enable gate is off', async () => {
+    vi.useFakeTimers()
+    const source = new FakeListingSource()
+    render(<PhoneTab gate={new FakeGate(false)} source={source} onOpenDevice={openDevice} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS) })
+    expect(source.refreshCount).toBe(0)
   })
 })

@@ -14,14 +14,9 @@ import {
   type PhoneEnvironmentCheck, type PhoneEnvironmentError, type PhoneEnvironmentSource, type PhoneEnvironmentView,
   type PhoneReadyDevice,
 } from './phone-environment.ts'
+import { startPhoneListingPoll } from './phone-listing-poll.ts'
 import { PhoneStreamHttpError } from './phone-stream-client.ts'
 import type { PhoneDeviceSummary, PhoneListingSnapshot, PhoneListingSource } from './registry.ts'
-
-/**
- * Browser listing poll cadence. Matches Host `phone-runtime` `pollIntervalMs`
- * default 5000 ms; the browser has no Host change stream for `GET /phone/devices`.
- */
-export const PHONE_LISTING_POLL_INTERVAL_MS = 5_000
 
 /** Checklist shown while the first (or a later) fleet pull is in flight. */
 const PROBING_CHECKS: readonly PhoneEnvironmentCheck[] = Object.freeze([
@@ -137,7 +132,7 @@ export function createListingPhoneEnvironmentSource(
   let lastError: PhoneEnvironmentError = PROBE_FAILED_ERROR
   const listeners = new Set<() => void>()
   let stopListing: (() => void) | undefined
-  let pollTimer: ReturnType<typeof setInterval> | undefined
+  let pollTimer: (() => void) | undefined
   const notify = (): void => {
     for (const listener of [...listeners]) listener()
   }
@@ -145,16 +140,11 @@ export function createListingPhoneEnvironmentSource(
     const shouldPoll = phase === 'ready' && listeners.size > 0
     if (shouldPoll) {
       if (pollTimer !== undefined) return
-      pollTimer = setInterval(() => {
-        void listing.refresh().catch(() => {
-          // A refused or malformed GET keeps the last committed snapshot;
-          // the next interval retries.
-        })
-      }, PHONE_LISTING_POLL_INTERVAL_MS)
+      pollTimer = startPhoneListingPoll(listing)
       return
     }
     if (pollTimer === undefined) return
-    clearInterval(pollTimer)
+    pollTimer()
     pollTimer = undefined
   }
   const attachListing = (): void => {

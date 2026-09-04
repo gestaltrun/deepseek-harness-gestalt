@@ -25,6 +25,7 @@ vi.mock('../src/client/registry.ts', async (importOriginal) => {
       ctx.effect(() => sidebar.registerTab(actual.buildPhoneTabDescriptor({
         ...options,
         switchDevice: () => {},
+        showPicker: () => {},
       })), 'ui-phone invariant wiring probe')
     },
   }
@@ -44,6 +45,7 @@ describe('ui-phone invariant wiring', () => {
       gate: options.gate,
       source: options.source,
       switchDevice: () => {},
+      showPicker: () => {},
       createController: options.createController,
     }
     expect(options.view.icon(16)).toBeNull()

@@ -4,9 +4,8 @@
  * failed first pull falls back to the missing-service probe-failed row.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  createListingPhoneEnvironmentSource, PHONE_LISTING_POLL_INTERVAL_MS,
-} from '../src/client/phone-environment-listing.ts'
+import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
+import { PHONE_LISTING_POLL_INTERVAL_MS } from '../src/client/phone-listing-poll.ts'
 import { MOBILECLI_MISSING_ERROR, PROBE_FAILED_ERROR } from '../src/client/phone-environment.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import { FakeListingSource, listingOf } from './phone-fakes.client.ts'

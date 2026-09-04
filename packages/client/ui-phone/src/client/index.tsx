@@ -93,6 +93,7 @@ function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment):
       visible={props.visible}
       source={env.source}
       onOpenDevice={onOpenDevice}
+      onShowPicker={() => { env.showPicker(props.tab.id) }}
       createController={env.createController}
     />
   )

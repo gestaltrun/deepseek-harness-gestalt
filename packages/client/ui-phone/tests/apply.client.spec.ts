@@ -565,6 +565,7 @@ describe('ui-phone client apply', () => {
         name: string
         visible: boolean
         onOpenDevice(serial: string, name: string): void
+        onShowPicker(): void
         createController(serial: string): { snapshot(): { kind: string }; dispose(): void }
       }
     }
@@ -577,6 +578,11 @@ describe('ui-phone client apply', () => {
         meta: { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' },
       },
     }])
+    body.props.onShowPicker()
+    expect(sidebar.updates.at(-1)).toEqual({
+      tabId: 'phone',
+      patch: { title: '手机', meta: {} },
+    })
     const controller = body.props.createController('R3CN30')
     expect(controller.snapshot()).toEqual({ kind: 'idle' })
     controller.dispose()
@@ -590,6 +596,7 @@ describe('ui-phone client apply', () => {
         isEnabled: () => false,
         gate: { snapshot: () => false, subscribe: () => () => undefined },
         switchDevice: () => {},
+        showPicker: () => {},
         createController: () => {
           throw new Error('not expected in this spec')
         },

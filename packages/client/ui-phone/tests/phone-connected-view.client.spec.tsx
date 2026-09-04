@@ -10,6 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PhoneConnectedView } from '../src/client/PhoneConnectedView.tsx'
+import { PHONE_LISTING_POLL_INTERVAL_MS } from '../src/client/phone-listing-poll.ts'
 import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
@@ -46,12 +47,14 @@ interface Harness {
   readonly scheduler: ManualScheduler
   readonly source: FakeListingSource
   readonly onOpenDevice: ReturnType<typeof vi.fn>
+  readonly onShowPicker: ReturnType<typeof vi.fn>
 }
 
 function renderView(visible = true, mintError?: unknown, source = new FakeListingSource().seed(listingOf(DEVICES))): Harness {
   const gateway = new FakeGateway()
   const scheduler = new ManualScheduler()
   const onOpenDevice = vi.fn()
+  const onShowPicker = vi.fn()
   // The gateway consumes its script synchronously at connect time, so the
   // outcome must be queued before the mount effect runs.
   if (mintError !== undefined) gateway.queueMint({ error: mintError })
@@ -62,6 +65,7 @@ function renderView(visible = true, mintError?: unknown, source = new FakeListin
       visible={visible}
       source={source}
       onOpenDevice={onOpenDevice}
+      onShowPicker={onShowPicker}
       createController={serial => new PhoneConnectionController({
         gateway,
         deviceId: serial,
@@ -69,7 +73,7 @@ function renderView(visible = true, mintError?: unknown, source = new FakeListin
       })}
     />,
   )
-  return { gateway, scheduler, source, onOpenDevice }
+  return { gateway, scheduler, source, onOpenDevice, onShowPicker }
 }
 
 /** Drive one async step inside act so controller transitions reach the DOM. */
@@ -195,6 +199,7 @@ describe('PhoneConnectedView chrome', () => {
           { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },
         ]))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={() => new PhoneConnectionController({
           gateway,
           deviceId: 'R3CN30',
@@ -230,6 +235,7 @@ describe('PhoneConnectedView chrome', () => {
           { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },
         ]))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={() => new PhoneConnectionController({
           gateway,
           deviceId: 'R3CN30',
@@ -292,6 +298,7 @@ describe('PhoneConnectedView chrome', () => {
         visible={true}
         source={source}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({
           gateway,
           deviceId: serial,
@@ -311,6 +318,7 @@ describe('PhoneConnectedView chrome', () => {
         visible={true}
         source={source}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({
           gateway,
           deviceId: serial,
@@ -336,6 +344,7 @@ describe('PhoneConnectedView chrome', () => {
       name: 'Pixel_6_API_35',
       source,
       onOpenDevice: () => {},
+      onShowPicker: () => {},
       createController: (serial: string) => new PhoneConnectionController({
         gateway, deviceId: serial, schedule: scheduler.schedule,
       }),
@@ -376,6 +385,39 @@ describe('PhoneConnectedView chrome', () => {
     await act(async () => { await flush() })
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
   })
+
+  it('lists a later online USB real in the dropdown without 重新检测环境', async () => {
+    vi.useFakeTimers()
+    try {
+      const source = new FakeListingSource().seed(listingOf(DEVICES))
+      const harness = renderView(true, undefined, source)
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      harness.gateway.lastSocket!.accept()
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      fireEvent.click(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' }))
+      expect(screen.queryByRole('menuitem', { name: /贝贝猫的iPhone/ })).toBeNull()
+      source.scriptNext(listingOf([
+        ...DEVICES,
+        {
+          id: '00008150-0008545C2608401C',
+          name: '贝贝猫的iPhone',
+          channel: 'usb',
+          state: 'online',
+          online: true,
+        },
+      ]))
+      await act(async () => { await vi.advanceTimersByTimeAsync(PHONE_LISTING_POLL_INTERVAL_MS) })
+      expect(screen.getByRole('menuitem', { name: /贝贝猫的iPhone/ })).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('returns occupation to the picker from the connected view', async () => {
+    const harness = await renderLive()
+    fireEvent.click(screen.getByRole('button', { name: '选择设备' }))
+    expect(harness.onShowPicker).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('PhoneConnectedView screen frame aspect', () => {
@@ -393,6 +435,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
         visible={true}
         source={source}
         onOpenDevice={onOpenDevice}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({
           gateway,
           deviceId: serial,
@@ -402,7 +445,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
     )
     await flush()
     await step(() => { gateway.lastSocket!.accept() })
-    return { gateway, scheduler, source, onOpenDevice }
+    return { gateway, scheduler, source, onOpenDevice, onShowPicker: vi.fn() }
   }
 
   /** The inline surface ratio the frame box follows. */
@@ -504,6 +547,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
           visible={true}
           source={new FakeListingSource().seed(listingOf(DEVICES))}
           onOpenDevice={() => {}}
+          onShowPicker={() => {}}
           createController={serial => new PhoneConnectionController({
             gateway,
             deviceId: serial,
@@ -716,6 +760,7 @@ describe('PhoneConnectedView touch and keys', () => {
         visible={true}
         source={source}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({
           gateway: serial === 'device-a' ? firstGateway : secondGateway,
           deviceId: serial,
@@ -735,14 +780,14 @@ describe('PhoneConnectedView touch and keys', () => {
 
     view.rerender(
       <PhoneConnectedView
-        serial="device-a" name="Device A" visible={false} source={source} onOpenDevice={() => {}}
+        serial="device-a" name="Device A" visible={false} source={source} onOpenDevice={() => {}} onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({ gateway: firstGateway, deviceId: serial })}
       />,
     )
     expect(releasePointerCapture).toHaveBeenCalledWith(11)
     view.rerender(
       <PhoneConnectedView
-        serial="device-a" name="Device A" visible={true} source={source} onOpenDevice={() => {}}
+        serial="device-a" name="Device A" visible={true} source={source} onOpenDevice={() => {}} onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({ gateway: firstGateway, deviceId: serial })}
       />,
     )
@@ -760,7 +805,7 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.pointerDown(target, { pointerId: 12, clientX: 20, clientY: 20 })
     view.rerender(
       <PhoneConnectedView
-        serial="device-b" name="Device B" visible={true} source={source} onOpenDevice={() => {}}
+        serial="device-b" name="Device B" visible={true} source={source} onOpenDevice={() => {}} onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({ gateway: secondGateway, deviceId: serial })}
       />,
     )
@@ -845,6 +890,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
           { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
         ]))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
       />,
     )
@@ -879,6 +925,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
           { id: 'fbcd1d21', name: 'MI 8', channel: 'usb', state: 'online', online: true },
         ], []))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
       />,
     )
@@ -915,6 +962,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
             { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
           ]))}
           onOpenDevice={() => {}}
+          onShowPicker={() => {}}
           createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
         />,
       )
@@ -938,6 +986,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
           { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
         ]))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({
           gateway: checkingGateway, deviceId: serial, retryLimit: 0,
         })}
@@ -967,6 +1016,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
           { id: 'UDID-9', name: 'Yishu iPhone', channel: 'usb', state: 'online', online: true },
         ]))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({ gateway: reinstallGateway, deviceId: serial })}
       />,
     )
@@ -991,6 +1041,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
         visible={true}
         source={new FakeListingSource().seed(listingOf(DEVICES))}
         onOpenDevice={() => {}}
+        onShowPicker={() => {}}
         createController={serial => new PhoneConnectionController({
           gateway,
           deviceId: serial,

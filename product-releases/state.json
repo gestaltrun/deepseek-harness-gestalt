@@ -1,7 +1,8 @@
 {
   "version": 1,
-  "nextSequence": 11,
+  "nextSequence": 12,
   "consumedIntentIds": [
+    "226-sidebar-browser",
     "414-desktop-recovery-version",
     "414-release-orchestration",
     "445-sub2api-p0",

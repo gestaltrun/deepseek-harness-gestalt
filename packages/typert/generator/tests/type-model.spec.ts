@@ -1233,7 +1233,7 @@ function configureDualRuntimeClient(root: string, splitProjects: boolean): void 
   manifest.dsh = { client: {} }
   manifest.exports['./client'] = {
     types: './lib/types/client.d.ts',
-    default: './lib/client.js',
+    default: './lib/client.cjs',
   }
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
   writeFileSync(join(packageRoot, 'src/client.ts'), [

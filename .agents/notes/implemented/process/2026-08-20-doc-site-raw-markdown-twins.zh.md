@@ -12,6 +12,8 @@ Status: implemented
 
 `vitepress build` 结束时向构建输出发射每个已发布路由的纯 Markdown 孪生页。`emitRawMarkdownPages` 复用填充 `website/.generated/` 的同一趟 manifest 加投影器流程，但以原始页面内容写入 `<outDir>/<route>`：不带 `editSource`/`outline` 投影 frontmatter，不做 locale 首页截断——frontmatter 是 VitePress 的渲染配置，孪生页丢弃它并保留正文——仓库版式（语言切换行、徽章）的剥离与渲染站一致。页面引用的图片复制到孪生页旁边。
 
+每次文档构建都将已解析的完整 `outDir` 作为可丢弃的自有输出。`buildDocumentationSite` 将构建根目录固定为 `website/`；删除函数与 VitePress 生命周期回调均保持为 `website/build.ts` 的私有实现，因此调用方无法要求该能力删除任意路径。VitePress 加载固定站点的配置后、写入当次 bundle 或 `public/` 文件前，该回调会删除已解析的输出；若输出路径是链接，则只解除链接而不遍历其目标。纯 Markdown 投影不在 `buildEnd` 删除文件，因此它的冲突检查能看到当次构建产生的每个文件，并仍会拒绝与 public 文件、页面或图片同路径的输出。
+
 一份投影同时服务两棵树，因为站内链接是相对路径。`./sibling.md` 在 HTML 站渲染为 clean URL，在原始树中按文件对文件解析，孪生页不需要第二套链接改写模式。所有路由都被发射，包括仅有 frontmatter 的 locale 首页：已发布页面链接到它们，原始树必须保持链接封闭；一个 spec 遍历发射树中的每条相对链接来钉住这条闭合性。
 
 index 路由在渲染站上呈现为目录 URL，"加 `.md`"在去掉末尾斜杠后落在 `<dir>.md` 上；因此每个 index 路由还发射一个父级别名孪生页。别名不是拷贝——拷贝的 `index.md` 会让相对链接整体上移一层——而是以别名 route 为基准的独立投影，链接解析仍针对 canonical manifest，始终指向 canonical 孪生页。根首页没有可放别名的父级；`/` 在文档中写明用 `/index.md`。孪生页与图片一律不得覆盖构建目录中已存在的文件（例如 `public/` 副本）；同名冲突使发射失败。
@@ -34,4 +36,4 @@ index 路由在渲染站上呈现为目录 URL，"加 `.md`"在去掉末尾斜�
 
 ## Consequences
 
-Agent 把页面 URL 去掉末尾斜杠再加 `.md` 即获取该页纯 Markdown，并在 `/llms.txt` 发现全集；渲染站不变。构建输出为每个路由多带一个 Markdown 文件、每个 index 路由多带一个别名，外加旁置图片副本——相对打包资产只是千字节级。孪生页保留 GitHub 风格的标题文本，而渲染站对含标点的标题使用不同 slug；agent 自行解析标题，因此没有门禁覆盖原始树的 fragment。因孪生页受众不需要而暂缓：`llms-full.txt`，以及每页的"查看 Markdown"控件——后者需要 stock-theme 站点刻意不设的 theme 目录。
+Agent 把页面 URL 去掉末尾斜杠再加 `.md` 即获取该页纯 Markdown，并在 `/llms.txt` 发现全集；渲染站不变。连续构建会替换上次构建的完整输出，不会把自己的孪生页当成另一个产生方。构建输出为每个路由多带一个 Markdown 文件、每个 index 路由多带一个别名，外加旁置图片副本——相对打包资产只是千字节级。孪生页保留 GitHub 风格的标题文本，而渲染站对含标点的标题使用不同 slug；agent 自行解析标题，因此没有门禁覆盖原始树的 fragment。因孪生页受众不需要而暂缓：`llms-full.txt`，以及每页的"查看 Markdown"控件——后者需要 stock-theme 站点刻意不设的 theme 目录。

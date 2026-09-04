@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-09-01-phone-hung-agent-install-ceiling.md
+2026-09-01-phone-hung-agent-install-ceiling.md: f34c646ebb1baf2685e3b048d4c2afbcff2ba87c
+2026-09-01-phone-hung-agent-install-ceiling.zh.md: d566b14a3e28ae99d22bf89a0b4a0ce2124b2e4a

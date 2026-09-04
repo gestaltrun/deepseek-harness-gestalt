@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- Screen: 窄视口（<1100px）时设备 dock 转为居中 overlay 的变体。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计稿 · 窄视口 dock overlay</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css). */
+body {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+  --ds-transition-duration-slow: 0.3s;
+
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-100: rgb(228, 237, 254);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  /* the mask that dims the app behind the overlay */
+  --dsw-alias-bg-mask-3: rgba(0, 0, 0, 0.48);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-60);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-60);
+
+  --dsw-font-l-20: 500 20px/28px var(--dsw-font-family);
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+
+  --dd-r-lg: 16px;
+  --dd-r-md: 10px;
+  --dd-r-sm: 8px;
+  --dd-shell: var(--dsw-static-neutral-bluish-900);
+}
+[data-dsw-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-800);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+
+.proto-note {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-label);
+  color: var(--dsw-alias-state-warn-label);
+  font: var(--dsw-font-code-block-small); letter-spacing: 0.04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code {
+  font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-specific-tip); padding: 1px 7px; border-radius: 6px;
+}
+.proto-note .spacer { flex: 1; }
+
+/* ============ narrow app scene (fixed 1024px stage) ============ */
+.viewport {
+  width: min(1024px, calc(100vw - 32px));
+  height: min(700px, calc(100vh - 120px));
+  margin: 28px auto 80px;
+  position: relative;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-shadow-lv3);
+  display: flex;
+}
+.minirail {
+  flex: none; width: 56px;
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-layer-2));
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding-top: 16px;
+}
+.minirail .cell { width: 26px; height: 26px; border-radius: 8px; background: var(--dsw-alias-border-l2); }
+.minirail .cell.on { background: var(--dsw-alias-interactive-bg-hover); outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: -2px; }
+
+.miniconvo { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.minihead {
+  flex: none; height: 44px; padding: 0 16px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.minihead b { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.miniflow { flex: 1; overflow: hidden; padding: 18px; display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
+.bub-user { align-self: flex-end; max-width: 85%; border-radius: 13px 13px 4px 13px; padding: 8px 12px; background: var(--dsw-static-deepseek-50); font-size: 13px; line-height: 22px; }
+[data-dsw-dark-theme] .bub-user { background: var(--dsw-static-neutral-bluish-850); }
+.bub-agent { max-width: 90%; font-size: 13px; line-height: 22px; color: var(--dsw-alias-label-primary); }
+.capsule-mini {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 11px; border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+}
+.capsule-mini:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.capsule-mini .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+@keyframes dd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--dsw-alias-state-success-tertiary); }
+  50% { box-shadow: 0 0 0 4px var(--dsw-alias-state-success-tertiary); }
+}
+.minicomposer {
+  margin: 12px 16px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 13px;
+  box-shadow: var(--dsw-shadow-lv1);
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 10px 12px 8px;
+  flex: none;
+}
+.minicomposer .ph { color: var(--dsw-alias-label-caption); font-size: 13px; padding-bottom: 14px; }
+.minicomposer .row { display: flex; align-items: center; gap: 8px; }
+.minicomposer .chipw { width: 22px; height: 22px; border-radius: 6px; background: var(--dsw-alias-bg-layer-2); }
+.sendbtn { margin-left: auto; width: 24px; height: 24px; border-radius: 999px; background: var(--dsw-alias-label-primary); position: relative; }
+.sendbtn::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 9px; height: 9px; transform: translate(-50%, -42%) rotate(45deg);
+  border-right: 2px solid var(--dsw-alias-bg-base); border-top: 2px solid var(--dsw-alias-bg-base);
+}
+
+/* ============ the centered overlay state ============ */
+.overlay-mask {
+  position: absolute; inset: 0; z-index: 30;
+  background: var(--dsw-alias-bg-mask-3);
+  display: grid; place-items: center;
+  transition: opacity var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+.overlay-mask.hidden { opacity: 0; pointer-events: none; visibility: hidden; }
+.overlay-panel {
+  width: 400px; max-width: calc(100% - 48px);
+  max-height: calc(100% - 56px);
+  display: flex; flex-direction: column;
+  border-radius: 18px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv3);
+  overflow: hidden;
+  transform: translateY(0) scale(1);
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out), opacity var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+.overlay-mask.hidden .overlay-panel { transform: translateY(10px) scale(0.98); }
+.ov-head {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.ov-head .ttl { font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 7px; }
+.ov-head .ttl svg { color: var(--dsw-alias-label-tertiary); }
+.ov-head .sp { flex: 1; }
+.iconbtn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--dd-r-sm);
+  background: transparent; color: var(--dsw-alias-label-secondary);
+  cursor: pointer; position: relative;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.iconbtn:focus-visible { outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: 2px; }
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute; left: 50%; top: calc(100% + 7px); transform: translateX(-50%);
+  background: var(--dsw-alias-tooltip-bg);
+  color: var(--dsw-static-neutral-bluish-00);
+  font-size: 12px; font-weight: 400;
+  padding: 4px 9px; border-radius: 7px;
+  white-space: nowrap; z-index: 45; pointer-events: none;
+}
+.ov-body { flex: 1; overflow: auto; padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 14px; }
+.ov-stage { display: grid; place-items: center; }
+.phone.f-bezel { padding: 6px; border-radius: 30px; }
+.phone .screen {
+  aspect-ratio: 360 / 780;
+  width: 300px;
+  max-width: 100%;
+  border-radius: 26px;
+  outline: 6px solid var(--dd-shell);
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-1);
+}
+svg.scr { display: block; width: 100%; height: 100%; }
+.toolrow {
+  display: flex; justify-content: center; gap: 4px;
+  padding: 6px; border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+.toolrow .toolsep { width: 1px; background: var(--dsw-alias-border-l2); margin: 6px 5px; }
+.ov-meta { display: flex; align-items: center; gap: 6px; justify-content: center; }
+.tierchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px; font-weight: 500;
+}
+.tierchip.active { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
+.tierchip .live { width: 6px; height: 6px; border-radius: 999px; background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+.ov-hint { text-align: center; color: var(--dsw-alias-label-caption); font-size: 12px; }
+
+/* restore chip after closing the overlay */
+.restore-chip {
+  position: absolute; right: 14px; bottom: 14px; z-index: 31;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px; font-weight: 500;
+  box-shadow: var(--dsw-shadow-lv2);
+  cursor: pointer;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+.overlay-closed .restore-chip { opacity: 1; pointer-events: auto; }
+
+.bp-tag {
+  position: absolute; left: 14px; top: 14px; z-index: 31;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-code-block-small);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE</span>
+  <b>屏幕：窄视口（&lt;1100px）· 设备面板转居中 overlay</b>
+  <code>slot 假设：shell.overlay（list 叠加层）· 遮罩用 bg-mask-3</code>
+  <span>三列放不下时不再内联占位，改为遮罩 + 居中卡片；×、Esc 或点遮罩均可关闭，会话列恢复完整宽度。</span>
+  <span class="spacer"></span>
+  <a href="./README.md" style="color:inherit;">索引</a>
+</div>
+
+<div class="viewport" id="viewport">
+  <div class="bp-tag">视口宽度示意 &lt;1100 px</div>
+
+  <!-- mini sidebar rail + squeezed-feeling conversation -->
+  <nav class="minirail" aria-hidden="true">
+    <span class="cell on"></span><span class="cell"></span><span class="cell"></span><span class="cell"></span>
+  </nav>
+  <section class="miniconvo">
+    <header class="minihead"><b>设备面板原型评审</b></header>
+    <div class="miniflow">
+      <div class="bub-agent">我先在模拟器里装一个测试 APK，然后进入登录页。</div>
+      <div class="capsule-mini" id="capsuleChip"><span class="dot"></span>Pixel_6_API_35 · 实时</div>
+      <div class="bub-user">好，装完先停在验证码输入框，等我手动填。</div>
+      <div class="bub-agent">明白：触控到验证码那一步我会暂停并提示接管。</div>
+    </div>
+    <div class="minicomposer" aria-hidden="true">
+      <div class="ph">回复 DeepSeek…</div>
+      <div class="row"><span class="chipw"></span><span class="chipw"></span><span class="sendbtn"></span></div>
+    </div>
+  </section>
+
+  <!-- ============ centered overlay ============ -->
+  <div class="overlay-mask" id="overlayMask">
+    <div class="overlay-panel" role="dialog" aria-modal="true" aria-label="设备画面面板">
+      <header class="ov-head">
+        <span class="ttl">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+          Pixel_6_API_35
+        </span>
+        <span style="flex:1;"></span>
+        <button class="iconbtn" data-tip="横竖屏切换" type="button">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 3v4h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="iconbtn" data-tip="关闭（Esc）" id="ovClose" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="ov-body">
+        <div class="ov-stage">
+          <div class="phone f-bezel">
+            <div class="screen">
+              <svg class="scr" viewBox="0 0 360 780" preserveAspectRatio="xMidYMid slice" role="img" aria-label="设备画面占位">
+                <rect width="360" height="780" fill="var(--dsw-alias-bg-layer-1)"/>
+                <text x="28" y="32" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">9:41</text>
+                <rect x="272" y="20" width="3" height="4" rx="1" fill="var(--dsw-alias-label-primary)"/>
+                <rect x="277" y="17" width="3" height="7" rx="1" fill="var(--dsw-alias-label-primary)"/>
+                <rect x="282" y="14" width="3" height="10" rx="1" fill="var(--dsw-alias-label-primary)"/>
+                <rect x="287" y="11" width="3" height="13" rx="1" fill="var(--dsw-alias-label-primary)"/>
+                <text x="28" y="86" font-size="26" font-weight="700" fill="var(--dsw-alias-label-primary)" font-family="-apple-system,'PingFang SC',sans-serif">设置</text>
+                <g font-family="-apple-system,'PingFang SC',sans-serif">
+                  <g fill="var(--dsw-alias-bg-layer-2)">
+                    <rect x="20" y="106" width="320" height="58" rx="12"/>
+                    <rect x="20" y="172" width="320" height="58" rx="12"/>
+                    <rect x="20" y="238" width="320" height="58" rx="12"/>
+                    <rect x="20" y="304" width="320" height="58" rx="12"/>
+                  </g>
+                  <circle cx="52" cy="135" r="15" fill="var(--dsw-static-deepseek-200)"/>
+                  <circle cx="52" cy="201" r="15" fill="var(--dsw-static-green-100)"/>
+                  <circle cx="52" cy="267" r="15" fill="var(--dsw-static-amber-100, #fef5e7)"/>
+                  <circle cx="52" cy="333" r="15" fill="var(--dsw-static-neutral-bluish-150)"/>
+                  <rect x="82" y="124" width="112" height="9" rx="4.5" fill="var(--dsw-alias-border-l2)"/>
+                  <rect x="82" y="141" width="76" height="7" rx="3.5" fill="var(--dsw-alias-border-l1)"/>
+                  <rect x="82" y="190" width="96" height="9" rx="4.5" fill="var(--dsw-alias-border-l2)"/>
+                  <rect x="82" y="207" width="64" height="7" rx="3.5" fill="var(--dsw-alias-border-l1)"/>
+                  <rect x="82" y="256" width="128" height="9" rx="4.5" fill="var(--dsw-alias-border-l2)"/>
+                  <rect x="82" y="273" width="88" height="7" rx="3.5" fill="var(--dsw-alias-border-l1)"/>
+                  <rect x="82" y="322" width="84" height="9" rx="4.5" fill="var(--dsw-alias-border-l2)"/>
+                </g>
+                <path d="M180 736c0-14 18-14 18 0" fill="none" stroke="var(--dsw-alias-label-dimmed)" stroke-width="2.4" stroke-linecap="round"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="toolrow">
+          <button class="iconbtn" data-tip="返回" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="iconbtn" data-tip="主屏幕" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button class="iconbtn" data-tip="最近任务" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+          <span class="toolsep"></span>
+          <button class="iconbtn" data-tip="截图" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.6-2.4h6.8L17 8.5h3v10H4v-10Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13.4" r="3" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button class="iconbtn" data-tip="刷新流" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v4.5h-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 12a8 8 0 0 1-13.66 5.66L4 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 20v-4.5h4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div class="ov-meta">
+          <span class="tierchip active"><span class="live"></span>MJPEG · 10 fps</span>
+          <span class="tierchip">H264 · 30 fps</span>
+        </div>
+        <div class="ov-hint">点击画面即向设备发送触控；拖动为滑动。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- reopen affordance once dismissed -->
+  <button class="restore-chip" id="restoreChip" type="button">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+    打开设备面板
+  </button>
+</div>
+
+<script>
+// Overlay close/reopen: × button, mask click, Escape; restore chip brings it back.
+var viewport = document.getElementById('viewport');
+var mask = document.getElementById('overlayMask');
+
+function setOverlay(open) {
+  mask.classList.toggle('hidden', !open);
+  viewport.classList.toggle('overlay-closed', !open);
+}
+document.getElementById('ovClose').addEventListener('click', function () { setOverlay(false); });
+mask.addEventListener('click', function (e) {
+  if (e.target === mask) setOverlay(false);
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') setOverlay(false);
+});
+document.getElementById('restoreChip').addEventListener('click', function () { setOverlay(true); });
+// composer capsule also reopens the panel
+document.getElementById('capsuleChip').addEventListener('click', function () { setOverlay(true); });
+</script>
+</body>
+</html>

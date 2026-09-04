@@ -44,6 +44,7 @@
     "tests/details-session-lifecycle.e2e.ts",
     "tests/plugin-config.e2e.ts",
     "tests/settings-chrome.e2e.ts",
+    "tests/phone-stream-fallback.e2e.ts",
     "tests/desktop-chrome.e2e.ts",
     "tests/schedule-board.e2e.ts",
     "tests/models-settings.e2e.ts",

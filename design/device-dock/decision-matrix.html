@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- 决策矩阵：三条轴线 × 并排原型格，供评审看图后锁定策略。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>决策矩阵 · 「手机」tab 三条轴线</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css). */
+body {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration-fast: 0.1s;
+
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-100: rgb(228, 237, 254);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  /* semantic aliases — light */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-interactive-bg-active: rgba(38, 49, 72, 0.1);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+
+  /* geometry from package sources (state.ts L121-L124) */
+  --bs-panel-default: 400px;
+  --bs-tabbar-h: 34px;
+}
+[data-dsw-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.14);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+
+.proto-note {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-label);
+  color: var(--dsw-alias-state-warn-label);
+  font: var(--dsw-font-code-block-small); letter-spacing: .04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code { font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); padding: 1px 7px; border-radius: 6px; }
+.proto-note .spacer { flex: 1; }
+
+.page-head { max-width: 1240px; margin: 30px auto 4px; padding: 0 24px; }
+.page-head h1 { font-size: 16px; line-height: 24px; font-weight: 500; margin: 0 0 10px; }
+.axes-summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.axis-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px; padding: 4px 13px;
+  font-size: 12.5px; color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.axis-pill b { color: var(--dsw-alias-label-primary); font-weight: 600; }
+.axis-pill .st {
+  font: var(--dsw-font-code-block-small);
+  padding: 0 7px; border-radius: 999px; height: 17px;
+  display: inline-flex; align-items: center;
+}
+.st.tentative { background: var(--dsw-static-deepseek-200); color: var(--dsw-static-neutral-bluish-1000); }
+.st.adopted { background: var(--dsw-static-green-100); color: var(--dsw-alias-state-success-primary); }
+.st.open { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); }
+
+/* ============ axis blocks ============ */
+.axis { max-width: 1240px; margin: 26px auto 40px; padding: 0 24px; }
+.axis-title { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; flex-wrap: wrap; }
+.axis-title h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.axis-title p { margin: 0; font-size: 12.5px; color: var(--dsw-alias-label-tertiary); }
+.gridrow { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+.cell { display: flex; flex-direction: column; align-items: center; gap: 9px; }
+.cell-tag {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary);
+}
+.cell-tag i {
+  font-style: normal; width: 17px; height: 17px; border-radius: 999px;
+  display: inline-grid; place-items: center;
+  background: var(--dsw-alias-label-primary); color: var(--dsw-alias-label-primary-foreground);
+  font: 600 11px/1 var(--ds-font-family-code);
+}
+.cx-cap {
+  align-self: stretch;
+  max-width: 420px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary);
+}
+.cx-cap b { color: var(--dsw-alias-label-secondary); font-weight: 600; }
+
+/* ---------- panel replica（同主稿）---------- */
+.bspanel {
+  width: var(--bs-panel-default);
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-sidebar-fill);
+  box-shadow: var(--dsw-shadow-lv1);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.tabstrip {
+  flex: none; height: var(--bs-tabbar-h);
+  display: flex; align-items: stretch;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  padding-right: 6px;
+}
+.tablist { flex: 1; min-width: 0; display: flex; overflow-x: auto; scrollbar-width: none; }
+.tablist::-webkit-scrollbar { display: none; }
+.tabitem {
+  flex: none; max-width: 160px; min-width: 64px;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 4px 0 10px;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-secondary);
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  cursor: default; user-select: none; white-space: nowrap; position: relative;
+}
+.tabitem:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tabitem.active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); }
+.tabtitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plusbtn {
+  flex: none; align-self: center; width: 22px; height: 22px; margin: 0 6px;
+  position: sticky; right: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+}
+.pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--dsw-alias-label-dimmed); }
+.dot.on { background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+@keyframes dd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  /* Alpha ring derived from --dsw-static-green-500; no alias at this tint. */
+  50% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25); }
+}
+
+.devbar { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--dsw-alias-border-l1); position: relative; }
+.devpick {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  font: var(--dsw-font-xxs-strong-12); cursor: pointer; position: relative;
+}
+.devpick:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.pickmenu {
+  position: absolute; top: 36px; left: 8px; z-index: 20;
+  min-width: 212px; padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+.mi { display: flex; align-items: center; gap: 9px; padding: 6px 9px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+.mi:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.mi .meta { margin-left: auto; font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-caption); }
+
+.tierchip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; padding: 2px 8px; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxs-strong-12); white-space: nowrap; }
+.tierchip.active { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
+.tierchip .biz { width: 5px; height: 5px; border-radius: 999px; background: var(--dsw-alias-state-business-primary); }
+
+.streamfill {
+  flex: 1; min-height: 0; position: relative;
+  background:
+    linear-gradient(180deg, var(--dsw-static-deepseek-200), var(--dsw-static-deepseek-100)),
+    var(--dsw-static-deepseek-100);
+}
+.streamtag {
+  position: absolute; top: 8px; left: 8px;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(84, 85, 87, 0.55);   /* 同 --dsw-alias-button-tool-bar-fill */
+  color: var(--dsw-static-neutral-bluish-00);
+  font: var(--dsw-font-xxs-strong-12);
+}
+.toolstrip { flex: none; display: flex; justify-content: center; gap: 4px; padding: 7px 8px; border-top: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
+.iconbtn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: transparent; color: var(--dsw-alias-label-secondary);
+}
+.iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.hintline { flex: none; text-align: center; color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-12); padding: 1px 10px 7px; }
+
+/* tab-strip overflow demo：窄容器 + 右缘渐隐 */
+.overflow-demo { width: 330px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; overflow: hidden; background: var(--dsw-alias-bg-layer-1); position: relative; }
+.overflow-demo::after {
+  content: ''; position: absolute; right: 30px; top: 0; bottom: 0; width: 42px;
+  background: linear-gradient(to right, transparent, var(--dsw-alias-bg-layer-1));
+  pointer-events: none;
+}
+.ovscrollbtn { position: absolute; right: 32px; top: 50%; transform: translateY(-50%); z-index: 3; pointer-events: none; color: var(--dsw-alias-label-caption); }
+
+/* dedupe focus ring on an existing tab */
+.focusring { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: -2px; border-radius: 5px; }
+.focustag {
+  position: absolute; left: 10px; top: calc(var(--bs-tabbar-h) - 6px); z-index: 21;
+  transform: translateY(100%);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 7px;
+  background: var(--dsw-alias-tooltip-bg, var(--dsw-static-neutral-bluish-850));
+  color: var(--dsw-static-neutral-bluish-00);
+  font: var(--dsw-font-code-block-small);
+  box-shadow: var(--dsw-shadow-lv1);
+  white-space: nowrap;
+}
+
+/* axis-2 cards */
+.entrycard {
+  width: 224px;
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px;
+  background: var(--dsw-alias-bg-base);
+  overflow: hidden;
+}
+.entrycard .demo-zone { padding: 14px 12px 12px; display: flex; flex-direction: column; gap: 8px; align-items: center; min-height: 118px; justify-content: center; }
+.menucard {
+  width: 208px; padding: 5px;
+  border-radius: 10px; border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3); box-shadow: var(--dsw-shadow-lv1);
+}
+.mrow { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 12.5px; }
+.mrow:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.mrow.disabled { color: var(--dsw-alias-label-caption); }
+.mrow.disabled:hover { background: transparent; }
+.ministrip { width: 188px; height: var(--bs-tabbar-h); display: flex; align-items: stretch; border: 1px solid var(--dsw-alias-border-l1); border-radius: 7px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; }
+.badgecount {
+  flex: none; min-width: 16px; height: 15px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-state-success-primary);
+  font: 600 11px/1 var(--ds-font-family-code);
+}
+.badgedot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--dsw-alias-label-dimmed); }
+
+/* axis-3 hatch for wasted space */
+.waste {
+  background:
+    repeating-linear-gradient(45deg, var(--dsw-alias-border-l2) 0, var(--dsw-alias-border-l2) 1px, transparent 1px, transparent 10px),
+    var(--dsw-alias-bg-layer-2);
+}
+.fixedcenter { display: grid; place-items: center; padding: 14px; }
+.phone-fixed {
+  width: 219px; aspect-ratio: 360 / 720;      /* 1:2 固定比例 */
+  border-radius: 12px; overflow: hidden;
+  outline: 1px solid var(--dsw-alias-border-l2);
+  background: linear-gradient(180deg, var(--dsw-static-deepseek-200), var(--dsw-static-deepseek-100));
+  position: relative;
+}
+.srccite { font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-caption); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE · 决策矩阵</span>
+  <b>「手机」tab 策略对照</b>
+  <code>全部格沿用 400px 面板副本（PANEL_DEFAULT）与 --dsw-* token</code>
+  <span>轴1 倾向每设备一 tab 待确认 · 轴2 恒可达+badge 已采纳（此页给终稿像素）· 轴3 待选定</span>
+  <span class="spacer"></span>
+  <a href="./README.md" style="color:inherit;">索引</a><span>·</span><a href="./phone-tab.html" style="color:inherit;">主稿 B →</a>
+</div>
+
+<div class="page-head">
+  <h1>决策矩阵 · 三条轴线并排原型</h1>
+  <div class="axes-summary">
+    <span class="axis-pill"><b>轴 1 多设备并存</b> <span class="st tentative">倾向 B · 待确认</span></span>
+    <span class="axis-pill"><b>轴 2 入口策略</b> <span class="st adopted">已采纳 · 恒可达 + badge</span></span>
+    <span class="axis-pill"><b>轴 3 已连接画面行为</b> <span class="st open">待选定</span></span>
+  </div>
+</div>
+
+<!-- ════════════════ 轴 1 · 多设备并存 ════════════════ -->
+<section class="axis">
+  <div class="axis-title">
+    <h2>轴 1 · 多设备并存</h2>
+    <p>createTab mint phone:&lt;serial&gt; 可并存 ↔ single:true 单例聚焦 —— 两形态并排确认</p>
+  </div>
+  <div class="gridrow">
+
+    <!-- 格 A 单例 -->
+    <div class="cell">
+      <span class="cell-tag"><i>A</i>单例模式（single:true）</span>
+      <aside class="bspanel" style="min-height:300px;">
+        <div class="tabstrip">
+          <div class="tabitem">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4.6c0-.9.7-1.6 1.6-1.6h2.6l1.6 1.7h4.6c.9 0 1.6.7 1.6 1.6v5.1c0 .9-.7 1.6-1.6 1.6H3.6c-.9 0-1.6-.7-1.6-1.6V4.6Z" stroke="currentColor" stroke-width="1.3"/></svg>
+            <span class="tabtitle">文件</span>
+          </div>
+          <div class="tabitem active">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+            <span class="tabtitle">手机</span>
+          </div>
+          <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="pane-body">
+          <div class="devbar">
+            <button class="devpick" type="button">
+              <span class="dot on"></span>Pixel_6_API_35
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+            </button>
+            <span style="flex:1;"></span>
+            <button class="tierchip active" type="button"><span class="biz"></span>H264<span style="color:var(--dsw-alias-label-caption);font-weight:400;">30 fps</span></button>
+            <!-- 下拉展开：换源不增 tab -->
+            <div class="pickmenu">
+              <div class="mi"><span class="dot on"></span>Pixel_6_API_35<span class="meta">当前 ✓</span></div>
+              <div class="mi"><span class="dot on"></span>iPhone 15<span class="meta">切换</span></div>
+              <div class="mi"><span class="dot on"></span>emulator-5554<span class="meta">切换</span></div>
+            </div>
+          </div>
+          <div class="streamfill">
+            <span class="streamtag"><span style="width:6px;height:6px;border-radius:999px;background:var(--dsw-static-green-400);display:inline-block;"></span>实时流 · 切源不断开面板</span>
+          </div>
+          <div class="toolstrip">
+            <button class="iconbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+            <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+          </div>
+        </div>
+      </aside>
+      <p class="cx-cap"><b>代价：</b>一次只能盯一台；对比两台画面要来回切下拉。Tab 条永远干净——只有一个「手机」。</p>
+    </div>
+
+    <!-- 格 B 每设备一 tab -->
+    <div class="cell">
+      <span class="cell-tag"><i>B</i>每设备一 tab（createTab → phone:&lt;serial&gt;）</span>
+      <aside class="bspanel" style="min-height:240px;">
+        <div class="tabstrip">
+          <div class="tablist">
+            <div class="tabitem">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4.6c0-.9.7-1.6 1.6-1.6h2.6l1.6 1.7h4.6c.9 0 1.6.7 1.6 1.6v5.1c0 .9-.7 1.6-1.6 1.6H3.6c-.9 0-1.6-.7-1.6-1.6V4.6Z" stroke="currentColor" stroke-width="1.3"/></svg>
+              <span class="tabtitle">文件</span>
+            </div>
+            <div class="tabitem active">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+              <span class="tabtitle">手机·Pixel_6</span>
+              <span aria-hidden="true" style="width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-state-success-primary);display:inline-block;"></span>
+            </div>
+            <div class="tabitem">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+              <span class="tabtitle">手机·iPhone_15</span>
+            </div>
+            <div class="tabitem">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+              <span class="tabtitle">手机·emulator-5554</span>
+            </div>
+          </div>
+          <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="pane-body">
+          <div class="devbar" style="justify-content:center;">
+            <span style="font-size:12.5px;color:var(--dsw-alias-label-tertiary);">三台同时各占一 tab；激活态(实心)与非激活态并存</span>
+          </div>
+          <div class="streamfill">
+            <span class="streamtag"><span style="width:6px;height:6px;border-radius:999px;background:var(--dsw-static-green-400);display:inline-block;"></span>Pixel_6 实时流</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- B 补充：溢出横向滚动态 -->
+      <div style="align-self:flex-start;display:flex;flex-direction:column;gap:6px;">
+        <span style="font:var(--dsw-font-xxs-strong-12);color:var(--dsw-alias-label-secondary);padding-left:2px;">溢出时：横向滚动，+ 按钮 sticky 常驻（TAB_MAX_WIDTH=160 逐项截断）</span>
+        <div class="overflow-demo">
+          <div class="tabstrip" style="border-bottom:none;background:transparent;">
+            <div class="tablist">
+              <div class="tabitem active">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+                <span class="tabtitle">手机·Pixel_6</span>
+              </div>
+              <div class="tabitem">
+                <span class="tabtitle">手机·iPhone_15</span>
+              </div>
+              <div class="tabitem">
+                <span class="tabtitle">手机·emulator-5554</span>
+              </div>
+              <div class="tabitem">
+                <span class="tabtitle">手机·Pixel_7_Cuttlefish</span>
+              </div>
+            </div>
+            <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+          </div>
+          <span class="ovscrollbtn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
+        </div>
+      </div>
+
+      <p class="cx-cap"><b>收益：</b>多台同屏对齐 agent 并行任务。<b>代价：</b>Tab 条拥挤（溢出靠横滚）；关闭设备即关 tab，语义要跟 onClose 对齐。</p>
+    </div>
+
+    <!-- 格 C 去重语义 -->
+    <div class="cell">
+      <span class="cell-tag"><i>C</i>去重语义：+ 菜单点已打开的设备 → 聚焦既有 tab</span>
+      <aside class="bspanel" style="min-height:214px;">
+        <div class="tabstrip">
+          <div class="tablist">
+            <div class="tabitem focusring active">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+              <span class="tabtitle">手机·Pixel_6</span>
+              <span aria-hidden="true" style="width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-state-success-primary);display:inline-block;"></span>
+              <span class="focustag">↑ 聚焦已有 tab（dedupeKey: serial）· 不新建</span>
+            </div>
+            <div class="tabitem">
+              <span class="tabtitle">手机·iPhone_15</span>
+            </div>
+          </div>
+          <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="pane-body" style="justify-content:flex-end;">
+          <nav class="menucard" style="margin:14px 14px 16px;align-self:flex-end;width:220px;">
+            <div class="mrow"><span class="dot on"></span>Pixel_6_API_35<span class="meta">已打开 → 聚焦</span></div>
+            <div class="mrow"><span class="dot on"></span>Galaxy_S24<span class="meta">新建 tab</span></div>
+          </nav>
+        </div>
+      </aside>
+      <p class="cx-cap">同 service.ts 的 dedupeKey 契约：<b>dedupeKey(tab) 命中既有实例则聚焦而非复制</b>（sidechat 按 thread、本处按 serial）；角标仅为示意高亮帧。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 轴 2 · 入口策略 ════════════════ -->
+<section class="axis">
+  <div class="axis-title">
+    <h2>轴 2 · 入口策略</h2>
+    <p>已采纳「恒可达 + badge」—— 此行给终稿像素与各自代价</p>
+  </div>
+  <div class="gridrow">
+
+    <div class="cell">
+      <span class="cell-tag"><i>①</i>+ 菜单行常亮可用</span>
+      <div class="entrycard">
+        <div class="demo-zone">
+          <div class="menucard">
+            <div class="mrow"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.8" stroke="currentColor" stroke-width="1.3"/><ellipse cx="8" cy="8" rx="2.6" ry="5.8" stroke="currentColor" stroke-width="1.1"/><path d="M2.4 8h11.2" stroke="currentColor" stroke-width="1.1"/></svg>浏览器</div>
+            <div class="mrow" style="outline:1px dashed var(--dsw-alias-state-business-primary);outline-offset:-1px;"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>手机<span style="margin-left:auto;font:var(--dsw-font-code-block-small);color:var(--dsw-alias-label-caption);">order 55</span></div>
+          </div>
+        </div>
+        <div class="cx-cap" style="border:none;border-top:1px solid var(--dsw-alias-border-l1);max-width:none;">代价：无设备时点开是引导空态，多一步才知缺什么 —— 由空态文案补足。</div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <span class="cell-tag"><i>②</i>Tab 条 badge 两态</span>
+      <div class="entrycard">
+        <div class="demo-zone">
+          <div class="ministrip">
+            <div class="tabitem" style="border-right:none;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+              <span class="tabtitle">手机</span>
+              <span class="badgedot" title="无设备"></span>
+            </div>
+          </div>
+          <div class="ministrip">
+            <div class="tabitem active" style="border-right:none;">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+              <span class="tabtitle">手机</span>
+              <span class="badgecount">2</span>
+            </div>
+          </div>
+        </div>
+        <div class="cx-cap" style="border:none;border-top:1px solid var(--dsw-alias-border-l1);max-width:none;">灰点＝无设备 / 绿色数字＝在线台数。代价：descriptor.badge 每次渲染都会被调，必须保持廉价。</div>
+      </div>
+    </div>
+
+    <div class="cell">
+      <span class="cell-tag"><i>③</i>反例 · terminal 式禁用行</span>
+      <div class="entrycard">
+        <div class="demo-zone">
+          <div class="menucard">
+            <div class="mrow disabled"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" style="opacity:.55;"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>手机 · 未检测到设备<span style="margin-left:auto;font:var(--dsw-font-code-block-small);text-decoration:line-through;">不可用</span></div>
+          </div>
+        </div>
+        <div class="cx-cap" style="border:none;border-top:1px solid var(--dsw-alias-border-l1);max-width:none;">作为反例保留：入口变灰后用户找不到「从哪里开始装模拟器」—— 与恒可达原则冲突，弃用。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ 轴 3 · 已连接画面行为 ════════════════ -->
+<section class="axis">
+  <div class="axis-title">
+    <h2>轴 3 · 已连接画面行为</h2>
+    <p>同一 400×520 短窗口内容两格对照 —— 待选定后回填主稿 B</p>
+  </div>
+  <div class="gridrow">
+
+    <!-- 格 A flex 贴底 -->
+    <div class="cell">
+      <span class="cell-tag"><i>A</i>flex 贴底 · 工具条常驻</span>
+      <aside class="bspanel" style="height:520px;">
+        <div class="tabstrip">
+          <div class="tabitem active">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+            <span class="tabtitle">手机·Pixel_6</span>
+          </div>
+          <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="transform:scale(.82);"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="devbar">
+          <button class="devpick" type="button"><span class="dot on"></span>Pixel_6_API_35</button>
+          <span style="flex:1;"></span>
+          <button class="tierchip active" type="button"><span class="biz"></span>H264 · 30fps</button>
+        </div>
+        <!-- 流区 flex 占满：类推 browserFrame{flex:1;min-height:0} -->
+        <div class="streamfill">
+          <span class="streamtag"><span style="width:6px;height:6px;border-radius:999px;background:var(--dsw-static-green-400);display:inline-block;"></span>流区 flex 占满 · 随面板伸缩</span>
+        </div>
+        <div class="toolstrip">
+          <button class="iconbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+          <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.6-2.4h6.8L17 8.5h3v10H4v-10Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13.4" r="3" stroke="currentColor" stroke-width="2"/></svg></button>
+        </div>
+        <div class="hintline">点击画面即触控；拖动为滑动</div>
+      </aside>
+      <p class="cx-cap">Back/Home 贴底常驻、无浪费空间；短窗口下画面变小但布局稳定。直接复用 <span class="srccite">browserFrame{flex:1;min-height:0}</span> 的行为契约。</p>
+    </div>
+
+    <!-- 格 B 固定比例居中 -->
+    <div class="cell">
+      <span class="cell-tag"><i>B</i>固定比例居中 · 1:2</span>
+      <aside class="bspanel" style="height:520px;">
+        <div class="tabstrip">
+          <div class="tabitem active">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+            <span class="tabtitle">手机·Pixel_6</span>
+          </div>
+          <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="transform:scale(.82);"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="devbar">
+          <button class="devpick" type="button"><span class="dot on"></span>Pixel_6_API_35</button>
+          <span style="flex:1;"></span>
+          <button class="tierchip active" type="button"><span class="biz"></span>H264 · 30fps</button>
+        </div>
+        <div class="fixedcenter waste" style="flex:1;min-height:0;">
+          <div class="phone-fixed">
+            <span class="streamtag"><span style="width:6px;height:6px;border-radius:999px;background:var(--dsw-static-green-400);display:inline-block;"></span>1:2 定比</span>
+          </div>
+        </div>
+        <div class="toolstrip" style="background:var(--dsw-alias-bg-layer-2);">
+          <button class="iconbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+          <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.6-2.4h6.8L17 8.5h3v10H4v-10Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13.4" r="3" stroke="currentColor" stroke-width="2"/></svg></button>
+        </div>
+        <div class="waste" style="height:34px;flex:none;"></div>
+      </aside>
+      <p class="cx-cap">斜纹＝浪费区：比例绝对忠实于真机像素，但 400×520 下上下都被吃掉；工具条也无法贴底。</p>
+    </div>
+  </div>
+</section>
+
+<script>
+// Static comparison sheet — no behaviour to wire beyond nothing.
+</script>
+</body>
+</html>

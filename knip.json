@@ -14,10 +14,12 @@
     "javac",
     "keytool",
     "musl-gcc",
+    "mkfifo",
     "openssl",
     "ps",
     "postgres",
     "python3",
+    "ps",
     "postgres",
     "redis-server",
     "sandbox-exec",
@@ -680,6 +682,11 @@
         "@deepseek-ai/dsh-client-ui-better-sidebar"
       ]
     },
+    "packages/client/ui-phone": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-ui-better-sidebar"
+      ]
+    },
     "packages/client/web": {
       "project": [
         "src/**/*.ts",
@@ -742,7 +749,8 @@
         "tests/member-question-e2e/electron.e2e.ts",
         "tests/member-question-e2e/host-plugin.ts",
         "tests/member-question-e2e/*.snapshot.ts",
-        "tests/e2e-sub2api/**/*.ts"
+        "tests/e2e-sub2api/**/*.ts",
+        "tests/e2e-electron/**/*.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -750,6 +758,11 @@
         "tests/**/*.ts"
       ],
       "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-ui-phone",
+        "@deepseek-ai/dsh-phone-environment",
+        "@deepseek-ai/dsh-phone-runtime",
+        "@deepseek-ai/dsh-phone-stream",
+        "@deepseek-ai/dsh-tool-phone",
         "@wdio/cli",
         "@wdio/electron-service",
         "@wdio/local-runner",

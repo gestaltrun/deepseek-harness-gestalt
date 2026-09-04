@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "478-phone-contracts-ready-lint",
+  "summary": {
+    "en": "Close the contracts-ready lint debt across the delivered Desktop phone surface.",
+    "zh": "清零已交付 Desktop 手机能力面的 contracts-ready lint 债务。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The change refines Desktop browser, Host test, snapshot, and catalog implementation without changing Mobile source or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The change refines Desktop browser, Host test, snapshot, and catalog implementation without changing Platform services, deployment inputs, or wire formats."
+    }
+  ]
+}

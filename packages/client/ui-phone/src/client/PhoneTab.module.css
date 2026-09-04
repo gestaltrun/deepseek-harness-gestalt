@@ -1,0 +1,235 @@
+/* Phone tab body: the not-connected empty state only (startup, connected,
+   and error states belong to later device-dock tickets). Rhythm mirrors the
+   better-sidebar panel modules: --dsw-* aliases, 12-14px padding, radius 8
+   rows, dashed empty placeholder. */
+
+.phone {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 14px 16px;
+  /* The body paints elevated surfaces (bg-layer-2 gate strip, the specific
+     selector track); the scrolling thumb rebinds to the l2 pair. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+/* Enable-gate strip pinned to the top of the body while Config.enabled is
+   false; explains why every detection control stays inert. */
+.gateBanner {
+  flex: none;
+  margin: 0 0 12px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.gateTitle {
+  margin: 0;
+  font: var(--dsw-font-xs-strong-13);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.gateDesc {
+  margin: 2px 0 0;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* Platform selector: the segmented pill from the mockup (padding 3px, two
+   rounded segments). Clicking switches which platform list renders below. */
+.platformSeg {
+  align-self: center;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--dsw-specific-selector, var(--dsw-alias-bg-layer-2));
+}
+
+.platformOption {
+  border: none;
+  border-radius: 999px;
+  padding: 3px 14px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xs-13);
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.platformOption:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.platformOption:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+.platformActive {
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+  box-shadow: var(--dsw-shadow-lv1);
+}
+
+.platformHint {
+  margin: 10px 0 0;
+  text-align: center;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-caption);
+}
+
+/* Group headers: caption-strength label with a trailing hairline. */
+.groupName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 2px;
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-xxs-strong-12);
+  letter-spacing: 0.05em;
+}
+
+.groupName::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--dsw-alias-border-l1);
+}
+
+.deviceRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.deviceRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.deviceDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+.deviceDotOffline {
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.deviceDotUnauthorized {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+/* The unauthorized error arm (design state 4) replaces the row's meta and
+   open action with the design's warn copy and its 重新检测 next action. */
+.unauthorizedArm {
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+/* Listing-pull failure arm: unresolvable mobilecli or a refused Host route. */
+.listingFailedArm {
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.listingFailedCommand {
+  display: block;
+  margin-top: 8px;
+  font: var(--dsw-font-markdown-code-block-small);
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+}
+
+.unauthorizedTitle {
+  margin: 0;
+  font: var(--dsw-font-xs-strong-13);
+}
+
+.unauthorizedDetail {
+  margin: 2px 0 0;
+  font: var(--dsw-font-xxs-12);
+}
+
+.alertActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.deviceName {
+  font: var(--dsw-font-xs-strong-13);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deviceMeta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+/* The dashed placeholder row under USB 真机 when no device answers. */
+.emptyRow {
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-xxs-12);
+}
+
+.redetectZone {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.redetectButton {
+  flex: none;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12);
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.redetectButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.redetectButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .platformOption,
+  .deviceRow {
+    transition: none;
+  }
+}

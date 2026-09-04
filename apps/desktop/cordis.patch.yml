@@ -1,4 +1,6 @@
 # Desktop-only overlay on the web profile. Browser `dsh web` does not load this file.
+# `ui-phone` is not re-inserted here: the web-app roster already carries the
+# row, and a second insert duplicates the loader entry id and kills startup.
 - insert:
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
@@ -12,6 +14,37 @@
       config:
         baseUrl: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_ORIGIN
         tokenFile: !!js process.env.DSH_DESKTOP_PROJECT_MEMBERSHIP_TOKEN_FILE
+
+# Phone fleet: Desktop always composes environment, stable fleet, stream, and
+# tool Consumers. The explicit executable env remains the operator override;
+# otherwise the environment selects managed current before system discovery.
+- insert:
+    - id: phone-runtime
+      name: '@deepseek-ai/dsh-phone-runtime'
+      config:
+        deferStart: true
+        serverPort: !!js "Number(process.env.DSH_PHONE_SERVER_PORT || 12000)"
+        provisioningProfilePath: !!js process.env.DSH_PHONE_PROVISIONING_PROFILE
+
+    - id: phone-environment
+      name: '@deepseek-ai/dsh-phone-environment'
+      config:
+        root: !!js dshHomePath('phone')
+        executablePath: !!js process.env.DSH_PHONE_MOBILECLI
+
+    - id: phone-environment-android
+      name: '@deepseek-ai/dsh-phone-environment-android'
+      config:
+        root: !!js dshHomePath('phone')
+
+    - id: phone-environment-ios
+      name: '@deepseek-ai/dsh-phone-environment-ios'
+
+    - id: phone-stream
+      name: '@deepseek-ai/dsh-phone-stream'
+
+    - id: tool-phone
+      name: '@deepseek-ai/dsh-tool-phone'
 
 # DeepSeek Gestalt owns authoritative Companion search and therefore activates
 # the derived full-text index in its Desktop-only layer. Browser `dsh web`

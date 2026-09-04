@@ -1709,6 +1709,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-browser BrowserSettingsSection id \'browser\'',
       'client-ui-desktop AccountControl id \'mobile-pairing\'',
       'client-ui-desktop Sub2ApiControl id \'sub2api\'',
+      'client-ui-phone PhoneSettingsSection id \'phone-devices\'',
       'client-ui-settings-general GeneralSection id \'general\'',
       'client-ui-settings-models ModelsSection id \'models\'',
       'client-ui-settings-plugins PluginsSettingsSection id \'plugins\'',

@@ -85,6 +85,7 @@
     "@deepseek-ai/dsh-client-ui-schedule": "workspace:^",
     "@deepseek-ai/dsh-client-ui-browser": "workspace:^",
     "@deepseek-ai/dsh-client-ui-better-sidebar": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-phone": "workspace:^",
     "@deepseek-ai/dsh-client-ui-workbench": "workspace:^",
     "@deepseek-ai/dsh-client-ui-theme": "workspace:^",
     "@deepseek-ai/dsh-client-ui-tool": "workspace:^",

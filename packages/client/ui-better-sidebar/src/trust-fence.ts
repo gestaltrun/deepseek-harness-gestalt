@@ -1,9 +1,8 @@
 /**
- * Browser-trust fence for the sidebar routes, behaviorally identical to the
- * /api gateway's fence in @deepseek-ai/dsh-client-connection
- * (src/api-request-trust.ts + src/loopback-hostname.ts, BSD-3-Clause,
- * copied here because the package does not export these helpers and the
- * plugin must not depend on its internals). Host-header loopback or a
+ * Browser-trust fence for the sidebar routes, aligned with the /api gateway's
+ * fence whose judgment is shared as @deepseek-ai/dsh-request-trust. This
+ * plugin keeps its own copy: its Origin fence compares hostnames, not
+ * host:port authorities (see below). Host-header loopback or a
  * configured trusted authority passes; cross-site browser markers refuse.
  * This is a DNS-rebinding / cross-site defense, not authentication.
  */

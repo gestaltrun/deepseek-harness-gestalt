@@ -1,0 +1,16 @@
+# phone/ — Phone device fleet capability family
+
+English | [中文](README.zh.md)
+
+The phone device fleet over the external mobilecli binary: one Host-half Service owns the loopback server child process, health polling, and the unified device listing; model- or GUI-facing Consumers evolve in their own packages.
+
+| Package | Role | ctx key |
+|---|---|---|
+| [`phone-environment/`](phone-environment/README.md) | Host toolchain detection and trusted managed mobilecli preparation | `ctx.phoneEnvironment` |
+| [`phone-environment-android/`](phone-environment-android/README.md) | Android SDK, API 35 image, and default AVD preparation Provider | registers into `ctx.phoneEnvironment` |
+| [`phone-environment-ios/`](phone-environment-ios/README.md) | Xcode iOS Runtime and default iPhone Simulator preparation Provider | registers into `ctx.phoneEnvironment` |
+| [`phone-runtime/`](phone-runtime/README.md) | mobilecli Provider and Service Definition, folded | `ctx.phoneDevices` |
+| [`phone-stream/`](phone-stream/README.md) | same-origin IO WebSocket and signed MJPEG/H264 reverse-proxy | `ctx.phoneStream` |
+| [`tool-phone/`](tool-phone/README.md) | Deferred model-facing Consumer | registers on `ctx.tools` |
+
+The subsystem reference is [docs/subsystems/phone-runtime.md](../../docs/subsystems/phone-runtime.md).

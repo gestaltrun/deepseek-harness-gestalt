@@ -1,0 +1,43 @@
+/* Primary minibutton shared by the phone tab bodies (the mockup's solid
+   pill-on-label button); consumers compose it so the shape lives once. */
+
+.minibtnPrimary {
+  flex: none;
+  border: none;
+  border-radius: 7px;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font: var(--dsw-font-xxs-12);
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.minibtnPrimary:hover {
+  opacity: 0.88;
+}
+
+.minibtnPrimary:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+.minibtnSecondary {
+  flex: none;
+  border: 1px solid var(--dsw-alias-border-subtle);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.minibtnSecondary:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-border-default);
+}
+
+.minibtnSecondary:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}

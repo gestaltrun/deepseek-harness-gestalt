@@ -26,6 +26,7 @@
     // Client package outside packages/client with a local CSS module face.
     "packages/extensions/ui-cordis/src/css-modules.d.ts",
     "packages/client/tsdown.client.ts",
+    "scripts/client-artifact-contract.ts",
     "scripts/client-build-environment.ts",
     "scripts/*.client.spec.ts",
     "scripts/client-bundle-css.spec.ts",
@@ -100,6 +101,7 @@
     { "path": "./packages/client/ui-user-questions" },
     { "path": "./packages/client/ui-member-questions" },
     { "path": "./packages/client/ui-trajectory" },
+    { "path": "./packages/client/ui-phone" },
     { "path": "./packages/session-query/session-log-export" },
     { "path": "./packages/client/ui-theme" },
     { "path": "./packages/client/ui-settings" },

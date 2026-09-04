@@ -1,0 +1,256 @@
+/**
+ * The listing source that consumes the Host `GET /phone/devices` route:
+ * wire validation, kind→channel mapping, commit-only-on-success with
+ * subscriber notification, snapshot identity between commits, and the
+ * badge online count — against stubbed browser globals.
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  createHttpPhoneListingSource, fetchPhoneListing, PHONE_DEVICES_PATH,
+} from '../src/client/phone-listing.ts'
+import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
+
+afterEach(() => { vi.unstubAllGlobals() })
+
+const WIRE_LISTING = {
+  android: [
+    { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', state: 'online', online: true },
+    { id: 'R3CN30', name: 'SM-S9310', kind: 'real', state: 'offline', online: false },
+  ],
+  ios: {
+    simulators: [{ id: 'iPhone-16', name: 'iPhone 16', kind: 'simulator', state: 'online', online: true }],
+    reals: [{ id: 'UDID-9', name: 'iPhone', kind: 'real', state: 'unauthorized', online: false }],
+  },
+}
+
+function stubFetch(status: number, body: unknown): { input: RequestInfo | URL; init: RequestInit } {
+  const seen: { input: RequestInfo | URL; init: RequestInit } = {} as never
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.input = input
+    seen.init = init ?? {}
+    return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })
+  }))
+  return seen
+}
+
+async function rejectionOf(run: () => Promise<unknown>): Promise<PhoneStreamHttpError> {
+  try {
+    await run()
+  } catch (error: unknown) {
+    if (error instanceof PhoneStreamHttpError) return error
+    throw error
+  }
+  throw new Error('expected PhoneStreamHttpError')
+}
+
+describe('phone listing source', () => {
+  it('starts empty and quiet before the first commit', () => {
+    const source = createHttpPhoneListingSource()
+    expect(source.snapshot()).toEqual({ android: [], ios: [] })
+    expect(source.getBadge()).toEqual({ onlineCount: 0 })
+  })
+
+  it('pulls the grouped listing, maps kinds onto channels, and counts online devices', async () => {
+    const seen = stubFetch(200, WIRE_LISTING)
+    const source = createHttpPhoneListingSource()
+    await source.refresh()
+    expect(seen.input).toBe(PHONE_DEVICES_PATH)
+    expect(seen.init.method).toBe('GET')
+    expect(source.snapshot()).toEqual({
+      android: [
+        { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
+        { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'offline', online: false },
+      ],
+      ios: [
+        { id: 'iPhone-16', name: 'iPhone 16', channel: 'emulator', state: 'online', online: true },
+        { id: 'UDID-9', name: 'iPhone', channel: 'usb', state: 'unauthorized', online: false },
+      ],
+    })
+    expect(source.getBadge()).toEqual({ onlineCount: 2 })
+  })
+
+  it('carries Host logicalDisplay on Android rows and rejects invalid values', async () => {
+    stubFetch(200, {
+      android: [{
+        id: 'fbcd1d21',
+        name: 'MI 8',
+        kind: 'real',
+        state: 'online',
+        online: true,
+        logicalDisplay: { width: 2248, height: 1080 },
+      }],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await source.refresh()
+    expect(source.snapshot().android[0]).toEqual({
+      id: 'fbcd1d21',
+      name: 'MI 8',
+      channel: 'usb',
+      state: 'online',
+      online: true,
+      logicalDisplay: { width: 2248, height: 1080 },
+    })
+
+    stubFetch(200, {
+      android: [{
+        id: 'x', name: 'x', kind: 'real', state: 'online', online: true, logicalDisplay: { width: 0, height: 1080 },
+      }],
+      ios: { simulators: [], reals: [] },
+    })
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+
+    stubFetch(200, {
+      android: [{
+        id: 'x', name: 'x', kind: 'real', state: 'online', online: true, logicalDisplay: 'landscape',
+      }],
+      ios: { simulators: [], reals: [] },
+    })
+    await expect(createHttpPhoneListingSource().refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+  })
+
+  it('notifies subscribers only when a refresh commits', async () => {
+    stubFetch(200, WIRE_LISTING)
+    const source = createHttpPhoneListingSource()
+    const commits: number[] = []
+    source.subscribe(() => { commits.push(commits.length + 1) })
+    await source.refresh()
+    expect(commits).toEqual([1])
+    stubFetch(500, 'upstream down')
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+    expect(commits).toEqual([1])
+  })
+
+  it('keeps the committed listing when the Host refuses or sends a malformed body', async () => {
+    stubFetch(200, WIRE_LISTING)
+    const source = createHttpPhoneListingSource()
+    await source.refresh()
+    const committed = source.snapshot()
+
+    stubFetch(403, { error: { code: 'forbidden', message: 'forbidden' } })
+    const refused = await rejectionOf(() => source.refresh())
+    expect(refused.status).toBe(403)
+    expect(refused.code).toBe('forbidden')
+    expect(refused.message).toBe('forbidden')
+
+    stubFetch(200, { android: 'nope', ios: {} })
+    const malformed = await rejectionOf(() => source.refresh())
+    expect(malformed.code).toBe('http')
+
+    stubFetch(200, WIRE_LISTING)
+    expect(source.snapshot()).toBe(committed)
+  })
+
+  it.each([
+    ['the body is not JSON', 'not json'],
+    ['the body is not an object', [42]],
+    ['the ios section is missing', { android: [] }],
+    ['an android entry is not an object', { android: [42], ios: { simulators: [], reals: [] } }],
+    ['a ref id is missing', { android: [{ name: 'x', kind: 'real', online: true }], ios: { simulators: [], reals: [] } }],
+    ['a ref name is missing', { android: [{ id: 'x', kind: 'real', online: true }], ios: { simulators: [], reals: [] } }],
+    ['a ref online flag is missing', { android: [{ id: 'x', name: 'x', kind: 'real', state: 'online' }], ios: { simulators: [], reals: [] } }],
+    ['a ref verbatim state is missing', { android: [{ id: 'x', name: 'x', kind: 'real', online: true }], ios: { simulators: [], reals: [] } }],
+    ['an ios group is missing', { android: [], ios: { reals: [] } }],
+    ['an ios ref is broken', { android: [], ios: { simulators: [], reals: [{ id: 'x' }] } }],
+  ])('classifies a listing where %s as a wire error', async (_label, body) => {
+    stubFetch(200, body)
+    const source = createHttpPhoneListingSource()
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+    expect(source.snapshot()).toEqual({ android: [], ios: [] })
+  })
+
+  it('classifies an unknown device kind as a wire error', async () => {
+    stubFetch(200, {
+      android: [{ id: 'x', name: 'x', kind: 'tv', online: true }],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+    expect(source.snapshot()).toEqual({ android: [], ios: [] })
+  })
+
+  it('carries the upstream state verbatim through the wire contract', async () => {
+    stubFetch(200, {
+      android: [
+        { id: 'R3CN30', name: 'SM-S9310', kind: 'real', state: 'unauthorized', online: false },
+        { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', state: 'device', online: true },
+      ],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await source.refresh()
+    // The state rides verbatim (#421 wire): unknown upstream values survive.
+    expect(source.snapshot().android).toEqual([
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'device', online: true },
+    ])
+  })
+
+  it('rejects a listing entry whose verbatim state is missing as a wire error', async () => {
+    stubFetch(200, {
+      android: [{ id: 'x', name: 'x', kind: 'real', online: true }],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+  })
+
+  it('stops notifying after the subscription is disposed', async () => {
+    stubFetch(200, WIRE_LISTING)
+    const source = createHttpPhoneListingSource()
+    const commits: number[] = []
+    const dispose = source.subscribe(() => { commits.push(commits.length + 1) })
+    dispose()
+    await source.refresh()
+    expect(commits).toEqual([])
+  })
+
+  it('carries a PHONE_UNRESOLVED listing failure with the Host install guidance', async () => {
+    stubFetch(502, {
+      error: {
+        code: 'PHONE_UNRESOLVED',
+        message: 'phone-runtime: cannot resolve the mobilecli executable.\n  npm install -g mobilecli@latest',
+      },
+    })
+    const source = createHttpPhoneListingSource()
+    const unresolved = await rejectionOf(() => source.refresh())
+    expect(unresolved.status).toBe(502)
+    expect(unresolved.code).toBe('PHONE_UNRESOLVED')
+    expect(unresolved.message).toContain('npm install -g mobilecli@latest')
+  })
+
+  it('wraps network refusals as status-0 wire errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('load failed')
+    }))
+    const source = createHttpPhoneListingSource()
+    const network = await rejectionOf(() => source.refresh())
+    expect(network.status).toBe(0)
+
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw 'socket reset'
+    }))
+    const nonError = await rejectionOf(() => source.refresh())
+    expect(nonError.message).toBe('socket reset')
+  })
+
+  it('passes selection cancellation to fetch without wrapping the abort', async () => {
+    const lifetime = new AbortController()
+    const abort = new DOMException('selection superseded', 'AbortError')
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal).toBe(lifetime.signal)
+      lifetime.abort()
+      throw abort
+    }))
+    await expect(fetchPhoneListing(lifetime.signal)).rejects.toBe(abort)
+  })
+
+  it('keeps the snapshot reference stable between commits', async () => {
+    stubFetch(200, WIRE_LISTING)
+    const source = createHttpPhoneListingSource()
+    const before = source.snapshot()
+    await source.refresh()
+    expect(source.snapshot()).not.toBe(before)
+    expect(source.snapshot()).toBe(source.snapshot())
+  })
+})

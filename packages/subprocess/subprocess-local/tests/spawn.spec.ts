@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  childEnv,
   killGroup,
   OutputCollector,
   spawnSubprocess,
   taskkillProcessTree,
 } from '../src/spawn.ts'
+import { childEnv } from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessHandle, SubprocessOutputReader } from '@deepseek-ai/dsh-subprocess'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 

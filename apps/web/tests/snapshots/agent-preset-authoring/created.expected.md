@@ -16,6 +16,9 @@
     - button "浏览器":
       - img
       - text: 浏览器
+    - button "手机设备":
+      - img
+      - text: 手机设备
     - button "侧边卡片"
   - button "打开配置文件"
   - button "关闭":

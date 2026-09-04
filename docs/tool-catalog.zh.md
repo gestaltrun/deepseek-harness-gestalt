@@ -46,6 +46,7 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-browser` | `browser_close`、`browser_create`、`browser_focus`、`browser_input`、`browser_navigate`、`browser_observe`、`browser_screenshot` | `ctx.tools`、`ctx.browserRuntime` | `tool/call`、`tool/result` | - | 所有 Browser 工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。 |
+| `@deepseek-ai/dsh-tool-phone` | `device_act`、`device_close`、`device_list`、`device_observe`、`device_open`、`device_screenshot` | `ctx.tools`、`ctx.phoneDevices` | `tool/call`、`tool/result` | - | 所有手机设备工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。device_open 与 device_close 默认走 tools/pre-execute ask；device_act 不走。 |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
@@ -2610,6 +2611,236 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 来源：[`packages/browser/tool-browser/src/index.ts`](../packages/browser/tool-browser/src/index.ts)
 
 所有 Browser 工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。
+
+<a id="deepseek-aidsh-tool-phone"></a>
+
+## `@deepseek-ai/dsh-tool-phone`
+
+### `device_act`
+
+在一台手机设备上执行一次封闭的 tap、swipe、type 或硬件按钮动作。没有任意 shell。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "description": "Android serial or iOS UDID returned by device_list."
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "tap"
+            },
+            "x": {
+              "type": "integer",
+              "description": "Horizontal pixel coordinate."
+            },
+            "y": {
+              "type": "integer",
+              "description": "Vertical pixel coordinate."
+            }
+          },
+          "required": [
+            "kind",
+            "x",
+            "y"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "swipe"
+            },
+            "x1": {
+              "type": "integer",
+              "description": "Start horizontal pixel coordinate."
+            },
+            "y1": {
+              "type": "integer",
+              "description": "Start vertical pixel coordinate."
+            },
+            "x2": {
+              "type": "integer",
+              "description": "End horizontal pixel coordinate."
+            },
+            "y2": {
+              "type": "integer",
+              "description": "End vertical pixel coordinate."
+            }
+          },
+          "required": [
+            "kind",
+            "x1",
+            "y1",
+            "x2",
+            "y2"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "type"
+            },
+            "text": {
+              "type": "string",
+              "description": "Non-empty text to type."
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "button"
+            },
+            "name": {
+              "type": "string",
+              "description": "Hardware button to press.",
+              "enum": [
+                "home",
+                "back",
+                "recents",
+                "power",
+                "volume_up",
+                "volume_down"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        }
+      ],
+      "description": "Exactly one closed gesture or hardware-button action."
+    }
+  },
+  "required": [
+    "deviceId",
+    "action"
+  ]
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
+
+### `device_close`
+
+关闭一台 iOS 模拟器或 Android 仿真器。真机被拒绝。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "description": "Android serial or iOS UDID returned by device_list."
+    }
+  },
+  "required": [
+    "deviceId"
+  ]
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
+
+### `device_list`
+
+列出手机设备群已知的全部 Android 与 iOS 设备，包括离线模拟器与仿真器。
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
+
+### `device_observe`
+
+从最新设备群清单观察一台手机设备。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "description": "Android serial or iOS UDID returned by device_list."
+    }
+  },
+  "required": [
+    "deviceId"
+  ]
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
+
+### `device_open`
+
+启动一台 iOS 模拟器或 Android 仿真器。真机被拒绝。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "description": "Android serial or iOS UDID returned by device_list."
+    }
+  },
+  "required": [
+    "deviceId"
+  ]
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
+
+### `device_screenshot`
+
+捕获一台手机设备的 PNG 截图并返回其绝对文件路径。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "description": "Android serial or iOS UDID returned by device_list."
+    }
+  },
+  "required": [
+    "deviceId"
+  ]
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts`](../packages/phone/tool-phone/src/index.ts)
+
+所有手机设备工具均为 deferred：tool_search 返回其 schema 而不激活工具，当前 eligibility 继续作为权威。device_open 与 device_close 默认走 tools/pre-execute ask；device_act 不走。
 
 <a id="deepseek-aidsh-tool-web"></a>
 

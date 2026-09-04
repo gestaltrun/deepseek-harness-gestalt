@@ -14,7 +14,7 @@ import { closeSync, mkdtempSync, openSync, unlinkSync, writeSync } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleepMs } from 'node:timers/promises'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { childEnv } from '@deepseek-ai/dsh-subprocess'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type {
   CollectedOutput,
@@ -25,26 +25,6 @@ import type {
   SubprocessSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
 import { linuxProcessGroupHasLiveMembers } from './process-inspector.ts'
-
-/**
- * Build a child environment: explicit caller entries override the scrubbed
- * parent base using the target platform's environment-key semantics. A string
- * deliberately restores or overrides an entry; an explicit `undefined`
- * tombstone removes an ordinary ambient entry.
- * @param extra - explicit caller entries and tombstones, merged after the scrub.
- * @returns the environment to hand to `spawn` for the child process.
- */
-export function childEnv(extra?: Readonly<NodeJS.ProcessEnv>): NodeJS.ProcessEnv {
-  const env = scrubbedParentEnv()
-  if (process.platform !== 'win32') return { ...env, ...extra }
-  let entries: [string, string | undefined][] = Object.entries(env)
-  for (const [key, value] of Object.entries(extra ?? {})) {
-    const normalized = key.toUpperCase()
-    entries = entries.filter(([inherited]) => inherited.toUpperCase() !== normalized)
-    entries.push([key, value])
-  }
-  return Object.fromEntries(entries)
-}
 
 /** Injectable knobs so tests can exercise spill and platform behavior deterministically. */
 export interface SpawnInternals {

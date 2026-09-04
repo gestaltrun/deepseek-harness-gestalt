@@ -28,6 +28,7 @@ packages/    @deepseek-ai/dsh-<pkg> workspaces at packages/<group>/<pkg>/
   skill/       skill provider registry + local impl + catalog/loader tool
   web/         web capability: Service Definition + search/fetch providers + tool Consumer
   browser/     Browser Runtime capability: Providers + deferred tools
+  phone/       mobilecli-backed phone device fleet Service (Host half)
   compaction/     compaction capability + basic provider
   context/     request-context plugins
   subagent/    subagent capability: Service Definition + providers + delegation Consumers

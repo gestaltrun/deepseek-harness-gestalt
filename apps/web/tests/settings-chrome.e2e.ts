@@ -31,6 +31,7 @@ const DIALOG_EN_EXPECTED = join(SNAPSHOT_DIR, 'dialog-en.expected.md')
 const DESKTOP_SETTINGS_EXPECTED = join(SNAPSHOT_DIR, 'desktop-settings.expected.md')
 const DESKTOP_ACCOUNT_WAITING_EXPECTED = join(SNAPSHOT_DIR, 'desktop-account-waiting.expected.md')
 const SUB2API_ERROR_EXPECTED = join(SNAPSHOT_DIR, 'sub2api-error.expected.md')
+const PHONE_DEVICES_EXPECTED = join(SNAPSHOT_DIR, 'phone-devices.expected.md')
 const PLUGIN_ROW_SELECTOR = '[data-plugin-entry$="ui-settings"]'
 const DESKTOP_BRIDGE_FIXTURE = fileURLToPath(
   new URL('../../../packages/client/ui-desktop/tests/desktop-bridge-fixture.client.ts', import.meta.url),
@@ -50,6 +51,21 @@ describe('web e2e: the settings page and General preferences', () => {
     // the client derives from it (the English default has its own spec below).
     page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
     tripwire = watchConsole(page)
+    await page.route('**/phone/environment', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          revision: 1,
+          enabled: false,
+          runtime: { kind: 'missing', targetVersion: '1.0.5', assetBytes: 5_458_848 },
+          platforms: {
+            android: { kind: 'deferred' },
+            ios: { kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' },
+          },
+        }),
+      })
+    })
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
   }, 120_000)
@@ -135,6 +151,11 @@ describe('web e2e: the settings page and General preferences', () => {
       scaffold.workspaceCwd,
     )
     await compareOrRefreshGolden(PLUGINS_EXPECTED, pluginsSnapshot, MODE)
+    await dialog.getByRole('button', { name: '手机设备', exact: true }).click()
+    const phoneSettings = dialog.locator('[data-phone-settings]')
+    await phoneSettings.getByText('设备运行时 · mobilecli', { exact: true }).waitFor({ timeout: 10_000 })
+    const phoneSnapshot = await captureStableAria(page, '[data-phone-settings]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(PHONE_DEVICES_EXPECTED, phoneSnapshot, MODE)
     // Close path 1: Escape.
     await page.keyboard.press('Escape')
     await expect.poll(() => page.getByRole('dialog', { name: '设置' }).count(), { timeout: 5_000 }).toBe(0)
@@ -672,8 +693,8 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'desktop-account-waiting.expected.md',
-      'desktop-settings.expected.md', 'dialog-en.expected.md', 'dialog.expected.md', 'plugins.expected.md',
-      'sub2api-error.expected.md',
+      'desktop-settings.expected.md', 'dialog-en.expected.md', 'dialog.expected.md',
+      'phone-devices.expected.md', 'plugins.expected.md', 'sub2api-error.expected.md',
     ])
   }, 60_000)
 })

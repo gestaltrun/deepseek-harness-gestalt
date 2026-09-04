@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-03-settings-listing-live-refresh-and-open-panel-contrast.md
+2026-09-03-settings-listing-live-refresh-and-open-panel-contrast.md: c2e8b0285177bdd03f7b62e6563569a0168e855f
+2026-09-03-settings-listing-live-refresh-and-open-panel-contrast.zh.md: 46122597e6beb11410cc81b0708dd441ba9e8084

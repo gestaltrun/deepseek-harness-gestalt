@@ -33,10 +33,31 @@ describe('client bundle build faces', () => {
     expect(development?.entry).toEqual({ client: 'src/client/index.ts' })
     expect(artifact?.entry).toEqual({ client: 'lib/types/client/index.js' })
   })
+
+  it('uses a package-declared TSX entry in development', () => {
+    const bundle = clientBundle(
+      '@deepseek-ai/dsh-client-test',
+      ['lib/types/index.js'],
+      { clientSourceEntry: 'src/client/index.tsx' },
+    )
+    const development = bundle({ env: {} }).find(config => config.platform === 'browser')
+    const artifact = bundle({ env: { DSH_BUILD_FACE: 'client' } })
+      .find(config => config.platform === 'browser')
+
+    expect(development?.entry).toEqual({ client: 'src/client/index.tsx' })
+    expect(artifact?.entry).toEqual({ client: 'lib/types/client/index.js' })
+  })
+
+  it('publishes the loader factory as CommonJS with an explicit CommonJS extension', () => {
+    const artifact = clientConfigs()[0]
+
+    expect(artifact?.format).toBe('cjs')
+    expect(artifact?.outputOptions).toMatchObject({ entryFileNames: 'client.cjs' })
+  })
 })
 
 function clientSourceMapPath(packagePath: string): string {
-  return fileURLToPath(new URL(`../packages/${packagePath}/lib/client.js.map`, import.meta.url))
+  return fileURLToPath(new URL(`../packages/${packagePath}/lib/client.cjs.map`, import.meta.url))
 }
 
 function purityResolveId(id = REQUESTING_PACKAGE): ResolveId {
@@ -148,6 +169,13 @@ describe('client bundle debug artifacts', () => {
   it('emits source maps for plugin TS and TSX outside the Vite module graph', () => {
     const configs = clientConfigs()
     expect(configs[0]?.sourcemap).toBe(true)
+  })
+
+  it('composes tsc maps into every dynamic browser bundle', () => {
+    const configs = clientConfigs()
+    const plugins = (configs[0] as { plugins: { name: string }[] }).plugins
+
+    expect(plugins.some(plugin => plugin.name === 'dsh-tsc-sourcemap')).toBe(true)
   })
 
   it('maps first-party sources to their repository package paths', () => {

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- Screen: device dock 同一标记的亮 / 暗双栏对照，验证 token 映射成立。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计稿 · 亮暗主题对照</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css).
+   The dark column simply sets [data-dsw-dark-theme] on its wrapper —
+   the same attribute the ui-layout theme presenter paints on <body>. */
+body {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+
+  /* static scale */
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-green-900: rgb(35, 60, 44);
+
+  /* semantic aliases — LIGHT */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-mask-drop: rgba(255, 255, 255, 0.7);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-60);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+
+  /* typography + elevation */
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+
+  --dd-r-lg: 16px;
+  --dd-r-md: 10px;
+  --dd-r-sm: 8px;
+  --dd-shell: var(--dsw-static-neutral-bluish-900);
+}
+/* semantic aliases — DARK (the only thing a themed subtree changes) */
+[data-dsw-dark-theme] {
+  --dsw-static-neutral-bluish-60: rgb(249, 250, 251);
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-mask-drop: rgba(39, 39, 48, 0.7);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+
+.proto-note {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-button-info-fill);
+  color: var(--dsw-alias-button-info-fill);
+  font: var(--dsw-font-code-block-small); letter-spacing: 0.04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code {
+  font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-specific-selector); padding: 1px 7px; border-radius: 6px;
+}
+.proto-note .spacer { flex: 1; }
+
+.compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: calc(100vh - 34px);
+}
+.col { padding: 34px 30px 70px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.col .collabel {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 4px 13px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  font: var(--dsw-font-xs-strong-13);
+}
+.collabel .mono { font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-caption); }
+
+/* the evaluated dock panel — identical markup in both columns */
+.panel {
+  width: 392px;
+  border-radius: var(--dd-r-lg);
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-shadow-lv3);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.p-head {
+  display: flex; align-items: center; gap: 8px;
+  height: 44px; padding: 0 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.p-head b { font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 7px; color: var(--dsw-alias-label-primary); }
+.p-head b svg { color: var(--dsw-alias-label-tertiary); }
+.devtag {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  padding: 3px 10px; border-radius: 999px;
+}
+.dot { width: 7px; height: 7px; border-radius: 999px; background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+@keyframes dd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--dsw-alias-state-success-tertiary); }
+  50% { box-shadow: 0 0 0 4px var(--dsw-alias-state-success-tertiary); }
+}
+
+.stagepad { display: grid; place-items: center; padding: 20px 16px; }
+.phone.f-bezel { padding: 6px; border-radius: 30px; }
+.phone .screen {
+  aspect-ratio: 360 / 640;
+  width: 268px;
+  max-width: 100%;
+  border-radius: 26px;
+  outline: 6px solid var(--dd-shell);
+  overflow: hidden;
+  background: var(--dsw-alias-bg-layer-1);
+}
+svg.scr { display: block; width: 100%; height: 100%; }
+
+.toolrow {
+  display: flex; justify-content: center; gap: 4px;
+  margin: 0 16px 12px;
+  padding: 6px; border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+.iconbtn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--dd-r-sm);
+  background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer;
+}
+.iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.toolsep { width: 1px; background: var(--dsw-alias-border-l2); margin: 5px 5px; }
+
+.meta { display: flex; justify-content: center; gap: 6px; padding-bottom: 14px; }
+.tierchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px;
+  padding: 2px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px; font-weight: 500;
+}
+.tierchip.active { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
+.tierchip .live { width: 6px; height: 6px; border-radius: 999px; background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+.tierchip .biz { width: 6px; height: 6px; border-radius: 999px; background: var(--dsw-alias-state-business-primary); }
+
+.swatchrow { max-width: 392px; width: 100%; margin-top: 4px; }
+.swatchrow h3 { font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-caption); margin: 0 0 8px; letter-spacing: 0.05em; }
+.swgrid { display: flex; flex-wrap: wrap; gap: 6px; }
+.sw {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  padding: 2px 9px 2px 5px;
+}
+.sw i {
+  font-style: normal;
+  width: 12px; height: 12px; border-radius: 4px; flex: none;
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+.footnote { max-width: 420px; text-align: center; color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-12); line-height: 1.7; }
+
+@media (max-width: 980px) { .compare { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE</span>
+  <b>屏幕：亮 / 暗对照（device dock 一屏）</b>
+  <code>token 映射：两栏标记与样式完全一致，仅右栏外层切换 data-dsw-dark-theme 属性</code>
+  <span>手机画面 SVG 也吃同一套变量，暗色下屏幕内容随主题变灰暗 —— 与真实流画面的观感一致。</span>
+  <span class="spacer"></span>
+  <a href="./README.md" style="color:inherit;">索引</a>
+</div>
+
+<div class="compare">
+
+  <!-- ============ LIGHT ============ -->
+  <section class="col" id="colLight">
+    <span class="collabel">Light<span class="mono">body 默认别名</span></span>
+
+    <div class="panel">
+      <header class="p-head">
+        <b>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+          设备
+        </b>
+        <span class="devtag"><span class="dot"></span>Pixel_6_API_35</span>
+      </header>
+      <div class="stagepad">
+        <div class="phone f-bezel"><div class="screen"><svg class="scr" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice">
+          <rect width="360" height="640" fill="var(--dsw-alias-bg-layer-1)"/>
+          <text x="26" y="30" font-size="14" font-weight="600" fill="var(--dsw-alias-label-primary)">9:41</text>
+          <rect x="276" y="19" width="3" height="4" rx="1" fill="var(--dsw-alias-label-primary)"/><rect x="281" y="16" width="3" height="7" rx="1" fill="var(--dsw-alias-label-primary)"/><rect x="286" y="13" width="3" height="10" rx="1" fill="var(--dsw-alias-label-primary)"/><rect x="291" y="10" width="3" height="13" rx="1" fill="var(--dsw-alias-label-primary)"/>
+          <text x="26" y="76" font-size="25" font-weight="700" fill="var(--dsw-alias-label-primary)" font-family="-apple-system,'PingFang SC',sans-serif">消息</text>
+          <g font-family="-apple-system,'PingFang SC',sans-serif">
+            <g><circle cx="50" cy="148" r="24" fill="var(--dsw-static-deepseek-200)"/><text x="50" y="155" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-static-deepseek-600)">林</text>
+              <text x="88" y="144" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">林小满</text><text x="88" y="164" font-size="12" fill="var(--dsw-alias-label-tertiary)">收到，明天上午同步细节</text></g>
+            <g><circle cx="50" cy="248" r="24" fill="var(--dsw-static-green-100)"/><text x="50" y="255" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-static-green-500)">摄</text>
+              <text x="88" y="244" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">摄影小组</text><text x="88" y="264" font-size="12" fill="var(--dsw-alias-label-tertiary)">新样片传到共享相册了</text></g>
+            <g><circle cx="50" cy="348" r="24" fill="var(--dsw-static-neutral-bluish-150)"/><text x="50" y="355" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-alias-label-tertiary)">张</text>
+              <text x="88" y="344" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">张一帆</text><text x="88" y="364" font-size="12" fill="var(--dsw-alias-label-tertiary)">[图片]</text></g>
+            <g><circle cx="50" cy="448" r="24" fill="var(--dsw-static-neutral-bluish-200)"/><text x="50" y="455" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-alias-label-secondary)">订</text>
+              <text x="88" y="444" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">订阅号</text><text x="88" y="464" font-size="12" fill="var(--dsw-alias-label-tertiary)">早报：一行代码修复泄漏</text></g>
+          </g>
+          <rect x="0" y="586" width="360" height="54" fill="var(--dsw-alias-bg-layer-1)" stroke="var(--dsw-alias-border-l1)" stroke-width="1"/>
+          <path d="M56 606c7-6 14-6 21 0v18H56Z" fill="none" stroke="var(--dsw-alias-label-primary)" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="180" cy="613" r="7" fill="none" stroke="var(--dsw-alias-label-tertiary)" stroke-width="2"/>
+          <circle cx="304" cy="607" r="6" fill="none" stroke="var(--dsw-alias-label-tertiary)" stroke-width="2"/>
+          <path d="M298 620c1.3-4.4 11.7-4.4 13 0" fill="none" stroke="var(--dsw-alias-label-tertiary)" stroke-width="2" stroke-linecap="round"/>
+        </svg></div></div>
+      </div>
+      <div class="toolrow">
+        <button class="iconbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+        <span class="toolsep"></span>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 3v4h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.6-2.4h6.8L17 8.5h3v10H4v-10Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13.4" r="3" stroke="currentColor" stroke-width="2"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v4.5h-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 12a8 8 0 0 1-13.66 5.66L4 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 20v-4.5h4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div class="meta">
+        <span class="tierchip active"><span class="live"></span>MJPEG · 10 fps</span>
+        <span class="tierchip"><span class="biz"></span>H264 · 30 fps</span>
+      </div>
+    </div>
+
+    <div class="swatchrow">
+      <h3>LIGHT 别名 → 值</h3>
+      <div class="swgrid">
+        <span class="sw"><i style="background:var(--dsw-alias-bg-base);"></i>bg-base</span>
+        <span class="sw"><i style="background:var(--dsw-alias-bg-layer-2);"></i>bg-layer-2</span>
+        <span class="sw"><i style="background:var(--dsw-alias-label-primary);"></i>label-primary</span>
+        <span class="sw"><i style="background:var(--dsw-alias-label-tertiary);"></i>label-tertiary</span>
+        <span class="sw"><i style="background:var(--dsw-alias-state-business-primary);"></i>business</span>
+        <span class="sw"><i style="background:var(--dsw-specific-sidebar-fill);outline:1px solid var(--dsw-alias-border-l2);"></i>sidebar-fill</span>
+      </div>
+    </div>
+    <p class="footnote">左栏为 body 默认（亮色）别名；所有填充只引用 --dsw-* 变量。</p>
+  </section>
+
+  <!-- ============ DARK — identical markup, only the wrapper attribute differs ============ -->
+  <section class="col" id="colDark" data-dsw-dark-theme>
+    <span class="collabel">Dark<span class="mono">[data-ds-dark-theme] 重映射</span></span>
+
+    <div class="panel">
+      <header class="p-head">
+        <b>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+          设备
+        </b>
+        <span class="devtag"><span class="dot"></span>Pixel_6_API_35</span>
+      </header>
+      <div class="stagepad">
+        <div class="phone f-bezel"><div class="screen"><svg class="scr" viewBox="0 0 360 640" preserveAspectRatio="xMidYMid slice">
+          <rect width="360" height="640" fill="var(--dsw-alias-bg-layer-1)"/>
+          <text x="26" y="30" font-size="14" font-weight="600" fill="var(--dsw-alias-label-primary)">9:41</text>
+          <rect x="276" y="19" width="3" height="4" rx="1" fill="var(--dsw-alias-label-primary)"/><rect x="281" y="16" width="3" height="7" rx="1" fill="var(--dsw-alias-label-primary)"/><rect x="286" y="13" width="3" height="10" rx="1" fill="var(--dsw-alias-label-primary)"/><rect x="291" y="10" width="3" height="13" rx="1" fill="var(--dsw-alias-label-primary)"/>
+          <text x="26" y="76" font-size="25" font-weight="700" fill="var(--dsw-alias-label-primary)" font-family="-apple-system,'PingFang SC',sans-serif">消息</text>
+          <g font-family="-apple-system,'PingFang SC',sans-serif">
+            <g><circle cx="50" cy="148" r="24" fill="var(--dsw-static-deepseek-200)"/><text x="50" y="155" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-static-deepseek-600)">林</text>
+              <text x="88" y="144" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">林小满</text><text x="88" y="164" font-size="12" fill="var(--dsw-alias-label-tertiary)">收到，明天上午同步细节</text></g>
+            <g><circle cx="50" cy="248" r="24" fill="var(--dsw-static-green-100)"/><text x="50" y="255" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-static-green-500)">摄</text>
+              <text x="88" y="244" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">摄影小组</text><text x="88" y="264" font-size="12" fill="var(--dsw-alias-label-tertiary)">新样片传到共享相册了</text></g>
+            <g><circle cx="50" cy="348" r="24" fill="var(--dsw-static-neutral-bluish-150)"/><text x="50" y="355" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-alias-label-tertiary)">张</text>
+              <text x="88" y="344" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">张一帆</text><text x="88" y="364" font-size="12" fill="var(--dsw-alias-label-tertiary)">[图片]</text></g>
+            <g><circle cx="50" cy="448" r="24" fill="var(--dsw-static-neutral-bluish-200)"/><text x="50" y="455" font-size="18" font-weight="600" text-anchor="middle" fill="var(--dsw-alias-label-secondary)">订</text>
+              <text x="88" y="444" font-size="15" font-weight="600" fill="var(--dsw-alias-label-primary)">订阅号</text><text x="88" y="464" font-size="12" fill="var(--dsw-alias-label-tertiary)">早报：一行代码修复泄漏</text></g>
+          </g>
+          <rect x="0" y="586" width="360" height="54" fill="var(--dsw-alias-bg-layer-1)" stroke="var(--dsw-alias-border-l1)" stroke-width="1"/>
+          <path d="M56 606c7-6 14-6 21 0v18H56Z" fill="none" stroke="var(--dsw-alias-label-primary)" stroke-width="2" stroke-linejoin="round"/>
+          <circle cx="180" cy="613" r="7" fill="none" stroke="var(--dsw-alias-label-tertiary)" stroke-width="2"/>
+          <circle cx="304" cy="607" r="6" fill="none" stroke="var(--dsw-alias-label-tertiary)" stroke-width="2"/>
+          <path d="M298 620c1.3-4.4 11.7-4.4 13 0" fill="none" stroke="var(--dsw-alias-label-tertiary)" stroke-width="2" stroke-linecap="round"/>
+        </svg></div></div>
+      </div>
+      <div class="toolrow">
+        <button class="iconbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+        <span class="toolsep"></span>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 1 1-2.34-5.66" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 3v4h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.6-2.4h6.8L17 8.5h3v10H4v-10Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13.4" r="3" stroke="currentColor" stroke-width="2"/></svg></button>
+        <button class="iconbtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v4.5h-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 12a8 8 0 0 1-13.66 5.66L4 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 20v-4.5h4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div class="meta">
+        <span class="tierchip active"><span class="live"></span>MJPEG · 10 fps</span>
+        <span class="tierchip"><span class="biz"></span>H264 · 30 fps</span>
+      </div>
+    </div>
+
+    <div class="swatchrow">
+      <h3>DARK 别名 → 值</h3>
+      <div class="swgrid">
+        <span class="sw"><i style="background:var(--dsw-alias-bg-base);"></i>bg-base</span>
+        <span class="sw"><i style="background:var(--dsw-alias-bg-layer-2);"></i>bg-layer-2</span>
+        <span class="sw"><i style="background:var(--dsw-alias-label-primary);"></i>label-primary</span>
+        <span class="sw"><i style="background:var(--dsw-alias-label-tertiary);"></i>label-tertiary</span>
+        <span class="sw"><i style="background:var(--dsw-alias-state-business-primary);"></i>business</span>
+        <span class="sw"><i style="background:var(--dsw-specific-sidebar-fill);outline:1px solid var(--dsw-alias-border-l2);"></i>sidebar-fill</span>
+      </div>
+    </div>
+    <p class="footnote">右栏仅在容器上切换 data-dsw-dark-theme，静态刻度中只有 neutral-bluish-60 在暗色下有独立值。</p>
+  </section>
+</div>
+</body>
+</html>

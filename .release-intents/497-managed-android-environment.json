@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "497-managed-android-environment",
+  "summary": {
+    "en": "Let Desktop prepare and start a pinned Android SDK, API 35 image, and private default emulator.",
+    "zh": "让 Desktop 准备并启动固定 Android SDK、API 35 镜像与私有默认模拟器。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Android SDK preparation runs only in the Desktop Host and does not change Mobile source or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Android SDK preparation is local to Desktop and does not change Platform services or wire formats."
+    }
+  ]
+}

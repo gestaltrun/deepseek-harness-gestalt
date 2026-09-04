@@ -2052,6 +2052,118 @@ export interface Config {
 
 Source: [`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
 
+<a id="deepseek-aidsh-phone-environment"></a>
+
+## `@deepseek-ai/dsh-phone-environment`
+
+Requires: `phoneDevices` · `webServer`
+
+```ts config-catalog
+/** Host-specific configuration; release trust facts remain fixed in source. */
+export interface Config {
+  /** Private phone state root; defaults to `$DSH_HOME/phone`. */
+  readonly root?: string
+  /** Explicit operator executable override, ahead of managed and system discovery. */
+  readonly executablePath?: string
+  /** Ceiling for mobilecli listing the prepared Android device online before the H264 probe. */
+  readonly androidRuntimeVerifyTimeoutMs?: number
+  /** Ceiling for online-listing, device-agent, and recognizable-picture verification. */
+  readonly iosRuntimeVerifyTimeoutMs?: number
+  /** Delay after installing the Simulator device agent before the first capture. */
+  readonly iosAgentSettleDelayMs?: number
+  /** Delay before retrying an unsuccessful first capture after device-agent installation. */
+  readonly iosAgentCaptureRetryDelayMs?: number
+  /** Ceiling for the first capture opened after device-agent installation. */
+  readonly iosAgentFirstCaptureTimeoutMs?: number
+}
+```
+
+Source: [`packages/phone/phone-environment/src/index.ts:82`](../packages/phone/phone-environment/src/index.ts)
+
+<a id="deepseek-aidsh-phone-environment-android"></a>
+
+## `@deepseek-ai/dsh-phone-environment-android`
+
+Requires: `phoneEnvironment`
+
+```ts config-catalog
+/** Host-private root shared with the stable phone environment Service. */
+export interface Config {
+  /** Private phone environment root; defaults to `$DSH_HOME/phone`. */
+  readonly root?: string
+}
+```
+
+Source: [`packages/phone/phone-environment-android/src/index.ts:21`](../packages/phone/phone-environment-android/src/index.ts)
+
+<a id="deepseek-aidsh-phone-runtime"></a>
+
+## `@deepseek-ai/dsh-phone-runtime`
+
+```ts config-catalog
+/**
+ * Validated runtime configuration. Defaults carry the upstream facts they can:
+ * `serverPort` mirrors mobilecli's documented default listen port and
+ * `bootTimeoutMs` mirrors the extended upstream deadline granted to
+ * `device.boot`; the polling cadence fields are deployment-varying choices.
+ */
+export interface Config {
+  /**
+   * Absolute path to the `mobilecli` executable. When omitted, `PATH` is
+   * searched first, then npm-global, the npx cache, and `npm_config_prefix`.
+   * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
+   */
+  executablePath?: string
+  /** Wait for the environment owner to select and activate an executable. */
+  deferStart?: boolean
+  /** Loopback TCP port the spawned server listens on. */
+  serverPort?: number
+  /** Interval between health probes and device-list polls, in milliseconds. */
+  pollIntervalMs?: number
+  /** Stable-child interval required after the first valid device listing, in milliseconds. */
+  readyStabilityMs?: number
+  /** Total window granted to readiness probing, baseline listing, and stability, in milliseconds. */
+  readyTimeoutMs?: number
+  /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
+  requestTimeoutMs?: number
+  /** Ceiling for recognizing one H264 key access unit from each Android source. */
+  h264ProbeTimeoutMs?: number
+  /** Ceiling on a `device.boot` round trip, in milliseconds. */
+  bootTimeoutMs?: number
+  /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
+  agentTimeoutMs?: number
+  /**
+   * Absolute path to the `.mobileprovision` file passed as
+   * `--provisioning-profile` when installing or re-signing the on-device agent
+   * on a physical handset; the upstream command requires it for real iOS
+   * installs. When set, the path must name an existing file.
+   */
+  provisioningProfilePath?: string
+}
+```
+
+Source: [`packages/phone/phone-runtime/src/index.ts:115`](../packages/phone/phone-runtime/src/index.ts)
+
+<a id="deepseek-aidsh-phone-stream"></a>
+
+## `@deepseek-ai/dsh-phone-stream`
+
+Requires: `phoneDevices` · `webServer`
+
+```ts config-catalog
+/**
+ * Validated runtime configuration. Token lifetime is a deployment-varying
+ * choice; path prefixes, HMAC algorithm, and the loopback capture fence are
+ * security invariants.
+ */
+export interface Config {
+  /** Milliseconds a minted capture URL remains valid. */
+  tokenTtlMs?: number
+}
+```
+
+Source: [`packages/phone/phone-stream/src/index.ts:59`](../packages/phone/phone-stream/src/index.ts)
+
 <a id="deepseek-aidsh-plan-mode"></a>
 
 ## `@deepseek-ai/dsh-plan-mode`
@@ -3573,6 +3685,22 @@ export interface Config {
 
 Source: [`packages/lsp/tool-lsp/src/index.ts:58`](../packages/lsp/tool-lsp/src/index.ts)
 
+<a id="deepseek-aidsh-tool-phone"></a>
+
+## `@deepseek-ai/dsh-tool-phone`
+
+Requires: `phoneDevices` · `tools`
+
+```ts config-catalog
+/** Model-facing Consumer configuration. */
+export interface Config {
+  /** Cooperative timeout budget in milliseconds for each fleet call. */
+  readonly timeoutMs?: number
+}
+```
+
+Source: [`packages/phone/tool-phone/src/index.ts:24`](../packages/phone/tool-phone/src/index.ts)
+
 <a id="deepseek-aidsh-tool-project-members"></a>
 
 ## `@deepseek-ai/dsh-tool-project-members`
@@ -4294,6 +4422,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-model-selection` ([`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-permission-presets` ([`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-phone` ([`packages/client/ui-phone/src/index.ts`](../packages/client/ui-phone/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-plan` ([`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-reference` ([`packages/client/ui-reference/src/index.ts`](../packages/client/ui-reference/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-renderer` ([`packages/client/ui-renderer/src/index.ts`](../packages/client/ui-renderer/src/index.ts))
@@ -4326,6 +4455,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
+- `@deepseek-ai/dsh-phone-environment-ios` — requires `phoneEnvironment` ([`packages/phone/phone-environment-ios/src/index.ts`](../packages/phone/phone-environment-ios/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
 - `@deepseek-ai/dsh-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
 - `@deepseek-ai/dsh-session-checkpoint-policy` — requires `llm` · `sessionPersistence` · `sessions` · `tools` ([`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts))
@@ -4398,6 +4528,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-remote-access-client` ([`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-redis` ([`packages/platform/remote-access-redis/src/index.ts`](../packages/platform/remote-access-redis/src/index.ts))
 - `@deepseek-ai/dsh-remote-protocol` ([`packages/platform/remote-protocol/src/index.ts`](../packages/platform/remote-protocol/src/index.ts))
+- `@deepseek-ai/dsh-request-trust` ([`packages/util/request-trust/src/index.ts`](../packages/util/request-trust/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
 - `@deepseek-ai/dsh-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))
 - `@deepseek-ai/dsh-sdk-client` ([`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts))

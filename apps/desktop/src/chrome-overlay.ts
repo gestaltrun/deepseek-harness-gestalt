@@ -3,14 +3,15 @@
  * @module @deepseek-ai/dsh-desktop/chrome-overlay
  */
 
-import { DESKTOP_OVERLAY_PARAM } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
+import {
+  CHROME_OVERLAY_ID_MAX_LENGTH, DESKTOP_OVERLAY_PARAM,
+} from '@deepseek-ai/dsh-client-ui-desktop/protocol'
 import type {
   ChromeOverlayAnchor, ChromeOverlayMenuItem, ChromeOverlayResult, ChromeOverlayShowRequest,
 } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
 
 const MAX_ITEMS = 32
 const MAX_TEXT = 200
-const MAX_ID = 128
 
 /** Overlay `WebContentsView` verbs used to show, hide, and restack. */
 export interface ChromeOverlayView {
@@ -128,10 +129,12 @@ export function syncChromeOverlayBounds(window: ChromeOverlayWindow, view: Chrom
 export function parseChromeOverlayShow(value: unknown): ChromeOverlayShowRequest | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const record = value as Record<string, unknown>
-  const requestId = text(record.requestId, MAX_ID)
+  const requestId = text(record.requestId, CHROME_OVERLAY_ID_MAX_LENGTH)
   if (requestId === undefined) return undefined
   if (record.kind === 'settings') {
-    const sectionId = record.sectionId === undefined ? undefined : text(record.sectionId, MAX_ID)
+    const sectionId = record.sectionId === undefined
+      ? undefined
+      : text(record.sectionId, CHROME_OVERLAY_ID_MAX_LENGTH)
     if (record.sectionId !== undefined && sectionId === undefined) return undefined
     return sectionId === undefined
       ? { kind: 'settings', requestId }
@@ -168,11 +171,11 @@ export function parseChromeOverlayShow(value: unknown): ChromeOverlayShowRequest
 export function parseChromeOverlayResult(value: unknown): ChromeOverlayResult | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const record = value as Record<string, unknown>
-  const requestId = text(record.requestId, MAX_ID)
+  const requestId = text(record.requestId, CHROME_OVERLAY_ID_MAX_LENGTH)
   if (requestId === undefined) return undefined
   if (record.type === 'close') return { type: 'close', requestId }
   if (record.type !== 'select') return undefined
-  const id = text(record.id, MAX_ID)
+  const id = text(record.id, CHROME_OVERLAY_ID_MAX_LENGTH)
   if (id === undefined) return undefined
   return { type: 'select', requestId, id }
 }
@@ -209,13 +212,15 @@ function parseItems(value: unknown): ChromeOverlayMenuItem[] | undefined {
   for (const entry of value) {
     if (typeof entry !== 'object' || entry === null) return undefined
     const record = entry as Record<string, unknown>
-    const id = text(record.id, MAX_ID)
+    const id = text(record.id, CHROME_OVERLAY_ID_MAX_LENGTH)
     const label = text(record.label, MAX_TEXT)
     if (id === undefined || label === undefined) return undefined
     if (record.disabled !== undefined && record.disabled !== true && record.disabled !== false) {
       return undefined
     }
-    const icon = record.icon === undefined ? undefined : text(record.icon, MAX_ID)
+    const icon = record.icon === undefined
+      ? undefined
+      : text(record.icon, CHROME_OVERLAY_ID_MAX_LENGTH)
     if (record.icon !== undefined && icon === undefined) return undefined
     items.push({
       id,

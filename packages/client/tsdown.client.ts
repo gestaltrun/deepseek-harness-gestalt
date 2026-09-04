@@ -18,6 +18,7 @@ import { transform } from 'lightningcss'
 import { optionalStringArray } from './modules/src/client/manifest.ts'
 import { PLATFORM_MODULES, PRELOADED_CLIENT_EXTERNALS } from './web/src/platform.ts'
 import { clientBuildEnvironmentDefines } from '../../scripts/client-build-environment.ts'
+import { DYNAMIC_CLIENT_ARTIFACT } from '../../scripts/client-artifact-contract.ts'
 
 /**
  * Virtual-id wrapper keeping module CSS away from tsdown's own css pipeline
@@ -58,7 +59,7 @@ function styleInjectionModule(
  * Everything else under @deepseek-ai/* is either a module-table entry
  * (external) or a leak the purity gate rejects.
  */
-export const INLINE_SAFE = /^(?:@deepseek-ai\/dsh-platform-account\/privacy|@deepseek-ai\/dsh-project-membership\/(?:remote-url|invite-role)$|@deepseek-ai\/dsh-browser-workspace\/client$|@deepseek-ai\/dsh-(?:host-apiproxy|file-reference|session|llm|tools|brand)(?:\/|$))/
+export const INLINE_SAFE = /^(?:@deepseek-ai\/dsh-platform-account\/privacy|@deepseek-ai\/dsh-project-membership\/(?:remote-url|invite-role)$|@deepseek-ai\/dsh-browser-workspace\/client$|@deepseek-ai\/dsh-phone-runtime\/swipe$|@deepseek-ai\/dsh-(?:host-apiproxy|file-reference|session|llm|tools|brand|request-trust)(?:\/|$))/
 
 /**
  * Vendored framework libraries: rescoped into @deepseek-ai, so the gate below
@@ -100,7 +101,8 @@ function browserSourcePath(source: string, sourcemapPath: string): string {
  * @param libEntry - node-half entries, spelled at the call site so the
  * package-invariants gate can see `lib/types/invariant.js` in each package's
  * own tsdown.config.ts (a preset-side glob hides it from the mechanical check).
- * @param options - phase placement, lib overrides, and companion Node configs.
+ * @param options - development client entry, phase placement, lib overrides,
+ * and companion Node configs.
  * @returns ENV-selected tsdown config for the current build face.
  */
 export function clientBundle(
@@ -111,7 +113,9 @@ export function clientBundle(
   const lib = clientLibraryConfig(id, libEntry, options.lib)
   return ({ env }) => {
     const face = buildFace(env?.DSH_BUILD_FACE)
-    const clientEntry = face === undefined ? 'src/client/index.ts' : 'lib/types/client/index.js'
+    const clientEntry = face === undefined
+      ? options.clientSourceEntry ?? 'src/client/index.ts'
+      : 'lib/types/client/index.js'
     const client = clientConfig(id, clientEntry)
     const node = [lib, ...(options.companions ?? [])]
     if (face === 'host') return options.hostPhase === true ? node : [SKIP_WORKSPACE_BUILD]
@@ -211,6 +215,8 @@ export function clientOnly(configs: readonly UserConfig[]): BuildFaceConfig {
 }
 
 interface ClientBundleOptions {
+  /** TypeScript source entry consumed by the development watcher. */
+  readonly clientSourceEntry?: string
   /** Emit the Node-side artifacts during the Host pass instead of the Client pass. */
   readonly hostPhase?: boolean
   /** Additional Node-side configs emitted alongside the package library. */
@@ -303,18 +309,7 @@ function staticLinkedConfig(
           return isBareSpecifier(source) ? { id: source, external: true } : null
         },
       },
-    }, {
-      // Contract 3. Rolldown does not read the `//# sourceMappingURL` of its
-      // inputs, so each tsc map is handed over as that module's map and
-      // composed into the bundle map; without it frames stop at the emitted
-      // lib/types JavaScript instead of reaching the TSX.
-      name: 'dsh-tsc-sourcemap',
-      async load(id: string) {
-        if (!id.includes(TYPES_MARKER) || !id.endsWith('.js') || !existsSync(`${id}.map`)) return null
-        const code = await readFile(id, 'utf8')
-        return { code: code.replace(SOURCEMAP_COMMENT, ''), map: await readFile(`${id}.map`, 'utf8') }
-      },
-    }, {
+    }, tscSourceMapPlugin(), {
       // Contract 4. The import survives verbatim and the sheet lands beside the
       // JavaScript, so the shell's CSS Modules pipeline sees a real stylesheet.
       name: 'dsh-css-asset',
@@ -473,7 +468,7 @@ function clientConfig(id: string, entry: string): UserConfig {
     name: `${id}/client`,
     entry: { client: entry },
     // Browser bundle lands next to the node half (single lib/ artifact dir;
-    // the entryFileNames pin keeps it exactly lib/client.js). clean must stay
+    // the entryFileNames pin keeps it exactly lib/client.cjs). clean must stay
     // off — a default clean would wipe the node-half output emitted above.
     outDir: 'lib',
     format: 'cjs',
@@ -528,7 +523,7 @@ function clientConfig(id: string, entry: string): UserConfig {
           + '(type-only imports are erased and never reach this gate)',
         )
       },
-    }, {
+    }, tscSourceMapPlugin(), {
       name: 'dsh-css-modules-inline',
       resolveId(source: string, importer: string | undefined) {
         if (!source.endsWith('.module.css')) return null
@@ -586,7 +581,7 @@ function clientConfig(id: string, entry: string): UserConfig {
       },
     }],
     outputOptions: {
-      entryFileNames: 'client.js',
+      entryFileNames: DYNAMIC_CLIENT_ARTIFACT.entryFileName,
       // The map is served from /plugins/<scoped-package>/client.js.map. The
       // browser resolves its local sources back into URLs that mirror the
       // /packages/<group>/<package>/src directories; sourcesContent keeps them usable
@@ -601,6 +596,8 @@ function clientConfig(id: string, entry: string): UserConfig {
 
 /** Path segment separating a package's tsc output from the sources it was emitted from. */
 const TYPES_MARKER = `${sep}lib${sep}types${sep}`
+/** Path segment separating a package root from its generated library artifacts. */
+const LIB_MARKER = `${sep}lib${sep}`
 
 /** Plugin name carrying contract 1, and the marker that identifies a statically linked config. */
 const STATIC_LINKED_PLUGIN = 'dsh-static-linked-external'
@@ -611,6 +608,55 @@ const SOURCE_MARKER = `${sep}src${sep}`
 
 /** Trailing sourcemap reference tsc appends to every emitted module. */
 const SOURCEMAP_COMMENT = /\n\/\/# sourceMappingURL=.*\s*$/
+
+/** Compose map-bearing tsc output into browser bundles that consume generated JavaScript. */
+function tscSourceMapPlugin() {
+  return {
+    name: 'dsh-tsc-sourcemap',
+    async load(id: string) {
+      if (!id.endsWith('.js')) return null
+      const emittedPath = tscModulePath(id)
+      if (emittedPath === undefined) return null
+      const code = await readFile(emittedPath, 'utf8')
+      const mapPath = `${emittedPath}.map`
+      const parsed: unknown = JSON.parse(await readFile(mapPath, 'utf8'))
+      if (!isSourceMap(parsed)) throw new Error(`invalid tsc source map ${mapPath}`)
+      const sourceRoot = typeof parsed.sourceRoot === 'string' ? parsed.sourceRoot : ''
+      const physicalSources = parsed.sources.map(source => resolvePath(dirname(mapPath), sourceRoot, source))
+      const sources = physicalSources.map((source) => {
+        const path = relative(dirname(id), source).split(sep).join('/')
+        return path.startsWith('.') ? path : `./${path}`
+      })
+      const sourcesContent = await Promise.all(physicalSources.map(source => readFile(source, 'utf8')))
+      return {
+        code: code.replace(SOURCEMAP_COMMENT, ''),
+        map: JSON.stringify({ ...parsed, sourceRoot: '', sources, sourcesContent }),
+      }
+    },
+  }
+}
+
+/** Resolve a first-party bundled library module to its map-bearing tsc output. */
+function tscModulePath(id: string): string | undefined {
+  if (id.includes(TYPES_MARKER)) return existsSync(`${id}.map`) ? id : undefined
+  const packagesRoot = resolvePath(REPOSITORY_ROOT, 'packages') + sep
+  const boundary = id.indexOf(LIB_MARKER)
+  if (!id.startsWith(packagesRoot) || boundary < 0) return existsSync(`${id}.map`) ? id : undefined
+  const candidate = resolvePath(
+    id.slice(0, boundary),
+    'lib',
+    'types',
+    id.slice(boundary + LIB_MARKER.length),
+  )
+  return existsSync(candidate) && existsSync(`${candidate}.map`) ? candidate : undefined
+}
+
+/** Return whether a parsed tsc map names each source file needed for content embedding. */
+function isSourceMap(value: unknown): value is Record<string, unknown> & { sources: string[] } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const sources = Reflect.get(value, 'sources')
+  return Array.isArray(sources) && sources.every(source => typeof source === 'string')
+}
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */
 function sourceAssetPath(source: string, importer: string): string {

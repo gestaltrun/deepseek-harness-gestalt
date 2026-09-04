@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-04-mjpeg-current-frame-size.md
+2026-09-04-mjpeg-current-frame-size.md: 67ee0ad2cbffd0da359d0fc0148a7fca2494b197
+2026-09-04-mjpeg-current-frame-size.zh.md: 0048e90443a1682c10bf8294fcb98033387884b8

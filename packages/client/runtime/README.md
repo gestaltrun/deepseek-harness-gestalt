@@ -96,6 +96,8 @@ Changing the model selection can change or invalidate provider-side cache reuse;
 
 ## Known Limitations and Deferred Work
 
+No invariant companion is published because the retained Client runtime has no independently observable owned relationship that can diverge from its source state.
+
 - **`loader.unload` is a stub** — it throws not-implemented; the client has no unload chain from fiber disposal through registration and style removal.
 - **Scope teardown is stage-driven, single-occupant today** — the staged session follows `list.current` exactly (staging is the open signal: the event window opens ⟺ the session is on stage); a removed-while-staged session's scope survives frozen until the stage moves on, not until true observer count reaches zero. Resolution (`binding()`/`scope()`) is pure addressing, render-safe; the render layer reads the current bundle through the `currentProvideInfo` observable. The staged state can widen to a multi-pane list when concurrent panes land.
 - **Value imports of this package from plugin bundles must use the `/client` subpath** — the bare package name is not in the loader externals table and inlines a second module instance, whose private scope-tag Symbol never matches.

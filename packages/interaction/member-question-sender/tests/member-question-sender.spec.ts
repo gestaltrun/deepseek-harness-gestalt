@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import UserQuestionService, { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
+import UserQuestionService, {
+  UserQuestionError,
+  type AskUserQuestionRequest,
+} from '@deepseek-ai/dsh-user-questions'
 import {
   decodeCompanionMessage,
   parseCompanionSessionId,
@@ -122,31 +125,30 @@ async function startSend(
 }
 
 describe('member-question sender', () => {
-  it('delegates ordinary questions to the next Host-root answerer exactly once', async () => {
+  it('delegates an ordinary request exactly once to a Remote-like answerer registered first', async () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)
-    const calls: string[] = []
-    ctx.on('user-questions/request', (request) => {
-      calls.push('local')
-      return Promise.resolve({
-        answers: request.questions.map(question => ({ id: question.id, selected: ['local'] })),
-      })
-    })
-    await ctx.plugin(Sender, { delivery: new MemoryMemberQuestionDelivery() })
+    const delivery = new MemoryMemberQuestionDelivery()
+    const remoteAnswerer = vi.fn((request: AskUserQuestionRequest) => Promise.resolve({
+      answers: request.questions.map(question => ({ id: question.id, selected: ['local'] })),
+    }))
+    ctx.on('user-questions/request', remoteAnswerer)
+    await ctx.plugin(Sender, { delivery })
 
     await expect(ctx.userQuestions.ask({
       questions: [{ id: 'q-1', question: 'Local?' }],
     })).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['local'] }] })
-    expect(calls).toEqual(['local'])
+    expect(remoteAnswerer).toHaveBeenCalledOnce()
+    expect(delivery.delivered).toEqual([])
   })
 
-  it('claims member-routed questions before local answerers and never calls next', async () => {
+  it('prepends member routing ahead of a Remote-like answerer registered first', async () => {
     const ctx = new Context()
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(UserQuestionService)
     const delivery = new MemoryMemberQuestionDelivery()
-    const local = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['local'] }] }))
-    ctx.on('user-questions/request', local)
+    const remoteAnswerer = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['local'] }] }))
+    ctx.on('user-questions/request', remoteAnswerer)
     await ctx.plugin(Sender, { delivery })
     const agent = stubAgent('asking-root')
     ctx.agents.enter(agent, undefined)
@@ -168,7 +170,7 @@ describe('member-question sender', () => {
     )
 
     await expect(answer).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['24 hours'] }] })
-    expect(local).not.toHaveBeenCalled()
+    expect(remoteAnswerer).not.toHaveBeenCalled()
   })
 
   it('preserves the sender stable error through the user-questions waterfall', async () => {

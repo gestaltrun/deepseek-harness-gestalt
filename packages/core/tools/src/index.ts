@@ -1246,7 +1246,7 @@ export class ToolRuntime extends Service {
   private wireSchemas(context: AssembleContext): ToolProviderResult {
     const view = this.view(context.scope)
     const mode = this.modeFor(context.scope)
-    const loaded = this.loadedSchemas(this.agentForScope(context.scope), view)
+    const loaded = this.loadedSchemas(context.agent, view)
     if (mode === 'native') {
       const schemas = [...view.visible.values()]
         .filter(definition => definition.deferLoading !== true)
@@ -1271,12 +1271,6 @@ export class ToolRuntime extends Service {
     }
     schemas.push(...loaded)
     return { schemas, knownNames: schemas.map(schema => schema.name) }
-  }
-
-  /** Recover an Agent only when the assembly scope itself is the established Agent owner. */
-  private agentForScope(scope: ScopeKey | undefined): Agent | undefined {
-    if (typeof scope !== 'object' || scope === null || !('session' in scope)) return undefined
-    return scope as Agent
   }
 
   /** Recover current deferred schemas by filtering, budgeting, then validating durable history. */
@@ -1664,7 +1658,7 @@ export class ToolRuntime extends Service {
   /** Project visible callable tools onto the generated PTC mode SDK contract. */
   private sdkSchemas(context: AssembleContext): ToolSdkSchema[] {
     const view = this.view(context.scope)
-    const loaded = new Map(this.loadedSchemas(this.agentForScope(context.scope), view).map(schema => [schema.name, schema]))
+    const loaded = new Map(this.loadedSchemas(context.agent, view).map(schema => [schema.name, schema]))
     const immediate = [...view.visible.values()]
       .filter(definition => definition.name !== RUN_CODE_NAME && definition.deferLoading !== true)
       .map((definition): ToolSdkSchema => {

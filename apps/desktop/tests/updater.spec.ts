@@ -85,6 +85,54 @@ describe('startAutoUpdater', () => {
     expect(seen).toContain('available')
   })
 
+  it('rechecks while available and replaces the offered version', () => {
+    const updater = fakeUpdater()
+    const life = startAutoUpdater({ updater, now: () => 10 })
+    updater.emit('update-available', { version: '0.1.14' })
+    expect(life.state()).toMatchObject({ state: 'available', newVersion: '0.1.14' })
+
+    life.checkForUpdates()
+    expect(life.state()).toMatchObject({ state: 'available', newVersion: '0.1.14' })
+    expect(updater.checkForUpdates).toHaveBeenCalledOnce()
+    updater.emit('checking-for-update')
+    expect(life.state().state).toBe('available')
+    updater.emit('update-available', { version: '0.1.15' })
+    expect(life.state()).toMatchObject({ state: 'available', newVersion: '0.1.15' })
+    updater.emit('update-not-available')
+    expect(life.state()).toEqual({ state: 'idle', lastCheckedAt: 10 })
+    life.dispose()
+  })
+
+  it('keeps the offered version when a silent recheck rejects', async () => {
+    let rejectCheck: ((error: Error) => void) | undefined
+    const updater = {
+      ...fakeUpdater(),
+      checkForUpdates: vi.fn(() => new Promise((_resolve, reject) => { rejectCheck = reject })),
+    }
+    const life = startAutoUpdater({ updater, now: () => 10 })
+    updater.emit('update-available', { version: '0.1.14' })
+    life.checkForUpdates()
+    updater.emit('error', new Error('feed unavailable'))
+    rejectCheck?.(new Error('feed unavailable'))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(life.state()).toMatchObject({ state: 'available', newVersion: '0.1.14' })
+    life.dispose()
+  })
+
+  it('does not let an in-flight recheck interrupt download', () => {
+    const updater = fakeUpdater()
+    const life = startAutoUpdater({ updater, now: () => 10 })
+    updater.emit('update-available', { version: '0.1.14' })
+    life.checkForUpdates()
+    life.download()
+    updater.emit('checking-for-update')
+    updater.emit('update-available', { version: '0.1.15' })
+    updater.emit('update-not-available')
+    expect(life.state()).toMatchObject({ state: 'downloading', newVersion: '0.1.14', downloadPercent: 0 })
+    life.dispose()
+  })
+
   it('preserves a discovered version only for later failures', () => {
     const updater = fakeUpdater()
     const life = startAutoUpdater({ updater, now: () => 10 })
@@ -93,6 +141,7 @@ describe('startAutoUpdater', () => {
     expect(life.state()).toEqual({ state: 'error', lastCheckedAt: null, errorMessage: 'offline' })
 
     updater.emit('update-available', { version: '0.1.1' })
+    life.download()
     updater.emit('error', new Error('download failed'))
     expect(life.state()).toEqual({
       state: 'error',
@@ -108,11 +157,18 @@ describe('startAutoUpdater', () => {
     const updater = {
       ...fakeUpdater(),
       checkForUpdates: vi.fn(() => new Promise((_resolve, reject) => { rejectCheck = reject })),
+      downloadUpdate: vi.fn(() => Promise.resolve()),
     }
     const life = startAutoUpdater({ updater, now: () => 10 })
 
     updater.emit('update-available', { version: '0.1.1' })
+    life.download()
     updater.emit('error', new Error('event failure'))
+    expect(life.state()).toMatchObject({
+      state: 'error',
+      newVersion: '0.1.1',
+      errorMessage: 'event failure',
+    })
     life.checkForUpdates()
     rejectCheck?.(new Error('retry failed'))
     await Promise.resolve()

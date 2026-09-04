@@ -32,7 +32,7 @@
 - textbox "Message the agent"
 - button "Commands and skills":
   - img
-- 'button "Access mode, current: Custom"': Custom
+- 'button "Access mode, current: Workspace Write" [disabled]': Workspace Write
 - button "Select model":
   - text: Select model
   - img

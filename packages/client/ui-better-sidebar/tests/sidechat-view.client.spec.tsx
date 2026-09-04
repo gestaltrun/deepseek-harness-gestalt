@@ -109,6 +109,12 @@ describe('SideChatView', () => {
     expect(iconView.container.querySelector('svg')).not.toBeNull()
     expect(created?.tab).toMatchObject({
       id: 'sidechat:session-draft-id',
+      title: 'New thread',
+      meta: { threadId: 'session-draft-id', provisional: true },
+    })
+    const fromMenu = descriptor.createTab?.({} as never, { type: 'sidechat', title: 'Side Chat' })
+    expect(fromMenu?.tab).toMatchObject({
+      title: 'New thread',
       meta: { threadId: 'session-draft-id', provisional: true },
     })
     expect(sidechatRootThreadIdOf({

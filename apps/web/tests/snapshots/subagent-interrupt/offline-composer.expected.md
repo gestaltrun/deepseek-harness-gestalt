@@ -20,6 +20,5 @@
 - textbox "Parent session offline; sending is unavailable but you can still stop the run" [disabled]
 - button "Commands and skills" [disabled]:
   - img
-- 'button "Access mode, current: Custom" [disabled]': Custom
+- 'button "Access mode, current: Workspace Write" [disabled]': Workspace Write
 - button "Stop generating"
-- button "Send message" [disabled]

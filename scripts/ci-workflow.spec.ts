@@ -662,7 +662,7 @@ describe('Issue lifecycle workflow', () => {
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
     const lifecycleEnabled = "${{ vars.DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED == 'true' }}"
-    expect(lifecycleJob.if).toBe(lifecycleEnabled)
+    expect(lifecycleJob.if).toBeUndefined()
     // Keep the subscription-type gates: issue-lifecycle does not re-subscribe
     // ready_for_review (issue-policy owns that) and only reacts to submitted
     // review events.
@@ -672,14 +672,16 @@ describe('Issue lifecycle workflow', () => {
     expect(lifecyclePullRequest.types).not.toContain('ready_for_review')
     expect(lifecyclePullRequest.types).toContain('review_requested')
     expect(lifecycleReview.types).toEqual(['submitted'])
-    const gated = "${{ github.event_name != 'pull_request_review' || github.event.review.state == 'changes_requested' }}"
+    const gated = "${{ vars.DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED == 'true' && (github.event_name != 'pull_request_review' || github.event.review.state == 'changes_requested') }}"
     const steps = lifecycleJob.steps.filter(isRecord)
     const ownerStep = steps.find(s => s.name === 'Validate project owner')
     const tokenStep = steps.find(s => s.name === 'Create project token')
     const handleStep = steps.find(s => s.name === 'Handle repository event')
-    expect(lifecycleJob.if).toBe(lifecycleEnabled)
     expect(steps.indexOf(ownerStep)).toBeLessThan(steps.indexOf(tokenStep))
-    expect(ownerStep).toMatchObject({ run: 'node .github/issue-management/policy.mjs deployment' })
+    expect(ownerStep).toMatchObject({
+      if: lifecycleEnabled,
+      run: 'node .github/issue-management/policy.mjs deployment',
+    })
     expect(tokenStep).toMatchObject({
       if: gated,
       with: {

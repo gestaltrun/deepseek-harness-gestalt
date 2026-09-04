@@ -16,7 +16,7 @@ The `DSH Issue Management` Project owns `Priority`, `Severity`, `Cost`, `Start D
 
 Repository policy resolves `Priority` and `Start Date` from the configured Project. It rejects an Issue-backed field or the wrong data type, reads Priority from the Project item, and writes Start Date through `updateProjectV2ItemFieldValue`. Organization Issue fields are retained only as `Legacy ...` migration sources and are not read by repository workflows.
 
-The pull-request policy workflow uses the repository `GITHUB_TOKEN` for REST Issue and pull-request reads. A deployment reads Project-local Priority only when `priorityField` names that field and supplies Project credentials; this personal-account tracker sets `priorityField` to `null`. Lifecycle mutations continue to use the write-capable App token only when organization Project lifecycle projection is enabled.
+The pull-request policy workflow uses the repository `GITHUB_TOKEN` for REST Issue and pull-request reads. A deployment reads Project-local Priority only when `priorityField` names that field and supplies Project credentials; the Gestalt tracker sets `priorityField` to `null` because Project Priority authorization is not configured. Lifecycle mutations continue to use the write-capable App token only when organization Project lifecycle projection is enabled.
 
 The Issue lifecycle workflow initializes `Start Date` only for `pull_request.opened`. It reads the pull request's live body, retains every same-repository reference that resolves to an Issue, converts `created_at` to a calendar date in the configured Project time zone, ensures the Issue is a Project item, and writes the date only when the current Project value is empty.
 

@@ -437,7 +437,7 @@ describe('allow-only eligibility declarations', () => {
 
     const result = await ctx.tools.execute({
       signal: testToolSignal,
-      callId: CallId('stale-ineligible'),
+      callId: ToolCallId('stale-ineligible'),
       name: 'blocked',
       arguments: {},
       agent: key,
@@ -452,7 +452,7 @@ describe('allow-only eligibility declarations', () => {
 
     const notLoaded = await ctx.tools.execute({
       signal: testToolSignal,
-      callId: CallId('not-loaded'),
+      callId: ToolCallId('not-loaded'),
       name: 'not-loaded',
       arguments: {},
       agent: key,
@@ -500,7 +500,7 @@ describe('allow-only eligibility declarations', () => {
 
     const result = await ctx.tools.execute({
       signal: testToolSignal,
-      callId: CallId('narrowed-before-dispatch'),
+      callId: ToolCallId('narrowed-before-dispatch'),
       name: 'stale',
       arguments: {},
       agent: key,

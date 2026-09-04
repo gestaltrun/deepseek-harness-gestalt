@@ -73,12 +73,15 @@ The `mode` config decides what the model sees: `native` (every visible schema), 
 |---|---|---|
 | `mode` | `native` | How visible tools are presented to the model: `native`, `ptc`, or `both` |
 | `maxParallelSubCalls` | `10` | Concurrency cap for a `run_code` program's overlapping sub-calls; `1` restores strictly serial dispatch |
+| `toolSearch` | `false` | Enables reserved `tool_search`; requires `maxResultBytes`, with optional `defaultLimit` (5) and `maxResults` (10) |
+
+When `toolSearch` is enabled, definitions with `deferLoading: true` remain in `catalogSchemas()` but are omitted from initial request schemas. `tool_search` returns ranked matching schemas, and successful durable results reconstruct those schemas for later native requests and PTC SDK bindings while current scope eligibility still applies. `maxResultBytes` limits the complete UTF-8 durable discovery result, including reconstructed and nested PTC aggregates.
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tools) is the exhaustive source for every accepted field. Non-native modes require a composed `ctx.codeRuntime` whose language has a registered SDK renderer; an agent preset selects its own presentation with [`dsh-agent-tool-presentation`](../agent-tool-presentation/README.md), and one agent can shadow the default with `presentAs(mode)`.
 
 ### Restrict tools per agent
 
-`ctx.tools.restrict(filter)` applies an allow or deny mask to the global tools one agent inherits; masks intersect, scoped registrations stay visible, and the restriction lifts when disposed. `ctx.tools.get(name, scope)` resolves a tool as one scope sees it. A Host-local presenter consumer passes the calling agent when it must match the definition that executed. `ctx.tools.schemas(scope)` returns the visible schemas without the `execute` functions.
+`ctx.tools.restrict(filter)` applies an allow or deny mask to the global tools one agent inherits; masks intersect, scoped registrations stay visible, and the restriction lifts when disposed. `ctx.tools.allowEligible(names)` contributes an allow-only set for the calling scope, with contributions along the scope chain unioned and disposed with their owner. `ctx.tools.get(name, scope)` resolves a tool as one scope sees it. A Host-local presenter consumer passes the calling agent when it must match the definition that executed. `ctx.tools.schemas(scope)` returns immediate request schemas, while `ctx.tools.catalogSchemas(scope)` retains eligible deferred end-tool schemas.
 
 ### Enforce policy on calls
 

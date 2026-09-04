@@ -73,12 +73,15 @@ ctx.tools.register(defineTool({
 |---|---|---|
 | `mode` | `native` | 可见工具向模型呈现的方式：`native`、`ptc` 或 `both` |
 | `maxParallelSubCalls` | `10` | `run_code` 程序重叠子调用的并发上限；`1` 恢复严格串行分发 |
+| `toolSearch` | `false` | 启用保留的 `tool_search`；必须配置 `maxResultBytes`，可选 `defaultLimit`（5）和 `maxResults`（10） |
+
+启用 `toolSearch` 后，带 `deferLoading: true` 的定义保留在 `catalogSchemas()` 中，但不会进入初始请求 schema。`tool_search` 返回排序后的匹配 schema；成功的持久化结果会在后续原生请求和 PTC SDK 绑定中重建这些 schema，同时继续遵守当前作用域资格。`maxResultBytes` 限制完整持久化发现结果的 UTF-8 字节数，包括重建结果和嵌套 PTC 聚合。
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tools)是每个受支持字段的穷尽式真源。非原生模式要求已组合的 `ctx.codeRuntime` 且其语言有已注册的 SDK 渲染器；agent preset 通过 [`dsh-agent-tool-presentation`](../agent-tool-presentation/README.zh.md) 自行选择呈现方式，单个 agent 可用 `presentAs(mode)` 遮蔽默认值。
 
 ### 按 agent 限制工具
 
-`ctx.tools.restrict(filter)` 对单个 agent 继承的全局工具应用允许或拒绝掩码；掩码取交集，作用域注册保持可见，限制在 dispose（资源释放）时解除。`ctx.tools.get(name, scope)` 按一个作用域的视角解析工具。需要匹配实际执行 definition 的 Host 本地 presenter 消费方会传入发起调用的 agent。`ctx.tools.schemas(scope)` 返回可见 schema（不含 `execute` 函数）。
+`ctx.tools.restrict(filter)` 对单个 agent 继承的全局工具应用允许或拒绝掩码；掩码取交集，作用域注册保持可见，限制在 dispose（资源释放）时解除。`ctx.tools.allowEligible(names)` 为调用作用域贡献仅允许集合，作用域链上的贡献取并集并随所有者释放。`ctx.tools.get(name, scope)` 按一个作用域的视角解析工具。需要匹配实际执行 definition 的 Host 本地 presenter 消费方会传入发起调用的 agent。`ctx.tools.schemas(scope)` 返回即时请求 schema，`ctx.tools.catalogSchemas(scope)` 则保留符合资格的延迟端工具 schema。
 
 ### 对调用实施策略
 

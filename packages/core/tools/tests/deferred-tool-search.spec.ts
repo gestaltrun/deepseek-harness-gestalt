@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createToolResultMessage as createBaseToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -16,6 +16,16 @@ import type { Config, ToolDefinition, ToolExecutionResult } from '@deepseek-ai/d
 const TEST_MAX_RESULT_BYTES = 64 * 1024
 
 const signal = new AbortController().signal
+
+function createToolResultMessage(
+  input: Parameters<typeof createBaseToolResultMessage>[0] & { loadedTools?: ToolSchema[] },
+): ReturnType<typeof createBaseToolResultMessage> {
+  const base = createBaseToolResultMessage(input)
+  if (input.loadedTools === undefined) return base
+  const block = base.content[0]
+  if (block?.type !== 'tool-result') throw new Error('expected canonical tool result block')
+  return { ...base, content: [{ ...block, loadedTools: input.loadedTools }] } as ReturnType<typeof createBaseToolResultMessage>
+}
 
 function tool(name: string, description: string, deferLoading = false): ToolDefinition {
   return {
@@ -62,7 +72,7 @@ async function scopedAgent(ctx: Context, session: Session): Promise<{ agent: Age
   return { agent, scope }
 }
 
-function durableResultBlockBytes(callId: CallId, result: ToolExecutionResult): number {
+function durableResultBlockBytes(callId: ToolCallId, result: ToolExecutionResult): number {
   if (result.isError || result.loadedTools === undefined) throw new Error('expected loaded tool result')
   const message = createToolResultMessage({
     callId,
@@ -85,7 +95,7 @@ function deferredSchema(name: string, description: string): ToolSchema {
   }
 }
 
-function appendDiscovery(session: Session, callId: CallId, schemas: ToolSchema[]): void {
+function appendDiscovery(session: Session, callId: ToolCallId, schemas: ToolSchema[]): void {
   session.append('tool/result', {
     turn: 1,
     step: 1,
@@ -100,7 +110,7 @@ function appendDiscovery(session: Session, callId: CallId, schemas: ToolSchema[]
 
 function reconstructedResultBytes(schemas: ToolSchema[]): number {
   const message = createToolResultMessage({
-    callId: CallId('tool-search-restored'),
+    callId: ToolCallId('tool-search-restored'),
     content: [{ type: 'text', text: JSON.stringify(schemas, null, 2) }],
     isError: false,
     loadedTools: schemas,
@@ -110,7 +120,7 @@ function reconstructedResultBytes(schemas: ToolSchema[]): number {
 
 function agentWithRestoredCandidates(candidates: readonly unknown[]): Agent {
   const base = createToolResultMessage({
-    callId: CallId('hostile-restored-candidates'),
+    callId: ToolCallId('hostile-restored-candidates'),
     content: [{ type: 'text', text: 'restored discovery candidates' }],
     isError: false,
   })
@@ -177,7 +187,7 @@ describe('deferred tool search', () => {
     ])
 
     const result = await ctx.tools.execute({
-      callId: CallId('search-1'),
+      callId: ToolCallId('search-1'),
       name: 'tool_search',
       arguments: { query: 'weather forecast' },
       signal,
@@ -214,7 +224,7 @@ describe('deferred tool search', () => {
     }
 
     await expect(ctx.tools.execute({
-      callId: CallId('invalid-search'),
+      callId: ToolCallId('invalid-search'),
       name: 'tool_search',
       arguments: arguments_,
       signal,
@@ -231,7 +241,7 @@ describe('deferred tool search', () => {
     }
 
     const result = await ctx.tools.execute({
-      callId: CallId('capped-search'),
+      callId: ToolCallId('capped-search'),
       name: 'tool_search',
       arguments: { query: 'weather', limit: 3 },
       signal,
@@ -260,7 +270,7 @@ describe('deferred tool search', () => {
     for (const definition of definitions) ctx.tools.register(definition)
 
     await expect(ctx.tools.execute({
-      callId: CallId('oversize-search'),
+      callId: ToolCallId('oversize-search'),
       name: 'tool_search',
       arguments: { query: 'weather' },
       signal,
@@ -312,7 +322,7 @@ describe('deferred tool search', () => {
     ctx.tools.register({ ...tool(`weather_${_dialect}`, `Weather ${_dialect}`, true), parameters })
 
     await expect(ctx.tools.execute({
-      callId: CallId(`search-${_dialect}`),
+      callId: ToolCallId(`search-${_dialect}`),
       name: 'tool_search',
       arguments: { query: `weather ${_dialect}` },
       signal,
@@ -334,7 +344,7 @@ describe('deferred tool search', () => {
     ctx.tools.register({ ...tool('weather_dialect', 'Weather dialect', true), parameters })
 
     const result = await ctx.tools.execute({
-      callId: CallId('search-invalid-dialect'),
+      callId: ToolCallId('search-invalid-dialect'),
       name: 'tool_search',
       arguments: { query: 'weather dialect' },
       signal,
@@ -359,7 +369,7 @@ describe('deferred tool search', () => {
       })
 
       const result = await ctx.tools.execute({
-        callId: CallId(`post-replaced-${replacement}`),
+        callId: ToolCallId(`post-replaced-${replacement}`),
         name: 'tool_search',
         arguments: { query: 'weather forecast' },
         signal,
@@ -402,7 +412,7 @@ describe('deferred tool search', () => {
       })
 
       const result = await ctx.tools.execute({
-        callId: CallId(`around-replaced-${replacement}`),
+        callId: ToolCallId(`around-replaced-${replacement}`),
         name: 'tool_search',
         arguments: { query: 'weather forecast' },
         signal,
@@ -428,7 +438,7 @@ describe('deferred tool search', () => {
       .toEqual(['tool_search'])
 
     const result = await ctx.tools.execute({
-      callId: CallId('search-1'),
+      callId: ToolCallId('search-1'),
       name: 'tool_search',
       arguments: { query: 'weather forecast' },
       agent,
@@ -439,7 +449,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('search-1'),
+        callId: ToolCallId('search-1'),
         content: result.content,
         isError: false,
         loadedTools: result.loadedTools ?? [],
@@ -452,7 +462,7 @@ describe('deferred tool search', () => {
       'tool_search',
     ])
 
-    const resumed = Session.create(SessionId('deferred-search-resumed'), session.events)
+    const resumed = Session.create(SessionId('deferred-search-resumed'), session.snapshotEvents())
     const resumedAgent = { session: resumed } as Agent
     expect((await ctx.systemPrompt.assemble({ scope: resumedAgent, agent: resumedAgent })).tools)
       .toEqual(next.tools)
@@ -480,7 +490,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('search-malformed'),
+        callId: ToolCallId('search-malformed'),
         content: [{ type: 'text', text: 'malformed durable discovery' }],
         isError: false,
         loadedTools: [malformed] as never,
@@ -488,7 +498,7 @@ describe('deferred tool search', () => {
     }, { surfaceOp: 'append' })
     const restored = Session.create(
       SessionId(`restored-${_case}`),
-      JSON.parse(JSON.stringify(persisted.events)) as never,
+      persisted.snapshotEvents(),
     )
     const agent = { session: restored } as Agent
 
@@ -531,7 +541,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('restored-stale'),
+        callId: ToolCallId('restored-stale'),
         content: [{ type: 'text', text: 'stale and eligible discovery candidates' }],
         isError: false,
         loadedTools: [...stale, eligible] as never,
@@ -608,7 +618,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('restored-oversized-invalid'),
+        callId: ToolCallId('restored-oversized-invalid'),
         content: [{ type: 'text', text: 'oversized invalid durable discovery' }],
         isError: false,
         loadedTools: [{
@@ -632,7 +642,7 @@ describe('deferred tool search', () => {
     const schema = deferredSchema('mcp__restored__huge', description)
     ctx.tools.register(tool(schema.name, 'Restored huge schema', true))
     const session = Session.create(SessionId(`restored-${_case}`))
-    appendDiscovery(session, CallId('restored-huge'), [schema])
+    appendDiscovery(session, ToolCallId('restored-huge'), [schema])
     const agent = { session } as Agent
 
     await expect(ctx.systemPrompt.assemble({ scope: agent, agent }))
@@ -646,8 +656,8 @@ describe('deferred tool search', () => {
     ))
     for (const schema of schemas) ctx.tools.register(tool(schema.name, schema.description, true))
     const session = Session.create(SessionId('restored-aggregate'))
-    appendDiscovery(session, CallId('restored-first'), schemas.slice(0, 2))
-    appendDiscovery(session, CallId('restored-second'), schemas.slice(2))
+    appendDiscovery(session, ToolCallId('restored-first'), schemas.slice(0, 2))
+    appendDiscovery(session, ToolCallId('restored-second'), schemas.slice(2))
     const agent = { session } as Agent
 
     await expect(ctx.systemPrompt.assemble({ scope: agent, agent }))
@@ -666,7 +676,7 @@ describe('deferred tool search', () => {
       ctx.tools.register(tool(eligible.name, eligible.description, true))
       ctx.tools.register(tool(stale.name, stale.description, true))
       const session = Session.create(SessionId(`restored-bound-${maxResultBytes}`))
-      appendDiscovery(session, CallId('restored-bound'), [stale, eligible])
+      appendDiscovery(session, ToolCallId('restored-bound'), [stale, eligible])
       const { agent, scope } = await scopedAgent(ctx, session)
       scope.ctx.tools.allowEligible([eligible.name])
       return ctx.systemPrompt.assemble({ scope: agent, agent })
@@ -712,7 +722,7 @@ describe('deferred tool search', () => {
     const { agent, scope } = await scopedAgent(ctx, session)
     const removeWeatherEligibility = scope.ctx.tools.allowEligible(['mcp__weather__forecast'])
     const result = await ctx.tools.execute({
-      callId: CallId('search-eligibility'),
+      callId: ToolCallId('search-eligibility'),
       name: 'tool_search',
       arguments: { query: 'weather forecast' },
       agent,
@@ -723,7 +733,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('search-eligibility'),
+        callId: ToolCallId('search-eligibility'),
         content: result.content,
         isError: false,
         loadedTools: result.loadedTools ?? [],
@@ -736,7 +746,7 @@ describe('deferred tool search', () => {
     expect((await ctx.systemPrompt.assemble({ scope: agent, agent })).tools.map(schema => schema.name))
       .toEqual(['tool_search'])
     await expect(ctx.tools.execute({
-      callId: CallId('stale-weather'),
+      callId: ToolCallId('stale-weather'),
       name: 'mcp__weather__forecast',
       arguments: {},
       agent,
@@ -756,7 +766,7 @@ describe('deferred tool search', () => {
       return { logs: [] }
     }
     const result = await ctx.tools.execute({
-      callId: CallId('run-code-search'),
+      callId: ToolCallId('run-code-search'),
       name: 'run_code',
       arguments: { code: 'await tools.tool_search({ query: "weather" })', description: 'Find the weather tool' },
       agent,
@@ -768,7 +778,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('run-code-search'),
+        callId: ToolCallId('run-code-search'),
         content: result.content,
         isError: false,
         loadedTools: result.loadedTools ?? [],
@@ -789,7 +799,7 @@ describe('deferred tool search', () => {
       return { logs: [], value }
     }
     const nextRun = await ctx.tools.execute({
-      callId: CallId('run-code-weather'),
+      callId: ToolCallId('run-code-weather'),
       name: 'run_code',
       arguments: { code: 'await tools.mcp__weather__forecast({ value: "Shanghai" })', description: 'Read the weather forecast' },
       agent,
@@ -810,7 +820,7 @@ describe('deferred tool search', () => {
       ['golf', 'geocoding'],
       ['hotel', 'hosting'],
     ] as const
-    const callId = CallId('run-code-aggregate-search')
+    const callId = ToolCallId('run-code-aggregate-search')
     const run = async (maxResultBytes: number): Promise<{
       ctx: Context
       agent: Agent
@@ -897,7 +907,7 @@ describe('deferred tool search', () => {
       return { logs: [] }
     }
     const search = await ctx.tools.execute({
-      callId: CallId('run-code-stale-search'),
+      callId: ToolCallId('run-code-stale-search'),
       name: 'run_code',
       arguments: { code: 'await tools.tool_search({ query: "weather forecast" })', description: 'Find the weather tool' },
       agent,
@@ -908,7 +918,7 @@ describe('deferred tool search', () => {
       turn: 1,
       step: 1,
       message: createToolResultMessage({
-        callId: CallId('run-code-stale-search'),
+        callId: ToolCallId('run-code-stale-search'),
         content: search.content,
         isError: false,
         loadedTools: search.loadedTools ?? [],
@@ -923,7 +933,7 @@ describe('deferred tool search', () => {
       return { logs: [] }
     }
     await ctx.tools.execute({
-      callId: CallId('run-code-after-stale'),
+      callId: ToolCallId('run-code-after-stale'),
       name: 'run_code',
       arguments: { code: 'return Object.keys(tools)', description: 'Inspect callable tools' },
       agent,

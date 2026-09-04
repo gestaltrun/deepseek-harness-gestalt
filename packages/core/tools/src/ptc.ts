@@ -8,7 +8,8 @@
 
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, ToolCallId, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CodeBindingFunction, CodeRunResult, CodeRuntime } from '@deepseek-ai/dsh-code-runtime'
 import { snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool, parameterSchemaSpecToJsonSchema } from './schema.ts'
@@ -277,6 +278,10 @@ export interface RunCodeBridgeOptions {
   maxParallel: number
   /** Runs the contained `tools/ptc-dispatch-log` waterfall over one settled sub-dispatch (the registry's private invoker). */
   shapeDispatchLog: (dispatch: PtcDispatchLog) => Promise<ContentBlock[]>
+  /** Current immediate and reconstructed schemas one program may bind. */
+  bindingSchemas: (agent: Agent | undefined) => ToolSchema[]
+  /** Aggregate nested discovery metadata onto the outer transport execution. */
+  recordLoadedTools: (exec: ToolRunContext, schemas: readonly ToolSchema[]) => void
 }
 
 /**
@@ -291,7 +296,7 @@ export interface RunCodeBridgeOptions {
  * @returns the registry-ready definition.
  */
 export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeOptions): ToolDefinition {
-  const { requireRuntime, peekRuntime, maxParallel, shapeDispatchLog } = options
+  const { requireRuntime, peekRuntime, maxParallel, shapeDispatchLog, bindingSchemas, recordLoadedTools } = options
   const definition = defineTool({
     name: RUN_CODE_NAME,
     // The description and `code` parameter description are placeholders here:
@@ -558,6 +563,9 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
               const result = parked.kind === 'post-result'
                 ? await scheduler.finalize(parked.exec, parked.result)
                 : scheduler.finish(parked.exec, parked.result)
+              if (!result.isError && result.loadedTools !== undefined) {
+                recordLoadedTools(exec, result.loadedTools)
+              }
               if (!result.isError && result.content.some(block => block.type === 'image')) {
                 exec.deferContext(createUserMessage({
                   content: result.content,
@@ -608,7 +616,7 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
       // restricted globals vanish) — the same view the SDK section declared,
       // so a program can bind exactly what its prompt promised; sub-dispatch
       // re-resolves per call through the same view (exec.agent threads down).
-      for (const schema of registry.schemas(exec.agent)) {
+      for (const schema of bindingSchemas(exec.agent)) {
         if (schema.name === RUN_CODE_NAME) continue
         Object.defineProperty(functions, schema.name, { enumerable: true, value: binding(schema.name) })
       }

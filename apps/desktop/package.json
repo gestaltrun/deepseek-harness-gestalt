@@ -61,8 +61,6 @@
     "@deepseek-ai/dsh-project-membership-core": "workspace:^",
     "@deepseek-ai/dsh-project-membership-http": "workspace:^",
     "@deepseek-ai/dsh-remote-access-http": "workspace:^",
-    "@deepseek-ai/dsh-session-persistence-sqlite": "workspace:^",
-    "@deepseek-ai/dsh-session-query-sqlite": "workspace:^",
     "@deepseek-ai/dsh-storage": "workspace:^",
     "@deepseek-ai/dsh-storage-domain": "workspace:^",
     "@deepseek-ai/dsh-storage-sqlite": "workspace:^",

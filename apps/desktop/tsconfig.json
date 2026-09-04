@@ -29,7 +29,6 @@
     { "path": "../../packages/platform/noise-channel" },
     { "path": "../../packages/platform/remote-access-http" },
     { "path": "../../packages/platform/remote-protocol" },
-    { "path": "../../packages/session/session-persistence-sqlite" },
     { "path": "../../packages/storage/storage" },
     { "path": "../../packages/storage/storage-domain" },
     { "path": "../../packages/storage/storage-sqlite" },

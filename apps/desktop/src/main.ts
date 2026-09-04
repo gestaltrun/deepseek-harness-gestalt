@@ -7,7 +7,7 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, net, powerMonitor, safeStorage,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, nativeTheme, net, powerMonitor, safeStorage,
   session, shell,
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
@@ -46,6 +46,8 @@ import {
 } from '@deepseek-ai/dsh-remote-protocol'
 import { ensureLaunchDirectory } from './launch-directory.ts'
 import { isElectronExecutable, resolveDesktopRuntime } from './runtime-paths.ts'
+import { bootBackgroundColor } from './boot-session.ts'
+import { attachBootScreen, waitForShellReady } from './boot-screen.ts'
 import { planHostExit, shouldPreventQuit, startWithOneRetry } from './host-exit.ts'
 import { classifyNavigation } from './navigation-policy.ts'
 import { spawnWebHost, type RunningWebHost } from './spawn-web-host.ts'
@@ -189,118 +191,121 @@ process.once('SIGTERM', () => { app.quit() })
 /** Create the window, spawn Web Host, attach updater. */
 async function boot(): Promise<void> {
   smokeLog('boot start')
-  window = createWindow()
+  const target = createWindow()
+  window = target
   smokeLog('window created')
-  const snowPairingVault = await DesktopSnowPairingVault.load(new EncryptedDesktopSnowPairingStore(
-    join(app.getPath('userData'), `snow-pairings-${accountEnvironment.databaseIdentity}.bin`),
-    {
-      encrypt: value => safeStorage.encryptString(value),
-      decrypt: value => safeStorage.decryptString(Buffer.from(value)),
-    },
-  ))
-  companionProduct.installLedger(await DesktopCompanionOperationLedger.load(
-    new FileDesktopCompanionOperationStore(join(
-      app.getPath('userData'), `companion-operations-${accountEnvironment.databaseIdentity}.json`,
-    )),
-  ))
-  const relayRuntime = resolveDesktopRuntime({
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    moduleUrl: import.meta.url,
-  })
-  if (!app.isPackaged && isElectronExecutable(relayRuntime.node)) {
-    throw new Error('Desktop Relay needs a real Node executable; set DSH_NODE or run via pnpm gestalt:dev')
-  }
-  systemFetch = createDesktopSystemNodeFetch({
-    nodePath: relayRuntime.node,
-    helperPath: relayRuntime.fetchHelper,
-    resolveProxy: async url => await resolveDesktopNetworkProxy({
-      packaged: app.isPackaged,
-      environment: process.env,
-      url,
-      resolve: async target => await session.defaultSession.resolveProxy(target),
-    }),
-    timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
-  })
-  account = createDesktopAccount(accountEnvironment)
-  projectMembershipPresence = createDesktopProjectMembershipPresence({
-    account: () => account,
-    environment: accountEnvironment,
-    fetch: systemFetch,
-  })
-  const relay = createDesktopRemoteRelay({
-    environment: accountEnvironment,
-    config: accountEnvironment.remoteRelay,
-    resolveProxy: async url => await resolveDesktopNetworkProxy({
-      packaged: app.isPackaged,
-      environment: process.env,
-      url,
-      resolve: async target => await session.defaultSession.resolveProxy(target),
-    }),
-    connectWithProxy: async (url, signal, limits, proxyUrl) => await connectDesktopRelayNodeHelper({
-      nodePath: relayRuntime.node,
-      helperPath: relayRuntime.relayHelper,
-      url,
-      ...(proxyUrl === undefined ? {} : { proxyUrl }),
-      signal,
-      limits,
-    }),
-    snowPairingVault,
-    desktopName: () => account.installationPresentation()?.name,
-    handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
-      operation, selector, context, snowPairingVault,
-    ),
-    liveProjection: {
-      connect: (selector, changed, disconnect) => companionProduct.connectLiveProjection(
-        parsePersonalPairingId(selector), changed, disconnect,
-      ),
-      project: async (change, selector, signal) => {
-        const attachmentKey = snowPairingVault.attachmentKey(selector)
-        if (attachmentKey === undefined) throw new Error('Personal Pairing is no longer active')
-        try {
-          return await companionProduct.projectLiveSession(change, attachmentKey, signal)
-        } finally {
-          attachmentKey.fill(0)
-        }
+  const bootScreen = attachBootScreen(target)
+  smokeLog('boot screen shown')
+  try {
+    const snowPairingVault = await DesktopSnowPairingVault.load(new EncryptedDesktopSnowPairingStore(
+      join(app.getPath('userData'), `snow-pairings-${accountEnvironment.databaseIdentity}.bin`),
+      {
+        encrypt: value => safeStorage.encryptString(value),
+        decrypt: value => safeStorage.decryptString(Buffer.from(value)),
       },
-      retainsConversation: (change, selector) => companionProduct.retainsLiveConversation(
-        parsePersonalPairingId(selector), change,
-      ),
-    },
-  })
-  let accountReady = true
-  try {
-    await account.start()
-  } catch (error) {
-    accountReady = false
-    smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
-    const failed = account
-    account = new UnavailableDesktopAccountController(
-      error instanceof Error ? error.message : String(error),
-    )
-    void failed.dispose().catch((disposeError: unknown) => {
-      console.error('[desktop-platform-account] dispose after failed start:', disposeError)
+    ))
+    companionProduct.installLedger(await DesktopCompanionOperationLedger.load(
+      new FileDesktopCompanionOperationStore(join(
+        app.getPath('userData'), `companion-operations-${accountEnvironment.databaseIdentity}.json`,
+      )),
+    ))
+    const relayRuntime = resolveDesktopRuntime({
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      moduleUrl: import.meta.url,
     })
-  }
-  if (accountReady) smokeLog('account ready')
-  pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
-  accountSignedIn = account.getSnapshot().status === 'signed-in'
-  projectMembershipPresence.setSignedIn(accountSignedIn)
-  stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
-  stopAccountEvents = account.subscribe(handleAccountSnapshot)
-  sub2api = await createDesktopSub2Api({
-    fetch: async (input, init) => await net.fetch(input, init),
-    host: {
-      restart: async startTimeoutMs => (await replaceWebHost(startTimeoutMs)).url,
-      origin: () => host?.url,
-    },
-  })
-  stopSub2ApiEvents = sub2api.subscribe(pushSub2ApiSnapshot)
-  installIntegrationsOnce()
-  const initialHostStartTimeout = sub2ApiBootHostStartTimeout(sub2api.getSnapshot())
-  const startInitialHost = (): Promise<RunningWebHost> =>
-    startHost(initialHostStartTimeout)
-  try {
+    if (!app.isPackaged && isElectronExecutable(relayRuntime.node)) {
+      throw new Error('Desktop Relay needs a real Node executable; set DSH_NODE or run via pnpm gestalt:dev')
+    }
+    systemFetch = createDesktopSystemNodeFetch({
+      nodePath: relayRuntime.node,
+      helperPath: relayRuntime.fetchHelper,
+      resolveProxy: async url => await resolveDesktopNetworkProxy({
+        packaged: app.isPackaged,
+        environment: process.env,
+        url,
+        resolve: async target => await session.defaultSession.resolveProxy(target),
+      }),
+      timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
+    })
+    account = createDesktopAccount(accountEnvironment)
+    projectMembershipPresence = createDesktopProjectMembershipPresence({
+      account: () => account,
+      environment: accountEnvironment,
+      fetch: systemFetch,
+    })
+    const relay = createDesktopRemoteRelay({
+      environment: accountEnvironment,
+      config: accountEnvironment.remoteRelay,
+      resolveProxy: async url => await resolveDesktopNetworkProxy({
+        packaged: app.isPackaged,
+        environment: process.env,
+        url,
+        resolve: async target => await session.defaultSession.resolveProxy(target),
+      }),
+      connectWithProxy: async (url, signal, limits, proxyUrl) => await connectDesktopRelayNodeHelper({
+        nodePath: relayRuntime.node,
+        helperPath: relayRuntime.relayHelper,
+        url,
+        ...(proxyUrl === undefined ? {} : { proxyUrl }),
+        signal,
+        limits,
+      }),
+      snowPairingVault,
+      desktopName: () => account.installationPresentation()?.name,
+      handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
+        operation, selector, context, snowPairingVault,
+      ),
+      liveProjection: {
+        connect: (selector, changed, disconnect) => companionProduct.connectLiveProjection(
+          parsePersonalPairingId(selector), changed, disconnect,
+        ),
+        project: async (change, selector, signal) => {
+          const attachmentKey = snowPairingVault.attachmentKey(selector)
+          if (attachmentKey === undefined) throw new Error('Personal Pairing is no longer active')
+          try {
+            return await companionProduct.projectLiveSession(change, attachmentKey, signal)
+          } finally {
+            attachmentKey.fill(0)
+          }
+        },
+        retainsConversation: (change, selector) => companionProduct.retainsLiveConversation(
+          parsePersonalPairingId(selector), change,
+        ),
+      },
+    })
+    let accountReady = true
+    try {
+      await account.start()
+    } catch (error) {
+      accountReady = false
+      smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
+      const failed = account
+      account = new UnavailableDesktopAccountController(
+        error instanceof Error ? error.message : String(error),
+      )
+      void failed.dispose().catch((disposeError: unknown) => {
+        console.error('[desktop-platform-account] dispose after failed start:', disposeError)
+      })
+    }
+    if (accountReady) smokeLog('account ready')
+    pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
+    accountSignedIn = account.getSnapshot().status === 'signed-in'
+    projectMembershipPresence.setSignedIn(accountSignedIn)
+    stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
+    stopAccountEvents = account.subscribe(handleAccountSnapshot)
+    sub2api = await createDesktopSub2Api({
+      fetch: async (input, init) => await net.fetch(input, init),
+      host: {
+        restart: async startTimeoutMs => (await replaceWebHost(startTimeoutMs)).url,
+        origin: () => host?.url,
+      },
+    })
+    stopSub2ApiEvents = sub2api.subscribe(pushSub2ApiSnapshot)
+    installIntegrationsOnce()
+    const initialHostStartTimeout = sub2ApiBootHostStartTimeout(sub2api.getSnapshot())
+    const startInitialHost = (): Promise<RunningWebHost> =>
+      startHost(initialHostStartTimeout)
     const started = respawned
       ? { value: await startInitialHost(), retried: false }
       : await startWithOneRetry(
@@ -313,7 +318,7 @@ async function boot(): Promise<void> {
     observeHostExit(host)
     sub2api.onHostOriginChanged()
     smokeLog('host ' + host.url + ' pid ' + String(host.child.pid))
-    await window.loadURL(host.url)
+    await revealHost(target, host.url)
     if (process.env.DSH_DESKTOP_SMOKE === '1') {
       await finishSmoke(window, host.url)
       return
@@ -321,11 +326,13 @@ async function boot(): Promise<void> {
     void ensureChromeOverlay(window, host.url)
   } catch (error) {
     smokeLog('error ' + (error instanceof Error ? error.message : String(error)))
-    await showError(window, error)
+    await showError(target, error)
     if (process.env.DSH_DESKTOP_SMOKE === '1') {
       requestShutdown(1)
       return
     }
+  } finally {
+    bootScreen.dispose()
   }
   if (updaterInitialized) return
   updaterInitialized = true
@@ -416,12 +423,16 @@ async function focusOrReopen(): Promise<void> {
     await boot()
     return
   }
-  window = createWindow()
+  const target = createWindow()
+  window = target
+  const bootScreen = attachBootScreen(target)
   try {
-    await window.loadURL(host.url)
+    await revealHost(target, host.url)
     void ensureChromeOverlay(window, host.url)
   } catch (error) {
-    await showError(window, error)
+    await showError(target, error)
+  } finally {
+    bootScreen.dispose()
   }
 }
 
@@ -440,6 +451,7 @@ function createWindow(): BrowserWindow {
     minWidth: 800,
     minHeight: 560,
     show: true,
+    backgroundColor: bootBackgroundColor(nativeTheme.shouldUseDarkColors),
     title: 'DeepSeek Gestalt',
     webPreferences: {
       preload: PRELOAD,
@@ -505,6 +517,17 @@ function syncTrafficLights(target: BrowserWindow, fullscreen: boolean): void {
   if (process.platform === 'darwin') {
     target.setWindowButtonPosition(fullscreen ? null : { x: 12, y: 8 })
   }
+}
+
+/**
+ * Load the Host URL and keep the boot mark up until the Session Surface paints.
+ * @param target - the Desktop Host window.
+ * @param url - loopback URL printed by the Web Host.
+ */
+async function revealHost(target: BrowserWindow, url: string): Promise<void> {
+  await target.loadURL(url)
+  await waitForShellReady(target)
+  smokeLog('shell ready')
 }
 
 async function startHost(timeoutMs?: number): Promise<RunningWebHost> {
@@ -573,7 +596,7 @@ async function replaceWebHost(startTimeoutMs?: number): Promise<RunningWebHost> 
   observeHostExit(started)
   smokeLog('host replaced ' + started.url + ' pid ' + String(started.child.pid))
   if (window !== undefined && !window.isDestroyed()) {
-    await window.loadURL(started.url)
+    await revealHost(window, started.url)
     void ensureChromeOverlay(window, started.url)
   }
   sub2api?.onHostOriginChanged()
@@ -588,10 +611,13 @@ async function onHostExit(exited: RunningWebHost): Promise<void> {
   if (plan === 'ignore' || window === undefined) return
   if (plan === 'respawn') {
     respawned = true
+    const bootScreen = attachBootScreen(window)
     try {
       await replaceWebHost()
     } catch (error) {
       await showError(window, error)
+    } finally {
+      bootScreen.dispose()
     }
     return
   }

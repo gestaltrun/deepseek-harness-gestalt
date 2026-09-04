@@ -32,9 +32,9 @@
 - textbox "Message the agent"
 - button "Commands and skills":
   - img
-- 'button "Access mode, current: Custom"': Custom
-- button "Select model":
-  - text: Select model
+- 'button "Access mode, current: Read Only"': Read Only
+- button "Select model, current DeepSeek-V4-Flash":
+  - text: DeepSeek-V4-Flash
   - img
 - button "6% of context used"
 - button "Send message" [disabled]

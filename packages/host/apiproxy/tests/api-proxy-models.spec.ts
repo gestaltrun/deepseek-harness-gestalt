@@ -17,7 +17,7 @@ import type {
   UserMessage,
 } from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
@@ -331,6 +331,139 @@ describe('Web session model selection', () => {
     expect(saveFile).not.toHaveBeenCalled()
     await ctx.fiber.dispose()
   })
+
+  it('serves models and selectModel for a live session-backed subagent', async () => {
+    const { ctx } = await harness()
+    const parent = ctx.sessions.create()
+    const childSession = ctx.sessions.create(undefined, {
+      meta: { cwd: '/tmp', origin: 'subagent', parentSession: parent.id },
+    })
+    const child = {
+      id: childSession.id,
+      session: childSession,
+      status: 'idle',
+      ctx,
+    } as unknown as Agent
+    ctx.agents.register(child)
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const catalog = expectValue(await api.sessions.models(request({ sessionId: childSession.id })))
+    expect(catalog.current).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    const selected = expectValue(await api.sessions.selectModel(request({
+      sessionId: childSession.id,
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+      reasoningEffort: ReasoningEffortId('high'),
+    })))
+    expect(selected.selected).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })
+    expect(childSession.requestHeader()?.config).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })
+    await ctx.fiber.dispose()
+  })
+
+  it('serves models and selectModel for an idle attached child without a live Agent', async () => {
+    const { ctx } = await harness()
+    const parent = ctx.sessions.create()
+    const childSession = ctx.sessions.create(undefined, {
+      meta: { cwd: '/tmp', origin: 'subagent', parentSession: parent.id },
+    })
+    childSession.append('subagent/descriptor', {
+      version: 2,
+      mode: 'continuable',
+      provider: 'spawn',
+      label: 'child',
+      agentProvider: 'deepseek-official',
+      agentModel: 'deepseek-chat',
+    })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    const resume = vi.spyOn(ctx.agents, 'resume')
+
+    const catalog = expectValue(await api.sessions.models(request({ sessionId: childSession.id })))
+    expect(catalog.current).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    const selected = expectValue(await api.sessions.selectModel(request({
+      sessionId: childSession.id,
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+      reasoningEffort: ReasoningEffortId('high'),
+    })))
+    expect(selected.selected).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })
+    expect(childSession.requestHeader()?.config).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })
+    expect(resume).not.toHaveBeenCalled()
+    expect(ctx.agents.get(childSession.id)).toBeUndefined()
+    const reread = expectValue(await api.sessions.models(request({ sessionId: childSession.id })))
+    expect(reread.current).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })
+    await ctx.fiber.dispose()
+  })
+
+  it('serves models and selectModel from a detached child log without resuming', async () => {
+    const { ctx } = await harness()
+    const sessionId = 'session-detached-child' as SessionId
+    const meta = {
+      version: 0, id: sessionId, createdAt: 1, cwd: '/tmp', origin: 'subagent',
+    } as SessionHeader
+    const events: SessionEvent[] = [{
+      type: 'subagent/descriptor',
+      seq: 0,
+      time: 1,
+      data: {
+        version: 2, mode: 'continuable', provider: 'spawn', label: 'child',
+        agentProvider: 'deepseek-official', agentModel: 'deepseek-chat',
+      },
+    }]
+    const append = vi.fn(async (_id: SessionId, batch: readonly SessionEvent[]) => {
+      events.push(...batch)
+    })
+    ctx.provide('sessionPersistence', {
+      list: () => Promise.resolve([meta]),
+      inspect: () => Promise.resolve({ meta, events }),
+      append,
+      locate: () => undefined,
+    } as never)
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    const resume = vi.spyOn(ctx.agents, 'resume')
+
+    const catalog = expectValue(await api.sessions.models(request({ sessionId })))
+    expect(catalog.current).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    expectValue(await api.sessions.selectModel(request({
+      sessionId,
+      provider: 'deepseek-official',
+      model: 'deepseek-reasoner',
+    })))
+    expect(append).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toMatchObject({
+      type: 'request/header',
+      data: { header: { config: { provider: 'deepseek-official', model: 'deepseek-reasoner' } } },
+    })
+    const reread = expectValue(await api.sessions.models(request({ sessionId })))
+    expect(reread.current).toMatchObject({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    expect(resume).not.toHaveBeenCalled()
+    expect(ctx.agents.get(sessionId)).toBeUndefined()
+    await ctx.fiber.dispose()
+  })
+
   it('groups successful providers and leaves an unlisted current selection out of the catalog', async () => {
     const { ctx, sessionId } = await harness({
       provider: 'deepseek-official',

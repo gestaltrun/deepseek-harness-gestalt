@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // InputBar behavior over the machine wiring: Enter-send semantics (IME guard,
 // Shift newline, busy Enter policy, Ctrl/Meta steering, repeat suppression), running
-// semantics (input stays free; continuable children keep Send beside Stop), the machine pending lock,
-// decoration backdrop, error banners, status strips, and the focus-keeping mousedown.
+// semantics (input stays free; continuable children share the primary Send/Stop
+// toggle), the machine pending lock, decoration backdrop, error banners, status
+// strips, and the focus-keeping mousedown.
 
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
@@ -217,7 +218,8 @@ function bench(over?: BenchOptions) {
   }
   const view = render(<InputBar {...props} />)
   const textarea = view.container.querySelector('textarea')!
-  const primaryStops = over?.running === true && over.subagent === undefined
+  const primaryStops = over?.running === true
+    && (over.subagent === undefined || over.subagent.address.mode === 'continuable')
   const button = view.container.querySelector<HTMLButtonElement>(
     `button[aria-label="${primaryStops ? '停止生成' : '发送消息'}"]`,
   )!
@@ -754,7 +756,7 @@ describe('running and lock semantics', () => {
     expect(ctrl.sink).toHaveBeenCalledWith('also queue', [], 'queue', expect.any(AbortSignal))
   })
 
-  it('running continuable subagent keeps Send beside an independent Stop', () => {
+  it('running continuable subagent turns the primary into Stop like an ordinary session', () => {
     const { button, interruptButton, textarea, sink, stop } = bench({
       running: true,
       draft: '后续消息',
@@ -767,16 +769,16 @@ describe('running and lock semantics', () => {
         parentAvailable: true,
       },
     })
-    expect(button.getAttribute('aria-label')).toBe('发送消息')
-    expect(interruptButton).not.toBeNull()
+    expect(button.getAttribute('aria-label')).toBe('停止生成')
+    expect(interruptButton).toBe(button)
     expect(textarea.disabled).toBe(false)
-    fireEvent.click(button)
+    fireEvent.keyDown(textarea, { key: 'Enter' })
     expect(sink).toHaveBeenCalledWith('后续消息', [], 'queue', expect.any(AbortSignal))
-    fireEvent.click(interruptButton!)
+    fireEvent.click(button)
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
-  it('parent-offline running continuable locks Send but keeps independent Stop usable', () => {
+  it('parent-offline running continuable locks input but keeps the primary Stop usable', () => {
     const { button, interruptButton, textarea, stop, view } = bench({
       running: true,
       draft: '',
@@ -792,10 +794,10 @@ describe('running and lock semantics', () => {
     expect(textarea.disabled).toBe(true)
     expect(textarea.placeholder).toBe('父会话已离线，无法继续发送；仍可停止当前运行')
     expect((view.getByLabelText('命令和 skill') as HTMLButtonElement).disabled).toBe(true)
-    expect(button.getAttribute('aria-label')).toBe('发送消息')
-    expect(button.disabled).toBe(true)
-    expect(interruptButton?.disabled).toBe(false)
-    fireEvent.click(interruptButton!)
+    expect(button.getAttribute('aria-label')).toBe('停止生成')
+    expect(interruptButton).toBe(button)
+    expect(button.disabled).toBe(false)
+    fireEvent.click(button)
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
@@ -1756,5 +1758,25 @@ describe('command launcher chrome and control seats', () => {
     cleanup()
     const live = bench({ running: true, permissions })
     expect((live.view.getByLabelText(/^访问模式/) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('locks the Access chip on a catalog-addressed child while the model seat stays live', () => {
+    const command = vi.fn(() => Promise.resolve(true))
+    const permissions = {
+      options: [{ value: 'workspace-write', name: 'workspace-write' }],
+      currentValue: 'workspace-write',
+    }
+    const { view, slotCalls } = bench({
+      permissions,
+      command,
+      subagent: {
+        address: { parentSessionId: 'parent' as SessionId, childSessionId: SID, mode: 'continuable' },
+        parentAvailable: true,
+      },
+    })
+    expect((view.getByLabelText(/^访问模式/) as HTMLButtonElement).disabled).toBe(true)
+    expect(command).not.toHaveBeenCalled()
+    const model = slotCalls.find(call => call.key === 'conversation.input.model')
+    expect((model?.owner as { locked: boolean }).locked).toBe(false)
   })
 })

@@ -16,6 +16,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   delete win.__DSH_BOOT__
   delete win.__ModuleLoader__
+  delete (globalThis as Record<string, unknown>).__DSH_SHELL_READY__
   document.body.innerHTML = ''
 })
 
@@ -46,6 +47,7 @@ async function expectBootFailure(setup: () => void, message: string): Promise<vo
   await entry.run()
   expect(container.textContent).toContain(message)
   expect(error).toHaveBeenCalledOnce()
+  expect((globalThis as Record<string, unknown>).__DSH_SHELL_READY__).toBe(true)
   await entry.dispose()
 }
 
@@ -130,6 +132,7 @@ describe('plugin activation', () => {
     expect(target.mode).toBe('live')
     expect(events).toEqual(['consumer', 'mount'])
     expect(container.textContent).toBe('mounted')
+    expect((globalThis as Record<string, unknown>).__DSH_SHELL_READY__).toBe(true)
     await entry.dispose()
   })
 })

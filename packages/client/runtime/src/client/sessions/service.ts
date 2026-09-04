@@ -460,7 +460,6 @@ export class SessionRuntime implements ISessions {
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     const featureRoute = admission?.modelRoute?.(sessionId)
     if (admission !== undefined) return featureRoute
-    if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
     return {
       models: async signal => (await this.api.sessions.models({ sessionId }, signal)).result,
       selectModel: async (selection, signal) => (await this.api.sessions.selectModel({

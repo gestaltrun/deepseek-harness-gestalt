@@ -48,7 +48,7 @@ SlotRegistry 分别为 renderer 提供 `useSessions` 与 `useWorkspaces` 的裸 
 
 ## 待处理队列投影
 
-`ConversationSnapshot.queue` 是 Host 提供的 `agent.inbox.nextTurn` 权威瞬态快照；待处理的 next-step steering（中途引导）不进入此投影。每行携带其 `MessageId`、所有内容块均为文本时的完整可编辑文本，以及扁平化预览。Host 根据持久 `agent/inbox/spliced` 变更派生完整 `session/queue` 快照，并在重连时发送基线；面向单条消息的 `agent/inbox/inserted`、`claimed` 与 `discarded` 通知不用于重建该投影。`Session.updateQueue()` 经 Host 侧 `Inbox.splice()` 发送编辑／移除操作，客户端不做乐观变更，因此下一份 Host 快照是唯一可见的提交结果，claim 竞态则可能呈现 `queue-item-not-found`。
+`ConversationSnapshot.queue` 是 Host 提供的 `agent.inbox.nextTurn` 权威瞬态快照；待处理的 next-step steering（中途引导）不进入此投影。每行携带其 `MessageId`、所有内容块均为文本时的完整可编辑文本，以及扁平化预览。Host 根据持久 `agent/inbox/spliced` 变更派生完整 `session/queue` 快照，并在重连时发送基线；面向单条消息的 `agent/inbox/inserted`、`claimed` 与 `discarded` 通知不用于重建该投影。`Session.updateQueue()` 经 Host 侧 `Inbox.splice()` 发送编辑／移除操作，包括 live session-backed child；客户端不做乐观变更，因此下一份 Host 快照是唯一可见的提交结果，claim 竞态则可能呈现 `queue-item-not-found`。
 
 ## Conversation 组装
 
@@ -86,7 +86,7 @@ reason 为 `max-tokens` 的 `turn/end` 会在该轮位置投影出一个 `turn-m
 
 每个常驻 `Session` 都拥有一个 `modelSelection` 快照，其中包含当前模型选择、按提供方分组的目录、逐提供方失败记录，以及 `idle`／`loading`／`ready`／`selecting`／`error` 状态。历史记录会建立或刷新当前模型选择，打开选择器会刷新目录；选择失败会保留上一次模型选择和可用分组。目录与选择操作共用单调递增的代次，因此较旧响应无法覆盖较新的模型选择。重连重建会恢复 Host 报告的模型选择，同时不替换未变化的选择子结构。
 
-`SessionAdmissionAdapter` 让功能自有 Session 的提示词、取消、排队消息变更、命令、skill（技能） catalog 寻址与模型操作始终经过同一个路由归属方。`ISessions.modelRoute(sessionId)`、`ISessions.commandCatalogSessionId(sessionId)` 与 `ISessions.skillCatalogSessionId(sessionId)` 会先咨询第一个持有该 id 的适配器，再考虑普通 Session RPC。省略的功能操作保持不可用，绝不会回退到普通 Session 路由；省略 command catalog 也会隐藏通用命令 source。临时功能可以在不发布未来 Session 的情况下寻址既有父会话的 catalog，并保留模型选择。没有功能路由、但已被 catalog 定址的 subagent 仍不可用，避免普通 Session RPC 绕过 subagent routing。
+`SessionAdmissionAdapter` 让功能自有 Session 的提示词、取消、排队消息变更、命令、skill（技能） catalog 寻址与模型操作始终经过同一个路由归属方。`ISessions.modelRoute(sessionId)`、`ISessions.commandCatalogSessionId(sessionId)` 与 `ISessions.skillCatalogSessionId(sessionId)` 会先咨询第一个持有该 id 的适配器，再考虑普通 Session RPC。省略的功能操作保持不可用，绝不会回退到普通 Session 路由；省略 command catalog 也会隐藏通用命令 source。临时功能可以在不发布未来 Session 的情况下寻址既有父会话的 catalog，并保留模型选择。没有功能路由、但已被 catalog 定址的 subagent，仍使用普通 `session.models` / `session.selectModel`，即使 child 没有 live Agent；prompt、cancel、command 与 skill catalog 路由仍保持隔离。
 
 ## 模型体验
 

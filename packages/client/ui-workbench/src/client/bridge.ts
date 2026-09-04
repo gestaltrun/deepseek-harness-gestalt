@@ -10,7 +10,8 @@ import type {
 import { listBrowserWorkspacePages } from '@deepseek-ai/dsh-browser-workspace/client'
 import { recoverListedMutation } from '@deepseek-ai/dsh-client-ui-browser/client'
 import {
-  officialProfileFromChrome, officialProfileOf, officialTabMeta, officialTargetKey, officialTargetOf,
+  officialCreateErrorOf, officialProfileFromChrome, officialProfileOf, officialTabMeta,
+  officialTargetKey, officialTargetOf,
 } from '../official-tab-meta.ts'
 import { planOfficialPageReconcile, type OfficialPage, type SidebarBrowserTab } from '../reconcile.ts'
 import { collectSidebarBrowserTabs, type SidebarStateSlice } from '../sidebar-tabs.ts'
@@ -54,6 +55,18 @@ interface MissingTargetRecovery {
   readonly missingTarget: BrowserTarget
   readonly request: BrowserWorkspaceCreateRemoteRequest
   readonly url?: string
+}
+
+/**
+ * The URL a freshly created page navigates to: an http(s) seed recorded on
+ * the sidebar tab by a link click or `sidebar_open`. Other tab paths (local
+ * files from older iframe tabs) never seed a Runtime navigation.
+ * @param path - Snapshot tab path, when persisted.
+ * @returns the navigation URL, or undefined for a blank new page.
+ */
+function seedUrlOf(path: string | undefined): string | undefined {
+  if (path === undefined || !/^https?:\/\//i.test(path)) return undefined
+  return path
 }
 
 /**
@@ -259,22 +272,40 @@ export class OfficialBrowserBridge {
       && bound !== undefined
       && officialTargetKey(bound) !== officialTargetKey(recovery.missingTarget)
     ) return
+    const profile = officialProfileOf(tab.meta)
+    if (officialCreateErrorOf(tab.meta) !== undefined) {
+      // A retry starts by dropping the recorded failure so the chrome returns
+      // to the creating placeholder while this attempt is in flight.
+      this.deps.sidebar.updateTab(tabId, {
+        meta: profile === undefined ? {} : { profile },
+      })
+    }
     try {
       const request = recovery?.request ?? createRequestForTab(tab.meta, this.deps.createRequest)
       const remote = this.deps.bindRemote(sessionId as SessionId)
       const created = await remote.create(request)
-      const committed = recovery?.url === undefined
+      const seedUrl = recovery?.url ?? seedUrlOf(tab.path)
+      const committed = seedUrl === undefined
         ? created
-        : await remote.refresh(created.target, created.revision, recovery.url)
+        : await remote.refresh(created.target, created.revision, seedUrl)
       this.deps.sidebar.updateTab(tabId, {
         meta: officialTabMeta(committed.target, officialProfileFromChrome(committed.chrome)),
         ...(committed.title.trim() === '' ? {} : { title: committed.title }),
       })
       this.known.set(tabId, officialTargetKey(committed.target))
       return committed
-    } catch {
-      // Create can reject when the Session or Runtime is gone; the empty
-      // sidebar tab stays until the user closes it or a later tick retries.
+    } catch (error) {
+      // Create can reject when the Session or Runtime is gone; the tab keeps
+      // its Profile identity, records the failure for the chrome's retry
+      // affordance, and a later tick may retry after state changes.
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[ui-workbench] official page create failed for ${tabId}: ${message}`)
+      this.deps.sidebar.updateTab(tabId, {
+        meta: {
+          ...(profile === undefined ? {} : { profile }),
+          createError: message,
+        },
+      })
     }
   }
 }

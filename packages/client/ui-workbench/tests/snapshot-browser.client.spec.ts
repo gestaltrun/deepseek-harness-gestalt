@@ -16,9 +16,23 @@ describe('snapshotBrowserProductPatch', () => {
     expect(snapshotBrowserProductPatch({
       tabsEnabled: { browser: false },
       browserInterceptLinks: true,
+      browserInterceptHttps: true,
     })).toEqual({
       tabsEnabled: { browser: true },
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
+    })
+  })
+
+  it('turns link takeover on so GUI link clicks open official pages', () => {
+    expect(snapshotBrowserProductPatch({
+      tabsEnabled: { browser: true },
       browserInterceptLinks: false,
+      browserInterceptHttps: false,
+    })).toEqual({
+      tabsEnabled: { browser: true },
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     })
   })
 
@@ -26,20 +40,24 @@ describe('snapshotBrowserProductPatch', () => {
     expect(snapshotBrowserProductPatch({
       tabsEnabled: { editor: true, browser: false },
       browserInterceptLinks: true,
+      browserInterceptHttps: true,
     })).toEqual({
       tabsEnabled: { editor: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     })
   })
 
   it('skips a write when the product state is already stored', () => {
     expect(snapshotBrowserProductPatch({
       tabsEnabled: { git: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     })).toBeUndefined()
     expect(snapshotBrowserProductPatch({
       tabsEnabled: { browser: true, git: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     })).toBeUndefined()
   })
 })

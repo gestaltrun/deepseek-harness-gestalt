@@ -125,17 +125,33 @@ describe('ui-browser browser plugin', () => {
     face.addNamedProfile('tmp')
     face.addNamedProfile('work')
     face.addNamedProfile('lab')
+    face.renameNamedProfile('work', 'tmp')
+    face.renameNamedProfile('work', 'desk')
     face.removeNamedProfile('work')
     face.removeNamedProfile('lab')
     face.setDefaultKind('shared')
     face.setDefaultPersistentName('lab')
+    host.publish({
+      status: 'ready',
+      value: {
+        defaultKind: 'persistent',
+        defaultPersistentName: 'lab',
+        namedProfiles: ['work', 'lab'],
+      },
+    })
+    face.renameNamedProfile('missing', 'desk')
+    face.renameNamedProfile('work', 'lab')
+    face.renameNamedProfile('work', 'desk')
     expect(host.set.mock.calls).toEqual([
       ['namedProfiles', ['work', 'lab']],
+      ['namedProfiles', ['desk']],
+      ['defaultPersistentName', 'desk'],
       ['namedProfiles', []],
       ['defaultPersistentName', ''],
       ['namedProfiles', ['work']],
       ['defaultKind', 'shared'],
       ['defaultPersistentName', 'lab'],
+      ['namedProfiles', ['desk', 'lab']],
     ])
   })
 

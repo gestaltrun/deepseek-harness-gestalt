@@ -14,7 +14,8 @@
  *   and per-id (`tab => tab.id` for diff tabs whose id is change-derived).
  *   `single: true` is sugar for `dedupeKey: () => id`.
  * - `createTab` lets a descriptor own tab instantiation (the terminal
- *   builtin uses it to mint `terminal:<n>` ids and bump `nextTerminal`).
+ *   builtin uses it to mint `terminal:<n>` ids and bump `nextTerminal`;
+ *   the optional seed is the `openTab` request).
  * - `matchFileViewer` walks descriptors in priority order (desc, stable):
  *   per descriptor it tries `detect` first (when `head` bytes are given),
  *   then `exts`; `exts: []` is a catch-all that matches any path.
@@ -22,7 +23,7 @@
 import type { ReactNode } from 'react'
 import type { Context } from '../context-types.ts'
 import {
-  activateTab as activateTabReducer, allLeaves, closeTab as closeTabReducer, closeFloatByTab, floatWithTab,
+  activateTab as activateTabReducer, allLeaves, closeTab as closeTabReducer, closeFloatByTab, firstLeaf, floatWithTab,
   leafWithTab, openTabInActivePane, patchTab, raiseFloat, tabOpenIn, togglePanel, treeOf,
   type SidebarSnapshot, type SidebarState, type SidebarStore, type SidebarTab,
 } from './state.ts'
@@ -190,10 +191,15 @@ export interface TabDescriptor {
   /**
    * Custom tab creation (minting the `SidebarTab` and any state patches).
    * Return `null` to refuse creation. The terminal builtin uses this to
-   * mint `terminal:<n>` ids and bump `nextTerminal`.
-   * When omitted, a default `{ id, type, title }` tab is created.
+   * mint `terminal:<n>` ids and bump `nextTerminal`. The optional seed is
+   * the `openTab` request so a descriptor can reuse an explicit id, title,
+   * or meta instead of minting a fresh identity. When omitted, a default
+   * `{ id, type, title }` tab is created.
    */
-  createTab?: (state: SidebarState) => { tab: SidebarTab; patch?: Partial<SidebarState> } | null
+  createTab?: (
+    state: SidebarState,
+    seed?: OpenTabSeed,
+  ) => { tab: SidebarTab; patch?: Partial<SidebarState> } | null
   /**
    * External-link target claim (v0.13.0+): when a GUI external-link click
    * is taken over (the `browserInterceptLinks` master AND the URL's
@@ -369,8 +375,8 @@ export interface BetterSidebarService {
   /**
    * Open a tab (used by external tabs and the + menu). `title` overrides
    * the descriptor's title when given (the editor tab shows the file name);
-   * when the descriptor provides `createTab` it mints the tab itself and
-   * `title`/`path`/`id` are ignored. `url` lands the tab with its `path`
+   * when the descriptor provides `createTab` it mints the tab from the live
+   * state and this seed. `url` lands the tab with its `path`
    * pre-set to the URL (the browser tab's navigation seed; the caller
    * usually pairs it with a hostname `title`). A disabled tab type is a
    * no-op.
@@ -426,7 +432,12 @@ export interface BetterSidebarService {
    * (v0.12.0+) rides to the callback like `closeTab`'s.
    */
   activateTab(tabId: string, scope?: SessionScope): void
-  /** Open a file in the sidebar editor of `scope`'s session (title defaults to the file name). */
+  /**
+   * Open a file in the sidebar editor of `scope`'s session.
+   * Title defaults to the file name. A seed with a path or URL that would
+   * otherwise land in the bottom workbench is retargeted to the right
+   * workbench before minting.
+   */
   openFile(scope: SessionScope, path: string, title?: string): void
   /**
    * Expand or collapse the right workbench panel. A no-op when the requested
@@ -643,14 +654,20 @@ export function createBetterSidebarService(
     let created: SidebarTab | undefined
     let activated: SidebarTab | undefined
     const reducer = (state: SidebarState): SidebarState => {
+      // Path/URL seeds do not follow a last-touched bottom pane; type-only
+      // opens still use the pane that owns the + menu.
+      const contentOpen = seed.path !== undefined || seed.url !== undefined
+      const landing = contentOpen && treeOf(state, state.activePane ?? '') === 'bottomSplits'
+        ? { ...state, activePane: firstLeaf(state.splits).id }
+        : state
       // Let the descriptor mint the tab (terminal's nextTerminal bump, etc.).
       let tab: SidebarTab
       let next: SidebarState
       if (descriptor.createTab !== undefined) {
-        const result = descriptor.createTab(state)
+        const result = descriptor.createTab(landing, seed)
         if (result === null) return state
         tab = result.tab
-        next = applyDedupe(state, result.tab, descriptor)
+        next = applyDedupe(landing, result.tab, descriptor)
         if (result.patch !== undefined) next = { ...next, ...result.patch }
       } else {
         tab = {
@@ -663,7 +680,7 @@ export function createBetterSidebarService(
           ...(seed.diff !== undefined ? { diff: seed.diff } : {}),
           ...(seed.meta !== undefined ? { meta: seed.meta } : {}),
         }
-        next = applyDedupe(state, tab, descriptor)
+        next = applyDedupe(landing, tab, descriptor)
       }
       // Classify the landing against the INPUT state FIRST: a FOCUS fires
       // onActivate with the tab that is active NOW; a real creation fires
@@ -722,7 +739,7 @@ export function createBetterSidebarService(
       // hosting the landing pane is collapsed, expand it. On narrow
       // viewports the two workbenches merge into one drawer, so the drawer
       // (panelOpen) is the only lever; on wide viewports the landing pane's
-      // own panel opens — the bottom panel when the active pane lives in the
+      // own panel opens — the bottom panel when that pane lives in the
       // bottom tree, else the right panel. Type-only opens (+ menu,
       // agent-terminal auto-tabs) never expand (the panel behavior is their
       // caller's business). The check runs on the post-dedupe state, so a

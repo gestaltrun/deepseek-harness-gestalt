@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type Agent } from '@deepseek-ai/dsh-agent'
-import type { EpochHeader } from '@deepseek-ai/dsh-session'
-import { inheritParentAgentRoute, resolveChildAgentOptions } from '../src/child-agent.ts'
+import type { EpochHeader, SessionEvent } from '@deepseek-ai/dsh-session'
+import { inheritParentAgentRoute, resolveChildAgentOptions, resumeChildAgentOptions } from '../src/child-agent.ts'
 
 function parent(input: {
   options: Agent['options']
@@ -71,5 +71,25 @@ describe('resolveChildAgentOptions', () => {
       { model: 'child-model' },
       1,
     )).toEqual({ provider: 'grok', model: 'child-model', subagentDepth: 1 })
+  })
+})
+
+describe('resumeChildAgentOptions', () => {
+  it('prefers a later owned request header over the creation descriptor', () => {
+    const events = [
+      { type: 'request/header', data: { header: { config: { provider: 'parent', model: 'parent-model' } }, reason: 'initial' } },
+      { type: 'subagent/descriptor', data: { version: 2, mode: 'continuable', provider: 'spawn', label: 'child', agentProvider: 'mock', agentModel: 'child-model' } },
+      { type: 'request/header', data: { header: { config: { provider: 'grok', model: 'grok-4' } }, reason: 'change' } },
+    ] as SessionEvent[]
+    expect(resumeChildAgentOptions(events, { agentProvider: 'mock', agentModel: 'child-model' }))
+      .toEqual({ provider: 'grok', model: 'grok-4' })
+  })
+
+  it('falls back to the creation descriptor when the child has no owned header', () => {
+    const events = [
+      { type: 'subagent/descriptor', data: { version: 2, mode: 'continuable', provider: 'spawn', label: 'child', agentProvider: 'mock', agentModel: 'child-model' } },
+    ] as SessionEvent[]
+    expect(resumeChildAgentOptions(events, { agentProvider: 'mock', agentModel: 'child-model' }))
+      .toEqual({ provider: 'mock', model: 'child-model' })
   })
 })

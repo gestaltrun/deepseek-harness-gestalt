@@ -164,8 +164,8 @@ export function InputBar({
   // (undefined = capability absent → the chip renders nothing).
   const permissions = useProjection('permissions')
 
-  // A continuable child without its live parent cannot accept human input,
-  // but its independent Stop below stays available while it runs.
+  // A continuable child without its live parent cannot accept human input.
+  // Stop remains the primary action while it runs, matching an ordinary session.
   const continuable = subagent?.address.mode === 'continuable'
   const parentOffline = continuable && !subagent.parentAvailable
   // Running input stays free; locked = session removed, the
@@ -576,11 +576,11 @@ export function InputBar({
     if (el !== null) toggleCommandMenu?.(selectionOf(el))
   }
 
-  // Ordinary sessions retain their primary Send/Stop toggle. A continuable
-  // child keeps Send as the primary action and exposes Stop independently so
-  // pointer users can queue follow-ups while its current turn is running.
-  const primaryStops = running && subagent === null
-  const interruptible = running && continuable
+  // Ordinary sessions and continuable children share one primary Send/Stop
+  // control. Follow-ups while a child is running still go through Enter /
+  // the queue, not a second composer button. One-shot children have no
+  // interrupt route, so the primary stays Send.
+  const primaryStops = running && (subagent === null || continuable)
   const primaryLabel = primaryStops ? t('input.stop') : t('input.send')
   const onPrimary = (): void => {
     if (primaryStops) {
@@ -595,9 +595,12 @@ export function InputBar({
   // The Access seat: the projection-fed permission chip (renders nothing
   // while the permissions key is absent — permission-less host or Draft —
   // or while the command face is absent with the session).
+  // Catalog children inherit a fixed sandbox and cannot switch through
+  // `/permission`; the chip stays visible and read-only.
+  const accessLocked = locked || subagent !== null
   const accessSelect: ReactNode = command === undefined
     ? null
-    : <PermissionSelect key={sessionId} value={permissions} locked={locked} command={command} t={t} />
+    : <PermissionSelect key={sessionId} value={permissions} locked={accessLocked} command={command} t={t} />
 
   // Mirror-layer decorations: a visible backdrop with transparent textarea
   // text. Claim tokens and references retain the draft's own glyph metrics,
@@ -873,15 +876,6 @@ export function InputBar({
             {rightItems}
             {renderSlot('conversation.input.model', { locked: modelSeatLocked })}
             <ContextMeter useProjection={useProjection} t={t} />
-            {interruptible && (
-              <InputBarPrimaryAction
-                kind="stop"
-                label={t('input.stop')}
-                disabled={stop === undefined}
-                onMouseDown={keepFocus}
-                onClick={() => { stop?.() }}
-              />
-            )}
             <InputBarPrimaryAction
               kind={primaryStops ? 'stop' : 'send'}
               label={primaryLabel}

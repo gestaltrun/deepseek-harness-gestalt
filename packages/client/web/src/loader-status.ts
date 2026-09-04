@@ -33,3 +33,14 @@ export const STATE_LABELS: Record<FiberState, LoaderEntryState> = {
   [FIBER_STATE.DISPOSED]: 'disposed',
   [FIBER_STATE.UNLOADING]: 'unloading',
 }
+
+/** Window flag Desktop Host polls before lifting the in-window boot mark. */
+export const SHELL_READY_FLAG = '__DSH_SHELL_READY__'
+
+/**
+ * Publish Session Surface readiness after the settled UI or fail-loud page paints.
+ * Desktop Host keeps its local boot mark up until this flag is true.
+ */
+export function markShellReady(): void {
+  ;(globalThis as Record<string, unknown>)[SHELL_READY_FLAG] = true
+}

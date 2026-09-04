@@ -12,7 +12,8 @@ import { listBrowserWorkspacePages } from '@deepseek-ai/dsh-browser-workspace/cl
 import { BrowserPageChrome } from '@deepseek-ai/dsh-client-ui-browser/client'
 import { isDesktopOverlayDocument } from '../desktop-overlay-document.ts'
 import {
-  officialProfileFromChrome, officialTabMeta, officialTargetKey, officialTargetOf,
+  officialCreateErrorOf, officialProfileFromChrome, officialTabMeta, officialTargetKey,
+  officialTargetOf,
 } from '../official-tab-meta.ts'
 import { bindBrowserWorkspace, type BrowserWorkspaceRemoteFace } from './remote-bind.ts'
 
@@ -88,6 +89,9 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
     (target: BrowserTarget) => workbench?.recoverOfficial?.(tab.id, target),
     [tab.id, workbench],
   )
+  const onRetryCreate = useCallback(() => {
+    workbench?.ensureOfficial?.(tab.id)
+  }, [tab.id, workbench])
   const actions = useMemo(() => {
     const remote = ctx.get('remote.browserWorkspace') as BrowserWorkspaceRemoteFace | undefined
     return remote === undefined ? undefined : bindBrowserWorkspace(remote, sessionId)
@@ -100,6 +104,7 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
 
   if (isDesktopOverlayDocument() || actions === undefined) return null
 
+  const createError = bound === undefined ? officialCreateErrorOf(tab.meta) : undefined
   return (
     <BrowserPageChrome
       target={bound}
@@ -111,6 +116,7 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
       {...(visible === undefined ? {} : { visible })}
       onCommittedPage={onCommittedPage}
       onMissingTarget={onMissingTarget}
+      {...(createError === undefined ? {} : { createError, onRetry: onRetryCreate })}
     />
   )
 }

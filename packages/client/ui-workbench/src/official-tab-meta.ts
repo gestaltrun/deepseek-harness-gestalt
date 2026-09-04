@@ -84,6 +84,19 @@ export function officialProfileOf(meta: unknown): OfficialBrowserProfile | undef
 }
 
 /**
+ * Read the create failure recorded on an unbound tab. The bridge writes it
+ * when the Runtime rejects or hangs a create, and clears it at the next
+ * attempt, so the chrome can offer a retry instead of a perpetual spinner.
+ * @param meta - Persisted tab meta.
+ * @returns the failure message, or undefined while no attempt has failed.
+ */
+export function officialCreateErrorOf(meta: unknown): string | undefined {
+  if (meta === null || typeof meta !== 'object') return undefined
+  const message = (meta as { createError?: unknown }).createError
+  return typeof message === 'string' && message.length > 0 ? message : undefined
+}
+
+/**
  * Reduce Runtime page chrome to the Profile identity persisted by the Workbench.
  * @param chrome - Runtime-observed Profile chrome.
  * @returns a reusable Profile identity, or undefined for malformed persistent chrome.

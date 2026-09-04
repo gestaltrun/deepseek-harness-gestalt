@@ -349,7 +349,7 @@ describe('ui-model-selection dual entry', () => {
     expect(() => b.seat().inject!(sid('ghost'))).toThrow(/resolved no scope/)
   })
 
-  it('withholds both model entries from addressed subagent sessions without Agent-bound RPCs', async () => {
+  it('withholds both model entries when the Session has no model route', async () => {
     const b = await bench()
     b.mint('child')
     b.address(sid('child'))
@@ -358,18 +358,18 @@ describe('ui-model-selection dual entry', () => {
     await expect(b.contribution().ui.options(
       projection('child'),
       new AbortController().signal,
-    )).rejects.toThrow(/unavailable for addressed subagent/)
+    )).rejects.toThrow(/unavailable for this session/)
 
     const face = b.seat().inject!(sid('child'))
     expect(face.available).toBe(false)
     face.load()
     await expect(face.select({ provider: 'deepseek', model: 'deepseek-v4-pro' })).resolves.toBe(false)
     await expect(b.ctx.modelDirectories.directoryFor(sid('child')).load())
-      .rejects.toThrow(/unavailable for addressed subagent/)
+      .rejects.toThrow(/unavailable for this session/)
     await expect(b.ctx.modelDirectories.directoryFor(sid('child')).select({
       provider: 'deepseek',
       model: 'deepseek-v4-pro',
-    })).rejects.toThrow(/unavailable for addressed subagent/)
+    })).rejects.toThrow(/unavailable for this session/)
     b.ctx.emit('connection/reset')
     await Promise.resolve()
     expect(b.calls).toEqual({ models: 0, select: 0 })

@@ -21,9 +21,8 @@
  * The decoder rebuilds the marker as a forward-slash `//server/share/...`
  * path. That form is intentionally platform-neutral: `node:path` resolves it
  * to `\\server\share\...` on win32 and `/server/share/...` on POSIX, so the
- * host's existing requireAbsolute + isWithin fence needs no platform signal
- * (a leading `//` is a legal POSIX absolute path, so no data is lost on
- * either platform).
+ * host's read-side path resolution needs no platform signal (a leading `//`
+ * is a legal POSIX absolute path, so no data is lost on either platform).
  *
  * This module is intentionally dependency-free (no node imports, no wire
  * helpers) so the client bundle can import `encodeHtmlUrl` without tripping

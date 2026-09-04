@@ -53,6 +53,7 @@
     "apps/web/tests/message-actions.e2e.ts",
     "apps/web/tests/message-feedback.e2e.ts",
     "apps/web/tests/message-feedback-layout.e2e.ts",
+    "apps/web/tests/annotation-persistence.e2e.ts",
     "apps/web/tests/annotation-images.e2e.ts",
     "apps/web/tests/markdown-images.e2e.ts",
     "apps/web/tests/reference-composer.e2e.ts",

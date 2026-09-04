@@ -64,10 +64,12 @@ describe('Project Reference compiler faces', () => {
     const host = readConfig(join(repositoryRoot, 'tsconfig.host.json'))
 
     expect(web.exclude).toEqual(expect.arrayContaining([
+      'tests/annotation-persistence.e2e.ts',
       'tests/annotation-images.e2e.ts',
       'tests/web-acceptance.acceptance.ts',
     ]))
     expect(host.include).toEqual(expect.arrayContaining([
+      'apps/web/tests/annotation-persistence.e2e.ts',
       'apps/web/tests/annotation-images.e2e.ts',
       'apps/web/tests/web-acceptance.acceptance.ts',
     ]))

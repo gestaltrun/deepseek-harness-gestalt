@@ -1246,7 +1246,7 @@ export class ToolRuntime extends Service {
   private wireSchemas(context: AssembleContext): ToolProviderResult {
     const view = this.view(context.scope)
     const mode = this.modeFor(context.scope)
-    const loaded = this.loadedSchemas(context.agent, view)
+    const loaded = this.loadedSchemas(this.agentForScope(context.scope), view)
     if (mode === 'native') {
       const schemas = [...view.visible.values()]
         .filter(definition => definition.deferLoading !== true)
@@ -1271,6 +1271,12 @@ export class ToolRuntime extends Service {
     }
     schemas.push(...loaded)
     return { schemas, knownNames: schemas.map(schema => schema.name) }
+  }
+
+  /** Recover an Agent only when the assembly scope itself is the established Agent owner. */
+  private agentForScope(scope: ScopeKey | undefined): Agent | undefined {
+    if (typeof scope !== 'object' || scope === null || !('session' in scope)) return undefined
+    return scope as Agent
   }
 
   /** Recover current deferred schemas by filtering, budgeting, then validating durable history. */
@@ -1414,16 +1420,10 @@ export class ToolRuntime extends Service {
   }
 
   /**
-   * Register a monotonic guard after the extensible `tools/pre-execute`
-   * waterfall. A plain-context guard applies globally; one registered through
-   * `agent.ctx` applies only to that agent. Any matching guard may deny by
-   * returning a reason, while no guard can force-allow a call another guard
-   * denied. The exact effect disposer is returned for ordered ownership and
-   * HMR cleanup.
-   * @param guard - synchronous check; a returned string denies the execution.
-   * @returns the exact disposer that unregisters the guard.
+   * Add positive tool eligibility for the calling scope.
+   * @param names - exact registered or future tool names allowed by this contribution.
+   * @returns the disposer that removes this contribution.
    */
-  /** Add positive tool eligibility for the calling scope. */
   allowEligible(names: readonly string[]): () => void {
     if (scopeOf(this.ctx) === undefined) throw new Error('tools.allowEligible() requires a scoped context')
     return this.layers.effect(
@@ -1494,6 +1494,11 @@ export class ToolRuntime extends Service {
     }
   }
 
+  /**
+   * Register a monotonic guard after the extensible pre-execute waterfall.
+   * @param guard - synchronous check; a returned string denies the execution.
+   * @returns the disposer that unregisters the guard.
+   */
   guard(guard: ToolGuard): () => void {
     return this.layers.effect(
       this.ctx,
@@ -1588,6 +1593,13 @@ export class ToolRuntime extends Service {
     return view.eligibility !== undefined && view.knownNames.has(name) && !view.eligibility.has(name)
   }
 
+  /** Whether a deferred definition lacks durable discovery for the calling Agent. */
+  private discoveryDenies(view: ToolView, name: string, agent: Agent | undefined): boolean {
+    const definition = view.visible.get(name)
+    if (definition?.deferLoading !== true) return false
+    return !this.loadedSchemas(agent, view).some(schema => schema.name === name)
+  }
+
   /**
    * Look up a tool as one scope sees it (scoped
    * shadows global; a restricted-away global reads as absent). Presenters pass
@@ -1652,7 +1664,7 @@ export class ToolRuntime extends Service {
   /** Project visible callable tools onto the generated PTC mode SDK contract. */
   private sdkSchemas(context: AssembleContext): ToolSdkSchema[] {
     const view = this.view(context.scope)
-    const loaded = new Map(this.loadedSchemas(context.agent, view).map(schema => [schema.name, schema]))
+    const loaded = new Map(this.loadedSchemas(this.agentForScope(context.scope), view).map(schema => [schema.name, schema]))
     const immediate = [...view.visible.values()]
       .filter(definition => definition.name !== RUN_CODE_NAME && definition.deferLoading !== true)
       .map((definition): ToolSdkSchema => {
@@ -1803,6 +1815,7 @@ export class ToolRuntime extends Service {
     const initialView = this.view(agent)
     const visible = initialView.visible.get(name)
     const eligibilityDenied = this.eligibilityDenies(initialView, name)
+    const discoveryDenied = parent === undefined && this.discoveryDenies(initialView, name, agent)
     const collapsed = visible !== undefined && this.collapses(name, agent, parent !== undefined)
     const concludingExecutions = this.concludingExecutions
     const base = {
@@ -1845,7 +1858,7 @@ export class ToolRuntime extends Service {
         callerSignal: signal,
         bodyInvoked: false,
       })
-      if (eligibilityDenied || collapsed) {
+      if (eligibilityDenied || discoveryDenied || collapsed) {
         // The collapse denies the call before the policy pipeline, but a
         // pre-dispatch abort still keeps the established cancellation
         // contract: `prepare`'s caller-cancellation check is skipped for
@@ -1854,7 +1867,7 @@ export class ToolRuntime extends Service {
         if (signal.aborted) {
           return { kind: 'final-result', exec: execution, result: toolAbortedBeforeDispatchResult() }
         }
-        if (eligibilityDenied) {
+        if (eligibilityDenied || discoveryDenied) {
           this.contentFinalizers.delete(execution)
           return { kind: 'final-result', exec: execution, result: toolErrorResult(new ToolNotFoundError(name)) }
         }
@@ -1997,7 +2010,9 @@ export class ToolRuntime extends Service {
    */
   private async dispatchScheduledExecution(exec: ToolRunContext): Promise<ScheduledToolDispatch> {
     try {
-      if (this.eligibilityDenies(this.view(exec.agent), exec.name)) {
+      const view = this.view(exec.agent)
+      if (this.eligibilityDenies(view, exec.name)
+        || (exec.parent === undefined && this.discoveryDenies(view, exec.name, exec.agent))) {
         this.contentFinalizers.delete(exec)
         return { kind: 'final-result', result: toolErrorResult(new ToolNotFoundError(exec.name)) }
       }

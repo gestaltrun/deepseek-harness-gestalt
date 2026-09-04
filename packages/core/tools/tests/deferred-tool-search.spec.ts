@@ -206,6 +206,29 @@ describe('deferred tool search', () => {
     }])
   })
 
+  it('denies a guessed deferred tool name before policy or body execution', async () => {
+    const ctx = await mount()
+    let preCalls = 0
+    let bodyCalls = 0
+    ctx.tools.register({
+      ...tool('mcp__weather__forecast', 'Forecast weather by city', true),
+      execute: async () => { bodyCalls++; return 'forecast' },
+    })
+    ctx.on('tools/pre-execute', async (_exec, next) => { preCalls++; return next() })
+
+    const result = await ctx.tools.execute({
+      callId: ToolCallId('guessed-deferred'),
+      name: 'mcp__weather__forecast',
+      arguments: { value: 'Shanghai' },
+      agent: { session: Session.create(SessionId('guessed-deferred')) } as Agent,
+      signal,
+    })
+
+    expect(result).toMatchObject({ isError: true, error: { info: { code: 'UNKNOWN_TOOL' } } })
+    expect(preCalls).toBe(0)
+    expect(bodyCalls).toBe(0)
+  })
+
   it.each([
     [null, 'non-object arguments'],
     [{ query: 42 }, 'query type'],
@@ -434,7 +457,7 @@ describe('deferred tool search', () => {
       source: { kind: 'user' },
     }), { surfaceOp: 'append' })
 
-    expect((await ctx.systemPrompt.assemble({ scope: agent, agent })).tools.map(schema => schema.name))
+    expect((await ctx.systemPrompt.assemble({ scope: agent })).tools.map(schema => schema.name))
       .toEqual(['tool_search'])
 
     const result = await ctx.tools.execute({
@@ -456,7 +479,7 @@ describe('deferred tool search', () => {
       }),
     }, { surfaceOp: 'append' })
 
-    const next = await ctx.systemPrompt.assemble({ scope: agent, agent })
+    const next = await ctx.systemPrompt.assemble({ scope: agent })
     expect(next.tools.map(schema => schema.name)).toEqual([
       'mcp__weather__forecast',
       'tool_search',
@@ -464,7 +487,7 @@ describe('deferred tool search', () => {
 
     const resumed = Session.create(SessionId('deferred-search-resumed'), session.snapshotEvents())
     const resumedAgent = { session: resumed } as Agent
-    expect((await ctx.systemPrompt.assemble({ scope: resumedAgent, agent: resumedAgent })).tools)
+    expect((await ctx.systemPrompt.assemble({ scope: resumedAgent })).tools)
       .toEqual(next.tools)
   })
 
@@ -502,7 +525,7 @@ describe('deferred tool search', () => {
     )
     const agent = { session: restored } as Agent
 
-    await expect(ctx.systemPrompt.assemble({ scope: agent, agent }))
+    await expect(ctx.systemPrompt.assemble({ scope: agent }))
       .rejects.toThrow(/durable loadedTools/)
   })
 
@@ -548,7 +571,7 @@ describe('deferred tool search', () => {
       }),
     }, { surfaceOp: 'append' })
 
-    const assembly = await ctx.systemPrompt.assemble({ scope: agent, agent })
+    const assembly = await ctx.systemPrompt.assemble({ scope: agent })
     expect(assembly.tools.map(schema => schema.name)).toContain(eligible.name)
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined()
   })
@@ -603,7 +626,7 @@ describe('deferred tool search', () => {
       accessor,
     ])
 
-    const assembly = await ctx.systemPrompt.assemble({ agent })
+    const assembly = await ctx.systemPrompt.assemble({ scope: agent })
     expect(assembly.tools.map(schema => schema.name)).toContain(eligible.name)
     expect(prototypeTrapCalls).toBe(0)
     expect(accessorReads).toBe(0)
@@ -630,7 +653,7 @@ describe('deferred tool search', () => {
     }, { surfaceOp: 'append' })
     const agent = { session } as Agent
 
-    await expect(ctx.systemPrompt.assemble({ scope: agent, agent }))
+    await expect(ctx.systemPrompt.assemble({ scope: agent }))
       .rejects.toThrow(/maxResultBytes 512/)
   })
 
@@ -645,7 +668,7 @@ describe('deferred tool search', () => {
     appendDiscovery(session, ToolCallId('restored-huge'), [schema])
     const agent = { session } as Agent
 
-    await expect(ctx.systemPrompt.assemble({ scope: agent, agent }))
+    await expect(ctx.systemPrompt.assemble({ scope: agent }))
       .rejects.toThrow(/maxResultBytes 512/)
   })
 
@@ -660,7 +683,7 @@ describe('deferred tool search', () => {
     appendDiscovery(session, ToolCallId('restored-second'), schemas.slice(2))
     const agent = { session } as Agent
 
-    await expect(ctx.systemPrompt.assemble({ scope: agent, agent }))
+    await expect(ctx.systemPrompt.assemble({ scope: agent }))
       .rejects.toThrow(/maxResultBytes 900/)
   })
 
@@ -679,7 +702,7 @@ describe('deferred tool search', () => {
       appendDiscovery(session, ToolCallId('restored-bound'), [stale, eligible])
       const { agent, scope } = await scopedAgent(ctx, session)
       scope.ctx.tools.allowEligible([eligible.name])
-      return ctx.systemPrompt.assemble({ scope: agent, agent })
+      return ctx.systemPrompt.assemble({ scope: agent })
     }
 
     expect((await assemble(exactBytes)).tools.map(schema => schema.name)).toContain(eligible.name)
@@ -743,7 +766,7 @@ describe('deferred tool search', () => {
     removeWeatherEligibility()
     scope.ctx.tools.allowEligible(['mcp__calendar__list'])
 
-    expect((await ctx.systemPrompt.assemble({ scope: agent, agent })).tools.map(schema => schema.name))
+    expect((await ctx.systemPrompt.assemble({ scope: agent })).tools.map(schema => schema.name))
       .toEqual(['tool_search'])
     await expect(ctx.tools.execute({
       callId: ToolCallId('stale-weather'),
@@ -785,7 +808,7 @@ describe('deferred tool search', () => {
       }),
     }, { surfaceOp: 'append' })
 
-    const assembly = await ctx.systemPrompt.assemble({ scope: agent, agent })
+    const assembly = await ctx.systemPrompt.assemble({ scope: agent })
     expect(assembly.tools.map(schema => schema.name)).toEqual(['run_code'])
     expect(assembly.sections.find(section => section.name === 'tools:sdk')?.text)
       .toContain('mcp__weather__forecast')
@@ -889,7 +912,7 @@ describe('deferred tool search', () => {
     const restored = overflow.agent.session.deriveMessages().at(-1)?.content[0]
     expect(restored).toMatchObject({ type: 'tool-result', isError: true })
     expect(restored).not.toHaveProperty('loadedTools')
-    expect((await overflow.ctx.systemPrompt.assemble({ scope: overflow.agent, agent: overflow.agent }))
+    expect((await overflow.ctx.systemPrompt.assemble({ scope: overflow.agent }))
       .sections.find(section => section.name === 'tools:sdk')?.text)
       .not.toContain('mcp__alpha__forecast')
   })

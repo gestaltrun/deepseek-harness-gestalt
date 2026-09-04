@@ -14,7 +14,7 @@ Issue Priority 同步与组织 Project 生命周期投影使用不同的 API、�
 
 `.github/issue-management/config.json` 通过 `priorityField` 声明 Issue Priority 集成。非空字符串会启用该集成并指定组织 Issue field。策略会为每个被引用 Issue 请求字段值；任何 API 失败仍是致命错误。`null` 会关闭该集成、阻止字段值请求，并在 PR 校验中把被引用 Issue 的 Priority 记录为未设置。
 
-个人账户 tracker 把 `priorityField` 设为 `null`。其 PR 策略继续校验 Issue 引用与 PR 标签，但不执行 Priority 同步。该设置不会合成原生 Issue Type，也不会启用 Project 生命周期投影；独立的部署选项由[仓库相对 Issue policy 决策](2026-08-17-repository-relative-issue-policy.zh.md)负责。
+Gestalt 组织 tracker 因未配置 Priority 同步所需的 Issue field 授权而把 `priorityField` 设为 `null`。其 PR 策略继续校验 Issue 引用与 PR 标签，但不执行 Priority 同步。该设置不会合成原生 Issue Type，也不会启用 Project 生命周期投影；独立的部署选项由[仓库相对 Issue policy 决策](2026-08-17-repository-relative-issue-policy.zh.md)负责。
 
 策略在启动时拒绝 `null` 或非空字符串以外的任何 `priorityField` 值，因此错误配置无法静默关闭强制校验。
 
@@ -32,4 +32,4 @@ Issue management 测试使用不同配置文件，在本地 fake GitHub API 上�
 
 ## 后果
 
-个人账户 PR 检查不再依赖不可用的组织 API。组织部署通过字段名选择启用，并保留严格失败行为。关闭部署会放弃 PR Priority 自动对齐，因为每个被引用 Issue 进入校验时都没有 Priority。
+Gestalt PR 检查不再依赖未配置的 Issue field API。部署通过字段名选择启用，并保留严格失败行为。关闭部署会放弃 PR Priority 自动对齐，因为每个被引用 Issue 进入校验时都没有 Priority。

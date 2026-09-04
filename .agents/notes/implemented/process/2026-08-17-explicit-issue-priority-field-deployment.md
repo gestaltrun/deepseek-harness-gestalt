@@ -14,7 +14,7 @@ Issue Priority synchronization and organization Project lifecycle projection hav
 
 `.github/issue-management/config.json` declares Issue Priority integration through `priorityField`. A non-empty string enables the integration and names the organization Issue field. The policy requests field values for every referenced Issue; any API failure remains fatal. `null` disables the integration, prevents the field-values request, and records the referenced Issue's Priority as absent for PR validation.
 
-The personal-account tracker sets `priorityField` to `null`. Its PR policy continues to validate Issue references and PR labels without Priority synchronization. This setting does not synthesize native Issue Types or enable Project lifecycle projection; the [repository-relative Issue policy decision](2026-08-17-repository-relative-issue-policy.md) owns that separate deployment option.
+The Gestalt organization tracker sets `priorityField` to `null` because Issue-field authorization for Priority synchronization is not configured. Its PR policy continues to validate Issue references and PR labels without Priority synchronization. This setting does not synthesize native Issue Types or enable Project lifecycle projection; the [repository-relative Issue policy decision](2026-08-17-repository-relative-issue-policy.md) owns that separate deployment option.
 
 The policy rejects any `priorityField` value other than `null` or a non-empty string at startup so a malformed deployment cannot silently disable enforcement.
 
@@ -32,4 +32,4 @@ The Issue-management test executes the real `policy.mjs pr` CLI against a local 
 
 ## Consequences
 
-Personal-account PR checks do not depend on an unavailable organization API. Organization deployments opt in by naming the field and retain strict failure behavior. A disabled deployment gives up automatic PR Priority alignment because every referenced Issue enters validation with no Priority.
+Gestalt PR checks do not depend on an unconfigured Issue-field API. Deployments opt in by naming the field and retain strict failure behavior. A disabled deployment gives up automatic PR Priority alignment because every referenced Issue enters validation with no Priority.

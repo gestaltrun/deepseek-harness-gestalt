@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-17-explicit-issue-priority-field-deployment.md
-2026-08-17-explicit-issue-priority-field-deployment.md: 09b04a2b06a0a4e92a38bd94c270f1c9bde7f796
-2026-08-17-explicit-issue-priority-field-deployment.zh.md: a2282ba623fa519944a2619f8a007e134e4f56d6
+2026-08-17-explicit-issue-priority-field-deployment.md: df423afb0e16dc726ab0f7965df749102c80beb2
+2026-08-17-explicit-issue-priority-field-deployment.zh.md: 15f9b81e73e5d16941050bd5281f52fcb81fbc9b

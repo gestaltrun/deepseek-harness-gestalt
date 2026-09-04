@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-tiered-standby-readiness.md
 2026-08-24-tiered-standby-readiness.md: 043cdaf57e7f38b7b3623c96627ba90a7d9a47d8
-2026-08-24-tiered-standby-readiness.zh.md: e17f8a1eaf102a3036816124ec57f58f454801db
+2026-08-24-tiered-standby-readiness.zh.md: 0a0dad22247e46fa5ad3fa6718db8a38b47ad27e

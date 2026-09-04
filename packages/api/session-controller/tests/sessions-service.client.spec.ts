@@ -388,6 +388,41 @@ describe('provisional identity lifecycle', () => {
     expect(b.api.callsOf('subagents.list')).toEqual([sid('parent')])
   })
 
+  it('does not apply a late openForRender catalog after Client Sessions disposal', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [
+      { id: 'parent' },
+      { id: 'child', parentId: 'parent', origin: 'subagent' },
+    ])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
+    b.api.onSubagentList = () => gate.promise
+    b.svc.openForRender(sid('child'))
+    await Promise.resolve()
+    expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
+    expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]?.state).toBe('loading')
+
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+
+    gate.resolve(ok({
+      entries: [{
+        kind: 'child', id: sid('grandchild'), mode: 'continuable', label: 'Grandchild',
+        activity: 'inactive', hasChildren: false,
+      }] as never[],
+      parentAvailable: true,
+    }))
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]).toMatchObject({
+      entries: [], state: 'loading',
+    })
+    expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
+  })
+
   it('drops a provisional scope when the Client Sessions plugin unloads', async () => {
     const b = bench()
     const readiness = b.ctx.plugin(() => undefined)

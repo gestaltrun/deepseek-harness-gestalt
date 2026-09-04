@@ -96,6 +96,8 @@ export class SessionManager {
   private readonly sessions = new Map<SessionId, Session>()
   /** In-flight Session disposals remain here after instances leave `sessions`, so manager disposal can await quiescence. */
   private readonly sessionDisposals = new Set<Promise<void>>()
+  /** Once true, catalog and list writers must not publish or start trailing work. */
+  private disposed = false
   /** Latest transient queues, retained independently of Session object materialization. */
   private readonly queues = new Map<SessionId, readonly SessionQueuedItem[]>()
   /**
@@ -255,14 +257,18 @@ export class SessionManager {
    * @returns when every Session Remote iterator has completed teardown.
    */
   async dispose(): Promise<void> {
+    this.disposed = true
     for (const timer of this.catalogDebounce.values()) clearTimeout(timer)
     this.catalogDebounce.clear()
     this.catalogStale.clear()
     this.openCatalogs.clear()
     this.provisionalSummaries.clear()
+    this.catalogs.clear()
+    const catalogWork = [...this.catalogInflight.values()].map(inflight => inflight.promise)
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
     for (const session of sessions) void this.startSessionDisposal(session)
+    await Promise.allSettled(catalogWork)
     await this.drainSessionDisposals()
   }
 
@@ -402,6 +408,7 @@ export class SessionManager {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
+    if (this.disposed) return Promise.resolve()
     const existing = this.catalogInflight.get(parentSessionId)
     if (existing !== undefined) return existing.promise
     const previous = this.catalogs.get(parentSessionId)
@@ -419,6 +426,7 @@ export class SessionManager {
     const operation = (async () => {
       try {
         const result = await this.remote.subagents.list(parentSessionId)
+        if (this.disposed) return
         if (result.ok) {
           const parentAvailable = this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
             ?? result.value.parentAvailable
@@ -447,6 +455,7 @@ export class SessionManager {
           })
         }
       } catch (error: unknown) {
+        if (this.disposed) return
         if (!isRemoteFailure(error)) throw error
         this.catalogs.set(parentSessionId, {
           entries: this.withCatalogMutations(
@@ -461,6 +470,7 @@ export class SessionManager {
         })
       } finally {
         this.catalogInflight.delete(parentSessionId)
+        if (this.disposed) return
         // Re-arm the trailing pull before the dirty notify: the response the
         // caller observed predates the stale-marking change, so the follow-up
         // refresh is the only carrier of that change.
@@ -483,6 +493,7 @@ export class SessionManager {
    * @param open - current menu state.
    */
   setSubagentCatalogOpen(parentSessionId: SessionId, open: boolean): void {
+    if (this.disposed) return
     if (open) {
       this.openCatalogs.add(parentSessionId)
       void this.refreshSubagents(parentSessionId)
@@ -510,6 +521,7 @@ export class SessionManager {
     this.listInflight = (async () => {
       try {
         const result = await this.remote.session.list({})
+        if (this.disposed) return
         if (result.ok) {
           for (const summary of result.value.items) {
             this.provisionalSummaries.delete(summary.sessionId)
@@ -574,13 +586,14 @@ export class SessionManager {
           this.listError = result.error
         }
       } catch (error) {
+        if (this.disposed) return
         if (!isRemoteFailure(error)) throw error
         this.listState = 'error'
         this.listError = error
       } finally {
         this.listMutations = null
         this.listInflight = null
-        this.notifier.markDirty()
+        if (!this.disposed) this.notifier.markDirty()
       }
     })()
     return this.listInflight
@@ -866,7 +879,7 @@ export class SessionManager {
 
   /** Debounce membership refetches while one parent catalog is selected or open. */
   private scheduleCatalogRefresh(parentSessionId: SessionId): void {
-    if (this.catalogDebounce.has(parentSessionId)) return
+    if (this.disposed || this.catalogDebounce.has(parentSessionId)) return
     const timer = setTimeout(() => {
       this.catalogDebounce.delete(parentSessionId)
       // The in-flight response predates the membership frame that scheduled

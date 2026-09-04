@@ -484,6 +484,40 @@ describe('subagent catalogs', () => {
     ])
   })
 
+  it('does not publish a late catalog after manager disposal', async () => {
+    const api = new FakeApiClient()
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
+    api.onSubagentList = () => gate.promise
+    const manager = new SessionManager(fakeRemote(api))
+    const notified = vi.fn()
+    manager.subscribe(notified)
+    const refresh = manager.refreshSubagents(S1)
+    await Promise.resolve()
+    expect(api.callsOf('subagents.list')).toEqual([S1])
+    notified.mockClear()
+
+    const settled = vi.fn()
+    const disposal = manager.dispose().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+
+    gate.resolve(ok({
+      entries: [{
+        kind: 'child', id: S2, mode: 'continuable', label: 'worker',
+        activity: 'inactive', hasChildren: false,
+      }] as never[],
+      parentAvailable: true,
+    }))
+    await disposal
+    await refresh
+    expect(settled).toHaveBeenCalledOnce()
+    expect(manager.getListSnapshot().subagentsByParent[S1]).toMatchObject({
+      entries: [], state: 'loading',
+    })
+    expect(notified).not.toHaveBeenCalled()
+    expect(api.callsOf('subagents.list')).toEqual([S1])
+  })
+
   it('coalesces overlapping catalog reads without scheduling a trailing pull', async () => {
     const api = new FakeApiClient()
     const root = 'fk-root' as SessionId

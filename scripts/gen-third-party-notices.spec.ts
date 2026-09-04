@@ -6,7 +6,6 @@ import {
   CLAUDE_AGENT_SDK_PACKAGE,
   claudeDistributionFromManifest,
   collectPythonDependencies,
-  collectRepositorySkillSources,
   isOwnerAuthorizedRuntime,
   isPermissive,
   type Manifest,
@@ -29,21 +28,6 @@ describe('THIRD_PARTY_NOTICES.md', () => {
     const generated = render()
     expect(generated).toContain('It depends on the third-party software listed below.')
     expect(readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), 'stale notices — run `pnpm run gen-third-party-notices`').toBe(generated)
-  })
-
-  it('discloses every copied repository Skill from its pinned source manifest', () => {
-    const skills = collectRepositorySkillSources()
-
-    expect(skills.map(skill => skill.name)).toEqual([
-      'ego-browser',
-      'implement-spec',
-      'retro',
-      'show-me',
-      'skill-doctor',
-      'unslop',
-    ])
-    expect(skills.every(skill => skill.license === 'MIT')).toBe(true)
-    expect(render()).toContain('## Repository agent Skills (`.agents/skills/`)')
   })
 })
 
@@ -130,17 +114,19 @@ describe('virtualManifest', () => {
     }
   })
 
-  it('ignores a platform-filtered virtual-store placeholder', () => {
-    const root = mkdtempSync(join(tmpdir(), 'dsh-notices-platform-placeholder-'))
+  it('selects the requested version when the store retains historical copies', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-notices-version-'))
     try {
       const name = '@scope/pkg'
       const store = join(root, 'store')
-      mkdirSync(join(store, '@scope+pkg@1.0.0'), { recursive: true })
-      const installed = join(store, 'peer-suffixed-entry', 'node_modules', name)
-      mkdirSync(installed, { recursive: true })
-      writeFileSync(join(installed, 'package.json'), JSON.stringify({ name, version: '1.0.0', license: 'MIT' }))
+      for (const version of ['1.0.0', '2.0.0']) {
+        const manifestDir = join(store, `${name.replace('/', '+')}@${version}`, 'node_modules', name)
+        mkdirSync(manifestDir, { recursive: true })
+        writeFileSync(join(manifestDir, 'package.json'), JSON.stringify({ name, version, license: 'MIT' }))
+      }
 
-      expect(virtualManifest(store, name)).toMatchObject({ name, version: '1.0.0' })
+      expect(virtualManifest(store, name, '2.0.0')).toMatchObject({ name, version: '2.0.0' })
+      expect(virtualManifest(store, name, '3.0.0')).toBeUndefined()
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -371,7 +357,6 @@ describe('manifestPatterns', () => {
       'tools/*/package.json',
       'native/landlock-run/package.json',
       'native/landlock-run/packages/*/package.json',
-      'examples/*/package.json',
     ])
   })
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import { AttachmentId, AttachmentStore, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type {
   ImageAttachmentLimits,
@@ -9,7 +9,7 @@ import type {
   SaveImageAttachment,
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import LlmRuntime, { CallId, createMessage, createToolResultMessage, createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ReasoningEffortId, userAgent } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, ReasoningEffortId, userAgent } from '@deepseek-ai/dsh-llm'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
@@ -30,6 +30,18 @@ const IMAGE_REF: ImageAttachmentRef = {
   bytes: 1,
   width: 1,
   height: 1,
+}
+const HOST_IMAGE_PATH = '/host/.dsh/attachments/objects/aa/object'
+const MODEL_IMAGE_PATH = '/model/.dsh/attachments/objects/aa/object'
+
+class MappedFileSystem extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'fs')
+  }
+
+  processPathFromHostPath(hostPath: string): string | undefined {
+    return hostPath === HOST_IMAGE_PATH ? MODEL_IMAGE_PATH : undefined
+  }
 }
 
 async function harness(baseURL: string, overrides: Record<string, unknown> = {}): Promise<Context> {
@@ -73,7 +85,7 @@ describe('PiAiAdapter provider routing', () => {
     })
     expect(result.message.content).toEqual([{ type: 'text', text: 'hello' }])
     expect(result.finish).toEqual({ kind: 'stop' })
-    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1 })
+    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1, totalTokens: 4 })
     expect(server.paths).toEqual(['/chat/completions'])
   })
 
@@ -123,19 +135,21 @@ describe('PiAiAdapter provider routing', () => {
       thinkingBudgets: { high: 2048 },
     })
     await assemble(ctx, {
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-pro',
       messages: [],
       temperature: 0.2,
       maxTokens: 77,
       sessionId: 'session-for-pi' as never,
     })
     expect(server.requests[0]).toMatchObject({
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-v4-pro',
       temperature: 0.2,
-      max_completion_tokens: 77,
+      max_tokens: 77,
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     })
+    expect(server.requests[0]).not.toHaveProperty('dsh_session_log')
+    expect(server.requests[0]).not.toHaveProperty('dsh_plugin_packages')
   })
 
   it('uses a dynamic request effort and reports unsupported efforts before network I/O', async () => {
@@ -226,61 +240,7 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.paths).toEqual(['/v1/responses'])
   })
 
-  it('projects durable discovered schemas as native Responses tool-search history', async () => {
-    const server = await mockServer([{ status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }])
-    const ctx = new Context()
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(LlmPiAi, {
-      providers: { openai: { apiKeyEnv: 'PI_TEST_KEY', baseURL: `${server.url}/v1` } },
-    })
-    const callId = CallId('search-call')
-    const weather = {
-      name: 'mcp__weather__forecast',
-      description: 'Forecast weather',
-      parameters: { type: 'object' },
-    }
-
-    await assemble(ctx, {
-      provider: 'openai',
-      model: 'gpt-5.5',
-      tools: [
-        { name: 'tool_search', description: 'Search tools', parameters: { type: 'object' } },
-        weather,
-      ],
-      messages: [
-        createMessage({
-          role: 'assistant',
-          content: [{ type: 'tool-call', id: callId, name: 'tool_search', arguments: '{"query":"weather"}' }],
-          source: { kind: 'model', provider: 'openai', model: 'gpt-5.5' },
-        }),
-        createToolResultMessage({
-          callId,
-          content: [{ type: 'text', text: JSON.stringify([weather]) }],
-          isError: false,
-          loadedTools: [weather],
-        }),
-      ],
-    })
-
-    const request = server.requests[0] as { tools?: unknown[]; input?: { type?: string; tools?: { name?: string }[] }[] }
-    expect(request.tools).toMatchObject([{
-      type: 'function',
-      name: 'tool_search',
-    }])
-    expect(request.tools).toHaveLength(1)
-    expect(request.input?.map(item => item.type)).toEqual([
-      'function_call',
-      'function_call_output',
-      'tool_search_call',
-      'tool_search_output',
-    ])
-    expect(request.input?.at(-1)?.tools).toMatchObject([{
-      name: weather.name,
-      defer_loading: true,
-    }])
-  })
-
-  it('resolves an attachment service mounted after the adapter when dispatching an image', async () => {
+  it('resolves attachment and filesystem services mounted after the adapter when dispatching an image', async () => {
     const server = await mockServer([{ status: 401, body: JSON.stringify({ error: { message: 'expected mock failure' } }) }])
     const attachmentId = AttachmentId(`sha256:${'a'.repeat(64)}`)
     const ref: ImageAttachmentRef = {
@@ -333,6 +293,10 @@ describe('PiAiAdapter provider routing', () => {
         return readImage(value)
       }
 
+      override imageHostPath(_ref: ImageAttachmentRef): string {
+        return HOST_IMAGE_PATH
+      }
+
       override readImageRequest(
         value: ImageAttachmentRef,
         policy: ImageRequestPolicy,
@@ -348,6 +312,7 @@ describe('PiAiAdapter provider routing', () => {
       providers: { openai: { apiKeyEnv: 'PI_TEST_KEY', baseURL: `${server.url}/v1` } },
     })
     await ctx.plugin(LateAttachmentStore)
+    await ctx.plugin(MappedFileSystem)
 
     const result = await assemble(ctx, {
       provider: 'openai',
@@ -363,6 +328,7 @@ describe('PiAiAdapter provider routing', () => {
       maxPixels: 2048 * 2048,
       maxBytes: 1024 * 1024,
     }, expect.any(AbortSignal))
+    expect(JSON.stringify(server.requests[0])).toContain(MODEL_IMAGE_PATH)
     expect(server.paths).toEqual(['/v1/responses'])
   })
 
@@ -535,6 +501,7 @@ describe('provider profile lifecycle', () => {
         reasoning: {
           efforts: [
             { id: ReasoningEffortId('off'), name: 'Off' },
+            { id: ReasoningEffortId('low'), name: 'Low' },
             { id: ReasoningEffortId('high'), name: 'High' },
             { id: ReasoningEffortId('max'), name: 'Max' },
           ],
@@ -625,65 +592,6 @@ describe('provider profile lifecycle', () => {
         defaultEffort: ReasoningEffortId('high'),
       },
     })
-  })
-
-  it('uses each declared model reasoning default independently', async () => {
-    const ctx = new Context()
-    await ctx.plugin(LlmRuntime)
-    await ctx.plugin(LlmPiAi, {
-      providers: {
-        'acme-gateway': {
-          apiKeyEnv: 'PI_TEST_KEY',
-          api: 'openai-completions',
-          baseURL: 'https://acme.test/v1',
-          reasoning: 'low',
-          models: [
-            {
-              id: 'acme-medium',
-              reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
-              defaultReasoningLevel: 'medium',
-            },
-            {
-              id: 'acme-high',
-              reasoningEfforts: { off: null, low: 'low', high: 'high' },
-              defaultReasoningLevel: 'high',
-            },
-          ],
-        },
-      },
-    })
-
-    await expect(ctx.llm.resolveModelInfo('acme-gateway', 'acme-medium')).resolves.toMatchObject({
-      reasoning: { defaultEffort: ReasoningEffortId('medium') },
-    })
-    await expect(ctx.llm.resolveModelInfo('acme-gateway', 'acme-high')).resolves.toMatchObject({
-      reasoning: { defaultEffort: ReasoningEffortId('high') },
-    })
-  })
-
-  it('dispatches the declared per-model reasoning default without an explicit request override', async () => {
-    const server = await mockServer([{ events: textEvents }])
-    const adapter = adapterOf({
-      'acme-gateway': {
-        apiKeyEnv: 'PI_TEST_KEY',
-        api: 'openai-completions',
-        baseURL: `${server.url}/v1`,
-        reasoning: 'low',
-        models: [{
-          id: 'acme-medium',
-          reasoningEfforts: { off: null, low: 'low', medium: 'medium', high: 'high' },
-          defaultReasoningLevel: 'medium',
-        }],
-      },
-    })
-
-    for await (const _chunk of adapter.stream({
-      provider: 'acme-gateway',
-      model: 'acme-medium',
-      messages: [],
-    })) { /* drain */ }
-
-    expect(server.requests[0]).toMatchObject({ reasoning_effort: 'medium' })
   })
 
   it('sends the declared wire spelling and refuses undeclared levels before network I/O', async () => {
@@ -928,6 +836,15 @@ describe('provider profile lifecycle', () => {
       .toBe(1024)
   })
 
+  it.each([
+    ['bad header name', 'value'],
+    ['x-company', 'line\nbreak'],
+    ['x-company', '部署'],
+  ])('rejects provider header %j when Fetch cannot represent the entry', (name, value) => {
+    expect(() => resolveProfiles({ openai: { headers: { [name]: value } } }))
+      .toThrow(`provider "openai" header "${name}" is not valid for Fetch`)
+  })
+
   it.each(['maxRetries', 'maxRetryDelayMs'] as const)(
     'rejects removed profile field %s instead of silently restoring hidden SDK retries',
     async (field) => {
@@ -1086,7 +1003,10 @@ describe('abort wiring', () => {
       messages: [],
       signal: controller.signal,
     })) chunks.push(chunk)
-    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'aborted' } })
+    expect(chunks.at(-1)).toMatchObject({
+      type: 'finish',
+      reason: { kind: 'aborted', failure: { code: 'ABORTED' } },
+    })
   })
 
   it('honors a pre-aborted caller signal', async () => {

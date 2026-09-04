@@ -7,12 +7,10 @@
 [`scaffold.ts`](scaffold.ts) 和
 [浏览器 e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.zh.md)中。
 
-`member-question-receiving.e2e.ts` 只用 mock remote Agent 作为发送方身份，随后运行 shipped Host receiver、API Proxy、WebSocket mux、Client Runtime、动态模块表、接收侧边栏行、成员提问组合卡、共享问题呈现与 Host settlement RPC。提问到达会在邀请绑定的 Workspace 中物化一个 Host Session，并注入 Decision Brief，但不启动模型 turn；本地回答不会留下永久 answered 条带。参考材料芯片通过 Better Sidebar Files 打开 receiver 所有的隐藏 Workspace 副本，断言 Files payload path 位于 `.dsh/member-questions/<questionId>/`，并保持同名 Workspace 文件不被改写。
-
 ## 这些是 Host 面的测试
 
 它们在根 `tsconfig.host.json` 中做类型检查，而不在 Client aggregate 中，因为它们直接读取
-Host 服务：`ctx.apiProxy`、Host 侧 `SessionStore`、`ctx.sessionProjectionCache`。运行时驱动
+Host 服务：`ctx.connection`、Host 侧 `SessionStore` 与 `ctx.sessionProjectionCache`。运行时驱动
 浏览器并不使一个文件成为 Client 程序的一部分——两个 face 在相同的键上以不同服务合并 cordis
 `Context`，因此单个程序无法同时看见两者。把这些文件挪进 Client aggregate 会让每一处
 Host 服务访问都无法编译。
@@ -28,12 +26,10 @@ Client face，而该 face 必须等 Host tsdown 生成 `@deepseek-ai/dsh-goal/re
 import 点明源模块。这样漂移会表现为选择器未命中或镜像值过期——是响亮的失败，绝不会是静默
 通过。`scaffold.ts` 按此规则镜像欢迎声明的 namespace、确认字段、版本和被断言的中文文案。
 
-有两类 Client import 是长期成立的。`assembled-boot.ts` 驱动 shell 本身，因此它从
+有一类 Client import 是长期成立的。`assembled-boot.ts` 驱动 shell 本身，因此它从
 `@deepseek-ai/dsh-client-web` import `AppWebEntry`、从
 `@deepseek-ai/dsh-client-modules/client` import boot manifest 类型：启动真实 shell 正是该
-harness 的用途，且这两个包本来就在 Host 图中。另外，chat 场景从
-`@deepseek-ai/dsh-client-runtime/client` import `conversationContextKey`，因为
-`client/runtime` 经未拆分的 `directory-picker` 包可达，且不会再牵入别的东西。这种可达性是
-偶然而非保证——一旦它离开该图，就像其余情形那样镜像该 helper。
+harness 的用途，且这两个包本来就在 Host 图中。chat 场景则在 `support.ts` 中镜像
+`conversationContextKey`，而不 import 其 Client owner。
 
 没有任何机制强制这条规则；靠 review 守住它。

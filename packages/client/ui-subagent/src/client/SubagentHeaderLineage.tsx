@@ -3,18 +3,20 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  indexSubagentDescendants, type SessionId, type SessionListState, type SessionProjectionMap,
-  type SessionSummary, type SubagentAddress, type SubagentCatalogSnapshot,
-} from '@deepseek-ai/dsh-client-runtime/client'
+  type SessionListState, type SessionProjectionMap, type SessionSummary,
+  type SubagentCatalogSnapshot,
+} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   IconChevronDownOutline14, IconChevronRightOutline14, IconRefreshOutline14, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { NS } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {} from '@deepseek-ai/dsh-subagent/client'
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import css from './SubagentHeaderLineage.module.css'
+import { indexSubagentDescendants } from './subagent-lineage.ts'
 
 type CatalogEntry = SubagentCatalogSnapshot['entries'][number]
 type Catalogs = SessionListState['subagentsByParent']
@@ -29,10 +31,6 @@ export interface SubagentCatalogInjected {
 /** Full props for the session-header lineage renderer. */
 export type SubagentHeaderLineageProps =
   PropsRuntime<'conversation.session.header.lineage'> & SubagentCatalogInjected & PropsLocale<typeof NS>
-
-/** Full props for the Side Chat descendant action. */
-export type SubagentHeaderActionProps =
-  PropsRuntime<'conversation.session.header.actions'> & SubagentCatalogInjected & PropsLocale<typeof NS>
 
 interface CatalogRowsProps {
   parentSessionId: SessionId
@@ -67,13 +65,13 @@ function treeItems(root: HTMLDivElement | null): HTMLElement[] {
 }
 
 /** Compact token count shared in shape with the conversation stats strip. */
-function formatTokens(value: number): string {
+function formatTokens(value: number, t: TranslateNS<typeof NS>): string {
   const scaled = (next: number): string => next >= 100
     ? String(Math.round(next))
     : String(Math.round(next * 10) / 10)
   if (value < 1_000) return String(value)
-  if (value < 1_000_000) return `${scaled(value / 1_000)}K`
-  return `${scaled(value / 1_000_000)}M`
+  if (value < 1_000_000) return t('tokens.thousand', { value: scaled(value / 1_000) })
+  return t('tokens.million', { value: scaled(value / 1_000_000) })
 }
 
 /** Sum the four disjoint durable provider-usage buckets. */
@@ -314,7 +312,7 @@ function CatalogRows({
         )
         const tokenMetric = totalTokens === undefined
           ? undefined
-          : `${formatTokens(totalTokens)} tok`
+          : t('tokens.total', { value: formatTokens(totalTokens, t) })
         const durationMetric = durationMs === undefined
           ? undefined
           : {
@@ -500,7 +498,6 @@ function CatalogDropdown({
   const hoverOpenTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const hoverCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const observedCatalogs = useRef(new Set<SessionId>())
-  const requestedInitialCatalog = useRef<SessionId>()
   const setCatalogOpenRef = useRef(setCatalogOpen)
   setCatalogOpenRef.current = setCatalogOpen
   const currentEntry = currentSessionId === undefined
@@ -531,16 +528,6 @@ function CatalogDropdown({
       error: null,
     }
     : catalog
-
-  useEffect(() => {
-    if (
-      variant !== 'switcher'
-      || catalog !== undefined
-      || requestedInitialCatalog.current === rootSessionId
-    ) return
-    requestedInitialCatalog.current = rootSessionId
-    refresh(rootSessionId)
-  }, [catalog, refresh, rootSessionId, variant])
 
   const observeCatalog = (parentSessionId: SessionId, next: boolean): void => {
     if (next) observedCatalogs.current.add(parentSessionId)
@@ -853,26 +840,5 @@ export function SubagentHeaderLineage({
         />
       )}
     </>
-  )
-}
-
-/** Render only the descendants rooted at the explicitly mounted Side Chat Session. */
-export function SubagentHeaderAction({
-  renderMode, openSession, sessionId, useSessions, refresh, setCatalogOpen, t,
-}: SubagentHeaderActionProps) {
-  if (renderMode !== 'sidechat') return null
-  const openEmbeddedChild = (address: SubagentAddress): void => {
-    openSession?.(address.childSessionId)
-  }
-  return (
-    <CatalogDropdown
-      rootSessionId={sessionId}
-      variant="count"
-      useSessions={useSessions}
-      openChild={openEmbeddedChild}
-      refresh={refresh}
-      setCatalogOpen={setCatalogOpen}
-      t={t}
-    />
   )
 }

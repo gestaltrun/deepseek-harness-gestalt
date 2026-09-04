@@ -22,104 +22,16 @@
  * and a hole has exactly one declaring entry — they carry the same owner
  * contract and the same occupant.
  */
-import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
 import type { HostObservable, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pull the owner SlotMap merges into programs that resolve the
 // runtime shares below.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type {
-  SessionId, SessionSearchResultItem, WorkspaceId, WorkspaceView,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionSearchResultItem } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
+import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { createWorkspaceViewStore } from '../stores.ts'
-
-/** Client-face projection of one bound cloud project. */
-export interface WorkspaceProjectView {
-  id: string
-  name: string
-  boundRemoteUrl: string
-  /** Authenticated Account whose membership authorized create or remote recovery. */
-  receivingAccountId?: string
-}
-
-/** Permission role inside one cloud project. */
-export type WorkspaceProjectRole = 'owner' | 'admin' | 'member'
-
-/** One roster row as the settings surface renders it. */
-export interface WorkspaceMemberRow {
-  membershipId: string
-  accountId: string
-  /** Public GitHub login; empty when the Account plane does not know the account. */
-  displayName: string
-  /** Public GitHub avatar URL; empty when the Account plane does not know the account. */
-  avatarRef: string
-  role: WorkspaceProjectRole
-  tags: readonly string[]
-  presence: 'online' | 'offline'
-}
-
-/** One invitation issued from the settings surface, still awaiting confirmation. */
-export interface WorkspaceIssuedInvitation {
-  invitationId: string
-  /** Invitee shown to the inviter (GitHub login as entered). */
-  inviteeName: string
-  /** Role the invitee receives at accept-with-workspace-link. */
-  grantedRole: WorkspaceProjectRole
-}
-
-/** One pending invitation addressed to the local account (poll source of the wizard). */
-export interface WorkspacePendingInvitation {
-  invitationId: string
-  receivingAccountId: string
-  projectId: string
-  projectName: string
-  inviterName: string
-  /** Normalized remote of the invited project, for same-origin link advice. */
-  remoteUrl: string
-  /** Role this invitation confers when the invitee completes the link step. */
-  grantedRole: WorkspaceProjectRole
-}
-
-/**
- * Upgrade seam between this surface and the membership client composition:
- * the browser routes every upgrade action through it. Composition adapts
- * `@deepseek-ai/dsh-project-membership-client`'s transport; compositions
- * without it render no upgrade affordance.
- */
-export interface ProjectMembershipGateway {
-  createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
-  /**
-   * Recover the current Account's Cloud Project without replacing an existing exact binding.
-   * A Workspace without origin recovers through its `local://workspace/<id>` Platform remote.
-   */
-  projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
-  roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
-  invite(input: { projectId: string; githubLogin: string; grantedRole: WorkspaceProjectRole }): Promise<WorkspaceIssuedInvitation>
-  issuedInvitations(projectId: string): Promise<readonly WorkspaceIssuedInvitation[]>
-  retractInvitation(invitationId: string): Promise<void>
-  decideInvitation(
-    invitationId: string,
-    input: { decision: 'decline' } | {
-      decision: 'accept-with-link'
-      localWorkspaceId: WorkspaceId
-      receivingAccountId: string
-      projectId: string
-      link: { workspaceName: string; normalizedRemoteUrl?: string }
-    },
-  ): Promise<void>
-  changeRole(membershipId: string, role: WorkspaceProjectRole): Promise<void>
-  setMemberTags(membershipId: string, tags: readonly string[]): Promise<void>
-  removeMember(membershipId: string): Promise<void>
-  /** Invitations addressed to the local account; polled while the browser is open. */
-  pendingInvitations(): Promise<readonly WorkspacePendingInvitation[]>
-  /** Normalized git origin of one local workspace checkout, when present and supported. */
-  localRemoteFor(workspaceId: WorkspaceId): Promise<string | undefined>
-  /** Pick a parent, clone the invited remote, and register the new Workspace; undefined means user cancellation. */
-  cloneWorkspace(input: {
-    remoteUrl: string
-    directoryName: string
-  }): Promise<{ workspaceId: WorkspaceId; title: string; normalizedRemoteUrl: string } | undefined>
-}
 
 /**
  * Owner share of the directory-flow holes: the complete conversation between
@@ -177,8 +89,13 @@ export type DirectoryPickingHooks = PropsHooks<DirectoryPickingInjected['hooks']
  */
 export type WorkspaceBrowserInjected = {
   hooks: DirectoryPickingInjected['hooks'] & {
-    /** Current generation's Host description, bound by the slot renderer. */
-    hostDescription: HostDescriptionSource
+    /**
+     * Fixed Host facts, reached through a hook rather than injected as values:
+     * the renderer memoizes an entry's inject result for the registration's
+     * lifetime, so facts read there would freeze at whatever the first render
+     * saw. Select the field the surface needs (`info => info.home`).
+     */
+    hostInfo: HostObservable<RemoteHostFacts>
   }
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and
@@ -225,8 +142,6 @@ export type WorkspaceBrowserInjected = {
   insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
-  /** Authenticated Project Membership gateway supplied by a product composition. */
-  projectMembership?: ProjectMembershipGateway | undefined
 }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */

@@ -22,9 +22,8 @@ import {
   markdownDestination,
   splitMarkdownUrlTarget,
 } from './markdown.ts'
-import { DSH_REPOSITORY_URL, GESTALT_PRODUCT_URL, GESTALT_REPOSITORY_URL } from './doc-site-seo.ts'
 
-const RAW_REPOSITORY_URL = 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt'
+const REPOSITORY_URL = 'https://github.com/deepseek-ai/deepseek-harness'
 const root = resolve(import.meta.dirname, '..')
 const generatedRoot = resolve(root, 'website/.generated')
 
@@ -141,10 +140,10 @@ function githubTarget(
   image: boolean,
 ): string {
   const path = repoPath(absPath, repoRoot)
-  if (image) return `${RAW_REPOSITORY_URL}/${repositoryRef}/${path}${suffix}`
+  if (image) return `https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/${repositoryRef}/${path}${suffix}`
   const kind = lstatSync(absPath).isDirectory() ? 'tree' : 'blob'
   const lineSuffix = line === undefined ? suffix : `#L${line}`
-  return `${GESTALT_REPOSITORY_URL}/${kind}/${repositoryRef}/${path}${lineSuffix}`
+  return `${REPOSITORY_URL}/${kind}/${repositoryRef}/${path}${lineSuffix}`
 }
 
 /**
@@ -563,12 +562,6 @@ export function llmsTxt(site: LlmsTxtSite): string {
     `> ${site.description}`,
     '',
     '页面 URL 去掉末尾斜杠再加 `.md` 即为该页原始 Markdown(根路径用 `/index.md`);下方列表是各页精确地址。Drop any trailing slash and append `.md` to a page URL for its raw Markdown (the site root is `/index.md`); the list below carries the exact addresses.',
-    '',
-    '## Project',
-    '',
-    `- [Gestalt product website](${GESTALT_PRODUCT_URL}): Product overview and downloads`,
-    `- [Gestalt source repository](${GESTALT_REPOSITORY_URL}): Source, issues, releases, and the product feature map`,
-    `- [Official DeepSeek Harness](${DSH_REPOSITORY_URL}): Compatible plugin and runtime base`,
   ]
   for (const { heading, locale } of llmsTxtLocales) {
     lines.push('', `## ${heading}`, '')

@@ -1,13 +1,63 @@
+---
+description: "Shell layout for the Web GUI: the three-column AppFrame with drag handles, concession behavior, the panel-geometry service, and theme presentation; for users and maintainers of the window chrome."
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-client-ui-layout
 
 English | [中文](README.zh.md)
 
-Shell plugin: three-column AppFrame (drag handles and concession chain) plus the `ctx.layout` panel-geometry service; it registers into the runtime-owned `root` slot and declares `sidebar`, `conversation`, `details`, and `shell.overlay`. The sidebar resize boundary is an invisible hit strip, while the details boundary retains its floating pill; only details shrinks during concession and then auto-closes in-flow. A closed sidebar retains a 56px control rail; a closed details preference is zero width, while an open preference that cannot keep the Session Surface at 640px paints as a right overlay. The package also seats the theme presenter: it consumes resolved `ctx.theme` snapshots and projects them onto the document (`html { color-scheme }` for native UA chrome, `body[data-ds-dark-theme]` from the active color scheme, the theme's alias tokens as inline variables on body, and one owned `<meta name="theme-color">` whose content follows the computed body background). Measuring after palette and token application keeps the rendered background as the single color authority; disposing the presenter removes its metadata node with its other global writes.
+## Summary
 
-AppFrame mounts the conversation and details columns except on the Desktop native-overlay document, which renders only `sidebar` so Settings can stack above official pages; a connected Session renders through `SessionProvider`. In Desktop composition, the macOS and Windows chrome markers offset the center Session column by 36px so the Session header stays below the frameless drag strip; browser composition keeps the default top edge. The transient layout store starts the sidebar at its default width and details closed, and it never reads or writes `localStorage`. A details occupant opens through `ctx.layout.openDetails({ minimum, default, maximum })`; omitting the range preserves ordinary details geometry at 300/360/520px, while an occupant may declare a 960px maximum. Repeating the active range preserves an open dragged width, changing the range adopts the new default, and close followed by reopen restores that active default. The concession solver clamps to the active range, shrinks details to its minimum while retaining the 640px Session Surface minimum, then derives an automatic in-flow close without rewriting the stored preference. When that preference is still open, AppFrame paints the occupant as a right-edge overlay over the Session Surface so collapse chrome stays reachable. Hero and other unselected states likewise derive a zero in-flow details width without changing that preference. AppFrame retains the last non-blank Session id across those states: the first Session remains closed, returning to the same Session restores its unchanged width, and selecting a different Session closes details before paint. The conversation owner share carries only the optional Side Chat render mode and explicit-renderer retarget callback, while the sidebar owner share contains only `collapsed` and `width`; registrants obtain other business data from standard hooks and actions from their own inject faces.
+This package provides the shell layout of the Web GUI: a three-column AppFrame with resizable sidebar and details panels, a concession chain that shrinks the details column and then auto-closes it when space runs out, and the `ctx.layout` panel-geometry service other plugins call to open or close the details column. It also seats the theme presenter, which projects the resolved color scheme, alias tokens, content font size, and `theme-color` metadata onto the document. Choose it for the standard window chrome; panel geometry is transient and resets on reload.
 
-The `/client` exports are the plugin body (`apply`/`inject`), `LayoutController`, `DetailsWidthRange`, and the owner-share interfaces. AppFrame, the panel store, and the concession solver remain package-internal.
+## Table of Contents
 
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Further Exploration](#further-exploration)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## Use this package
+
+Mount this plugin at the root slot; it then renders the app frame around whatever occupies the sidebar, conversation, and details columns. Users resize the sidebar by dragging its invisible hit strip and the details panel by dragging its floating pill; when the window narrows, only details shrinks, then auto-closes. A closed sidebar retains a 56px control rail; details closes to zero width.
+
+### Theme presentation
+
+The presenter consumes resolved theme snapshots and projects them onto the document: `html { color-scheme }` for native UA chrome, `body[data-ds-dark-theme]` from the active color scheme, the theme's alias tokens and `--dsh-content-font-size` as inline variables on body, and one owned `<meta name="theme-color">` whose content follows the computed body background. Disposing the presenter removes its metadata node with its other global writes.
+
+-----
+
+<a id="understand-the-implementation"></a>
+## Understand the implementation
+
+<details>
+<summary>Implementation internals — click to expand</summary>
+
+One `register()` call contributes `AppFrame` into the runtime's built-in `'root'` slot and, in the same breath, declares the four child slots (`sidebar`, `conversation`, `details`, `shell.overlay`), seats the layout store (panel geometry), and wires the `ctx.layout` panel-action service. The transient layout store starts the sidebar at its default width and details closed, and never reads or writes `localStorage`. AppFrame always mounts the conversation and details columns; a connected Session renders through `SessionProvider`. It projects the selected Session title over the build-configured product title or the localized `common.brand.localBuild` fallback, so locale revisions update document metadata with the root entry. The theme presenter is a second effect: pure DOM writes from resolved snapshots — initial state through the getter once, then event-driven only, with no React path. It applies palette, font-size, and token variables before measuring the rendered background as the single color authority.
+
+</details>
+
+-----
+
+<a id="further-exploration"></a>
+## Further Exploration
+
+Read these pages when the layout surface is not enough. They move from the frame to the columns it renders and the theme it presents.
+
+- [ui-sidebar](../ui-sidebar/README.md) — occupies the `sidebar` column and its seats.
+- [ui-conversation](../ui-conversation/README.md) — occupies the `conversation` and `details` columns.
+- [ui-theme](../ui-theme/README.md) — the theme seam whose resolved snapshots the presenter consumes.
+- [Web client architecture](../../../.agents/notes/implemented/architecture/2026-07-19-gui-web-client-architecture.md) — how browser plugin rows load and register slots.
+
+-----
+
+<a id="model-experience"></a>
 ## Model Experience
 
 None, as the layout shell manages browser viewing state; nothing here reaches a model request.
@@ -18,6 +68,23 @@ None; this package neither assembles nor sends a provider request.
 
 ## Known Limitations and Deferred Work
 
+<a id="known-limitations-and-deferred-work"></a>
+
+
+These limits define the current layout behavior. They are current package constraints, not a general window-manager comparison or a task backlog.
+
 - **Panel geometry is transient** — reload restores the sidebar default and details closed; switching between distinct Session ids also closes details and forgets its dragged width, while unselected surfaces render details at zero width without modifying geometry.
-- **Concession-chain auto-close derives a zero in-flow width without touching the preferred width** — an open preference still paints as a right overlay; widening the window restores the in-flow track; consumers must not read the stored details width as the rendered truth.
+- **Concession-chain auto-close derives a zero width without touching the preferred width** — the panel restores itself when the window widens; consumers must not read the stored details width as the rendered truth.
 - **No scroll anchoring during squeeze reflow** — layout changes may move the reader's viewport.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>
+
+**Runtime invariant:** No companion is published. The shell viewing-state store behind ctx.layout emits no cordis events; clamp/prune/concession-chain sequencing is asserted directly by this package's columns and service specs.

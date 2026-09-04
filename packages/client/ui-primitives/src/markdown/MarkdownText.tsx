@@ -11,7 +11,7 @@
  * full parse self-heals it.
  */
 
-import { memo, useLayoutEffect, useMemo, useRef } from 'react'
+import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { IncrementalMarkdownParser } from './incremental.ts'
 import { parseGfm, parseGfmWithMath } from './parse.ts'
@@ -19,35 +19,35 @@ import {
   collectReferenceTargets, createReferenceTargets, renderBlocks, renderFootnoteSection,
   wrapBlockChildren,
 } from './render.tsx'
-import type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
-import { MarkdownSelectionCollector } from './selection-map.tsx'
-import type { MarkdownSelectionMapRef } from './selection-map.tsx'
+import type { MarkdownFileMentions, MarkdownLabels, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
 import 'katex/dist/katex.min.css'
 import css from './MarkdownText.module.css'
 
-export type { MarkdownCodeLabels, MarkdownFileMentions } from './render.tsx'
+export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels } from './render.tsx'
 
 /** One settled full render: parse with math, resolve references, append the footnote section. */
 function renderSettled(
   text: string,
-  codeLabels: MarkdownCodeLabels | undefined,
+  labels: MarkdownLabels,
   fileMentions: MarkdownFileMentions | undefined,
-  selection: MarkdownSelectionCollector | undefined,
 ): ReactNode[] {
   const root = parseGfmWithMath(text)
   const targets = createReferenceTargets()
   collectReferenceTargets(root.children, targets)
   const context: MarkdownRenderContext = {
     streaming: false,
-    codeLabels,
+    labels,
     fileMentions,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
-    selection,
   }
   const blocks = wrapBlockChildren(
-    renderBlocks(root.children.map((node, index) => ({ node, key: index })), context),
+    renderBlocks(root.children.map((node, index) => ({
+      node,
+      /* v8 ignore next -- parseFull uses parseGfm, which stamps every top-level node. */
+      key: node.position?.start.offset ?? -(index + 1),
+    })), context),
     false,
   )
   const section = renderFootnoteSection(context)
@@ -71,8 +71,8 @@ class StreamingRenderer {
   private lastText: string | null = null
   private lastRendered: ReactNode[] = []
 
-  /** @param codeLabels - Fence copy labels baked into cached elements; the owner replaces the renderer when they change. */
-  constructor(private readonly codeLabels: MarkdownCodeLabels | undefined) {}
+  /** @param labels - Localized Markdown chrome baked into cached elements; the owner replaces the renderer when it changes. */
+  constructor(private readonly labels: MarkdownLabels) {}
 
   /**
    * Render the current accumulated text. Idempotent per text value, so React
@@ -104,7 +104,7 @@ class StreamingRenderer {
     if (newlyFrozen.length > 0) {
       const frozenContext: MarkdownRenderContext = {
         streaming: true,
-        codeLabels: this.codeLabels,
+        labels: this.labels,
         fileMentions: undefined,
         targets: frameTargets,
         footnoteOrder: this.frozenFootnoteOrder,
@@ -122,7 +122,7 @@ class StreamingRenderer {
     }
     const tailContext: MarkdownRenderContext = {
       streaming: true,
-      codeLabels: this.codeLabels,
+      labels: this.labels,
       fileMentions: undefined,
       targets: frameTargets,
       footnoteOrder: [...this.frozenFootnoteOrder],
@@ -144,9 +144,10 @@ class StreamingRenderer {
 /**
  * Render untrusted assistant-authored Markdown as semantic React elements.
  * @param props - Markdown source text preserved by the session projection;
- * `streaming` renders fences and TeX plain (highlighting and KaTeX land on
- * the finalize swap) and parses incrementally across chunks; `codeLabels`
- * forwards localized copy-button labels to fence CodeBlocks — pass a
+ * `streaming` parses incrementally across chunks and highlights fences as
+ * they grow (each fence re-tokenizes only appended text; TeX stays literal
+ * until the finalize swap so incomplete formulae never flash errors);
+ * `labels` forwards localized fence and footnote chrome — pass a
  * reference-stable object (memoized per locale revision), because a new
  * identity discards the streaming render cache mid-message. `fileMentions`
  * links inline-code tokens its resolver recognizes as real files; this is
@@ -157,36 +158,24 @@ class StreamingRenderer {
  * relative links, and unsafe protocols are disabled, while absolute HTTP(S)
  * images render directly.
  */
-export const MarkdownText = memo(function MarkdownText({
-  text, streaming = false, codeLabels, fileMentions, selectionMapRef,
-}: {
+export const MarkdownText = memo(function MarkdownText({ text, streaming = false, labels, fileMentions }: {
   text: string
   streaming?: boolean
-  codeLabels?: MarkdownCodeLabels | undefined
+  labels: MarkdownLabels
   fileMentions?: MarkdownFileMentions | undefined
-  /** Receives the settled renderer's selectable text/image mapping. */
-  selectionMapRef?: MarkdownSelectionMapRef | undefined
 }) {
   const streamRef = useRef<StreamingRenderer | null>(null)
-  const streamLabelsRef = useRef<MarkdownCodeLabels | undefined>(codeLabels)
-  const rendered = useMemo(() => {
+  const streamLabelsRef = useRef<MarkdownLabels>(labels)
+  const children = useMemo(() => {
     if (!streaming) {
       streamRef.current = null
-      const selection = selectionMapRef === undefined ? undefined : new MarkdownSelectionCollector()
-      return { children: renderSettled(text, codeLabels, fileMentions, selection), selection }
+      return renderSettled(text, labels, fileMentions)
     }
-    if (streamRef.current === null || streamLabelsRef.current !== codeLabels) {
-      streamRef.current = new StreamingRenderer(codeLabels)
-      streamLabelsRef.current = codeLabels
+    if (streamRef.current === null || streamLabelsRef.current !== labels) {
+      streamRef.current = new StreamingRenderer(labels)
+      streamLabelsRef.current = labels
     }
-    return { children: streamRef.current.render(text), selection: undefined }
-  }, [text, streaming, codeLabels, fileMentions, selectionMapRef])
-  useLayoutEffect(() => {
-    if (selectionMapRef === undefined) return
-    selectionMapRef.current = rendered.selection ?? null
-    return () => {
-      if (selectionMapRef.current === rendered.selection) selectionMapRef.current = null
-    }
-  }, [rendered.selection, selectionMapRef])
-  return <div className={css.markdown}>{rendered.children}</div>
+    return streamRef.current.render(text)
+  }, [text, streaming, labels, fileMentions])
+  return <div className={css.markdown}>{children}</div>
 })

@@ -1,25 +1,30 @@
 // Shared scaffolding for the assembled-jsdom snapshots: the real built
 // workspace `lib/client.js` artifacts booted through AppWebEntry's
-// ModuleLoader path (loadBundle) against the keyless FixtureApiClient
+// ModuleLoader path (loadBundle) against the keyless fixture Connection RPC
 // transport. Every file that mounts this graph needs the same boot entry list,
 // the same bundle map, the same jsdom globals, and the same mount call, and
 // differs only in what it asserts afterwards, so the scaffolding lives here.
 //
 // Keyless and deterministic: the fixture is the fake server, so nothing here
 // reaches a model or the network.
-import { readFileSync } from 'node:fs'
+import { globSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { act, cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { bootInjections, orderByModuleGraph } from '@deepseek-ai/dsh-client-modules'
-import type { ClientModuleLoaderTarget, WebBootEntry } from '@deepseek-ai/dsh-client-modules/client'
+import type { ClientModuleLoaderTarget, WebBootEntry, WebBootGraph } from '@deepseek-ai/dsh-client-modules/client'
 import { AppWebEntry } from '@deepseek-ai/dsh-client-web'
 
 interface AssembledPlugin extends WebBootEntry {
   /** Absolute path to the built client artifact declared by this package. */
   bundlePath: string
+}
+
+interface AssembledBootOptions {
+  /** Package ids omitted from this mounted composition. */
+  readonly exclude?: readonly string[]
 }
 
 interface ClientPackageManifest {
@@ -59,17 +64,16 @@ const BUNDLE_LAYERS = [
 const bundleResolvers = BUNDLE_LAYERS.map(layer => createRequire(layer.manifest))
 const webBundleResolver = bundleResolvers[1]
 if (webBundleResolver === undefined) throw new Error('assembled boot: web bundle resolver missing')
+const workspacePackageManifests = new Map(globSync('packages/*/*/package.json', { cwd: REPO_ROOT }).map((relative) => {
+  const path = join(REPO_ROOT, relative)
+  const pkg = JSON.parse(readFileSync(path, 'utf8')) as ClientPackageManifest
+  if (pkg.name === undefined) throw new Error(`assembled boot: workspace package has no name: ${path}`)
+  return [pkg.name, path]
+}))
 const appBoot = await import(pathToFileURL(webBundleResolver.resolve('@deepseek-ai/dsh-app-boot')).href) as unknown as BootComposition
 
 function resolvePackageManifest(specifier: string): string | undefined {
-  for (const require of bundleResolvers) {
-    try {
-      return require.resolve(`${specifier}/package.json`)
-    } catch {
-      continue
-    }
-  }
-  return undefined
+  return workspacePackageManifests.get(specifier)
 }
 
 function resolveClientExport(packagePath: string, pkg: ClientPackageManifest): string {
@@ -80,6 +84,9 @@ function resolveClientExport(packagePath: string, pkg: ClientPackageManifest): s
   }
   return resolve(dirname(packagePath), relative)
 }
+
+const comboUrl = (ids: readonly string[], rev: string): string =>
+  `/plugins/??${ids.map(id => `${id}/client.js`).join(',')}&rev=${rev}`
 
 /** Derive the assembled browser graph from the same bundle patches and package declarations as `dsh web`. */
 function loadAssembledPlugins(): readonly AssembledPlugin[] {
@@ -99,7 +106,7 @@ function loadAssembledPlugins(): readonly AssembledPlugin[] {
     plugins.set(entry.name, {
       id: entry.name,
       bundlePath: resolveClientExport(packagePath, pkg),
-      url: `/plugins/${entry.name}/client.js?rev=fx`,
+      url: comboUrl([entry.name], 'fx'),
       rev: 'fx',
       ...(declaration.inject === undefined ? {} : { inject: declaration.inject }),
       ...(declaration.external === undefined ? {} : { external: declaration.external }),
@@ -116,13 +123,56 @@ function loadAssembledPlugins(): readonly AssembledPlugin[] {
 
 const PLUGINS = loadAssembledPlugins()
 
-const bundles = new Map(PLUGINS.map(plugin => [
-  plugin.url,
-  readFileSync(plugin.bundlePath, 'utf8'),
-]))
+const BOOTSTRAP_IDS = ['@deepseek-ai/dsh-client-modules'] as const
+
+/** Build the fixture graph after applying per-scenario package exclusions. */
+function bootGraph(plugins: readonly AssembledPlugin[]): WebBootGraph {
+  const bootstrapEntries = plugins
+    .map(plugin => plugin.id)
+    .filter(id => BOOTSTRAP_IDS.includes(id as typeof BOOTSTRAP_IDS[number]))
+  const applicationEntries = plugins
+    .map(plugin => plugin.id)
+    .filter(id => !BOOTSTRAP_IDS.includes(id as typeof BOOTSTRAP_IDS[number]))
+  return {
+    rev: 'fx',
+    entries: plugins.map(({ bundlePath: _bundlePath, ...plugin }) => plugin),
+    batches: [
+      ...(bootstrapEntries.length === 0 ? [] : [{
+        phase: 'bootstrap' as const,
+        url: comboUrl(bootstrapEntries, 'fx'),
+        rev: 'fx',
+        entries: bootstrapEntries,
+      }]),
+      ...(applicationEntries.length === 0 ? [] : [{
+        phase: 'application' as const,
+        url: comboUrl(applicationEntries, 'fx'),
+        rev: 'fx',
+        entries: applicationEntries,
+      }]),
+    ],
+  }
+}
+
+/** Build single-resource and startup combo script bodies for one fixture composition. */
+function bundleTable(graph: WebBootGraph, plugins: readonly AssembledPlugin[]): Map<string, string> {
+  const bundles = new Map(plugins.map(plugin => [
+    plugin.url,
+    readFileSync(plugin.bundlePath, 'utf8'),
+  ]))
+  for (const batch of graph.batches) {
+    bundles.set(batch.url, batch.entries.map((id) => {
+      const plugin = plugins.find(candidate => candidate.id === id)
+      if (plugin === undefined) throw new Error(`assembled boot: batch names unknown plugin ${id}`)
+      const code = bundles.get(plugin.url)
+      if (code === undefined) throw new Error(`assembled boot: missing built bundle ${plugin.url}`)
+      return code
+    }).join('\n;\n'))
+  }
+  return bundles
+}
 
 interface FixtureWindow extends Window {
-  __DSH_BOOT__?: { rev: string; entries: WebBootEntry[] }
+  __DSH_BOOT__?: WebBootGraph
   __ModuleLoader__?: ClientModuleLoaderTarget
 }
 
@@ -130,105 +180,6 @@ class ResizeObserverStub {
   observe(): void {}
   disconnect(): void {}
   unobserve(): void {}
-}
-
-class MemoryIdbRequest {
-  result: unknown
-  error: DOMException | null = null
-  onsuccess: (() => void) | null = null
-  onerror: (() => void) | null = null
-  onupgradeneeded: (() => void) | null = null
-}
-
-class MemoryObjectStore {
-  constructor(
-    readonly keyPath: string,
-    readonly rows = new Map<string, unknown>(),
-  ) {}
-
-  put(record: Record<string, unknown>): MemoryIdbRequest {
-    const key = record[this.keyPath]
-    if (typeof key !== 'string') throw new Error('indexedDB put: keyPath is not a string')
-    this.rows.set(key, record)
-    return new MemoryIdbRequest()
-  }
-
-  get(key: string): MemoryIdbRequest {
-    const request = new MemoryIdbRequest()
-    queueMicrotask(() => {
-      request.result = this.rows.get(key)
-      request.onsuccess?.()
-    })
-    return request
-  }
-
-  delete(key: string): MemoryIdbRequest {
-    this.rows.delete(key)
-    return new MemoryIdbRequest()
-  }
-}
-
-class MemoryTransaction {
-  error: DOMException | null = null
-  oncomplete: (() => void) | null = null
-  onerror: (() => void) | null = null
-
-  constructor(private readonly store: MemoryObjectStore) {
-    queueMicrotask(() => { this.oncomplete?.() })
-  }
-
-  objectStore(_name: string): MemoryObjectStore {
-    return this.store
-  }
-}
-
-class MemoryDatabase {
-  readonly objectStoreNames = {
-    contains: (name: string): boolean => this.stores.has(name),
-  }
-
-  constructor(
-    readonly name: string,
-    public version: number,
-    readonly stores = new Map<string, MemoryObjectStore>(),
-  ) {}
-
-  createObjectStore(name: string, options: { keyPath: string }): MemoryObjectStore {
-    const store = new MemoryObjectStore(options.keyPath)
-    this.stores.set(name, store)
-    return store
-  }
-
-  transaction(name: string, _mode: IDBTransactionMode): MemoryTransaction {
-    const store = this.stores.get(name)
-    if (store === undefined) throw new Error(`indexedDB transaction: missing store ${name}`)
-    return new MemoryTransaction(store)
-  }
-
-  close(): void {}
-}
-
-/** jsdom has no IndexedDB; Composer persist (`putStagedImage`) opens one after paste. */
-class MemoryIndexedDB {
-  readonly #dbs = new Map<string, MemoryDatabase>()
-
-  open(name: string, version = 1): MemoryIdbRequest {
-    const request = new MemoryIdbRequest()
-    queueMicrotask(() => {
-      let db = this.#dbs.get(name)
-      const upgrade = db === undefined || db.version < version
-      if (db === undefined) {
-        db = new MemoryDatabase(name, version)
-        this.#dbs.set(name, db)
-      } else if (db.version < version) {
-        db.version = version
-      }
-      request.result = db
-      if (upgrade) request.onupgradeneeded?.()
-      request.onsuccess?.()
-    })
-    return request
-  }
 }
 
 class EventSourceStub {
@@ -239,13 +190,6 @@ class EventSourceStub {
 const win = window as FixtureWindow
 let unmount: (() => Promise<void>) | undefined
 
-// File-scoped: `void putStagedImage` can open the database after afterEach
-// has already run `vi.unstubAllGlobals()`.
-Object.defineProperty(globalThis, 'indexedDB', {
-  configurable: true,
-  value: new MemoryIndexedDB(),
-})
-
 /**
  * Register the per-test jsdom setup and teardown the assembled boot needs:
  * English pinned before boot so role/text locators stay deterministic across
@@ -254,6 +198,19 @@ Object.defineProperty(globalThis, 'indexedDB', {
  * the boot globals, and the injected plugin styles afterwards.
  */
 export function installAssembledBootEnv(): void {
+  // jsdom implements no scroll geometry: the trigger menu reveals its
+  // highlight with scrollIntoView on open, which a pasted leading token now
+  // reaches in this lane (the editor re-tracks at the settled caret).
+  if (typeof Element.prototype.scrollIntoView !== 'function') {
+    Element.prototype.scrollIntoView = () => {}
+  }
+  // jsdom implements no Range geometry either: Lexical's selection reveal
+  // measures the caret with one after a programmatic edit settles focus.
+  if (typeof Range.prototype.getBoundingClientRect !== 'function') {
+    Range.prototype.getBoundingClientRect = () => ({
+      top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}),
+    })
+  }
   beforeEach(() => {
     localStorage.clear()
     // The locale service derives its provisional locale from the browser and
@@ -293,24 +250,26 @@ export function installAssembledBootEnv(): void {
  * Mount the assembled application on the fixture transport; the teardown
  * registered by installAssembledBootEnv disposes it.
  * @param search - fixture query string used to select deterministic host behavior.
+ * @param options - composition changes applied to this mount.
  */
-export function mountAssembledApp(search = '?fixture'): void {
+export function mountAssembledApp(search = '?fixture', options: AssembledBootOptions = {}): void {
+  const excluded = new Set(options.exclude)
+  const plugins = PLUGINS.filter(plugin => !excluded.has(plugin.id))
   history.replaceState(null, '', `/${search}`)
   const root = document.createElement('div')
   root.id = 'root'
   document.body.appendChild(root)
-  win.__DSH_BOOT__ = { rev: 'fx', entries: PLUGINS.map(({ bundlePath: _bundlePath, ...plugin }) => plugin) }
+  const graph = bootGraph(plugins)
+  const bundles = bundleTable(graph, plugins)
+  win.__DSH_BOOT__ = graph
   const [facadeRow] = bootInjections(win.__DSH_BOOT__)
   if (facadeRow?.kind !== 'script') throw new Error('missing injected ModuleLoader facade row')
   ;(0, eval)(facadeRow.text)
-  // Mirror the blocking Host-injected scripts before the Vite entry calls create().
-  for (const id of ['@deepseek-ai/dsh-client-modules', '@deepseek-ai/dsh-client-runtime']) {
-    const plugin = PLUGINS.find(candidate => candidate.id === id)
-    if (plugin === undefined) throw new Error(`missing parser-preloaded fixture row ${id}`)
-    const code = bundles.get(plugin.url)
-    if (code === undefined) throw new Error(`missing built bundle ${plugin.url}`)
-    ;(0, eval)(code)
-  }
+  // Mirror the blocking Host-injected bootstrap batch before the Vite entry calls create().
+  const bootstrapUrl = graph.batches.find(batch => batch.phase === 'bootstrap')?.url
+  const bootstrap = bootstrapUrl === undefined ? undefined : bundles.get(bootstrapUrl)
+  if (bootstrap === undefined) throw new Error('missing parser-preloaded fixture batch')
+  ;(0, eval)(bootstrap)
   act(() => {
     const entry = new AppWebEntry(root, {
       loadBundle: async (url) => {

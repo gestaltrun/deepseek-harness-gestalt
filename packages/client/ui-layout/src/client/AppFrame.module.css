@@ -26,7 +26,7 @@
   min-width: 0;
   overflow: hidden;
   background: var(--dsw-specific-sidebar-fill);
-  border-right: 1px solid var(--dsw-alias-border-l1);
+  border-right: 0.5px solid var(--dsw-alias-border-l3);
 }
 
 .centerCol {
@@ -50,7 +50,7 @@
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border-left: 1px solid var(--dsw-alias-border-l2);
+  border-left: 0.5px solid var(--dsw-alias-border-l3);
 }
 
 /* In-flow concession closed the track; the occupant stays mounted and paints
@@ -122,7 +122,7 @@
   border-radius: 10px;
   box-sizing: border-box;
   background: var(--dsw-alias-button-floating-fill);
-  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border: 0.5px solid var(--dsw-alias-border-l2-darkmode-thin);
   /* Hover affordance: the details pill hides until the pointer is over its
      column, the strip itself, or a drag. */
   opacity: 0;

@@ -1,61 +1,51 @@
-/** Localized copy for the Session Schedule task board. */
+/** `schedule.catalog` namespace dictionaries. */
 
-/** Locale namespace for Schedule task-board copy. */
-export const NS = 'schedule' as const
+/** Dictionary namespace owned by this plugin. */
+export const NS = 'schedule.catalog'
 
-/** Simplified Chinese Schedule task-board dictionary. */
+/** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'count.active.one': '{count} 个定时任务等待执行',
-  'count.active.other': '{count} 个定时任务等待执行',
-  'count.short': '{count} 个定时任务',
-  'list.aria': '定时任务',
-  'list.title': '定时任务',
-  'list.scope': '仅在此 Session 内执行',
-  'state.scheduled': '等待中',
-  'state.overdue': '待补跑',
-  'state.paused': '已暂停',
-  'rule.once': '一次',
-  'rule.every': '每 {duration}',
-  'duration.minutes': '{minutes} 分钟',
-  'duration.hours': '{hours} 小时',
-  'duration.days': '{days} 天',
-  'action.pause': '暂停 {prompt}',
-  'action.resume': '恢复 {prompt}',
-  'action.delete': '删除 {prompt}',
-  'action.confirmDelete': '确认删除 {prompt}',
-  'action.cancelDelete': '取消删除 {prompt}',
-  'delete.confirm': '确认删除？',
-  'delete.yes': '删除',
-  'delete.no': '取消',
-  'error.fallback': '操作失败',
+  'trigger.one': '{count} 个提醒',
+  'trigger.other': '{count} 个提醒',
+  'list.aria': '活动提醒',
+  'status.scheduled': '等待中',
+  'status.overdue': '已逾期',
+  'frequency.once': '单次',
+  'frequency.every': '{value}{unit}一次',
+  'unit.day.one': '天',
+  'unit.day.other': '天',
+  'unit.hour.one': '小时',
+  'unit.hour.other': '小时',
+  'unit.minute.one': '分钟',
+  'unit.minute.other': '分钟',
+  'unit.second.one': '秒',
+  'unit.second.other': '秒',
+  'relative.now': '现在到期',
+  'relative.future': '{value}{unit}后',
+  'relative.overdue': '已逾期 {value}{unit}',
 } as const
 
-/** Stable Schedule task-board message keys. */
-export type ScheduleKey = keyof typeof zh
-
-/** English Schedule task-board dictionary. */
-export const en: Record<ScheduleKey, string> = {
-  'count.active.one': '{count} scheduled task waiting',
-  'count.active.other': '{count} scheduled tasks waiting',
-  'count.short': '{count} scheduled tasks',
-  'list.aria': 'Scheduled tasks',
-  'list.title': 'Scheduled tasks',
-  'list.scope': 'Runs only in this Session',
-  'state.scheduled': 'Waiting',
-  'state.overdue': 'Overdue',
-  'state.paused': 'Paused',
-  'rule.once': 'Once',
-  'rule.every': 'Every {duration}',
-  'duration.minutes': '{minutes} min',
-  'duration.hours': '{hours} hr',
-  'duration.days': '{days} d',
-  'action.pause': 'Pause {prompt}',
-  'action.resume': 'Resume {prompt}',
-  'action.delete': 'Delete {prompt}',
-  'action.confirmDelete': 'Confirm deleting {prompt}',
-  'action.cancelDelete': 'Cancel deleting {prompt}',
-  'delete.confirm': 'Delete this task?',
-  'delete.yes': 'Delete',
-  'delete.no': 'Cancel',
-  'error.fallback': 'Action failed',
+/** English dictionary, key-identical to the Chinese source of truth. */
+export const en: Record<ScheduleCatalogKey, string> = {
+  'trigger.one': '{count} reminder',
+  'trigger.other': '{count} reminders',
+  'list.aria': 'Active reminders',
+  'status.scheduled': 'Scheduled',
+  'status.overdue': 'Overdue',
+  'frequency.once': 'Once',
+  'frequency.every': 'Every {value} {unit}',
+  'unit.day.one': 'day',
+  'unit.day.other': 'days',
+  'unit.hour.one': 'hour',
+  'unit.hour.other': 'hours',
+  'unit.minute.one': 'minute',
+  'unit.minute.other': 'minutes',
+  'unit.second.one': 'second',
+  'unit.second.other': 'seconds',
+  'relative.now': 'Due now',
+  'relative.future': 'in {value} {unit}',
+  'relative.overdue': '{value} {unit} overdue',
 }
+
+/** Key domain of the Schedule catalog namespace. */
+export type ScheduleCatalogKey = keyof typeof zh

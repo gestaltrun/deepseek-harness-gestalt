@@ -7,9 +7,8 @@
  * same top-down order) on one fade that ends with the slide. The bottom-pinned
  * settings control only fades. The workspace/session browsing region between
  * the New Session button and the foot is the `sidebar.workspaces` registrant's,
- * and the foot holds `sidebar.settings` plus `sidebar.footer.action` on one
- * row; the shell hands them the wide flag (plus an expand request callback
- * for the browser). Desktop may fill `sidebar.chrome.drag` and `sidebar.brand`.
+ * and the foot holds `sidebar.settings` plus `sidebar.footer.action`; the shell
+ * hands them the wide flag (plus an expand request callback for the browser).
  *
  * The column also owns whether the scroll regions nested in it draw a
  * scrollbar at all: the shell tracks the pointer and rebinds ui-theme's
@@ -24,11 +23,6 @@ import {
 import type { SidebarRootComponentProps } from './contract/slots.ts'
 import css from './SidebarRoot.module.css'
 
-/** True when this document is the Desktop native overlay renderer. */
-function isDesktopOverlayDocument(): boolean {
-  return document.documentElement.hasAttribute('data-dsh-desktop-overlay')
-}
-
 /** Wide-content unmount delay; matches the 150ms wide-content fade-out. */
 const COLLAPSE_SETTLE_MS = 150
 
@@ -39,6 +33,16 @@ const COLLAPSE_SETTLE_MS = 150
  * edge — on the way to the conversation, or around a portalled menu.
  */
 const SCROLLBAR_LINGER_MS = 2000
+
+/** Format complete-build metadata for the local brand badge. */
+function localBuildVersion(): string | undefined {
+  const version = process.env.DSH_CLIENT_VERSION
+  if (version === undefined) return undefined
+  const commit = process.env.DSH_CLIENT_COMMIT_HASH
+  return version
+    + (commit === undefined ? '' : `-${commit}`)
+    + (process.env.DSH_CLIENT_GIT_DIRTY === 'true' ? '-dirty' : '')
+}
 
 /**
  * Render the sidebar column shell.
@@ -52,13 +56,7 @@ export function SidebarRoot({
   toggleSidebar,
   t,
   renderSlot,
-  renderSlotChain,
 }: SidebarRootComponentProps) {
-  // Overlay document: Host chrome already has the rail; this tree only
-  // paints Settings above official pages.
-  if (isDesktopOverlayDocument()) {
-    return renderSlot('sidebar.settings', { wide: true })
-  }
   // Wide content stays mounted while the collapse animates (fading via
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
   const [settled, setSettled] = useState(collapsed)
@@ -99,9 +97,9 @@ export function SidebarRoot({
     lingerTimer.current = undefined
   }
   // Leaving is decided by the column's BOX, not by DOM containment, and only
-  // while the bars are drawn. ui-settings renders its full-viewport page as a
+  // while the bars are drawn. ui-settings renders its full-viewport panel as a
   // fixed-position DESCENDANT of this column, so a pointer moved onto that
-  // page — or onto the conversation once it closes — fires no `pointerleave`
+  // panel — or onto the conversation once it closes — fires no `pointerleave`
   // here, and the bars would stay drawn over a column nobody is pointing at.
   // The element's own leave stays as the one signal geometry cannot give: a
   // pointer that leaves the window emits no further moves.
@@ -123,6 +121,8 @@ export function SidebarRoot({
     }
   }, [pointerInside])
 
+  const buildVersion = localBuildVersion()
+
   return (
     <div
       ref={column}
@@ -137,9 +137,6 @@ export function SidebarRoot({
       }}
       onPointerLeave={() => { armLinger() }}
     >
-      <div className={css.dragStrip}>
-        {renderSlot('sidebar.chrome.drag', { wide })}
-      </div>
       <div className={css.logoRow}>
         {/* Expanded, the brand doubles as a New Session shortcut; the
             collapsed rail's logo is the expand toggle below instead. */}
@@ -150,27 +147,23 @@ export function SidebarRoot({
             aria-label={t('session.new.label')}
             onClick={() => { startSession() }}
           >
-            {renderSlotChain('sidebar.brand', { wide }, {
-              fallback: (
-                <span className={css.brandIdentity} aria-hidden="true">
-                  <span className={css.brandMark}>
-                    {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
-                  </span>
-                  <span className={css.brandName}>
-                    {renderSlot('sidebar.brand.name', {}, {
-                      fallback: (
-                        <>
-                          <span className={css.fallbackBrandName}>DSH Gestalt</span>
-                          {process.env.DSH_CLIENT_COMMIT_HASH
-                            ? <span className={css.buildRevision}>{process.env.DSH_CLIENT_COMMIT_HASH}</span>
-                            : null}
-                        </>
-                      ),
-                    })}
-                  </span>
-                </span>
-              ),
-            })}
+            <span className={css.brandIdentity} aria-hidden="true">
+              <span className={css.brandMark}>
+                {renderSlot('sidebar.brand.mark', { size: 24 }, { fallback: <FishLogo size={24} /> })}
+              </span>
+              <span className={css.brandName}>
+                {renderSlot('sidebar.brand.name', {}, {
+                  fallback: buildVersion === undefined
+                    ? <span className={css.fallbackBrandName}>{t('brand.localBuild')}</span>
+                    : (
+                      <span className={css.localBuildBrand}>
+                        <span className={css.localBuildTitle}>{t('brand.localBuild')}</span>
+                        <span className={css.buildVersion}>{buildVersion}</span>
+                      </span>
+                    ),
+                })}
+              </span>
+            </span>
           </button>
         )}
         {/* Rail resting state is the whale mark; hovering swaps in the panel
@@ -215,15 +208,13 @@ export function SidebarRoot({
         })}
       </div>
 
-      {/* Wide: Settings left, footer actions right. Rail: actions then Settings. */}
+      {/* Footer actions stack above Settings in both sidebar widths. */}
       <div className={css.footArea}>
-        <div className={css.settingsRow}>
-          <div className={css.footerActions}>
-            {renderSlot('sidebar.footer.action', { wide })}
-          </div>
-          <div className={css.settingsArea}>
-            {renderSlot('sidebar.settings', { wide })}
-          </div>
+        <div className={css.footerActions}>
+          {renderSlot('sidebar.footer.action', { wide })}
+        </div>
+        <div className={css.settingsArea}>
+          {renderSlot('sidebar.settings', { wide })}
         </div>
       </div>
     </div>

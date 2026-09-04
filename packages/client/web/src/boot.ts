@@ -11,9 +11,8 @@ import type {
 } from '@deepseek-ai/dsh-client-modules/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { BootPage } from './boot-page.ts'
-import { markDesktopOverlayDocument } from './desktop-overlay-mode.ts'
 import { getStaticModules } from './seed.ts'
-import { markShellReady, STATE_LABELS } from './loader-status.ts'
+import { STATE_LABELS } from './loader-status.ts'
 import './base.css'
 
 /** Module transport hook replaced by jsdom tests. */
@@ -36,7 +35,6 @@ export class AppWebEntry {
   constructor(container: HTMLElement, seams?: BootSeams) {
     this.container = container
     this.seams = seams
-    markDesktopOverlayDocument()
     this.page = new BootPage(container)
   }
 
@@ -47,6 +45,13 @@ export class AppWebEntry {
    */
   async run(): Promise<void> {
     try {
+      // Boot-readiness gate: whichever bootstrap applies the injection table
+      // settles this deferred once every row has taken effect — the served
+      // index resolves it in the rendered tail, so the await returns on the
+      // next microtask; an asynchronous bootstrap resolves it after its last
+      // row, or rejects it into the failure rendering below. An absent global
+      // means no bootstrap owns the document and there is nothing to wait for.
+      await (globalThis as { __DSH_BOOT_READY__?: { promise: Promise<void> } }).__DSH_BOOT_READY__?.promise
       const win = globalThis as DshWindow
       const moduleLoader = win.__ModuleLoader__
       if (moduleLoader === undefined) {
@@ -73,11 +78,9 @@ export class AppWebEntry {
       this.ctx = ctx
       await this.runPluginBoot(ctx, prefetching)
       await this.mountApp(ctx)
-      markShellReady()
     } catch (reason) {
       console.error(reason)
       this.page.fail(reason instanceof Error ? reason.message : String(reason))
-      markShellReady()
     }
   }
 
@@ -97,15 +100,8 @@ export class AppWebEntry {
     await mounted
   }
 
-  /** Prefetch stage-one bundles; their import path owns any eventual failure. */
+  /** Prefetch stage-one bundles and their dynamic requests before concurrent plugin imports. */
   private async prefetchImmediateTier(): Promise<void> {
-    // A transport carrying loadBundle owns the bundle bytes; HTTP prefetch
-    // against its static deployment answers nothing. A transport without
-    // loadBundle leaves bundles on HTTP, prefetch included.
-    const transport = (globalThis as {
-      __DSH_TRANSPORT__?: { loadBundle?: unknown }
-    }).__DSH_TRANSPORT__
-    if (transport?.loadBundle !== undefined) return
     await Promise.all(this.manifest.plugins
       .filter(row => row.immediately)
       .map(row => this.modules.prefetch(row.id).catch((_prefetchError: unknown) => {

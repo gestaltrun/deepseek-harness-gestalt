@@ -1,13 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import { createPortal } from 'react-dom'
-import type { JobView } from '@deepseek-ai/dsh-client-runtime/client'
-import {
-  IconChevronDownOutline14,
-  StateDot,
-  useAnchoredPosition,
-  useDismissOnOutsidePointer,
-  type StateDotState,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import type { SessionJob as JobView } from '@deepseek-ai/dsh-api-session-controller/types'
+import { IconChevronDownOutline14, StateDot, useDismissOnOutsidePointer, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { NS } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -19,21 +12,6 @@ export type JobListActionProps =
 
 /** Stable empty list so a session with no jobs keeps one array identity. */
 const NO_TASKS: readonly JobView[] = []
-const MENU_MARGIN = 16
-const MENU_WIDTH = 336
-
-/** Align the menu's right edge to its trigger and clamp it inside the viewport. */
-export function jobMenuPosition(trigger: HTMLButtonElement): CSSProperties {
-  const rect = trigger.getBoundingClientRect()
-  const width = Math.min(MENU_WIDTH, window.innerWidth - MENU_MARGIN * 2)
-  return {
-    top: rect.bottom + 5,
-    left: Math.min(
-      Math.max(MENU_MARGIN, rect.right - width),
-      window.innerWidth - width - MENU_MARGIN,
-    ),
-  }
-}
 
 /** A job the registry still holds open, and whose duration therefore ticks. */
 function isLive(job: JobView): boolean {
@@ -119,20 +97,11 @@ export function JobListAction({ sessionId, useSessions, t }: JobListActionProps)
   const [now, setNow] = useState(() => Date.now())
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLUListElement>(null)
 
   const rows = useMemo(() => ordered(jobs), [jobs])
   const liveCount = useMemo(() => jobs.filter(isLive).length, [jobs])
-  const menuPosition = useAnchoredPosition({
-    open,
-    anchorRef: triggerRef,
-    panelRef: menuRef,
-    gap: 5,
-    margin: MENU_MARGIN,
-    align: 'end',
-    width: MENU_WIDTH,
-  })
-  useDismissOnOutsidePointer(rootRef, open, setOpen, menuRef)
+
+  useDismissOnOutsidePointer(rootRef, open, setOpen)
 
   // The clock only runs while an open list is showing something that moves.
   useEffect(() => {
@@ -161,10 +130,9 @@ export function JobListAction({ sessionId, useSessions, t }: JobListActionProps)
     setOpen(false)
     triggerRef.current?.focus()
   }
-  const listRoot = { ref: rootRef, className: css.root, onKeyDown }
 
   return (
-    <div {...listRoot}>
+    <div ref={rootRef} className={css.root} onKeyDown={onKeyDown}>
       <button
         ref={triggerRef}
         type="button"
@@ -184,9 +152,9 @@ export function JobListAction({ sessionId, useSessions, t }: JobListActionProps)
         <span className={css.count}>{countLabel}</span>
         <IconChevronDownOutline14 className={open ? css.triggerOpen : undefined} />
       </button>
-      {open && menuPosition !== null
-        ? createPortal((
-          <ul ref={menuRef} className={css.menu} style={menuPosition} aria-label={t('list.aria')}>
+      {open
+        ? (
+          <ul className={css.menu} aria-label={t('list.aria')}>
             {rows.map((job) => {
               const live = isLive(job)
               const elapsed = live ? now - job.startedAt : (job.finishedAt ?? job.startedAt) - job.startedAt
@@ -208,7 +176,7 @@ export function JobListAction({ sessionId, useSessions, t }: JobListActionProps)
               )
             })}
           </ul>
-        ), document.body)
+        )
         : null}
     </div>
   )

@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
-// CodeBlock + the shiki singleton: registered grammars highlight into token
-// spans colored by --shiki-* custom properties; unknown/absent languages take
-// the identical-geometry plain arm; aliases resolve; the trailing newline is
-// display-trimmed. MarkdownText's fence route is pinned in markdown.spec.tsx
-// alongside the rest of the markdown family.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { CodeBlock } from '../src/markdown/CodeBlock.tsx'
-import { highlightToHtml, subscribeGrammarLoaded } from '../src/markdown/highlight.ts'
+import type { ComponentProps } from 'react'
+import { CodeBlock as LocalizedCodeBlock } from '../src/markdown/CodeBlock.tsx'
+import { highlightToHtml } from '../src/markdown/highlight.ts'
+import { markdownLabels } from './labels.client.ts'
+
+function CodeBlock(props: Omit<ComponentProps<typeof LocalizedCodeBlock>, 'copyLabel' | 'copiedLabel'>) {
+  return <LocalizedCodeBlock {...props} {...markdownLabels.code} />
+}
 
 afterEach(cleanup)
 
@@ -42,20 +43,12 @@ describe('highlightToHtml', () => {
   ]
 
   it('lazily loads every read-card grammar: plain first, highlighted after load', async () => {
-    let dispose = (): void => undefined
-    const loaded = new Promise<void>((resolve) => {
-      dispose = subscribeGrammarLoaded(() => {
-        if (LAZY_ALIASES.every(alias => highlightToHtml('x', alias)?.includes('shiki') === true)) resolve()
-      })
-    })
     // First touch returns the plain fallback (undefined) and starts the import.
     for (const alias of LAZY_ALIASES) expect(highlightToHtml('x', alias)).toBeUndefined()
-    try {
-      await loaded
-    } finally {
-      dispose()
-    }
-    for (const alias of LAZY_ALIASES) expect(highlightToHtml('x', alias)).toContain('shiki')
+    // Once every grammar has registered, the same call highlights.
+    await vi.waitFor(() => {
+      for (const alias of LAZY_ALIASES) expect(highlightToHtml('x', alias)).toContain('shiki')
+    }, { timeout: 5_000 })
   })
 })
 

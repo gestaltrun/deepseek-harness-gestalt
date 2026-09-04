@@ -17,15 +17,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
     /** One plugin's card inside the plugin configuration section (see module JSDoc). */
     'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: SettingsPluginItemOwnerProps }
-    /**
-     * One search-provider tab inside the Web Search card. Extra plugins register
-     * here so the card grows new providers without a second top-level card.
-     */
-    'settings.plugin.web-search.provider': {
-      kind: 'list'
-      scope: 'root'
-      owner: SettingsPluginItemOwnerProps
-    }
   }
 }
 

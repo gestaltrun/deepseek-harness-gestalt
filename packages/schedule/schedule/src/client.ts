@@ -1,14 +1,2 @@
-/** Browser-safe Schedule projection and Remote value types. */
-
-export type {
-  AfterScheduleRecord,
-  AtScheduleRecord,
-  EveryScheduleRecord,
-  ScheduleDeleteResult,
-  ScheduleId,
-  ScheduleProjection,
-  ScheduleProjectionItem,
-  ScheduleRecord,
-  ScheduleState,
-  ScheduleView,
-} from './types.ts'
+/** Browser-safe Schedule vocabulary. @module @deepseek-ai/dsh-schedule/client */
+export type * from './types.ts'

@@ -9,9 +9,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { liveModelSelection, type Agent, type AgentOptions, type CreateAgentOptions } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { foldRequestHeader, type Session, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-system-prompt'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 // Type-only: make `ctx.get('sandboxPolicy')` / `ctx.get('approval')` resolve
 // to the policy services when composed — delegation consumes both
@@ -57,62 +58,38 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 }
 
 /**
- * Resolve the parent route a new child inherits: the live session selection
- * the next parent prompt would use, else the latest logged request header,
- * else the parent's creation-time `AgentOptions`.
- * @param parent - the delegating parent.
- * @returns inherited provider, model, and output-token cap.
+ * Resolve the parent values inherited by a child. The latest request header
+ * owns provider, model, and reasoning effort after request-time selection;
+ * creation options remain the fallback before the first request and retain
+ * the configured output-token limit.
+ * @param parent - delegating parent Agent.
+ * @returns detached Agent options for child-option merging.
  */
-export function inheritParentAgentRoute(parent: Agent): Pick<AgentOptions, 'provider' | 'model' | 'maxTokens'> {
-  const live = liveModelSelection(parent)
-  const logged = parent.session.requestHeader()?.config
-  const provider = live?.provider ?? logged?.provider ?? parent.options.provider
-  const model = live?.model ?? logged?.model ?? parent.options.model
-  const maxTokens = parent.options.maxTokens
+export function parentAgentOptionsForDelegation(parent: Agent): AgentOptions {
+  const requestConfig = parent.session.requestHeader()?.config
+  if (requestConfig === undefined) return { ...parent.options }
+  const {
+    provider: _createdProvider,
+    model: _createdModel,
+    reasoningEffort: _createdReasoningEffort,
+    ...createdOptions
+  } = parent.options
   return {
-    ...provider !== undefined ? { provider } : {},
-    ...model !== undefined ? { model } : {},
-    ...maxTokens !== undefined ? { maxTokens } : {},
+    ...createdOptions,
+    provider: requestConfig.provider,
+    model: requestConfig.model,
+    ...requestConfig.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: requestConfig.reasoningEffort },
   }
 }
 
 /**
- * Fold request headers that belong to the child itself. A fork seed replays
- * the parent's log, so the latest header before `subagent/descriptor` is the
- * parent's route, not a child selection.
- * @param events - the child session events in log order.
- * @returns the latest owned header, or `undefined` when the child has none.
- */
-export function foldChildRequestHeader(events: readonly SessionEvent[]): ReturnType<typeof foldRequestHeader> {
-  const descriptorIndex = events.findIndex(event => event.type === 'subagent/descriptor')
-  const owned = descriptorIndex < 0 ? events : events.slice(descriptorIndex + 1)
-  return foldRequestHeader(owned)
-}
-
-/**
- * Resolve the model route a cold-resumed continuable child should run: a later
- * owned `request/header` wins over the creation-time descriptor.
- * @param events - the persisted child session events.
- * @param descriptor - the child's creation-time provider and model, when set.
- * @returns provider and model for `ctx.agents.resume()`.
- */
-export function resumeChildAgentOptions(
-  events: readonly SessionEvent[],
-  descriptor: { readonly agentProvider?: string; readonly agentModel?: string },
-): Pick<AgentOptions, 'provider' | 'model'> {
-  const header = foldChildRequestHeader(events)
-  const provider = header?.config.provider ?? descriptor.agentProvider
-  const model = header?.config.model ?? descriptor.agentModel
-  return {
-    ...provider !== undefined ? { provider } : {},
-    ...model !== undefined ? { model } : {},
-  }
-}
-
-/**
- * Resolve the child's `AgentOptions`: the parent's current provider/model
- * route unless the request overrides it, stamped with the child's own
- * delegation depth.
+ * Resolve the child's `AgentOptions`: the parent's provider/model,
+ * reasoning-effort, and maxTokens values unless the request overrides them,
+ * stamped with the child's own delegation depth. Changing the route without
+ * naming an effort clears the parent's route-owned effort so the selected
+ * model resolves its own default.
  * @param parent - the delegating parent whose route the child inherits.
  * @param requested - per-child overrides, if any.
  * @param childDepth - the resolved delegation depth to stamp.
@@ -123,11 +100,22 @@ export function resolveChildAgentOptions(
   requested: AgentOptions | undefined,
   childDepth: number,
 ): AgentOptions {
-  return {
-    ...inheritParentAgentRoute(parent),
+  const parentOptions = parentAgentOptionsForDelegation(parent)
+  const parentProvider = parentOptions.provider
+  const parentModel = parentOptions.model
+  const parentReasoningEffort = parentOptions.reasoningEffort
+  const parentMaxTokens = parentOptions.maxTokens
+  const resolved: AgentOptions = {
+    ...parentProvider !== undefined ? { provider: parentProvider } : {},
+    ...parentModel !== undefined ? { model: parentModel } : {},
+    ...parentReasoningEffort !== undefined ? { reasoningEffort: parentReasoningEffort } : {},
+    ...parentMaxTokens !== undefined ? { maxTokens: parentMaxTokens } : {},
     ...requested,
     subagentDepth: childDepth,
   }
+  const routeChanged = resolved.provider !== parentProvider || resolved.model !== parentModel
+  if (routeChanged && requested?.reasoningEffort === undefined) delete resolved.reasoningEffort
+  return resolved
 }
 
 /**
@@ -144,13 +132,13 @@ export function resolveChildAgentOptions(
  * child never had.
  * @param parent - the delegating parent agent.
  * @param childDepth - the resolved delegation depth to persist.
- * @param lineageSeedLength - how many leading events came from the parent's log.
+ * @param isSeeded - whether this child inherits a parent-log prefix, including an explicitly empty one.
  * @returns the `meta` for `ctx.agents.create()`.
  */
 export function childSessionMeta(
   parent: Agent,
   childDepth: number,
-  lineageSeedLength: number,
+  isSeeded: boolean,
 ): NonNullable<CreateAgentOptions['meta']> {
   const parentHeader = parent.session.header
   const agentPreset = parent.ctx.get('agentPresets')?.composedPreset(parent.ctx)
@@ -158,12 +146,12 @@ export function childSessionMeta(
     ...parentHeader.cwd !== undefined ? { cwd: parentHeader.cwd } : {},
     ...agentPreset === undefined ? {} : { agentPreset },
     parentSession: parentHeader.id,
+    isSeeded,
     // Navigation classification only; the descriptor remains the authority
     // for mode and continuation capability.
     origin: 'subagent',
     // Durable: the recursion budget must survive persistence and resume.
     delegationDepth: childDepth,
-    ...lineageSeedLength > 0 ? { seedLength: lineageSeedLength } : {},
   }
 }
 
@@ -214,10 +202,17 @@ export function applyChildComposition(
   composition: ChildComposition,
 ): void {
   childCtx.get('agentPresets')?.composeFrom(childCtx, parent.ctx)
-  // Order 120: after the sandbox:policy (110) and approval:policy (115) sentences.
-  childCtx.systemPrompt.context({ name: 'subagent:delegation', order: 120, text: SUBAGENT_DELEGATION_CONTEXT })
+  childCtx.systemPrompt.context({
+    name: 'subagent:delegation',
+    order: childCtx.systemPrompt.getContextOrder('SUBAGENT_DELEGATION'),
+    text: SUBAGENT_DELEGATION_CONTEXT,
+  })
   if (composition.persona !== undefined) {
-    childCtx.systemPrompt.section({ name: 'deployment:persona', order: 0, text: composition.persona })
+    childCtx.systemPrompt.section({
+      name: 'deployment:persona',
+      order: childCtx.systemPrompt.getSectionOrder('DEPLOYMENT_PERSONA'),
+      text: composition.persona,
+    })
   }
   if (composition.toolFilter !== undefined) childCtx.tools.restrict(composition.toolFilter)
 }

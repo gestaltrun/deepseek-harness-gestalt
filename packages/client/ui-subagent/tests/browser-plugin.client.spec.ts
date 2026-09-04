@@ -1,15 +1,17 @@
 /** ui-subagent browser half: catalog actions and read-only composer routing. */
 import { Context } from '@deepseek-ai/cordis'
 import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
-import { describe, expect, it, vi } from 'vitest'
-import {
-  SlotRegistry, type ConversationSnapshot, type SessionId, type SessionListState,
-  type SessionSummary, type SubagentAddress,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import { describe, expect, it } from 'vitest'
+import type {
+  SessionListState, SessionSnapshot, SessionSummary,
+} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { apply as applyLocale, inject as localeInject } from '@deepseek-ai/dsh-client-locale/client'
 import {
-  SubagentHeaderAction, SubagentHeaderLineage, type SubagentCatalogInjected,
+  SubagentHeaderLineage, type SubagentCatalogInjected,
 } from '../src/client/SubagentHeaderLineage.tsx'
 import {
   SubagentReadOnlyComposer, type SubagentReadOnlyMatch,
@@ -31,15 +33,7 @@ const sid = (id: string) => id as SessionId
 function sessionsWith(sessions: SessionSummary[]) {
   const byId: Record<string, SessionSummary> = {}
   for (const s of sessions) byId[s.id] = s
-  const snapshot: SessionListState = {
-    ids: sessions.map(s => s.id),
-    byId,
-    current: undefined,
-    phase: 'ready',
-    subagentsByParent: {},
-    jobsBySession: {},
-    currentAddress: undefined,
-  }
+  const snapshot = { ids: sessions.map(s => s.id), byId, current: undefined } as unknown as SessionListState
   const actionCalls: { method: string; args: unknown[] }[] = []
   return {
     list: {
@@ -49,9 +43,6 @@ function sessionsWith(sessions: SessionSummary[]) {
     actionCalls,
     openSubagent: (address: SubagentAddress) => {
       actionCalls.push({ method: 'openSubagent', args: [address] })
-    },
-    open: (sessionId: SessionId) => {
-      actionCalls.push({ method: 'open', args: [sessionId] })
     },
     refreshSubagents: (parentSessionId: SessionId) => {
       actionCalls.push({ method: 'refreshSubagents', args: [parentSessionId] })
@@ -69,7 +60,6 @@ async function provideSlotFaces(ctx: Context): Promise<void> {
     name: 'root',
     children: {
       'conversation.session.header.lineage': { kind: 'single', scope: 'session' },
-      'conversation.session.header.actions': { kind: 'list', scope: 'session' },
       'conversation.composer': { kind: 'chain', scope: 'session' },
     },
   } as never, () => null)
@@ -80,7 +70,6 @@ async function fullBench(sessions: SessionSummary[]) {
   const ctx = new Context()
   const face = sessionsWith(sessions)
   ctx.provide('sessions', face)
-  ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
   ctx.provide('remote', { $on: () => () => {} } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
   await provideSlotFaces(ctx)
@@ -108,9 +97,6 @@ describe('apply', () => {
     const { ctx, face } = await fullBench(FAMILY)
     const catalogEntry = ctx.slots.entries('conversation.session.header.lineage')
       .find(entry => entry.component === SubagentHeaderLineage)!
-    const descendantEntry = ctx.slots.entries('conversation.session.header.actions')
-      .find(entry => entry.component === SubagentHeaderAction)
-    expect(descendantEntry?.options).toEqual(expect.objectContaining({ id: 'subagent-descendants', order: 10 }))
     const actions = (catalogEntry.inject as unknown as (id: SessionId) => SubagentCatalogInjected)(sid('parent'))
     const address: SubagentAddress = {
       parentSessionId: sid('parent'),
@@ -130,13 +116,14 @@ describe('apply', () => {
       .find(entry => entry.component === SubagentReadOnlyComposer)!
     const select = composerEntry.select as (owner: ComposerChainProps) => SubagentReadOnlyMatch | null
     const owner = (
-      subagent: ConversationSnapshot['subagent'] | undefined,
+      subagent: SessionSnapshot['subagent'] | undefined,
       running = false,
     ): ComposerChainProps => ({
-      interactions: [],
+      sessionId: subagent?.address.childSessionId,
       session: subagent === undefined
         ? undefined
-        : ({ subagent, running } as unknown as ConversationSnapshot),
+        : ({ subagent, running } as SessionSnapshot),
+      pendingInteraction: undefined,
     })
     expect(select(owner(undefined))).toBeNull()
     expect(select(owner(null))).toBeNull()
@@ -145,104 +132,12 @@ describe('apply', () => {
     // One-shot stays read-only even while running: it has no stop action.
     expect(select(owner({ address: { ...address, mode: 'one-shot' }, parentAvailable: true }, true)))
       .toEqual({ reason: 'one-shot' })
+    expect(select(owner({ address }))).toBeNull()
     expect(select(owner({ address, parentAvailable: true }))).toBeNull()
     expect(select(owner({ address, parentAvailable: false })))
       .toEqual({ reason: 'parent-unavailable' })
     // A RUNNING parent-offline continuable yields the default composer, whose
     // disabled input still carries the primary Stop; stopped, it takes back over.
     expect(select(owner({ address, parentAvailable: false }, true))).toBeNull()
-  })
-
-  it('opens a Side Chat catalog row as a sidebar tab without selecting the child', async () => {
-    const side = sid('side-thread')
-    const { ctx, face } = await fullBench([
-      summary({ id: sid('parent'), displayTitle: 'parent', running: true }),
-      summary({
-        id: side, parentId: sid('parent'), origin: 'subagent',
-        displayTitle: 'Side: 123', running: false,
-      }),
-    ])
-    const openTab = vi.fn()
-    const setPanelOpen = vi.fn()
-    ctx.provide('betterSidebar', {
-      isTabEnabled: () => true,
-      setPanelOpen,
-      openTab,
-    })
-    const catalogEntry = ctx.slots.entries('conversation.session.header.lineage')
-      .find(entry => entry.component === SubagentHeaderLineage)!
-    const actions = (catalogEntry.inject as unknown as (id: SessionId) => SubagentCatalogInjected)(sid('parent'))
-    const address: SubagentAddress = {
-      parentSessionId: sid('parent'),
-      childSessionId: side,
-      mode: 'continuable',
-    }
-    actions.openChild(address)
-    expect(face.actionCalls).toEqual([{ method: 'open', args: [sid('parent')] }])
-    expect(setPanelOpen).toHaveBeenCalledWith(true)
-    expect(openTab).toHaveBeenCalledWith({
-      type: 'sidechat',
-      id: 'sidechat:side-thread',
-      title: '123',
-      meta: { threadId: side },
-    }, { sessionId: sid('parent') })
-  })
-
-  it('opens a catalog-only Side Chat row and falls back when the tab is unavailable', async () => {
-    const side = sid('side-catalog')
-    const { ctx, face } = await fullBench([
-      summary({ id: sid('parent'), displayTitle: 'parent', running: true }),
-    ])
-    const snapshot = face.list.getSnapshot()
-    snapshot.current = sid('parent')
-    snapshot.subagentsByParent = {
-      [sid('parent')]: {
-        entries: [
-          { kind: 'diagnostic', id: sid('corrupt'), reason: 'corrupt' },
-          { kind: 'child', id: sid('other'), mode: 'continuable', label: 'Side: other', activity: 'inactive', hasChildren: false },
-          { kind: 'child', id: side, mode: 'continuable', label: 'Side: catalog', activity: 'inactive', hasChildren: false },
-        ],
-        parentAvailable: true,
-        state: 'ready',
-        error: null,
-      },
-    }
-    const openTab = vi.fn()
-    const sidebar = {
-      isTabEnabled: (): boolean => false,
-      openTab,
-    }
-    ctx.provide('betterSidebar', sidebar)
-    const catalogEntry = ctx.slots.entries('conversation.session.header.lineage')
-      .find(entry => entry.component === SubagentHeaderLineage)!
-    const actions = (catalogEntry.inject as unknown as (id: SessionId) => SubagentCatalogInjected)(sid('parent'))
-    const address: SubagentAddress = {
-      parentSessionId: sid('parent'),
-      childSessionId: side,
-      mode: 'continuable',
-    }
-    actions.openChild(address)
-    expect(openTab).not.toHaveBeenCalled()
-    expect(face.actionCalls).toEqual([{ method: 'openSubagent', args: [address] }])
-
-    sidebar.isTabEnabled = () => true
-    face.actionCalls.length = 0
-    actions.openChild(address)
-    expect(face.actionCalls).toEqual([])
-    expect(openTab).toHaveBeenCalledWith({
-      type: 'sidechat',
-      id: 'sidechat:side-catalog',
-      title: 'catalog',
-      meta: { threadId: side },
-    }, { sessionId: sid('parent') })
-
-    face.actionCalls.length = 0
-    const missing: SubagentAddress = {
-      parentSessionId: sid('parent'),
-      childSessionId: sid('missing'),
-      mode: 'continuable',
-    }
-    actions.openChild(missing)
-    expect(face.actionCalls).toEqual([{ method: 'openSubagent', args: [missing] }])
   })
 })

@@ -2,7 +2,7 @@
 /**
  * AppFrame interaction spec under the four-share props form: real layout
  * store instance (createLayoutStore().create() — the test-sanctioned engine
- * path), a recording renderSlot stub, and a render-prop SessionProvider stub
+ * path), a recording renderSlot stub, and a SessionProvider component stub
  * (the real one is framework-wired to the renderer host; its own behavior is
  * ui-renderer's spec territory). Drag sequences (pointer capture + rAF flush),
  * concession response to viewport change, and details staying mounted at
@@ -10,8 +10,6 @@
  * engine, so the frame width comes from a mocked getBoundingClientRect and
  * resizes are driven through the ResizeObserver stub.
  */
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
@@ -19,23 +17,24 @@ import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import { SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
-import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/src/client/service.ts'
-import type {
-  SessionId, SessionListState, WorkspaceListState,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
 // Session selection controls for the SessionProvider and useSessions stubs.
 const selectedSession = { current: 's-test' as SessionId | undefined }
 const selectedSessionBlank = { current: false }
-const baselinesReady = { current: true }
+const selectedSessionTitle = { current: undefined as string | undefined }
+const workspacesReady = { current: true }
+type AttentionSnapshot = Parameters<Parameters<AppFrameProps['useSessionPendingInteraction']>[0]>[0]
+const noAttention: AttentionSnapshot = new Map()
+const useSessionPendingInteraction: AppFrameProps['useSessionPendingInteraction'] = selector => selector(noAttention)
 
-// Render-prop contract stub fed through the standard seat prop (the renderer
-// injects the real one in production): session mode runs children(id), empty
-// mode runs the empty branch — the frame must work against exactly this
-// shape. Typed as the seat's own component type so the branded sessionId
-// parameter stays contract-checked.
+// Provider contract stub fed through the standard seat prop (the renderer
+// injects the real one in production): session mode renders children and
+// empty mode runs the empty branch.
 const SessionProviderStub: AppFrameProps['SessionProvider'] = ({ children, empty }) =>
-  selectedSession.current === undefined ? <>{empty?.() ?? null}</> : <>{children(selectedSession.current)}</>
+  selectedSession.current === undefined ? <>{empty?.() ?? null}</> : <>{children}</>
 
 
 /** Observer stub: captures the callback so tests can fire resizes manually. */
@@ -58,8 +57,6 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
 function mountFrame() {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
   const instance = createLayoutStore().create()
-  const layout = new LayoutController()
-  layout.attachPanels(instance.actions)
   const slotCalls: { key: string; props: unknown }[] = []
   const renderSlot = ((key: string, owner: object) => {
     slotCalls.push({ key, props: owner })
@@ -75,15 +72,24 @@ function mountFrame() {
       ids: current === undefined ? [] : [current],
       byId: current === undefined
         ? {}
-        : { [current]: { id: current, displayTitle: 'Test', running: false, blank: selectedSessionBlank.current, updatedAt: 1 } },
+        : {
+          [current]: {
+            id: current,
+            displayTitle: 'Test',
+            running: false,
+            blank: selectedSessionBlank.current,
+            updatedAt: 1,
+            ...(selectedSessionTitle.current === undefined ? {} : { title: selectedSessionTitle.current }),
+          },
+        },
       current,
       phase: 'ready',
     } as SessionListState
     return sel(sessionState)
   }) as never
-  const workspaceState: WorkspaceListState = {
+  const workspaceState: WorkspaceSnapshot = {
     items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
-    baselinesReady: baselinesReady.current, recentWorkspaceId: undefined,
+    ...(workspacesReady.current ? {} : { state: 'loading' as const, phase: 'pending' as const }),
   }
   const element = () => (
     <AppFrame
@@ -91,13 +97,15 @@ function mountFrame() {
       actions={instance.actions}
       renderSlot={renderSlot}
       useSessions={useSessions}
-      useWorkspaces={((sel: (s: WorkspaceListState) => unknown) => sel(workspaceState)) as never}
+      useSessionPendingInteraction={useSessionPendingInteraction}
+      useWorkspaces={((sel: (s: WorkspaceSnapshot) => unknown) => sel(workspaceState)) as never}
       SessionProvider={SessionProviderStub}
+      t={key => key === 'brand.localBuild' ? 'DSH Local Build' : key}
     />
   )
   const utils = render(element())
   const frame = utils.container.firstElementChild as HTMLElement
-  return { instance, layout, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
+  return { instance, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
 }
 
 function tracks(frame: HTMLElement): number[] {
@@ -119,7 +127,8 @@ beforeEach(() => {
   frameWidth = 1920
   selectedSession.current = 's-test' as SessionId
   selectedSessionBlank.current = false
-  baselinesReady.current = true
+  selectedSessionTitle.current = undefined
+  workspacesReady.current = true
   vi.useFakeTimers()
   vi.stubGlobal('ResizeObserver', ResizeObserverStub)
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => { cb(0) }, 16) as unknown as number)
@@ -137,21 +146,31 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
-  document.documentElement.removeAttribute('data-dsh-desktop-overlay')
+  document.title = ''
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 describe('AppFrame', () => {
-  it('paints only the sidebar and shell overlay slots on the overlay document', () => {
-    document.documentElement.setAttribute('data-dsh-desktop-overlay', '')
-    const { slotCalls, queryByTestId, container } = mountFrame()
-    expect(queryByTestId('center-content')).toBeNull()
-    expect(queryByTestId('details-content')).toBeNull()
-    expect(queryByTestId('sidebar-content')).toBeTruthy()
-    expect(slotCalls.map(c => c.key)).toEqual(['sidebar', 'shell.overlay'])
-    expect(slotCalls[0]!.props).toEqual({ collapsed: false, width: 280 })
-    expect(container.firstElementChild?.hasAttribute('data-dsh-desktop-overlay-root')).toBe(true)
+  it('localizes the product title when the build does not supply one', () => {
+    mountFrame()
+    expect(document.title).toBe('DSH Local Build')
+  })
+
+  it('projects the selected durable Session title', () => {
+    vi.stubEnv('DSH_CLIENT_TITLE', 'Product')
+    selectedSessionTitle.current = 'First'
+    const { rerenderFrame } = mountFrame()
+    expect(document.title).toBe('First — Product')
+
+    selectedSessionTitle.current = 'Revised'
+    act(() => { rerenderFrame() })
+    expect(document.title).toBe('Revised — Product')
+
+    selectedSession.current = undefined
+    act(() => { rerenderFrame() })
+    expect(document.title).toBe('Product')
   })
 
   it('renders three tracks from store state', () => {
@@ -175,15 +194,17 @@ describe('AppFrame', () => {
     // No current session: the session-maybe conversation shell owns the New
     // Session view itself — the center column renders it unconditionally.
     selectedSession.current = undefined
-    const { slotCalls, getByTestId } = mountFrame()
+    const { slotCalls, getByTestId, queryByTestId } = mountFrame()
     expect(getByTestId('center-content')).toBeTruthy()
     expect(slotCalls.map(c => c.key)).toContain('conversation')
+    expect(queryByTestId('details-content')).toBeNull()
+    expect(slotCalls.map(c => c.key)).toContain('details')
   })
 
   it('renders both column occupants before baselines settle (no loading gate)', () => {
     // No loading gate: a bare loading status reads worse than the shell's own
     // pending rendering — both occupants mount from first paint.
-    baselinesReady.current = false
+    workspacesReady.current = false
     const { slotCalls } = mountFrame()
     expect(slotCalls.map(c => c.key)).toContain('conversation')
     expect(slotCalls.map(c => c.key)).toContain('details')
@@ -244,54 +265,11 @@ describe('AppFrame', () => {
   })
 
   it('details drag widens leftward (negative dx grows the panel)', () => {
-    const { frame, layout } = mountFrame()
-    act(() => { layout.openDetails() })
+    const { frame, instance } = mountFrame()
+    act(() => { instance.actions.openDetails() })
     const handles = frame.querySelectorAll('[class*="handle"]')
     drag(handles[1]!, 1560, 1500)
     expect(tracks(frame)[1]).toBe(420)
-  })
-
-  it('applies the public occupant range to drag, reopen, and narrow-window concession', () => {
-    frameWidth = 2000
-    const { frame, instance, layout } = mountFrame()
-    const browserRange = { minimum: 420, default: 640, maximum: 960 }
-
-    act(() => { layout.openDetails(browserRange) })
-    expect(tracks(frame)).toEqual([280, 640])
-    const handles = frame.querySelectorAll('[class*="handle"]')
-    drag(handles[1]!, 1500, 1100)
-    expect(tracks(frame)).toEqual([280, 960])
-    expect(instance.getSnapshot().details).toBe(960)
-
-    act(() => { layout.closeDetails(); layout.openDetails(browserRange) })
-    expect(tracks(frame)).toEqual([280, 640])
-
-    frameWidth = 1400
-    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
-    expect(tracks(frame)).toEqual([280, 480])
-    frameWidth = 1339
-    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
-    expect(tracks(frame)).toEqual([280, 0])
-    expect(instance.getSnapshot().details).toBe(640)
-    expect(frame.hasAttribute('data-details-overlay')).toBe(true)
-    expect(frame.hasAttribute('data-details-collapsed')).toBe(false)
-    expect(frame.querySelector('[data-overlay]')?.getAttribute('style')).toContain('640px')
-    frameWidth = 2000
-    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
-    expect(tracks(frame)).toEqual([280, 640])
-    expect(frame.hasAttribute('data-details-overlay')).toBe(false)
-  })
-
-  it('overlays details on the default Desktop width so Browser Dock chrome stays reachable', () => {
-    frameWidth = 1280
-    const { frame, layout } = mountFrame()
-    const browserRange = { minimum: 420, default: 640, maximum: 960 }
-    act(() => { layout.openDetails(browserRange) })
-    expect(tracks(frame)).toEqual([280, 0])
-    expect(frame.hasAttribute('data-details-overlay')).toBe(true)
-    expect(frame.hasAttribute('data-details-collapsed')).toBe(false)
-    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(2)
-    expect(frame.querySelector('[data-overlay]')?.getAttribute('style')).toContain('640px')
   })
 
   it('drag base is the rendered (concession-clamped) width, not the preference', () => {
@@ -454,15 +432,5 @@ describe('AppFrame — unmount with an in-flight resize frame', () => {
     frameWidth = 1250
     act(() => { fireResize?.(); fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
-  })
-})
-
-describe('AppFrame desktop chrome CSS', () => {
-  it('insets the center column under macOS and Windows chrome markers', () => {
-    const css = readFileSync(join(process.cwd(), 'packages/client/ui-layout/src/client/AppFrame.module.css'), 'utf8')
-    const mac = /\.frame:has\(\[data-desktop-chrome='mac'\]\) \.centerCol\s*\{(?<body>[^}]+)\}/.exec(css)?.groups?.body ?? ''
-    const win = /\.frame:has\(\[data-desktop-chrome='win'\]\) \.centerCol\s*\{(?<body>[^}]+)\}/.exec(css)?.groups?.body ?? ''
-    expect(mac).toContain('padding-top: var(--dsh-window-chrome-height)')
-    expect(win).toContain('padding-top: 36px')
   })
 })

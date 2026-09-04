@@ -4,20 +4,20 @@
  *
  * The section declares `settings.plugins.tab`; its own `configurable` tab then
  * declares `settings.plugin.item` and renders whatever cards were registered
- * into it. The three cards this package ships are the host-plane sections the
- * deployment already exposes; Web Search then declares a provider-tab slot so
- * extra plugins can add search backends without a second top-level card.
+ * into it. The cards this package ships are the host-plane sections the
+ * deployment already exposes; each binds its namespace through the client
+ * settings scope, which keeps them unaware of one another and of other tabs.
  */
 
-import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: the settings shell's SlotMap merge (the 'settings.section' entry)
 // and the ctx.settingsScope Context merge. Cross-plugin collaboration goes
 // through the service, never a value import (client bundle purity gate).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import { labeledSlotTab } from './slot-tab.ts'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: the ctx.remote Context merge and the forwarded-event key face.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { AgentLoopCard } from './AgentLoopCard.tsx'
@@ -25,15 +25,15 @@ import { BashCard } from './BashCard.tsx'
 import { ConfigurablePluginsTab } from './ConfigurablePluginsTab.tsx'
 import { PluginsSettingsSection } from './PluginsSettingsSection.tsx'
 import type { PluginsSettingsSectionInjected, PluginsSettingsTabEntry } from './PluginsSettingsSection.tsx'
+import { SubagentModelSelectionCard } from './SubagentModelSelectionCard.tsx'
 import { WebSearchCard } from './WebSearchCard.tsx'
-import { WebSearchProviderPanel } from './WebSearchProviderPanel.tsx'
 import { AGENT_LOOP_NS, AgentLoopCardController } from './agent-loop-card-controller.ts'
 import { SHELL_NS, BashCardController } from './bash-card-controller.ts'
 import { ConfigurablePluginsTabController } from './tab-store.ts'
 import {
-  WEB_SEARCH_ANTHROPIC_NS, WEB_SEARCH_KIMI_NS, WEB_SEARCH_NS,
-  WebSearchCardController, WebSearchShell, type WebSearchSettings,
-} from './web-search-card-controller.ts'
+  SUBAGENT_MODEL_SELECTION_NS, SubagentModelSelectionCardController,
+} from './subagent-model-selection-card-controller.ts'
+import { WEB_SEARCH_NS, WebSearchCardController } from './web-search-card-controller.ts'
 import { en, zh } from './locales.ts'
 
 export type { PluginsSettingsSectionInjected, PluginsSettingsSectionProps } from './PluginsSettingsSection.tsx'
@@ -47,81 +47,55 @@ export type {
 } from './card-form.ts'
 export type { AgentLoopCardFace, AgentLoopCardState } from './agent-loop-card-controller.ts'
 export type { BashCardFace, BashCardState } from './bash-card-controller.ts'
-export type {
-  WebSearchCardFace, WebSearchCardState, WebSearchShellFace,
-} from './web-search-card-controller.ts'
+export type { WebSearchCardFace, WebSearchCardState } from './web-search-card-controller.ts'
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'settings.plugins'
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'settingsScope']
+export const inject = [
+  'slots', 'locale', 'remote', 'remote.credentials', 'remote.session', 'settingsScope',
+]
 
 /**
  * Mount the plugin configuration section and the cards this package ships.
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
-  const { api } = ctx.get('connection') as ConnectionHandle
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-plugins: section dictionaries')
 
   const bash = new BashCardController(ctx.settingsScope.bind({ namespace: SHELL_NS }))
   const agentLoop = new AgentLoopCardController(ctx.settingsScope.bind({ namespace: AGENT_LOOP_NS }))
-  const deepseekScope = ctx.settingsScope.bind<WebSearchSettings>({ namespace: WEB_SEARCH_NS })
-  const webSearch = new WebSearchCardController(deepseekScope, api, 'deepseek', deepseekScope, {
-    titleKey: 'webSearchTitle',
-    descriptionKey: 'webSearchDescription',
-    baseUrlHintKey: 'webSearchBaseUrlHint',
-    idPrefix: 'plugin-config-web-search',
-  })
-  const anthropicSearch = new WebSearchCardController(
-    ctx.settingsScope.bind<WebSearchSettings>({ namespace: WEB_SEARCH_ANTHROPIC_NS }),
-    api,
-    'anthropic-messages',
-    deepseekScope,
-    {
-      titleKey: 'webSearchTitle',
-      descriptionKey: 'webSearchDescription',
-      baseUrlHintKey: 'anthropicSearchBaseUrlHint',
-      idPrefix: 'plugin-config-anthropic-search',
-    },
-  )
-  const kimiSearch = new WebSearchCardController(
-    ctx.settingsScope.bind<WebSearchSettings>({ namespace: WEB_SEARCH_KIMI_NS }),
-    api,
-    'kimi',
-    deepseekScope,
-    {
-      titleKey: 'webSearchTitle',
-      descriptionKey: 'webSearchDescription',
-      baseUrlHintKey: 'kimiSearchBaseUrlHint',
-      idPrefix: 'plugin-config-kimi-search',
-    },
-  )
-  const webSearchShell = new WebSearchShell(
-    deepseekScope,
-    () => ctx.slots.entries('settings.plugin.web-search.provider'),
-    { titleKey: 'webSearchTitle', descriptionKey: 'webSearchDescription' },
-    webSearch,
-    api,
+  const webSearch = new WebSearchCardController(
+    ctx.settingsScope.bind({ namespace: WEB_SEARCH_NS }), ctx)
+  const subagentModelSelection = new SubagentModelSelectionCardController(
+    ctx.settingsScope.bind({ namespace: SUBAGENT_MODEL_SELECTION_NS }),
+    ctx,
   )
 
   // The credential a card reports is not part of any settings section, so its
   // scope publishes nothing when one is written. This is the only signal that
   // a key written on another surface reached the Host.
   ctx.effect(
-    () => ctx.remote.$on('credentials/reference-updated', (ref) => {
-      webSearch.refreshCredential(ref)
-      anthropicSearch.refreshCredential(ref)
-      kimiSearch.refreshCredential(ref)
-    }),
+    () => ctx.remote.$on('credentials/reference-updated', (ref) => { webSearch.refreshCredential(ref) }),
     'ui-settings-plugins: credential invalidations',
   )
+  ctx.effect(
+    () => ctx.remote.$on('llm/adapters-updated', () => { subagentModelSelection.refreshCatalog() }),
+    'ui-settings-plugins: subagent adapter invalidations',
+  )
+  ctx.effect(
+    () => ctx.remote.$on('settings/document-updated', () => { subagentModelSelection.refreshCatalog() }),
+    'ui-settings-plugins: subagent settings invalidations',
+  )
+  ctx.effect(
+    () => ctx.on('connection/reset', () => { subagentModelSelection.resetConnection() }),
+    'ui-settings-plugins: subagent connection generation',
+  )
+  ctx.effect(() => () => { subagentModelSelection.dispose() }, 'ui-settings-plugins: subagent preference')
 
-  // Which namespaces the Host serves comes from the shared describe mirror,
-  // whose owning plugin already refreshes it on document commits and
-  // reconnects — the tab only derives.
+  // The shared SettingsScope mirror updates after document commits and reconnects.
   const configurable = new ConfigurablePluginsTabController(
     ctx.settingsScope.describe(), () => ctx.slots.entries('settings.plugin.item'))
   ctx.effect(() => () => { configurable.dispose() }, 'ui-settings-plugins: tab directory')
@@ -144,7 +118,12 @@ export function apply(ctx: ClientContext): void {
             tabsVersion = version
             tabsRevision = revision
             tabs = ctx.slots.entries('settings.plugins.tab')
-              .map(labeledSlotTab)
+              .map(entry => ({
+                /* v8 ignore next -- list-slot registration requires id */
+                id: entry.options.id ?? '',
+                order: entry.options.order ?? 0,
+                label: resolveSlotLabel(entry.options.label) ?? '',
+              }))
               .sort((a, b) => a.order - b.order)
           }
           return tabs
@@ -174,7 +153,7 @@ export function apply(ctx: ClientContext): void {
   }, PluginsSettingsSection))
 
   // The existing configuration page is one ordinary tab. It keeps ownership
-  // of the card slot and the three shipped card contributions below.
+  // of the card slot and the shipped card contributions below.
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
     name: 'settings.plugins.tab',
     id: 'configurable',
@@ -200,46 +179,15 @@ export function apply(ctx: ClientContext): void {
     }, AgentLoopCard)
     yield ctx.slots.register({
       name: 'settings.plugin.item',
+      key: SUBAGENT_MODEL_SELECTION_NS,
+      locale: NS,
+      inject: () => subagentModelSelection.inject(),
+    }, SubagentModelSelectionCard)
+    yield ctx.slots.register({
+      name: 'settings.plugin.item',
       key: WEB_SEARCH_NS,
       locale: NS,
-      inject: () => webSearchShell.inject(),
-      children: { 'settings.plugin.web-search.provider': { kind: 'list', scope: 'root' } },
+      inject: () => webSearch.inject(),
     }, WebSearchCard)
   })
-
-  // TODO(dead-panel): rows feed the tab ledger only; fields live on WebSearchCard.
-  ctx.slots.inject('settings.plugin.web-search.provider', function* () {
-    yield ctx.slots.register({
-      name: 'settings.plugin.web-search.provider',
-      id: 'deepseek',
-      order: 0,
-      label: () => t('providerDeepseek'),
-      locale: NS,
-      inject: () => webSearch.inject(),
-    }, WebSearchProviderPanel)
-    yield ctx.slots.register({
-      name: 'settings.plugin.web-search.provider',
-      id: 'anthropic-messages',
-      order: 10,
-      label: () => t('providerAnthropic'),
-      locale: NS,
-      inject: () => anthropicSearch.inject(),
-    }, WebSearchProviderPanel)
-    yield ctx.slots.register({
-      name: 'settings.plugin.web-search.provider',
-      id: 'kimi',
-      order: 20,
-      label: () => t('providerKimi'),
-      locale: NS,
-      inject: () => kimiSearch.inject(),
-    }, WebSearchProviderPanel)
-  })
-  webSearchShell.rewire()
-  ctx.effect(
-    () => ctx.slots.subscribe('settings.plugin.web-search.provider', () => {
-      webSearchShell.rewire()
-      webSearchShell.notifyTabs()
-    }),
-    'ui-settings-plugins: search-provider ledger',
-  )
 }

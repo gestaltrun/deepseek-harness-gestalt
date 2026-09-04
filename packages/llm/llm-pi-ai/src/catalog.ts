@@ -14,7 +14,6 @@
 
 import { builtinProviders, getBuiltinModels, getBuiltinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { BuiltinProvider } from '@earendil-works/pi-ai/providers/all'
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type {
   AnthropicMessagesCompat,
   Api,
@@ -90,17 +89,19 @@ export type PiAiThinkingFormat = NonNullable<OpenAICompletionsCompat['thinkingFo
 
 /**
  * The nameable reasoning-dispatch formats, most-reached first. The `Record`
- * key type is a drift gate: a pi-ai upgrade that adds a format (0.84 added
- * `baseten`) fails compilation here until the new format is named, so the
- * offer never silently lags the upstream set. The two `chat-template` variants
- * are nameable because {@link PiAiCompatProfile.chatTemplateKwargs} carries
- * the kwargs they dispatch through.
+ * key type is a drift gate: an upstream format addition fails compilation
+ * here until it is named, so the offer never silently lags the upstream set.
+ * The two `chat-template` variants are nameable because
+ * {@link PiAiCompatProfile.chatTemplateKwargs} carries their kwargs;
+ * `baseten` is nameable because {@link PiAiCompatProfile.chatTemplateArgs}
+ * carries its arguments.
  */
 const THINKING_FORMAT_GATE: Record<PiAiThinkingFormat, true> = {
   'openai': true,
   'deepseek': true,
   'openrouter': true,
   'together': true,
+  'baseten': true,
   'zai': true,
   'qwen': true,
   'chat-template': true,
@@ -218,6 +219,7 @@ const COMPLETIONS_COMPAT_GATE = {
   supportsDeveloperRole: 'offer',
   supportsReasoningEffort: 'offer',
   supportsUsageInStreaming: 'offer',
+  supportsFinishReason: 'offer',
   maxTokensField: 'offer',
   requiresToolResultName: 'offer',
   requiresAssistantAfterToolResult: 'offer',
@@ -225,6 +227,8 @@ const COMPLETIONS_COMPAT_GATE = {
   requiresReasoningContentOnAssistantMessages: 'offer',
   thinkingFormat: 'offer',
   chatTemplateKwargs: 'offer',
+  chatTemplateArgs: 'offer',
+  supportsThinkingTokenBudget: 'offer',
   supportsStrictMode: 'offer',
   cacheControlFormat: 'offer',
   supportsLongCacheRetention: 'offer',
@@ -244,6 +248,7 @@ const RESPONSES_COMPAT_GATE = {
   supportsLongCacheRetention: 'offer',
   sessionAffinityFormat: 'withhold',
   supportsOpenAIGrammarTools: 'withhold',
+  supportsAdditionalTools: 'withhold',
   supportsToolSearch: 'withhold',
   supportsExplicitPromptCacheMode: 'withhold',
 } as const satisfies Record<keyof OpenAIResponsesCompat, CompatDisposition>
@@ -345,6 +350,11 @@ export interface PiAiCompatProfile {
   supportsReasoningEffort?: boolean
   /** Whether the endpoint accepts `stream_options: {include_usage: true}`; `openai-completions`. */
   supportsUsageInStreaming?: boolean
+  /**
+   * Whether streams include `finish_reason`; `false` lets pi-ai infer the
+   * terminal reason when the stream ends; `openai-completions`.
+   */
+  supportsFinishReason?: boolean
   /** Which output-cap field the endpoint reads; `openai-completions`. */
   maxTokensField?: NonNullable<OpenAICompletionsCompat['maxTokensField']>
   /** Whether tool results must carry `name`; `openai-completions`. */
@@ -365,6 +375,10 @@ export interface PiAiCompatProfile {
    * can read, so kwargs set beside another format are sent nowhere.
    */
   chatTemplateKwargs?: NonNullable<OpenAICompletionsCompat['chatTemplateKwargs']>
+  /** Arguments sent as `chat_template_args` under the `baseten` thinking format; `openai-completions`. */
+  chatTemplateArgs?: NonNullable<OpenAICompletionsCompat['chatTemplateArgs']>
+  /** Whether the endpoint accepts `thinking_token_budget` to cap vLLM reasoning; `openai-completions`. */
+  supportsThinkingTokenBudget?: boolean
   /**
    * Whether the endpoint accepts `strict` in tool definitions;
    * `openai-completions`, the three Responses protocols, `bedrock-converse-stream`.
@@ -433,10 +447,10 @@ export type EveryProfileFieldMatchesUpstream = AssertTrue<
  *
  * schemastery materializes an absent dict as `{}` — the behavior
  * `reasoningEfforts` works around with a union — so every parsed profile
- * carries a `chatTemplateKwargs` key whether or not anyone wrote one. An empty
- * one states nothing here: it would send no kwargs, which is exactly what
- * leaving the field out does, so absent and empty are the same request and
- * neither may make a route look like it configured a switch. A valueless
+ * carries both template-argument keys whether or not anyone wrote them. An
+ * empty one states nothing here: it would send no arguments, which is exactly
+ * what leaving the field out does, so absent and empty are the same request
+ * and neither may make a route look like it configured a switch. A valueless
  * scalar is the other thing schemastery lets through, and it is refused by
  * {@link assertOfferedCompatFields} before this runs rather than filtered.
  * @param compat - the configured switches, when any.
@@ -566,8 +580,6 @@ export interface PiAiModelProfile {
    * declares the offered levels and their wire spellings.
    */
   reasoningEfforts?: false | PiAiReasoningEfforts
-  /** Default selectable reasoning level for this model; omission uses the route default when supported. */
-  defaultReasoningLevel?: ModelThinkingLevel
   /** pi-ai wire-compatibility switches for this model, winning over the route's per field; one its protocol does not declare is refused. */
   compat?: PiAiCompatProfile
 }
@@ -772,8 +784,6 @@ export interface RouteCatalog {
    * picked, so only an explicit configuration lands here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
-  /** Per-model reasoning defaults explicitly declared by the deployment. */
-  modelReasoningDefaults: ReadonlyMap<string, ModelThinkingLevel>
 }
 
 /**
@@ -835,7 +845,6 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
   }
   const seen = new Set<string>()
   const configuredMaxTokens = new Map<string, number>()
-  const modelReasoningDefaults = new Map<string, ModelThinkingLevel>()
   const models = entries.map((entry) => {
     if (entry.id.length === 0) invalid(provider, 'has a model with an empty id')
     if (seen.has(entry.id)) invalid(provider, `lists model "${entry.id}" more than once`)
@@ -865,7 +874,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
     // Only a value the profile named is a deployment choice; the catalog's is
     // the model's capability and stays out of request defaults.
     if (entry.maxTokens !== undefined) configuredMaxTokens.set(entry.id, entry.maxTokens)
-    const model: Model<Api> = {
+    return {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
       // package does not model — reasoning-level spellings, compatibility
@@ -884,17 +893,6 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
       ...resolveModelReasoning(provider, entry, base),
       ...resolveModelCompat(provider, entry, request.compat, base, api),
     }
-    if (entry.defaultReasoningLevel !== undefined) {
-      if (!model.reasoning) {
-        invalid(provider, `model "${entry.id}" defaultReasoningLevel "${entry.defaultReasoningLevel}" requires a reasoning model`)
-      }
-      if (!getSupportedThinkingLevels(model).some(level => level === entry.defaultReasoningLevel)) {
-        invalid(provider, `model "${entry.id}" defaultReasoningLevel "${entry.defaultReasoningLevel}" is not`
-          + ' present in its reasoningEfforts')
-      }
-      modelReasoningDefaults.set(entry.id, entry.defaultReasoningLevel)
-    }
-    return model
   })
   // Per field, not per block: a route may default a switch its completions
   // models take beside one only its anthropic models do, and neither should
@@ -906,5 +904,5 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
     invalid(provider, `sets compat "${field}", but no model on the route speaks a protocol that takes it;`
       + ` it exists on ${takers.join(', ')}`)
   }
-  return { models, configuredMaxTokens, modelReasoningDefaults }
+  return { models, configuredMaxTokens }
 }

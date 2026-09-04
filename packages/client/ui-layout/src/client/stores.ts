@@ -8,7 +8,7 @@
  * receives the bound actions through the registration's inject hook. The
  * active details range is transient viewing state beside its preferred width.
  */
-import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
+import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
 import {
   clampWidth, DEFAULT_DETAILS_WIDTH_RANGE,
   SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,

@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest'
 import {
   gitBlobHash,
   gitIndexPaths,
-  readGitIndexBlobs,
   readGitIndexBlob,
   storeGitBlob,
 } from './translation-pairing-git.ts'
@@ -41,7 +40,7 @@ function signature(markdown: string) {
     'counterpart.zh.md',
     {
       repoRoot: process.cwd(), sourcePath: 'counterpart.md',
-      isTranslationPairSource: fixturePairSource, markdown,
+      isTranslationPairSource: fixturePairSource, repositoryFileExists: () => true, markdown,
     },
   )
 }
@@ -130,32 +129,6 @@ describe('translation pairing snapshots', () => {
       expect(indexed?.content.toString('utf8')).toBe('staged')
       expect(indexed?.objectId).toBe(gitBlobHash(Buffer.from('staged')))
       expect(readGitIndexBlob(root, 'absent.md')).toBeUndefined()
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-
-  it('reads multiple selected staged blobs in one batch', () => {
-    const root = mkdtempSync(join(tmpdir(), 'dsh-translation-pairing-index-'))
-    try {
-      execFileSync('git', ['init', '--quiet', root], {
-        env: { ...process.env, GIT_DEFAULT_HASH: 'sha1' },
-      })
-      writeFileSync(join(root, 'first.md'), 'first staged')
-      writeFileSync(join(root, 'duplicate.md'), 'first staged')
-      writeFileSync(join(root, 'second.md'), 'second staged\nwith lines\n')
-      const binary = Buffer.from([0x62, 0x69, 0x6e, 0x0a, 0x00, 0xff])
-      writeFileSync(join(root, 'binary.md'), binary)
-      execFileSync('git', ['-C', root, 'add', 'first.md', 'duplicate.md', 'second.md', 'binary.md'])
-      writeFileSync(join(root, 'first.md'), 'first unstaged')
-
-      const indexed = readGitIndexBlobs(root, ['first.md', 'duplicate.md', 'second.md', 'binary.md', 'absent.md'])
-
-      expect(indexed.get('first.md')?.content.toString('utf8')).toBe('first staged')
-      expect(indexed.get('duplicate.md')?.objectId).toBe(indexed.get('first.md')?.objectId)
-      expect(indexed.get('second.md')?.content.toString('utf8')).toBe('second staged\nwith lines\n')
-      expect(indexed.get('binary.md')?.content).toEqual(binary)
-      expect(indexed.has('absent.md')).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -277,6 +250,30 @@ describe('translation pairing switchers', () => {
   })
 })
 
+describe('translation pairing link language parity', () => {
+  it('compares a .zh.md target and its .md sibling as the same document', () => {
+    const en = 'See [docs](persistence.md) and [notes](note.md#anchor).'
+    const zh = '参见[文档](persistence.zh.md)与[笔记](note.zh.md#anchor)。'
+    expect(
+      translationStructureDiff(
+        signature(en),
+        signature(zh),
+      ),
+    ).toEqual([])
+  })
+
+  it('still rejects a genuinely different target', () => {
+    const en = 'See [docs](persistence.md).'
+    const zh = '参见[文档](other.md)。'
+    expect(
+      translationStructureDiff(
+        signature(en),
+        signature(zh),
+      ),
+    ).not.toEqual([])
+  })
+})
+
 describe('translation pairing records', () => {
   const paths = translationPairPaths('docs/foo.md')
   const record = {
@@ -312,12 +309,12 @@ describe('translation scope discovery', () => {
     'BRAND_GUIDELINES.md',
     'BRAND_GUIDELINES.zh.md',
     'BRAND_GUIDELINES.i18n.yaml',
+    'SAFETY.md',
+    'SAFETY.zh.md',
+    'SAFETY.i18n.yaml',
     'apps/cli/README.md',
     'future/subtree/readme.md',
     'packages/example/README.zh.md',
-    'plugins/README.md',
-    'plugins/README.zh.md',
-    'plugins/README.i18n.yaml',
     'native/example/README.i18n.yaml',
     '.agents/notes/proposed/feature.md',
     'docs/guide.md',
@@ -330,18 +327,14 @@ describe('translation scope discovery', () => {
     'packages/example/guide.md',
     'packages/example/CONTRIBUTING.md',
     'packages/example/BRAND_GUIDELINES.md',
-    'examples/tutorial.md',
+    'other/tutorial.md',
     'website/reference.md',
     'packages/example/README.txt',
     'vendor/example/README.md',
-    'plugins/dsh-sub2api-sidecar/README.md',
     'packages/example/node_modules/dependency/README.md',
     'packages/example/lib/README.md',
     'coverage/report/README.md',
-    'apps/desktop/out/README.md',
-    'apps/desktop/release/mac-arm64/App.app/Contents/Resources/node/README.md',
-    'apps/desktop/resources/node/README.md',
-    'python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-macos-arm64/README.md',
+    'python/sdk-runtime/src/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-macos-arm64/README.md',
     'python/sdk-runtime/src/deepseek_harness_runtime/runtime/node/README.md',
   ])('excludes non-source or non-README path %s', (file) => {
     expect(isTranslationScopeFile(file)).toBe(false)

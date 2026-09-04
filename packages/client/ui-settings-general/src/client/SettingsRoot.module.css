@@ -1,18 +1,26 @@
-/* Settings shell: sidebar foot trigger row + full-viewport settings page.
-   The trigger uses the sidebar foot's 42px row / 36px rail circle rhythm; the
-   page is a two-column layout — 188px nav column + content column with a
-   54px header and the 24px-padded options area. Section bodies cap their own
-   width, so the page stays full-bleed at every window size. */
-
-/* Trigger row: the 42px foot-row box shared with the Cordis footer action. */
-.trigger {
+.triggerRow {
   flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
   width: calc(100% + 4px);
-  height: 42px;
   margin: 4px -2px;
+}
+
+.triggerRow.railRow {
+  width: 36px;
+  margin: 8px 0 10px;
+}
+
+.trigger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  height: 42px;
+  margin: 0;
   padding: 0 10px 0 8px;
   box-sizing: border-box;
   border: none;
@@ -32,13 +40,15 @@
 
 /* Rail trigger: the same 36x36 circle box as the other rail controls. */
 .trigger.rail {
+  flex: none;
   width: 36px;
   height: 36px;
-  margin: 8px 0 10px;
+  margin: 0;
   justify-content: center;
   gap: 0;
   padding: 0;
   border-radius: 50%;
+  corner-shape: round;
 }
 
 .triggerLabel {
@@ -46,18 +56,43 @@
   white-space: nowrap;
 }
 
-/* Full-viewport page: an opaque layer-2 surface that replaces the Session
-   Surface while open (browser window, Desktop overlay view, overlay document
-   — the same page element in all three). No mask and no floating panel: the
-   page IS the surface, so there is nothing behind it to dim. */
-.page {
+/* Full-viewport layer (figma Mask 501:29946 #000@24%): mask tokens match the
+   Modal primitive (--dsw-alias-bg-mask-1 + --dsw-mask-blur). */
+.overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
   display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mask {
+  position: absolute;
+  inset: 0;
+  background: var(--dsw-alias-bg-mask-1);
+  backdrop-filter: var(--dsw-mask-blur);
+}
+
+/* Panel (figma Settings 501:29947): r24, white; the figma lv3 effects are
+   superseded by the shared elevation treatment; figma's 1080x700 is shrunk to 800 wide.
+   One height for every section, taken from the viewport rather than the
+   content: sections differ by hundreds of pixels (a settings list against the
+   composition editor), and a content-sized panel would resize under the
+   pointer on every nav click. Whatever does not fit scrolls in `.options`. */
+.panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 800px;
+  height: min(800px, calc(100vh - 48px));
+  max-width: calc(100vw - 48px);
+  border-radius: 32px;
+  overflow: hidden;
   background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-elevation-prominent);
   /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens.
-     Declared on the page rather than the scrolling `.options` child so the
+     Declared on the panel rather than the scrolling `.options` child so the
      elevation choice sits with the surface; the custom properties inherit
      down to whichever descendant scrolls (see ui-theme
      styles/scrollbar.css for the rebinding contract). */
@@ -65,8 +100,8 @@
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-/* Nav column (figma .Setting-nav 501:29958): 188 wide, pad (12,22,12,0),
-   gap 18, no own fill — the page surface shows through. */
+/* Nav rail (figma .Setting-nav 501:29958): 188 wide, pad (12,22,12,0),
+   gap 18, no own fill — the panel white shows through. */
 .nav {
   flex: none;
   display: flex;

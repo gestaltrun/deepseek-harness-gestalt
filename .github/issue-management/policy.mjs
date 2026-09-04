@@ -36,8 +36,6 @@ const LEGACY_LABELS = new Set([
   'web-search',
 ])
 const TERMINAL_STATUSES = new Set(['Done', 'No action'])
-const PULL_REQUEST_READ_AUTHENTICATIONS = new Set(['anonymous', 'token'])
-const PULL_REQUEST_POLICY_ACTIVATIONS = new Set(['non-draft', 'review-activity'])
 const ACTIVE_STATUS_ORDER = config.statuses.filter((status) => !TERMINAL_STATUSES.has(status))
 const IMPLEMENTATION_PULL_REQUEST_ACTIONS = new Set([
   'opened',
@@ -54,47 +52,16 @@ for (const status of ['In progress', 'In review']) {
 if (typeof config.lifecycleActor !== 'string' || !config.lifecycleActor) {
   throw new Error('config.lifecycleActor 未设置')
 }
-if (typeof config.projectOrganization !== 'string' || !config.projectOrganization) {
-  throw new Error('config.projectOrganization 未设置')
+if (typeof config.priorityField !== 'string' || !config.priorityField) {
+  throw new Error('config.priorityField 未设置')
 }
-if (
-  config.priorityField !== null &&
-  (typeof config.priorityField !== 'string' || !config.priorityField.trim())
-) {
-  throw new Error('config.priorityField 必须为非空字符串或 null')
+if (typeof config.startDateField !== 'string' || !config.startDateField) {
+  throw new Error('config.startDateField 未设置')
 }
-if (!PULL_REQUEST_READ_AUTHENTICATIONS.has(config.pullRequestReadAuthentication)) {
-  throw new Error('config.pullRequestReadAuthentication 必须为 anonymous 或 token')
+if (typeof config.projectTimeZone !== 'string' || !config.projectTimeZone) {
+  throw new Error('config.projectTimeZone 未设置')
 }
-if (!PULL_REQUEST_POLICY_ACTIVATIONS.has(config.pullRequestPolicyActivation)) {
-  throw new Error('config.pullRequestPolicyActivation 必须为 non-draft 或 review-activity')
-}
-
-/**
- * Resolve the repository that emitted the workflow event.
- * @param {Record<string, string|undefined>} environment Workflow environment.
- * @returns {{owner: string, name: string, fullName: string}} Repository coordinates.
- */
-export function repositoryCoordinates(environment = process.env) {
-  const value = environment.GITHUB_REPOSITORY
-  const match = value?.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/)
-  if (!match) throw new Error('GITHUB_REPOSITORY 必须为 owner/name')
-  const [, owner, name] = match
-  return { owner, name, fullName: `${owner}/${name}` }
-}
-
-function repositoryApiPath(path) {
-  return `/repos/${repositoryCoordinates().fullName}${path}`
-}
-
-function validateLifecycleDeployment(environment = process.env) {
-  const { owner } = repositoryCoordinates(environment)
-  if (config.projectOrganization !== owner) {
-    throw new Error(
-      `config.projectOrganization 必须与 GITHUB_REPOSITORY owner 一致：${config.projectOrganization} != ${owner}`,
-    )
-  }
-}
+Intl.DateTimeFormat('en-US', { timeZone: config.projectTimeZone })
 
 /**
  * Return Markdown outside balanced details elements.
@@ -198,9 +165,8 @@ export function validateBody({
 }
 
 /**
- * Decide whether repository metadata policy applies to a PR.
+ * Decide whether the human-review policy applies to a PR.
  * @param {{isDraft: boolean, authorType: string, reviewRequestCount: number, reviewCount: number}} input PR state.
- * @param {'non-draft'|'review-activity'} activation Deployment activation mode.
  * @returns {boolean} Whether the PR policy is mandatory.
  */
 export function requiresPullRequestPolicy({
@@ -208,10 +174,9 @@ export function requiresPullRequestPolicy({
   authorType,
   reviewRequestCount,
   reviewCount,
-}, activation = config.pullRequestPolicyActivation) {
+}) {
   const automated = authorType === 'Bot' || authorType === 'App'
-  if (isDraft || automated) return false
-  return activation === 'non-draft' || reviewRequestCount > 0 || reviewCount > 0
+  return !isDraft && !automated && (reviewRequestCount > 0 || reviewCount > 0)
 }
 
 /**
@@ -258,6 +223,29 @@ export function nextResolvingIssueStatus(currentStatus, command, currentStatusAc
     return target
   }
   return currentIndex >= 0 && currentIndex < targetIndex ? target : null
+}
+
+/**
+ * Convert a GitHub timestamp to a Project date in one configured time zone.
+ * @param {string} timestamp ISO timestamp.
+ * @param {string} timeZone IANA time-zone name.
+ * @returns {string} Calendar date in YYYY-MM-DD form.
+ */
+export function projectDate(timestamp, timeZone = config.projectTimeZone) {
+  const instant = new Date(timestamp)
+  if (Number.isNaN(instant.getTime())) throw new Error(`无效的 PR 创建时间：${timestamp}`)
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(instant)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  )
+  return `${parts.year}-${parts.month}-${parts.day}`
 }
 
 function stripIgnoredMarkdown(body) {
@@ -370,21 +358,11 @@ export function validateIssue(issue) {
 
 /**
  * Validate PR metadata and its referenced Issues.
- * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>, requiredAreas?: string[]}} input PR snapshot.
+ * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>}} input PR snapshot.
  * @returns {string[]} Validation errors.
  */
 export function validatePullRequest(input) {
   if (!requiresPullRequestPolicy(input)) return []
-  return validatePullRequestMetadata(input)
-}
-
-/**
- * Validate PR metadata without applying Draft or review-activity activation.
- * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>, requiredAreas?: string[]}} input PR snapshot.
- * @returns {string[]} Validation errors.
- */
-export function validatePullRequestMetadata(input) {
-  if (input.authorType === 'Bot' || input.authorType === 'App') return []
   const errors = []
   const kinds = input.labels.filter((label) => PR_KINDS.has(label))
   const unknownKinds = input.labels.filter(
@@ -406,8 +384,6 @@ export function validatePullRequestMetadata(input) {
   if (sourceLabels.length > 0) errors.push(`source/* 仅用于 Issue：${sourceLabels.join(', ')}`)
   if (priorities.length > 1) errors.push(`PR 最多有一个 p0–p3，当前为 ${priorities.length}`)
   if (areas.length === 0) errors.push('PR 必须至少有一个 area/*')
-  const missingAreas = (input.requiredAreas ?? []).filter((area) => !areas.includes(area))
-  if (missingAreas.length > 0) errors.push(`PR 缺少相关 area/*：${missingAreas.join(', ')}`)
   for (const number of input.references.all) {
     if (!input.issues.has(number)) errors.push(`#${number} 不是同仓库 Issue`)
   }
@@ -442,22 +418,22 @@ function token() {
   return value
 }
 
-async function api(
-  path,
-  { allow404 = false, authentication = 'token', headers = {}, ...options } = {},
-) {
-  const authorization = authentication === 'token' ? { Authorization: `Bearer ${token()}` } : {}
+function projectToken() {
+  return process.env.PROJECT_TOKEN || token()
+}
+
+async function api(path, options = {}) {
   const response = await fetch(`${process.env.GITHUB_API_URL ?? 'https://api.github.com'}${path}`, {
     ...options,
     headers: {
       Accept: 'application/vnd.github+json',
-      ...authorization,
+      Authorization: `Bearer ${token()}`,
       'X-GitHub-Api-Version': API_VERSION,
       'User-Agent': 'dsh-issue-policy',
-      ...headers,
+      ...options.headers,
     },
   })
-  if (allow404 && response.status === 404) return null
+  if (options.allow404 && response.status === 404) return null
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`${options.method ?? 'GET'} ${path}: ${response.status} ${body}`)
@@ -466,31 +442,29 @@ async function api(
   return response.json()
 }
 
-function pullRequestReadApi(path, options = {}) {
-  return api(path, { ...options, authentication: config.pullRequestReadAuthentication })
-}
-
 async function graphql(query, variables) {
   const result = await api('/graphql', {
     method: 'POST',
     body: JSON.stringify({ query, variables }),
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${projectToken()}`,
+      'Content-Type': 'application/json',
+    },
   })
   if (result.errors?.length) throw new Error(result.errors.map((error) => error.message).join('; '))
   return result.data
 }
 
-async function issueSnapshot(number, status = undefined, read = api) {
-  const issue = await read(repositoryApiPath(`/issues/${number}`))
+/**
+ * Read one Issue together with its Project planning values.
+ * @param {number} number Same-repository Issue number.
+ * @param {string|null|undefined} status Optional known Project status.
+ * @returns {Promise<object|null>} Issue snapshot, or null when the number identifies a pull request.
+ */
+export async function issueSnapshot(number, status = undefined) {
+  const issue = await api(`/repos/${config.organization}/${config.repository}/issues/${number}`)
   if (issue.pull_request) return null
-  let priority = null
-  if (config.priorityField !== null) {
-    const values = await read(
-      repositoryApiPath(`/issues/${number}/issue-field-values?per_page=100`),
-    )
-    const field = values.find((value) => value.issue_field_name === config.priorityField)
-    priority = field?.single_select_option?.name ?? null
-  }
+  const context = await projectContext(number)
   return {
     number,
     nodeId: issue.node_id,
@@ -499,23 +473,24 @@ async function issueSnapshot(number, status = undefined, read = api) {
     assignees: issue.assignees.map((assignee) => assignee.login),
     labels: issue.labels.map((label) => label.name),
     type: issue.type?.name ?? null,
-    priority,
-    status: status === undefined ? await projectStatus(number) : status,
+    priority: context.item?.priorityValue?.name ?? null,
+    status: status === undefined ? (context.item?.fieldValueByName?.name ?? null) : status,
     state: issue.state,
     stateReason: issue.state_reason ?? null,
   }
 }
 
-async function projectContext(number, includeStatusActor = false) {
-  const repository = repositoryCoordinates()
+async function projectContext(number, includeStatusActor = false, includeStartDate = false) {
   const data = await graphql(
     `query(
       $organization: String!
-      $repositoryOwner: String!
       $repository: String!
       $number: Int!
       $project: Int!
       $includeStatusActor: Boolean!
+      $includeStartDate: Boolean!
+      $priorityField: String!
+      $startDateField: String!
     ) {
       organization(login: $organization) {
         projectV2(number: $project) {
@@ -523,12 +498,24 @@ async function projectContext(number, includeStatusActor = false) {
           title
           fields(first: 50) {
             nodes {
-              ... on ProjectV2SingleSelectField { id name options { id name } }
+              ... on ProjectV2Field {
+                id
+                name
+                dataType
+                isIssueField
+              }
+              ... on ProjectV2SingleSelectField {
+                id
+                name
+                dataType
+                isIssueField
+                options { id name }
+              }
             }
           }
         }
       }
-      repository(owner: $repositoryOwner, name: $repository) {
+      repository(owner: $organization, name: $repository) {
         issue(number: $number) {
           id
           timelineItems(last: 100, itemTypes: [PROJECT_V2_ITEM_STATUS_CHANGED_EVENT])
@@ -548,18 +535,27 @@ async function projectContext(number, includeStatusActor = false) {
               fieldValueByName(name: "Status") {
                 ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
               }
+              priorityValue: fieldValueByName(name: $priorityField) {
+                ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
+              }
+              startDateValue: fieldValueByName(name: $startDateField)
+                @include(if: $includeStartDate) {
+                ... on ProjectV2ItemFieldDateValue { date }
+              }
             }
           }
         }
       }
     }`,
     {
-      organization: config.projectOrganization,
-      repositoryOwner: repository.owner,
-      repository: repository.name,
+      organization: config.organization,
+      repository: config.repository,
       number,
       project: config.projectNumber,
       includeStatusActor,
+      includeStartDate,
+      priorityField: config.priorityField,
+      startDateField: config.startDateField,
     },
   )
   const project = data.organization?.projectV2
@@ -568,24 +564,39 @@ async function projectContext(number, includeStatusActor = false) {
   if (!issue) throw new Error(`#${number} 不存在`)
   const statusField = project.fields.nodes.find((field) => field?.name === 'Status')
   if (!statusField) throw new Error('Project 缺少 Status 字段')
+  const priorityField = project.fields.nodes.find((field) => field?.name === config.priorityField)
+  if (!priorityField) throw new Error(`Project 缺少 ${config.priorityField} 字段`)
+  if (priorityField.dataType !== 'SINGLE_SELECT') {
+    throw new Error(`Project ${config.priorityField} 字段必须为 Single Select`)
+  }
+  if (priorityField.isIssueField) {
+    throw new Error(`Project ${config.priorityField} 字段必须为 Project custom field`)
+  }
+  const startDateField = includeStartDate
+    ? project.fields.nodes.find((field) => field?.name === config.startDateField)
+    : null
+  if (includeStartDate && !startDateField) {
+    throw new Error(`Project 缺少 ${config.startDateField} 字段`)
+  }
+  if (startDateField && startDateField.dataType !== 'DATE') {
+    throw new Error(`Project ${config.startDateField} 字段必须为 Date`)
+  }
+  if (startDateField?.isIssueField) {
+    throw new Error(`Project ${config.startDateField} 字段必须为 Project Date 字段`)
+  }
   const item = issue.projectItems.nodes.find((candidate) => candidate.project.id === project.id)
   const latestStatusEvent = issue.timelineItems?.nodes
     ?.filter((event) => event?.project?.id === project.id)
     .at(-1)
   const statusActor =
-    latestStatusEvent?.status === item?.fieldValueByName?.name
+    latestStatusEvent && latestStatusEvent.status === item?.fieldValueByName?.name
       ? (latestStatusEvent.actor?.login ?? null)
       : null
-  return { project, issue, statusField, item, statusActor }
+  return { project, issue, statusField, priorityField, startDateField, item, statusActor }
 }
 
-async function projectStatus(number) {
-  const context = await projectContext(number)
-  return context.item?.fieldValueByName?.name ?? null
-}
-
-async function ensureProjectItem(number) {
-  const context = await projectContext(number)
+async function ensureProjectItem(number, includeStartDate = false) {
+  const context = await projectContext(number, false, includeStartDate)
   if (context.item) return context
   const data = await graphql(
     `mutation($projectId: ID!, $contentId: ID!) {
@@ -597,8 +608,57 @@ async function ensureProjectItem(number) {
   )
   return {
     ...context,
-    item: { id: data.addProjectV2ItemById.item.id, fieldValueByName: null },
+    item: {
+      id: data.addProjectV2ItemById.item.id,
+      fieldValueByName: null,
+      priorityValue: null,
+      startDateValue: null,
+    },
   }
+}
+
+/**
+ * Initialize one Issue's Project Start Date when it is empty.
+ * @param {number} number Same-repository Issue number.
+ * @param {string} date Date in YYYY-MM-DD form.
+ * @returns {Promise<void>} Resolves after the conditional Project update.
+ */
+export async function initializeIssueStartDate(number, date) {
+  const context = await ensureProjectItem(number, true)
+  if (context.item.startDateValue?.date) return
+  await graphql(
+    `mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $date: Date!) {
+      updateProjectV2ItemFieldValue(input: {
+        projectId: $projectId,
+        itemId: $itemId,
+        fieldId: $fieldId,
+        value: {date: $date}
+      }) { projectV2Item { id } }
+    }`,
+    {
+      projectId: context.project.id,
+      itemId: context.item.id,
+      fieldId: context.startDateField.id,
+      date,
+    },
+  )
+}
+
+/**
+ * Initialize every referenced Issue from a newly opened PR.
+ * @param {{createdAt: string, references: {all: number[]}}} pull Pull-request snapshot.
+ * @param {string} action Pull-request event action.
+ * @param {(number: number, date: string) => Promise<void>} initialize Date writer.
+ * @returns {Promise<void>} Resolves after all eligible Issues are processed.
+ */
+export async function initializePullRequestStartDates(
+  pull,
+  action,
+  initialize = initializeIssueStartDate,
+) {
+  if (action !== 'opened') return
+  const date = projectDate(pull.createdAt)
+  for (const number of pull.references.all) await initialize(number, date)
 }
 
 async function updateStatus(context, status) {
@@ -628,13 +688,15 @@ async function setStatus(number, status) {
 }
 
 async function upsertAudit(number, errors) {
-  const comments = await api(repositoryApiPath(`/issues/${number}/comments?per_page=100`))
+  const comments = await api(
+    `/repos/${config.organization}/${config.repository}/issues/${number}/comments?per_page=100`,
+  )
   const existing = comments.find(
     (comment) => comment.user?.type === 'Bot' && comment.body?.includes(AUDIT_MARKER),
   )
   if (errors.length === 0) {
     if (existing) {
-      await api(repositoryApiPath(`/issues/comments/${existing.id}`), {
+      await api(`/repos/${config.organization}/${config.repository}/issues/comments/${existing.id}`, {
         method: 'DELETE',
       })
     }
@@ -643,13 +705,13 @@ async function upsertAudit(number, errors) {
   const body = `${AUDIT_MARKER}\n⚠️ Issue policy 未通过：\n\n${errors.map((error) => `- ${error}`).join('\n')}`
   if (existing) {
     if (existing.body === body) return
-    await api(repositoryApiPath(`/issues/comments/${existing.id}`), {
+    await api(`/repos/${config.organization}/${config.repository}/issues/comments/${existing.id}`, {
       method: 'PATCH',
       body: JSON.stringify({ body }),
       headers: { 'Content-Type': 'application/json' },
     })
   } else {
-    await api(repositoryApiPath(`/issues/${number}/comments`), {
+    await api(`/repos/${config.organization}/${config.repository}/issues/${number}/comments`, {
       method: 'POST',
       body: JSON.stringify({ body }),
       headers: { 'Content-Type': 'application/json' },
@@ -665,14 +727,14 @@ async function auditIssue(number, extraErrors = [], status = undefined) {
   return errors
 }
 
-async function resolvingReferencesSnapshot(number, pull, read = api) {
+async function resolvingReferencesSnapshot(number, pull) {
   const references = parseReferences({
     body: pull.body ?? '',
-    repository: repositoryCoordinates().fullName,
+    repository: `${config.organization}/${config.repository}`,
   })
   const issues = new Map()
   for (const issueNumber of references.all) {
-    const issue = await issueSnapshot(issueNumber, null, read)
+    const issue = await issueSnapshot(issueNumber, null)
     if (issue) issues.set(issueNumber, issue)
   }
   return {
@@ -683,59 +745,28 @@ async function resolvingReferencesSnapshot(number, pull, read = api) {
 }
 
 async function pullRequestSnapshot(number) {
-  const pull = await pullRequestReadApi(repositoryApiPath(`/pulls/${number}`))
-  const snapshot = {
-    number,
+  const [pull, reviewRequests, reviews] = await Promise.all([
+    api(`/repos/${config.organization}/${config.repository}/pulls/${number}`),
+    api(`/repos/${config.organization}/${config.repository}/pulls/${number}/requested_reviewers`),
+    api(`/repos/${config.organization}/${config.repository}/pulls/${number}/reviews?per_page=100`),
+  ])
+  const resolving = await resolvingReferencesSnapshot(number, pull)
+  return {
+    ...resolving,
     isDraft: pull.draft,
     authorType: pull.user?.type ?? 'User',
-    reviewRequestCount: 0,
-    reviewCount: 0,
+    reviewRequestCount: reviewRequests.users.length + reviewRequests.teams.length,
+    reviewCount: reviews.length,
     labels: pull.labels.map((label) => label.name),
-    references: { all: [], resolving: [], related: [] },
-    issues: new Map(),
-  }
-  if (snapshot.isDraft || snapshot.authorType === 'Bot' || snapshot.authorType === 'App') {
-    return snapshot
-  }
-  if (config.pullRequestPolicyActivation === 'review-activity') {
-    const [reviewRequests, reviews] = await Promise.all([
-      pullRequestReadApi(repositoryApiPath(`/pulls/${number}/requested_reviewers`)),
-      pullRequestReadApi(repositoryApiPath(`/pulls/${number}/reviews?per_page=100`)),
-    ])
-    snapshot.reviewRequestCount = reviewRequests.users.length + reviewRequests.teams.length
-    snapshot.reviewCount = reviews.length
-  }
-  if (!requiresPullRequestPolicy(snapshot)) return snapshot
-  const resolving = await resolvingReferencesSnapshot(number, pull, pullRequestReadApi)
-  return {
-    ...snapshot,
-    ...resolving,
-  }
-}
-
-async function pullRequestMetadataSnapshot(number) {
-  const pull = await pullRequestReadApi(repositoryApiPath(`/pulls/${number}`))
-  const snapshot = {
-    number,
-    isDraft: pull.draft,
-    authorType: pull.user?.type ?? 'User',
-    reviewRequestCount: 0,
-    reviewCount: 0,
-    labels: pull.labels.map((label) => label.name),
-    references: { all: [], resolving: [], related: [] },
-    issues: new Map(),
-  }
-  if (snapshot.authorType === 'Bot' || snapshot.authorType === 'App') return snapshot
-  const resolving = await resolvingReferencesSnapshot(number, pull, pullRequestReadApi)
-  return {
-    ...snapshot,
-    ...resolving,
   }
 }
 
 async function lifecyclePullRequestSnapshot(number) {
-  const pull = await api(repositoryApiPath(`/pulls/${number}`))
-  return resolvingReferencesSnapshot(number, pull)
+  const pull = await api(`/repos/${config.organization}/${config.repository}/pulls/${number}`)
+  return {
+    ...(await resolvingReferencesSnapshot(number, pull)),
+    createdAt: pull.created_at,
+  }
 }
 
 async function transitionResolvingIssues(pull, command) {
@@ -756,43 +787,17 @@ async function transitionResolvingIssues(pull, command) {
 
 async function runPullRequestCheck(event) {
   const pull = await pullRequestSnapshot(event.pull_request.number)
-  if (!requiresPullRequestPolicy(pull)) {
-    process.stdout.write('PR 尚未进入 Issue policy 强制范围。\n')
-    return
-  }
   const errors = validatePullRequest(pull)
   if (errors.length > 0) {
     for (const error of errors) process.stdout.write(`::error::${error}\n`)
     throw new Error(`Issue policy 未通过，共 ${errors.length} 项`)
   }
-  process.stdout.write('Issue policy 通过。\n')
-}
-
-async function runPullRequestMetadataCheck(event) {
-  const pull = await pullRequestMetadataSnapshot(event.pull_request.number)
-  const errors = validatePullRequestMetadata({
-    ...pull,
-    requiredAreas: requiredPullRequestAreas(),
-  })
-  if (errors.length > 0) {
-    for (const error of errors) process.stdout.write(`::error::${error}\n`)
-    throw new Error(`PR metadata 未通过，共 ${errors.length} 项`)
-  }
-  process.stdout.write('PR metadata 通过。\n')
-}
-
-function requiredPullRequestAreas(environment = process.env) {
-  const raw = environment.DSH_REQUIRED_PR_AREAS
-  if (raw === undefined || raw === '') return []
-  const parsed = JSON.parse(raw)
-  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !value.startsWith('area/'))) {
-    throw new Error('DSH_REQUIRED_PR_AREAS 必须为 area/* 字符串数组')
-  }
-  return [...new Set(parsed)].sort()
+  process.stdout.write(
+    requiresPullRequestPolicy(pull) ? 'Issue policy 通过。\n' : 'PR 尚未进入 Issue policy 强制范围。\n',
+  )
 }
 
 async function runLifecycle(eventName, event) {
-  validateLifecycleDeployment()
   if (eventName === 'issues') {
     const number = event.issue.number
     if (event.action === 'opened') await setStatus(number, 'Inbox')
@@ -813,6 +818,9 @@ async function runLifecycle(eventName, event) {
     if (!command) return
     const pull = await lifecyclePullRequestSnapshot(event.pull_request.number)
     await transitionResolvingIssues(pull, command)
+    if (eventName === 'pull_request') {
+      await initializePullRequestStartDates(pull, event.action)
+    }
   }
 }
 
@@ -824,10 +832,8 @@ function readEvent() {
 async function main(argv) {
   const [command] = argv
   if (command === 'pr') await runPullRequestCheck(readEvent())
-  else if (command === 'pr-metadata') await runPullRequestMetadataCheck(readEvent())
   else if (command === 'lifecycle') await runLifecycle(process.env.GITHUB_EVENT_NAME, readEvent())
-  else if (command === 'deployment') validateLifecycleDeployment()
-  else throw new Error('用法：policy.mjs pr|pr-metadata|lifecycle|deployment')
+  else throw new Error('用法：policy.mjs pr|lifecycle')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

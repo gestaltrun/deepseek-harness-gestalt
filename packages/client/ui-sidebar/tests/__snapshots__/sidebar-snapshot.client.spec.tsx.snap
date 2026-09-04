@@ -10,14 +10,6 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
     style=""
   >
     <div
-      class="dragStrip"
-    >
-      <div
-        data-slot="sidebar.chrome.drag"
-        style="display: contents;"
-      />
-    </div>
-    <div
       class="logoRow"
     >
       <button
@@ -80,24 +72,20 @@ exports[`sidebar shell snapshots > renders the collapsed rail after the crossfad
       class="footArea"
     >
       <div
-        class="settingsRow"
+        class="footerActions"
       >
         <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.footer.action"
+          style="display: contents;"
+        />
+      </div>
+      <div
+        class="settingsArea"
+      >
         <div
-          class="settingsArea"
-        >
-          <div
-            data-slot="sidebar.settings"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.settings"
+          style="display: contents;"
+        />
       </div>
     </div>
   </div>
@@ -114,14 +102,6 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
     style="width: 300px;"
   >
     <div
-      class="dragStrip"
-    >
-      <div
-        data-slot="sidebar.chrome.drag"
-        style="display: contents;"
-      />
-    </div>
-    <div
       class="logoRow"
     >
       <button
@@ -129,52 +109,51 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
         class="brand wide"
         type="button"
       >
-        <div
-          data-slot="sidebar.brand"
-          style="display: contents;"
+        <span
+          aria-hidden="true"
+          class="brandIdentity"
         >
           <span
-            aria-hidden="true"
-            class="brandIdentity"
+            class="brandMark"
           >
-            <span
-              class="brandMark"
+            <div
+              data-slot="sidebar.brand.mark"
+              style="display: contents;"
             >
-              <div
-                data-slot="sidebar.brand.mark"
-                style="display: contents;"
-              >
-                <svg
-                  aria-hidden="true"
-                  data-content="965fe321"
-                  fill="none"
-                  height="17.6580310880829"
-                  viewBox="0 0 23.16 17.04"
-                  width="24"
-                />
-              </div>
-            </span>
-            <span
-              class="brandName"
-            >
-              <div
-                data-slot="sidebar.brand.name"
-                style="display: contents;"
-              >
-                <span
-                  class="fallbackBrandName"
-                >
-                  DSH Gestalt
-                </span>
-                <span
-                  class="buildRevision"
-                >
-                  abc1234
-                </span>
-              </div>
-            </span>
+              <svg
+                aria-hidden="true"
+                data-content="965fe321"
+                fill="none"
+                height="17.6580310880829"
+                viewBox="0 0 23.16 17.04"
+                width="24"
+              />
+            </div>
           </span>
-        </div>
+          <span
+            class="brandName"
+          >
+            <div
+              data-slot="sidebar.brand.name"
+              style="display: contents;"
+            >
+              <span
+                class="localBuildBrand"
+              >
+                <span
+                  class="localBuildTitle"
+                >
+                  DSH Local Build
+                </span>
+                <span
+                  class="buildVersion"
+                >
+                  1.2.3-rc.4-abc1234-dirty
+                </span>
+              </span>
+            </div>
+          </span>
+        </span>
       </button>
       <button
         aria-label="Collapse sidebar"
@@ -223,24 +202,20 @@ exports[`sidebar shell snapshots > renders the expanded column (wordmark, capsul
       class="footArea"
     >
       <div
-        class="settingsRow"
+        class="footerActions"
       >
         <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.footer.action"
+          style="display: contents;"
+        />
+      </div>
+      <div
+        class="settingsArea"
+      >
         <div
-          class="settingsArea"
-        >
-          <div
-            data-slot="sidebar.settings"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.settings"
+          style="display: contents;"
+        />
       </div>
     </div>
   </div>
@@ -257,14 +232,6 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
     style="width: 300px;"
   >
     <div
-      class="dragStrip"
-    >
-      <div
-        data-slot="sidebar.chrome.drag"
-        style="display: contents;"
-      />
-    </div>
-    <div
       class="logoRow"
     >
       <button
@@ -272,52 +239,51 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
         class="brand wide"
         type="button"
       >
-        <div
-          data-slot="sidebar.brand"
-          style="display: contents;"
+        <span
+          aria-hidden="true"
+          class="brandIdentity"
         >
           <span
-            aria-hidden="true"
-            class="brandIdentity"
+            class="brandMark"
           >
-            <span
-              class="brandMark"
+            <div
+              data-slot="sidebar.brand.mark"
+              style="display: contents;"
             >
-              <div
-                data-slot="sidebar.brand.mark"
-                style="display: contents;"
-              >
-                <svg
-                  aria-hidden="true"
-                  data-content="965fe321"
-                  fill="none"
-                  height="17.6580310880829"
-                  viewBox="0 0 23.16 17.04"
-                  width="24"
-                />
-              </div>
-            </span>
-            <span
-              class="brandName"
-            >
-              <div
-                data-slot="sidebar.brand.name"
-                style="display: contents;"
-              >
-                <span
-                  class="fallbackBrandName"
-                >
-                  DSH Gestalt
-                </span>
-                <span
-                  class="buildRevision"
-                >
-                  abc1234
-                </span>
-              </div>
-            </span>
+              <svg
+                aria-hidden="true"
+                data-content="965fe321"
+                fill="none"
+                height="17.6580310880829"
+                viewBox="0 0 23.16 17.04"
+                width="24"
+              />
+            </div>
           </span>
-        </div>
+          <span
+            class="brandName"
+          >
+            <div
+              data-slot="sidebar.brand.name"
+              style="display: contents;"
+            >
+              <span
+                class="localBuildBrand"
+              >
+                <span
+                  class="localBuildTitle"
+                >
+                  DSH 本地构建
+                </span>
+                <span
+                  class="buildVersion"
+                >
+                  1.2.3-rc.4-abc1234-dirty
+                </span>
+              </span>
+            </div>
+          </span>
+        </span>
       </button>
       <button
         aria-label="收起侧边栏"
@@ -366,24 +332,20 @@ exports[`sidebar shell snapshots > renders the expanded column in the default lo
       class="footArea"
     >
       <div
-        class="settingsRow"
+        class="footerActions"
       >
         <div
-          class="footerActions"
-        >
-          <div
-            data-slot="sidebar.footer.action"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.footer.action"
+          style="display: contents;"
+        />
+      </div>
+      <div
+        class="settingsArea"
+      >
         <div
-          class="settingsArea"
-        >
-          <div
-            data-slot="sidebar.settings"
-            style="display: contents;"
-          />
-        </div>
+          data-slot="sidebar.settings"
+          style="display: contents;"
+        />
       </div>
     </div>
   </div>

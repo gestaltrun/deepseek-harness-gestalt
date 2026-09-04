@@ -6,16 +6,9 @@ import { dirname, join, parse, resolve } from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
-import type { FileAttachmentRef, ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentLimits } from '@deepseek-ai/dsh-attachment'
 import type { NormalizationPolicy } from '../src/normalization.ts'
-import {
-  commitPreparedImageFile,
-  prepareImageFile,
-  readGenericFile,
-  readImageFile,
-  saveGenericFile,
-  saveImageFile,
-} from '../src/store.ts'
+import { commitPreparedImageFile, prepareImageFile, readImageFile, saveImageFile } from '../src/store.ts'
 
 const fsControl = vi.hoisted(() => ({
   readSignals: [] as AbortSignal[],
@@ -46,7 +39,7 @@ const PNG = Uint8Array.from(Buffer.from(
   'base64',
 ))
 
-const POLICY: NormalizationPolicy = { maxDimension: 2048, maxBytes: 1024 * 1024 }
+const POLICY: NormalizationPolicy = { maxPixels: 2048 * 2048, maxDimension: 8192, maxBytes: 1024 * 1024 }
 
 const LIMITS: ImageAttachmentLimits = {
   maxImageBytes: 1024,
@@ -139,10 +132,21 @@ describe('local attachment store', () => {
     expect(second.attachmentId).toBe(first.attachmentId)
     expect(new Uint8Array(await readFile(object))).toEqual(PNG)
     if (process.platform !== 'win32') {
-      expect((await stat(object)).mode & 0o777).toBe(0o600)
+      expect((await stat(object)).mode & 0o777).toBe(0o400)
       expect((await stat(join(storageRoot, 'objects', sha256.slice(0, 2)))).mode & 0o777).toBe(0o700)
     }
+    await chmod(object, 0o600)
+    await saveImageFile(storageRoot, { data: PNG, mediaType: 'image/png' }, LIMITS, POLICY)
+    if (process.platform !== 'win32') expect((await stat(object)).mode & 0o777).toBe(0o400)
     await expect(readImageFile(storageRoot, first)).resolves.toEqual({ ref: first, data: PNG })
+  })
+
+  it.skipIf(process.platform !== 'win32')('publishes a new object on Windows', async () => {
+    const storageRoot = await root()
+
+    const ref = await saveImageFile(storageRoot, { data: PNG, mediaType: 'image/png' }, LIMITS, POLICY)
+
+    await expect(readImageFile(storageRoot, ref)).resolves.toEqual({ ref, data: PNG })
   })
 
   it('stores the normalized image of an oversized source and reads it back verified', async () => {
@@ -153,10 +157,10 @@ describe('local attachment store', () => {
 
     const saved = await saveImageFile(storageRoot, {
       data: oversized, mediaType: 'image/png', name: 'big.png',
-    }, { ...LIMITS, maxImagePixels: 64 }, { maxDimension: 2, maxBytes: 1024 * 1024 })
+    }, { ...LIMITS, maxImagePixels: 64 }, { maxPixels: POLICY.maxPixels, maxDimension: 2, maxBytes: 1024 * 1024 })
 
     expect(saved).toMatchObject({
-      mediaType: 'image/png',
+      mediaType: 'image/jpeg',
       width: 2,
       height: 2,
       name: 'big.png',
@@ -266,70 +270,6 @@ describe('local attachment store', () => {
 
     await expect(saveImageFile(storageRoot, { data: PNG, mediaType: 'image/png' }, LIMITS, POLICY))
       .rejects.toMatchObject({ code: 'ATTACHMENT_WRITE_FAILED' })
-  })
-
-  it('persists and verifies generic file bytes with canonical display metadata', async () => {
-    const storageRoot = await root()
-    const data = Uint8Array.of(0, 255, 1, 2)
-    const ref = await saveGenericFile(storageRoot, {
-      data, name: String.raw`C:\private\payload.bin`, mediaType: ' Application/Octet-Stream ',
-    }, 4)
-
-    expect(ref).toMatchObject({
-      name: 'payload.bin', mediaType: 'application/octet-stream', bytes: 4,
-      sha256: createHash('sha256').update(data).digest('hex'),
-    })
-    await expect(readGenericFile(storageRoot, ref)).resolves.toEqual({ ref, data })
-  })
-
-  it('rejects invalid generic file admission and reference metadata', async () => {
-    const storageRoot = await root()
-    const input = { data: Uint8Array.of(1), name: 'payload.bin', mediaType: 'application/octet-stream' }
-    await expect(saveGenericFile(storageRoot, { ...input, data: new Uint8Array() }, 1))
-      .rejects.toMatchObject({ code: 'ATTACHMENT_WRITE_FAILED' })
-    await expect(saveGenericFile(storageRoot, { ...input, data: Uint8Array.of(1, 2) }, 1))
-      .rejects.toMatchObject({ code: 'ATTACHMENT_WRITE_FAILED' })
-    await expect(saveGenericFile(storageRoot, { ...input, name: '\u0000' }, 1))
-      .rejects.toMatchObject({ code: 'INVALID_ATTACHMENT_REF' })
-    for (const mediaType of ['x', 'x'.repeat(128), 'not a/type']) {
-      await expect(saveGenericFile(storageRoot, { ...input, mediaType }, 1))
-        .rejects.toMatchObject({ code: 'INVALID_ATTACHMENT_REF' })
-    }
-
-    const ref = await saveGenericFile(storageRoot, input, 1)
-    const invalid: FileAttachmentRef[] = [
-      { ...ref, sha256: '0'.repeat(64) },
-      { ...ref, bytes: 0 },
-      { ...ref, name: '/private/payload.bin' },
-      { ...ref, mediaType: 'Application/Octet-Stream' },
-    ]
-    for (const value of invalid) {
-      await expect(readGenericFile(storageRoot, value))
-        .rejects.toMatchObject({ code: 'INVALID_ATTACHMENT_REF' })
-    }
-  })
-
-  it('maps missing, unreadable, corrupt, and cancelled generic file reads', async () => {
-    const storageRoot = await root()
-    const data = Uint8Array.of(1, 2, 3)
-    const ref = await saveGenericFile(storageRoot, {
-      data, name: 'payload.bin', mediaType: 'application/octet-stream',
-    }, 3)
-    const sha256 = ref.sha256
-    const object = join(storageRoot, 'objects', sha256.slice(0, 2), sha256)
-
-    const alreadyAborted = new AbortController()
-    const reason = new Error('cancelled before read')
-    alreadyAborted.abort(reason)
-    await expect(readGenericFile(storageRoot, ref, alreadyAborted.signal)).rejects.toBe(reason)
-
-    await writeFile(object, Uint8Array.of(9, 9, 9))
-    await expect(readGenericFile(storageRoot, ref)).rejects.toMatchObject({ code: 'ATTACHMENT_CORRUPT' })
-    await rm(object)
-    await expect(readGenericFile(storageRoot, ref)).rejects.toMatchObject({ code: 'ATTACHMENT_NOT_FOUND' })
-
-    await mkdir(object, { recursive: true })
-    await expect(readGenericFile(storageRoot, ref)).rejects.toMatchObject({ code: 'ATTACHMENT_READ_FAILED' })
   })
 
   it('rejects prepared bytes that no longer match their content-addressed reference', async () => {

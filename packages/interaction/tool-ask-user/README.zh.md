@@ -1,65 +1,153 @@
+---
+description: "基于用户交互 seam 的模型侧 ask_user_question 工具；供组合或排查交互式 agent 表面的用户与维护者阅读。"
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-tool-ask-user
 
 [English](README.md) | 中文
 
-模型侧 `ask_user_question` 工具，基于 `ctx.userQuestions` 实现。当模型需要确认、选择结果或缺失的信息才能继续时，它可以借此向用户提出简明问题。
+## 概述
 
-## 工具
+`dsh-tool-ask-user` 为模型提供一个工具——`ask_user_question`——用于在需要确认、选择结果或缺失的信息才能继续时，向用户提出简明问题。工具会暂停，直到首个作用域 answerer 接受请求，然后把回答作为普通工具结果送回 agent loop（智能体循环），因此循环机制没有任何变化。工具返回规范的 `{ answers: [...] }` 结构，并以紧凑的 JSON 文本形式呈现。它自身不渲染 UI，也不了解输入的收集方式；Web Client 通过 Remote Events 提供 answerer。运行时中归属于其他 agent 的子级不能向用户提问；它必须在最终结果中包含尚未解决的问题。
 
-`ask_user_question` 接受以下参数：
+## 目录
 
-- `questions`：必填的非空问题对象数组。
-- `id`：每个问题必填的稳定 id，会原样包含在回答中。
-- `question`：每个问题必填的问题文本。
-- `header`：可选的简短标题。
-- `options`：可选选项，包含 `label` 和 `description`。如需推荐某个选项，请将其置于首位，并在该标签末尾追加 `(Recommended)`。
-- `multi_select`：该问题是否可以返回多个选中的选项。
-- `to_project_member`：可选的单收件人。从 `self` 为 false 的行复制 `project_members.displayName`（公开 GitHub 登录名）。未知登录名或 `accountId` 以 `INELIGIBLE_ADDRESSEE` 失败。解析成功但收件人就是提问账号时以 `SELF_ADDRESSEE` 失败。存在时，调用经 `ctx.memberQuestionSender` 路由，不会进入本地 user-questions 提供方。运行期资格过滤会在组装后的提示中隐藏该参数，除非 `boundProjectResolver` 返回云端项目 id；静态注册表 schema 仍保留它。
-- `background`：agent 撰写的决策简报文本。与 `to_project_member` 一起时必填；1 到 600 个 Unicode 码点，构建期以 `BACKGROUND_REQUIRED` 或 `BACKGROUND_TOO_LONG` 拒绝。
-- `references`：可选的 `{ path, reason? }[]`，本地与路由提问均可使用。每个 `path` 必须解析为提问会话工作区内的现存文件；每个 `reason` 至多 100 个码点。失败会抛出 `REFERENCES_INVALID` 并指出具体项。本地提问接受 references 且不改变路由；将 details 面板聚焦到被引用文件被推迟。
+- [使用本包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [进一步探索](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与延期工作](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
 
-没有 `to_project_member` 时，工具调用 `ctx.userQuestions.ask()`，并返回规范的 `{ answers: [{ id, selected, custom? }] }`。`selected` 包含选项标签；`custom` 携带自由填写的回答，对于多选题会补充 `selected`，对于单选题则会覆盖它。Native 渲染器会保留紧凑的 JSON 文本形式 `{ "answers": [{ "id": "...", "selected": ["..."], "custom": "..." }] }`。路由提问需要 `routeResolver` 从包含收件人的当前名册中解析绑定 Project 与已鉴权来源；公开登录名匹配大小写不敏感。成员缺失时会在投递前以 `INELIGIBLE_ADDRESSEE` 失败，发送器或 resolver 缺失时以 `SENDER_UNAVAILABLE` 失败。工具取消会传递到 route resolver。发送器生命周期失败（`MEMBER_OFFLINE`、`QUESTION_EXPIRED`、`QUESTION_WITHDRAWN`、`QUESTION_SUPERSEDED`、`REVOKED_DURING_FLIGHT`）仍作为普通工具结果保留。
+-----
 
-## 职责
+<a id="use-this-package"></a>
+## 使用本包
 
-此包是用户交互 seam 与成员提问发送器 seam 的 Consumer 包。它不渲染 UI，也不了解输入的收集方式；本地提问将模型参数转换为 `AskUserQuestionRequest`，路由提问则把已校验的 payload 转发给 `ctx.memberQuestionSender.send()`。
+凡模型应当能够暂停等待人类决定的场景，都可组合此插件：它提供 `ask_user_question` 工具，并且需要带有接受作用域请求的 answerer 的 `ctx.userQuestions` seam。没有 answerer 接受时，工具调用会以错误失败，而不是降级。
 
+### 何时调用该工具
+
+当模型需要确认、选择结果或缺失的信息才能继续时，调用 `ask_user_question`。发送一个或多个问题，每个问题携带稳定的 `id`（回答中会原样包含）；推荐选项放在首位，并在标签末尾追加 `(Recommended)`。
+
+```json
+{
+  "questions": [
+    {
+      "id": "cleanup",
+      "question": "Proceed with the destructive cleanup?",
+      "header": "Confirm",
+      "options": [
+        { "label": "Yes, delete them (Recommended)", "description": "Removes the three stale files." },
+        { "label": "No, keep them", "description": "Aborts the cleanup." }
+      ]
+    }
+  ]
+}
+```
+
+### 模型得到什么
+
+工具为每个问题返回一个回答对象：`selected` 保存选中的选项标签，`custom` 携带自由填写的回答——对多选题补充 `selected`，对单选题覆盖它。Native 渲染器保留紧凑的 JSON 文本形式。
+
+```json
+{ "answers": [{ "id": "cleanup", "selected": ["Yes, delete them (Recommended)"] }] }
+```
+
+### 调用何时失败
+
+工具调用会阻塞到用户作答，并且只能通过当前轮次的信号取消。没有 answerer 接受、调用被中止、或调用方不是确切的存活运行时根，都会以模型在工具结果中看到的错误结算——最值得注意的是，归属于另一个 agent 的存活子级会被拒绝（`DELEGATED_CALLER`），必须在最终结果中包含尚未解决的问题或决定。
+
+-----
+
+<a id="understand-the-implementation"></a>
+## 理解实现
+
+<details>
+<summary>实现细节——点击展开</summary>
+
+可观察行为已在[使用本包](#use-this-package)中说明；本节解释工具定义及其与 seam 的关系。
+
+### 源码地图
+
+| 文件 | 职责 |
+|---|---|
+| [`src/index.ts`](src/index.ts) | 工具注册：`ask_user_question` schema、执行路径、结果渲染 |
+| — | 不发布运行时不变式伴生入口；执行关系由 seam 拥有。 |
+
+### Consumer 角色
+
+该插件以 `['tools', 'userQuestions']` 注入，在 `ctx.tools` 上注册一个 `defineTool` 条目。`execute` 把模型参数映射为 `AskUserQuestionRequest`，转发确切的调用 agent 与当前轮次的信号，并把接受的回答映射回规范的 `answers` 数组。身份检查、意图校验、waterfall 分派与错误分类由 seam 拥有；本包只做转换。
+
+### 结果渲染
+
+`render` 输出把结构化值经 `JSON.stringify` 投影为单个文本块，因此模型侧结果是紧凑 JSON，而非更丰富的内容块词汇。
+
+</details>
+
+-----
+
+<a id="further-exploration"></a>
+## 进一步探索
+
+当包级约定不够用时阅读以下页面。它们从工具表面逐步进入 seam 约定及其 answerer waterfall。
+
+- [用户交互子系统参考](../../../docs/subsystems/user-questions.zh.md)——此工具背后的服务约定、问题词汇与 answerer waterfall。
+- [工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-ask-user)——生成的 `ask_user_question` schema。
+- [user-questions 包](../user-questions/README.zh.md)——本工具消费的 seam。
+- [交互组映射](../README.zh.md)——相邻的审批与命令表面。
+
+-----
+
+<a id="model-experience"></a>
 ## 模型体验
 
 ### 工具 schema
 
 #### 模型看到的内容
 
-模型会看到生成的 [`ask_user_question` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-ask-user)，其中包含问题 id、提示语、标题、选项、多选标志、`background` 和 `references`。仅当提问工作区绑定到云端项目时，才会出现 `to_project_member`。
+模型会看到生成的 [`ask_user_question` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-ask-user)，其中包含问题 id、提示语、标题、选项与多选标志。
 
 #### Token 影响
 
-工具可见时，每个请求都会产生常态 schema token 开销：`background` 与 `references` 保留在组装后的 schema 中。`to_project_member` 仅在 `boundProjectResolver` 返回云端项目 id 时额外增加 schema 开销；非绑定组装会省略该属性，从而保持原先的 schema 宽度。
+工具可见时，每个请求都会产生固定的 schema token 开销。
 
 #### KV Cache 影响
 
-只要定义以及 `to_project_member` 的绑定项目可见性保持不变，前缀即可稳定复用。绑定或解除绑定工作区、插件生命周期变化或作用域限制会改变组装后的 schema，并使从此前缀起的缓存复用失效。
+只要定义和可见性保持不变，前缀即可稳定复用。插件生命周期变化或作用域限制可能会使从此 schema 起的缓存复用失效。
 
 ### 工具调用历史与结果
 
 #### 模型看到的内容
 
-模型提出的完整问题保留在 assistant 工具调用参数中。路由提问还会在那里保留 `to_project_member`、`background` 和 `references`。用户或成员回答后，下一步会看到精确采用 `{"answers":[{"id":"<id>","selected":["<label>"],"custom":"<text>"}]}` 形式的紧凑 JSON；不使用 `custom` 时会省略该字段，`selected` 可以包含零个、一个或多个标签。发送器生命周期失败作为普通工具结果文本返回。调用等待期间的 UI 交互不属于模型上下文。
+模型提出的完整问题保留在 assistant 工具调用参数中。用户回答后，下一步会看到精确采用 `{"answers":[{"id":"<id>","selected":["<label>"],"custom":"<text>"}]}` 形式的紧凑 JSON；不使用 `custom` 时会省略该字段，`selected` 可以包含零个、一个或多个标签。调用等待期间的 UI 交互不属于模型上下文。
 
 #### Token 影响
 
-参数、`background`、`references`、回答 JSON 以及生命周期错误文本是依数据而定的保留 token；等待用户或成员时不会产生 token 开销。
+参数和回答 JSON 是依数据而定的保留 token；等待用户时不会产生 token 开销。
 
 #### KV Cache 影响
 
-仅追加；新可见内容位于可复用请求前缀之后，不会使现有 KV Cache 条目失效。
+仅追加；新出现的可见内容位于可复用请求前缀之后，不会使现有 KV Cache 条目失效。
 
-## Known Limitations and Deferred Work
+## 已知限制与延期工作
+
+<a id="known-limitations-and-deferred-work"></a>
+
+
+这些限制说明该工具何时不合适。它们是当前包约束，不是 UI 积压事项。
 
 - **待处理问题会阻塞工具调用，直至用户作答**：该工具未声明 `timeout-policy` 预算；取消仅沿用当前轮次的 `exec.signal`。
-- **运行时中归属于其他 agent 的 subagent 不能向用户提问**：`ask_user_question` 会以 `DELEGATED_CALLER` 拒绝归属于另一个 agent 的存活子级；该子级必须在最终结果中包含尚未解决的问题或决策。持久谱系不能决定这一边界，因此带有谱系的会话恢复为运行时根后可以正常提问。
+- **运行时中归属于其他 agent 的 subagent 不能向用户提问**：`ask_user_question` 会以 `DELEGATED_CALLER` 拒绝归属于另一个 agent 的存活子级；该子级必须在最终结果中包含尚未解决的问题或决定。持久谱系不能决定这一边界，因此带有谱系的会话恢复为运行时根后可以正常提问。
 - **Native 回答渲染为 JSON 文本**：规范值仍为结构化数据，但模型侧结果使用紧凑 JSON，而非更丰富的内容块词汇。
-- **`to_project_member` 保留在静态 schema 中**：提示组装会从组装后的工具列表中为非绑定工作区省略该参数；`ctx.tools.schemas()` 与生成的目录仍记录静态参数。
-- **本地参考材料聚焦被推迟**：本地提问会接受并校验 `references`，但将 details 面板打开到被引用文件由后续工单落地。
-- **路由投递依赖 T4 注册表传输缺环**：编码与发送器接口已经存在；在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。在该传输落地之前，没有投递适配器的组合以 `SENDER_UNAVAILABLE` 或 `DELIVERY_UNAVAILABLE` 失败关闭，而不是排队。
-- **路由提问会读取工作区字节以进行 `document-chunk` 传输**：本地提问仍只校验 path 元数据。路由提问会读取每个已接纳文件，并向发送器转发对齐的 `{ path, bytes }`；发送器编码 Companion `document-chunk` 帧，接收端重组仍是消费方职责。
+
+<a id="dev-note"></a>
+### 开发备注
+
+<details>
+<summary>维护者的工作上下文——点击展开</summary>
+
+无。
+
+</details>

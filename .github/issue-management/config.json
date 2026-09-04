@@ -1,11 +1,12 @@
 {
-  "projectOrganization": "deepseek-harness",
+  "organization": "deepseek-harness",
+  "repository": "deepseek-harness",
   "projectNumber": 1,
   "projectTitle": "DSH Issue Management",
   "lifecycleActor": "dsh-issue-management",
-  "pullRequestReadAuthentication": "token",
-  "pullRequestPolicyActivation": "non-draft",
-  "priorityField": null,
+  "priorityField": "Priority",
+  "startDateField": "Start Date",
+  "projectTimeZone": "Asia/Shanghai",
   "allowUnassignedOwner": true,
   "statuses": [
     "Inbox",

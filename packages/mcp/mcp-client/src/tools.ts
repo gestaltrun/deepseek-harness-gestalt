@@ -23,7 +23,8 @@ import type { AttachmentStore, ImageAttachmentRef, ImageMediaType, SaveImageAtta
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
-import type { JsonSchemaNode, JsonValue } from '@deepseek-ai/dsh-tools'
+import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
@@ -31,14 +32,12 @@ export interface ToolBridgeOptions {
   registrationFailure: 'contain' | 'throw'
   serverName: string
   toolCallTimeoutMs: number
-  /** Whether registered schemas are initially deferred behind `tool_search`. */
-  deferLoading: boolean
 }
 
 /** State for one sync generation: the current set of disposers keyed by public name. */
 export type ToolDisposers = Map<string, () => void>
 
-/** Canonical MCP result exposed to Code Mode without discarding protocol blocks. */
+/** Canonical MCP result exposed to PTC mode without discarding protocol blocks. */
 export type McpResult<Structured extends JsonValue = JsonValue> = {
   content: JsonValue[]
   structuredContent?: Structured
@@ -259,7 +258,6 @@ function createDefinition(
     name: publicName,
     description,
     parameters,
-    deferLoading: opts.deferLoading,
     output: createOutput(rawName, structuredSchema),
     execute: createExecutor(client, ctx, rawName, taskRequired, opts, projections),
     finalizeContent(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>) {

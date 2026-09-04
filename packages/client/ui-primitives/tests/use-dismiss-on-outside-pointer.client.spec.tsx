@@ -1,56 +1,41 @@
 // @vitest-environment jsdom
-import { useRef } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+/** The outside-pointer dismissal primitive as observable popover behavior. */
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import { useDismissOnOutsidePointer } from '../src/useDismissOnOutsidePointer.ts'
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { afterEach, describe, expect, it } from 'vitest'
+import { useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 
-afterEach(() => {
-  cleanup()
-  vi.restoreAllMocks()
-})
+afterEach(cleanup)
 
-function Host(props: { open: boolean; setOpen: (open: boolean) => void }) {
-  const rootRef = useRef<HTMLDivElement>(null)
-  const portalRef = useRef<HTMLDivElement>(null)
-  useDismissOnOutsidePointer(rootRef, props.open, props.setOpen, portalRef)
+function Popover({ portaled }: { portaled: boolean }) {
+  const [open, setOpen] = useState(true)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  useDismissOnOutsidePointer(rootRef, open, setOpen, portaled ? panelRef : undefined)
   return (
-    <>
-      <div ref={rootRef} data-testid="root" />
-      <div ref={portalRef} data-testid="portal" />
-    </>
+    <div ref={rootRef} data-testid="root">
+      <button type="button">trigger</button>
+      {open && !portaled && <div data-testid="surface">surface</div>}
+      {open && portaled && createPortal(<div ref={panelRef} data-testid="surface">surface</div>, document.body)}
+    </div>
   )
 }
 
 describe('useDismissOnOutsidePointer', () => {
-  it('attaches only while open and dismisses outside both owned elements', () => {
-    const setOpen = vi.fn()
-    const view = render(<Host open={false} setOpen={setOpen} />)
-
-    fireEvent.pointerDown(document.body)
-    expect(setOpen).not.toHaveBeenCalled()
-
-    view.rerender(<Host open setOpen={setOpen} />)
+  it('closes on an outside pointerdown but not on one inside the root', () => {
+    const view = render(<Popover portaled={false} />)
     fireEvent.pointerDown(view.getByTestId('root'))
-    fireEvent.pointerDown(view.getByTestId('portal'))
-    expect(setOpen).not.toHaveBeenCalled()
-
+    expect(view.queryByTestId('surface')).not.toBeNull()
     fireEvent.pointerDown(document.body)
-    expect(setOpen).toHaveBeenCalledWith(false)
-
-    view.rerender(<Host open={false} setOpen={setOpen} />)
-    fireEvent.pointerDown(document.body)
-    expect(setOpen).toHaveBeenCalledTimes(1)
+    expect(view.queryByTestId('surface')).toBeNull()
   })
 
-  it('ignores an event target that is not a DOM Node', () => {
-    const setOpen = vi.fn()
-    const add = vi.spyOn(document, 'addEventListener')
-    render(<Host open setOpen={setOpen} />)
-    const listener = add.mock.calls.find(([type]) => type === 'pointerdown')?.[1]
-    if (typeof listener !== 'function') throw new Error('pointerdown listener was not registered')
-
-    listener({ target: window } as unknown as PointerEvent)
-
-    expect(setOpen).not.toHaveBeenCalled()
+  it('counts the portaled surface as inside while still closing outside it', () => {
+    const view = render(<Popover portaled />)
+    fireEvent.pointerDown(view.getByTestId('surface'))
+    expect(view.queryByTestId('surface')).not.toBeNull()
+    fireEvent.pointerDown(document.body)
+    expect(view.queryByTestId('surface')).toBeNull()
   })
 })

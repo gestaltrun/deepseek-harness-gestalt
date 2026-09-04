@@ -8,21 +8,25 @@ import type {
 } from '../src/client/contract/slots.ts'
 import { SidebarRoot } from '../src/client/SidebarRoot.tsx'
 import { en } from '../src/client/locales.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 
 // English-dictionary translate stub: the shell renders the same copy the
 // assertions below query by accessible name.
-const t: SidebarRootComponentProps['t'] = key => (en as Record<string, string>)[key] ?? key
+const t: SidebarRootComponentProps['t'] = key =>
+  (en as Record<string, string>)[key] ?? (commonEn as Record<string, string>)[key] ?? key
 
 afterEach(() => {
   cleanup()
   vi.unstubAllEnvs()
-  document.documentElement.removeAttribute('data-dsh-desktop-overlay')
   vi.useRealTimers()
 })
 
 // The shell never reads the global hooks itself, but they ride the standard
 // props share; stub them as never-called functions.
 const neverHook = (() => { throw new Error('shell must not read global hooks') }) as never
+type AttentionSnapshot = Parameters<Parameters<SidebarRootComponentProps['useSessionPendingInteraction']>[0]>[0]
+const noAttention: AttentionSnapshot = new Map()
+const useSessionPendingInteraction: SidebarRootComponentProps['useSessionPendingInteraction'] = selector => selector(noAttention)
 
 function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; width?: number } = {}) {
   const startSession = vi.fn()
@@ -36,7 +40,7 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
   const root = () => (
     <SidebarRoot
       collapsed={current.collapsed} width={current.width}
-      useSessions={neverHook} useWorkspaces={neverHook}
+      useSessions={neverHook} useSessionPendingInteraction={useSessionPendingInteraction} useWorkspaces={neverHook}
       startSession={startSession} toggleSidebar={toggleSidebar} t={t}
       renderSlot={((
         key: string,
@@ -52,13 +56,9 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
           footerActionOwner = owner
           return <div data-testid="footer-action-seat" data-wide={owner.wide} />
         }
-        if (key === 'sidebar.chrome.drag') {
-          return <div data-testid="drag-seat" data-wide={owner.wide} />
-        }
         regionOwner = owner as SidebarSectionOwnerProps
         return <div data-testid="region" data-wide={owner.wide} />
       }) as SidebarRootComponentProps['renderSlot']}
-      renderSlotChain={((_key, _owner, opts) => opts?.fallback ?? null) as SidebarRootComponentProps['renderSlotChain']}
     />
   )
   const view = render(root())
@@ -85,16 +85,6 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
 }
 
 describe('SidebarRoot shell', () => {
-  it('paints only settings on the overlay document', () => {
-    document.documentElement.setAttribute('data-dsh-desktop-overlay', '')
-    const b = mountShell()
-    expect(screen.getByTestId('settings-seat')).toBeTruthy()
-    expect(b.settingsOwner().wide).toBe(true)
-    expect(screen.queryByTestId('region')).toBeNull()
-    expect(screen.queryByTestId('footer-action-seat')).toBeNull()
-    expect(screen.queryByTestId('drag-seat')).toBeNull()
-  })
-
   it('routes New Session (capsule + wordmark) and the column toggle', () => {
     const b = mountShell()
     expect(screen.getByTestId('custom-brand-mark')).toBeTruthy()
@@ -110,18 +100,48 @@ describe('SidebarRoot shell', () => {
 
   it('renders generic brand fallbacks when no package fills the slots', () => {
     vi.stubEnv('DSH_CLIENT_COMMIT_HASH', '0123456')
+    vi.stubEnv('DSH_CLIENT_GIT_DIRTY', 'true')
+    vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3-rc.4')
     const { container } = render(<SidebarRoot
       collapsed={false} width={300}
-      useSessions={neverHook} useWorkspaces={neverHook}
+      useSessions={neverHook} useSessionPendingInteraction={useSessionPendingInteraction} useWorkspaces={neverHook}
       startSession={vi.fn()} toggleSidebar={vi.fn()} t={t}
       renderSlot={((_key: string, _owner: unknown, options?: { fallback?: ReactNode }) =>
         options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
-      renderSlotChain={((_key, _owner, opts) => opts?.fallback ?? null) as SidebarRootComponentProps['renderSlotChain']}
     />)
 
-    expect(screen.getByText('DSH Gestalt')).toBeTruthy()
-    expect(screen.getByText('0123456')).toBeTruthy()
+    expect(screen.getByText('DSH Local Build')).toBeTruthy()
+    expect(screen.getByText('1.2.3-rc.4-0123456-dirty')).toBeTruthy()
     expect(container.querySelector('svg')).not.toBeNull()
+  })
+
+  it.each([
+    [{ DSH_CLIENT_VERSION: '1.2.3' }, '1.2.3'],
+    [{ DSH_CLIENT_COMMIT_HASH: 'abcdef0', DSH_CLIENT_VERSION: '1.2.3' }, '1.2.3-abcdef0'],
+  ])('omits unavailable build-version suffixes from %j', (environment, expected) => {
+    for (const [name, value] of Object.entries(environment)) vi.stubEnv(name, value)
+    render(<SidebarRoot
+      collapsed={false} width={300}
+      useSessions={neverHook} useSessionPendingInteraction={useSessionPendingInteraction} useWorkspaces={neverHook}
+      startSession={vi.fn()} toggleSidebar={vi.fn()} t={t}
+      renderSlot={((_key: string, _owner: unknown, options?: { fallback?: ReactNode }) =>
+        options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
+    />)
+
+    expect(screen.getByText('DSH Local Build')).toBeTruthy()
+    expect(screen.getByText(expected)).toBeTruthy()
+  })
+
+  it('retains the local-build fallback without complete build metadata', () => {
+    render(<SidebarRoot
+      collapsed={false} width={300}
+      useSessions={neverHook} useSessionPendingInteraction={useSessionPendingInteraction} useWorkspaces={neverHook}
+      startSession={vi.fn()} toggleSidebar={vi.fn()} t={t}
+      renderSlot={((_key: string, _owner: unknown, options?: { fallback?: ReactNode }) =>
+        options?.fallback ?? null) as SidebarRootComponentProps['renderSlot']}
+    />)
+
+    expect(screen.getByText('DSH Local Build')).toBeTruthy()
   })
 
   it('hands the region its wide flag and clamps expandSidebar to the collapsed state', () => {

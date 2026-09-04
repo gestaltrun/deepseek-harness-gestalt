@@ -16,24 +16,16 @@ interface ComposerRailItem extends AttachmentRailItem {
 
 /** Draft-image rail, document drop target, and original-image preview slot entry. */
 export function ComposerAttachments({
-  attachments, canAcceptDrop, onAddImages, onRemoveImage, dropLimits, pinOverlayFor, t,
+  attachments, canAcceptDrop, onAddImages, onRemoveImage, dropLimits, t,
 }: ComposerAttachmentsProps) {
   const [preview, setPreview] = useState<ComposerAttachment | null>(null)
-  const [pinMode, setPinMode] = useState(false)
-  const [refuse, setRefuse] = useState<string | undefined>(undefined)
   const [dragActive, setDragActive] = useState(false)
   const dragDepth = useRef(0)
-  const pinOverlay = preview === null ? undefined : pinOverlayFor?.(preview)
-  const closePreview = useCallback(() => {
-    pinOverlay?.onCloseEditor?.()
-    setPreview(null)
-    setPinMode(false)
-    setRefuse(undefined)
-  }, [pinOverlay])
+  const closePreview = useCallback(() => { setPreview(null) }, [])
 
   useEffect(() => {
-    if (preview !== null && !attachments.some(attachment => attachment.id === preview.id)) closePreview()
-  }, [attachments, closePreview, preview])
+    if (preview !== null && !attachments.some(attachment => attachment.id === preview.id)) setPreview(null)
+  }, [attachments, preview])
 
   useEffect(() => {
     const fileTransfer = (event: globalThis.DragEvent): DataTransfer | null => {
@@ -107,11 +99,7 @@ export function ComposerAttachments({
           <AttachmentRail
             items={railItems}
             labels={attachmentRailLabels(t)}
-            onOpen={(item) => {
-              setPinMode(false)
-              setRefuse(undefined)
-              setPreview(item.attachment)
-            }}
+            onOpen={(item) => { setPreview(item.attachment) }}
             onRemove={(item) => { onRemoveImage(item.attachment.id) }}
           />
         </div>
@@ -122,25 +110,6 @@ export function ComposerAttachments({
           alt={preview.file.name || t('image.original')}
           labels={lightboxLabels(t)}
           onClose={closePreview}
-          {...(pinOverlay === undefined ? {} : { annotation: {
-            mode: pinMode,
-            pins: pinOverlay.pins,
-            modeLabel: pinOverlay.modeLabel,
-            exitLabel: pinOverlay.exitLabel,
-            ...(refuse === undefined ? {} : { refuse }),
-            onToggleMode: () => {
-              if (preview.file.type === 'image/gif') {
-                setRefuse(t('annotation.gifRefuse'))
-                setPinMode(false)
-                return
-              }
-              setRefuse(undefined)
-              setPinMode(current => !current)
-            },
-            onPlace: pinOverlay.onPlace,
-            onSelect: pinOverlay.onSelect,
-          } })}
-          {...(pinOverlay?.editor === undefined ? {} : { editor: pinOverlay.editor })}
         />
       )}
     </>

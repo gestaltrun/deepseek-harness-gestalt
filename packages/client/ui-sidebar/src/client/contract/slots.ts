@@ -4,15 +4,14 @@
  * owns column geometry (fold state machine, brand row, New Session);
  * everything between the section header and the list bottom is the
  * `sidebar.workspaces` registrant's (ui-workspace), and the foot is the
- * `sidebar.settings` registrant's (ui-settings) with optional
- * `sidebar.footer.action` items on the same row. Desktop may occupy
- * `sidebar.brand` and `sidebar.chrome.drag`.
+ * `sidebar.settings` registrant's (ui-settings), followed by optional footer
+ * actions in `sidebar.footer.action`.
  */
 import type { PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 // Type-only: pulls ui-layout's SlotMap merge (the 'sidebar' entry) into every
 // program that sees this contract, so PropsRuntime<'sidebar'> resolves.
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -41,20 +40,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.settings': { kind: 'single'; scope: 'root'; owner: SidebarSettingsOwnerProps }
     /**
-     * Optional actions on the same foot row as Settings, to the right of the
-     * gear. Declared by this package's 'sidebar' entry; each action receives
-     * only the column state.
+     * Optional actions beside Settings at the sidebar foot. Declared by this
+     * package's 'sidebar' entry; each action receives only the column state.
      */
     'sidebar.footer.action': { kind: 'list'; scope: 'root'; owner: SidebarFooterActionOwnerProps }
-    /**
-     * Desktop-only drag strip above the logo row. Empty in browser `dsh web`.
-     */
-    'sidebar.chrome.drag': { kind: 'list'; scope: 'root'; owner: SidebarDragOwnerProps }
-    /**
-     * Wordmark chain. The shell fallback is the HARNESS badge; Desktop
-     * elects the GESTALT badge.
-     */
-    'sidebar.brand': { kind: 'chain'; scope: 'root'; owner: SidebarBrandOwnerProps }
   }
 }
 
@@ -96,18 +85,6 @@ export interface SidebarFooterActionOwnerProps {
   wide: boolean
 }
 
-/** Owner share of the Desktop drag strip above the logo row. */
-export interface SidebarDragOwnerProps {
-  /** Whether the sidebar renders wide content (false = 56px rail). */
-  wide: boolean
-}
-
-/** Owner share of the wordmark chain (wide row vs rail; rail uses the fallback unmount). */
-export interface SidebarBrandOwnerProps {
-  /** Whether the sidebar renders wide content (false = 56px rail). */
-  wide: boolean
-}
-
 /**
  * Registrant-private injected share (arrives via the register inject
  * factory). The shell keeps only its own controls: starting a Session from
@@ -137,7 +114,5 @@ export type SidebarRootComponentProps =
     | 'sidebar.workspaces'
     | 'sidebar.settings'
     | 'sidebar.footer.action'
-    | 'sidebar.chrome.drag'
-    | 'sidebar.brand'
   >
   & SidebarRootInjected & PropsLocale<'sidebar'>

@@ -7,7 +7,10 @@
  * with the runtime sessions service. A second effect seats the theme
  * presenter, which projects ctx.theme snapshots onto document.body.
  */
-import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PanelActions } from './service.ts'
 import { AppFrame } from './AppFrame.tsx'
@@ -21,7 +24,7 @@ import { ThemePresenter } from './theme-presenter.ts'
 // OwnerShare contracts below are the render-side halves registrants compose
 // against; the frame components and the store factory are package-internal.
 export { LayoutController } from './service.ts'
-export type { DetailsWidthRange, ILayout } from './service.ts'
+export type { ILayout } from './service.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -56,21 +59,20 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      *
      * Current-session-optional: the occupant owns both states without
      * changing its React identity, so it keeps its own state across a session
-     * switch. Optional owner props control an explicit secondary renderer;
-     * session facts arrive through the framework hooks of the
-     * `session-maybe` scope.
+     * switch. It receives no owner props; session facts arrive through the
+     * framework hooks of the `session-maybe` scope.
      */
     'conversation': { kind: 'single'; scope: 'session-maybe'; owner: ConvOwnerProps }
     /**
-     * The right details column, shown when the layout opens it. Occupants are
-     * additive list entries: ui-conversation's DetailsPanel (`id: 'tool'`)
-     * declares the tool-details seat. Official Browser chrome lives in the
-     * workbench sidebar, not here. Absent an occupant the column renders nothing.
+     * The right details column, shown when the layout opens it. OCCUPIED by
+     * ui-conversation's DetailsPanel, which declares the tool-details seat
+     * inside it — registering here replaces the column and takes that seat
+     * with it. Absent an occupant the column renders nothing.
      *
      * No owner props: the framework injects the session id and hooks for the
      * `session` scope, and `ctx.layout` owns whether the column is open.
      */
-    'details': { kind: 'list'; scope: 'session'; owner: DetailsOwnerProps }
+    'details': { kind: 'single'; scope: 'session'; owner: DetailsOwnerProps }
     /**
      * Frame-wide floating layer, above every column and outside their scroll
      * containers. Deliberately generic and unowned by any feature: a badge, a
@@ -100,18 +102,13 @@ export interface SidebarOwnerProps {
 }
 
 /** Conversation owner share: business state and actions belong to the registrant. */
-export interface ConvOwnerProps {
-  /** Side Chat renders the same conversation registration without blank-session Hero chrome. */
-  renderMode?: 'sidechat' | undefined
-  /** Retarget an explicitly mounted conversation without changing the shell's selected Session. */
-  openSession?: ((sessionId: SessionId) => void) | undefined
-}
+export interface ConvOwnerProps {}
 
 /** Details owner share: empty — sessionId arrives as a framework-standard prop. */
 export interface DetailsOwnerProps {}
 
 /** Required services (cordis fiber inject — the loader passes all module exports as an object plugin). */
-export const inject = ['slots', 'theme']
+export const inject = ['slots', 'theme', 'locale']
 
 /**
  * Client plugin body: provide ctx.layout, then one register() call — AppFrame
@@ -125,10 +122,11 @@ export function apply(ctx: ClientContext): void {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
       name: 'root',
+      locale: 'common',
       children: {
         'sidebar': { kind: 'single', scope: 'root' },
         'conversation': { kind: 'single', scope: 'session-maybe' },
-        'details': { kind: 'list', scope: 'session' },
+        'details': { kind: 'single', scope: 'session' },
         'shell.overlay': { kind: 'list', scope: 'root' },
       },
       // Exclusive store: the factory itself — the framework instantiates per

@@ -5,15 +5,7 @@ import { resolve } from 'node:path'
 import type { DefaultTheme, PageData, SiteConfig } from 'vitepress'
 import type { ViteDevServer } from 'vite'
 import { withMermaid } from 'vitepress-plugin-mermaid'
-import { docsPages, landingLink, localeCollections, orderedPages, routeLink, sectionSpec, type DocsLocale, type DocsPage, type DocsSidebar } from '../docs.ts'
-import {
-  docsLocaleIdentity,
-  docsPageHead,
-  docsSiteIdentity,
-  GESTALT_REPOSITORY_URL,
-  resolveDocsSiteBaseUrl,
-  robotsTxt,
-} from '../../scripts/doc-site-seo.ts'
+import { landingLink, localeCollections, orderedPages, routeLink, sectionSpec, type DocsLocale, type DocsPage, type DocsSidebar } from '../docs.ts'
 import { docsSourceFiles, emitRawMarkdownPages, llmsTxt, projectDocs, rawMarkdownRoute } from '../../scripts/project-doc-site.ts'
 
 projectDocs()
@@ -146,12 +138,7 @@ function serveRawMarkdown(server: ViteDevServer): void {
     const sitePath = pathname.startsWith(base) ? pathname.slice(base.length) : pathname.replace(/^\//, '')
     if (sitePath === 'llms.txt') {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-      res.end(llmsTxt({ base, ...docsSiteIdentity }))
-      return
-    }
-    if (sitePath === 'robots.txt') {
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-      res.end(robotsTxt(siteBaseUrl))
+      res.end(llmsTxt({ base, ...siteIdentity }))
       return
     }
     const content = sitePath.endsWith('.md') ? rawMarkdownRoute(sitePath) : undefined
@@ -200,14 +187,14 @@ const sharedTheme: Pick<DefaultTheme.Config, 'search' | 'socialLinks' | 'editLin
     },
   },
   socialLinks: [
-    { icon: 'github', link: GESTALT_REPOSITORY_URL },
+    { icon: 'github', link: 'https://github.com/deepseek-ai/deepseek-harness' },
   ],
   editLink: {
     pattern: ({ frontmatter }: PageData) => {
       const data: unknown = frontmatter
       const editSource: unknown = typeof data === 'object' && data !== null ? Reflect.get(data, 'editSource') : undefined
       if (typeof editSource !== 'string') throw new Error('Projected documentation page has no editSource frontmatter.')
-      return `https://github.com/gestaltrun/deepseek-harness-gestalt/edit/master/${editSource}`
+      return `https://github.com/deepseek-ai/deepseek-harness/edit/master/${editSource}`
     },
     text: '在 GitHub 上编辑此页',
   },
@@ -216,8 +203,11 @@ const sharedTheme: Pick<DefaultTheme.Config, 'search' | 'socialLinks' | 'editLin
 /** Site base path, carrying the leading and trailing slashes VitePress requires. */
 const base = process.env.DOCS_BASE ?? '/'
 
-/** Absolute deployment URL shared by canonical links, sitemap, and robots.txt. */
-const siteBaseUrl = resolveDocsSiteBaseUrl(process.env)
+/** Site identity shared by the VitePress configuration and the llms.txt index. */
+const siteIdentity = {
+  title: 'DeepSeek Harness',
+  description: '用于构建 Agent Harness 的插件化 SDK',
+}
 
 /**
  * The DeepSeek wordmark, inlined so its `currentColor` fills follow the active
@@ -241,7 +231,6 @@ const wordmark = readFileSync(resolve(import.meta.dirname, '../public/wordmark.s
 const siteStyle = `
 .dsh-lockup { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .dsh-wordmark { display: block; height: 22px; width: auto; color: var(--vp-c-text-1); }
-.dsh-product-name { color: var(--vp-c-text-1); font-size: 14px; font-weight: 600; white-space: nowrap; }
 .dsh-tag {
   display: inline-flex;
   align-items: center;
@@ -293,33 +282,24 @@ const scrollbarScript = `
 `
 
 /**
- * Navigation-bar title: the DeepSeek wordmark, localized product name, and release-stage tag.
+ * Navigation-bar title: the DeepSeek wordmark and the release-stage tag.
  * VitePress renders `siteTitle` as HTML.
  *
- * @param productName - Localized product name.
  * @param previewTag - Localized release-stage label.
  * @returns Markup placed beside the navigation-bar home link.
  */
-function siteTitle(productName: string, previewTag: string): string {
-  return `<span class="dsh-lockup">${wordmark}<span class="dsh-product-name">${productName}</span><span class="dsh-tag">${previewTag}</span></span>`
+function siteTitle(previewTag: string): string {
+  return `<span class="dsh-lockup">${wordmark}<span class="dsh-tag">${previewTag}</span></span>`
 }
 
 export default withMermaid({
-  title: docsSiteIdentity.title,
-  description: docsSiteIdentity.description,
+  title: siteIdentity.title,
+  description: siteIdentity.description,
   base,
-  sitemap: { hostname: siteBaseUrl.href },
-  transformHead({ page, title, description }) {
-    const manifestPage = docsPages.find(candidate => candidate.route === page)
-    return manifestPage === undefined
-      ? []
-      : docsPageHead({ page: manifestPage, pages: docsPages, siteBaseUrl, title, description })
-  },
-  /** Emit raw Markdown, llms.txt, and robots.txt beside the rendered site. */
+  /** Emit the raw-Markdown twin of every route plus llms.txt beside the rendered site. */
   buildEnd(siteConfig: SiteConfig) {
     emitRawMarkdownPages(siteConfig.outDir)
-    writeFileSync(resolve(siteConfig.outDir, 'llms.txt'), llmsTxt({ base, ...docsSiteIdentity }))
-    writeFileSync(resolve(siteConfig.outDir, 'robots.txt'), robotsTxt(siteBaseUrl))
+    writeFileSync(resolve(siteConfig.outDir, 'llms.txt'), llmsTxt({ base, ...siteIdentity }))
   },
   head: [
     // VitePress leaves head hrefs untouched, so the base belongs here explicitly.
@@ -335,9 +315,8 @@ export default withMermaid({
     root: {
       label: '简体中文',
       lang: 'zh-CN',
-      ...docsLocaleIdentity.root,
       themeConfig: {
-        siteTitle: siteTitle('獭子哥', '技术预览'),
+        siteTitle: siteTitle('技术预览'),
         nav: [
           { text: '入门', link: landingLink('root', guideModules.root.guide), activeMatch: '^/guide/' },
           ...moduleNav('root'),
@@ -362,9 +341,8 @@ export default withMermaid({
       label: 'English',
       lang: 'en-US',
       link: '/en/',
-      ...docsLocaleIdentity.en,
       themeConfig: {
-        siteTitle: siteTitle('Gestalt', 'Preview'),
+        siteTitle: siteTitle('Preview'),
         nav: [
           { text: 'Guide', link: landingLink('en', guideModules.en.guide), activeMatch: '^/en/guide/' },
           ...moduleNav('en'),
@@ -379,7 +357,7 @@ export default withMermaid({
             const data: unknown = frontmatter
             const editSource: unknown = typeof data === 'object' && data !== null ? Reflect.get(data, 'editSource') : undefined
             if (typeof editSource !== 'string') throw new Error('Projected documentation page has no editSource frontmatter.')
-            return `https://github.com/gestaltrun/deepseek-harness-gestalt/edit/master/${editSource}`
+            return `https://github.com/deepseek-ai/deepseek-harness/edit/master/${editSource}`
           },
           text: 'Edit this page on GitHub',
         },

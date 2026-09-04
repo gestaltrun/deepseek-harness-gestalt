@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -33,6 +33,7 @@ function agent(ctx: Context, cwd: string | undefined): Agent {
     version: 0,
     id,
     createdAt: 0,
+    isSeeded: false,
     ...cwd === undefined ? {} : { cwd },
   })
   const value: Agent = {
@@ -66,7 +67,7 @@ function call(
 ) {
   return ctx.tools.execute({
     signal,
-    callId: CallId(`persistent-pwsh-${++callNumber}`),
+    callId: ToolCallId(`persistent-pwsh-${++callNumber}`),
     name: 'pwsh',
     arguments: { command },
     ...owner === undefined ? {} : { agent: owner },
@@ -92,8 +93,6 @@ type StubMode =
   | 'end-only'
   | 'init-exit'
   | 'init-timeout'
-  | 'init-source-echo'
-  | 'init-echo-stuck'
   | 'spawn-error'
   | 'send-error'
   | 'prompt-after-idle'
@@ -115,20 +114,17 @@ class StubTerminalSession implements TerminalBackendSession {
   closed: string[] = []
   mode: StubMode
   sends = 0
-  promptSetups: string[] = []
   pendingText = ''
   historyTruncated = false
   throwOnSend = false
 
   constructor(mode: StubMode) {
     this.mode = mode
-    if (mode === 'init-source-echo' || mode === 'init-echo-stuck') this.scrollback = 'PowerShell 7.6.4\n'
   }
 
   startSend(request: TerminalSendRequest): TerminalSendOperation {
     this.sends += 1
     if (request.text.startsWith('function prompt')) {
-      this.promptSetups.push(request.text)
       if (this.mode === 'init-exit') {
         this.statusValue = { kind: 'exited', exitCode: 1, signal: null }
         return this.operation(Promise.resolve(this.result('', 'session_exit')))
@@ -136,18 +132,7 @@ class StubTerminalSession implements TerminalBackendSession {
       if (this.mode === 'init-timeout') {
         return this.operation(Promise.resolve(this.result('', 'timeout')))
       }
-      if (this.mode === 'init-source-echo' || this.mode === 'init-echo-stuck') {
-        return this.operation(Promise.resolve(this.result(request.text, 'stdin_read')))
-      }
-      return this.operation(Promise.resolve(this.result(`${this.motd}__DSH_PWSH_TOOL_SETUP_DONE__`, 'stdin_read')))
-    }
-    if (request.text.length === 0 && this.mode === 'init-source-echo') {
-      const ready = `${this.motd}__DSH_PWSH_TOOL_SETUP_DONE__`
-      this.scrollback += ready
-      return this.operation(Promise.resolve(this.result(ready, 'stdin_read')))
-    }
-    if (request.text.length === 0 && this.mode === 'init-echo-stuck') {
-      return this.operation(Promise.resolve(this.result('', 'inferred_idle')))
+      return this.operation(Promise.resolve(this.result(this.motd, 'stdin_read')))
     }
     if (this.mode === 'send-error') throw new Error('stub send failed')
     if (this.throwOnSend) throw new Error('PTY session has exited')
@@ -360,8 +345,6 @@ describe('tool-pwsh-persistent', () => {
     expect(text(await call(ctx, owner, 'Write-Output two'))).toBe('hello from stub')
     expect(stub.sessions).toHaveLength(1)
     expect(stub.sessions[0]?.sends).toBe(3)
-    expect(stub.sessions[0]?.promptSetups).toHaveLength(1)
-    expect(stub.sessions[0]?.promptSetups[0]).not.toContain('__DSH_PERSISTENT_PWSH_PROMPT__ ')
 
     const ownerWithoutCwd = agent(ctx, undefined)
     expect(text(await call(ctx, ownerWithoutCwd, 'pwd'))).toBe('hello from stub')
@@ -570,20 +553,6 @@ describe('tool-pwsh-persistent', () => {
       expect(stub.sessions).toHaveLength(2)
     },
   )
-
-  it('waits past the setup-source echo before accepting the installed tool prompt', async () => {
-    const { ctx, owner, stub } = await setup({ backendType: 'stub' }, 'init-source-echo')
-    expect(text(await call(ctx, owner, 'Write-Output one'))).toBe('hello from stub')
-    expect(stub.sessions[0]?.sends).toBe(3)
-    expect(stub.sessions[0]?.promptSetups[0]).not.toContain('__DSH_PERSISTENT_PWSH_PROMPT__ ')
-    expect(stub.sessions[0]?.promptSetups[0]).not.toContain('__DSH_PWSH_TOOL_SETUP_DONE__')
-  })
-
-  it('fails initialization when the setup echo never prints the tool done token', async () => {
-    const { ctx, owner, stub } = await setup({ backendType: 'stub', timeoutMs: 50 }, 'init-echo-stuck')
-    expect((await call(ctx, owner, 'pwd')).isError).toBe(true)
-    expect(stub.sessions[0]?.closed).toContain('persistent pwsh initialization failed')
-  })
 
   it.each(['init-exit', 'init-timeout'] as const)(
     'fails initialization and closes the unusable shell for %s',

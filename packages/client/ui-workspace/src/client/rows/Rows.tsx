@@ -2,21 +2,21 @@
  * Workspace browser tree row components (figma Cell set 14:3080): pure presentational —
  * all data and callbacks arrive via props. Hover swaps (folder->chevron,
  * time->ellipsis, action buttons) are CSS-only. Row ... menus are visual-only
- * except workspace Settings/Rename/Delete and session Rename/Fork/Archive; the session
+ * except workspace Rename/Delete and session Rename/Fork/Archive; the session
  * and workspace hover cards are suppressed while a menu is open.
  */
 import { useState } from 'react'
 import clsx from 'clsx'
 import {
-  HoverCard, IconArchiveOutline20, IconBranchOutline16, IconEditOutline16,
-  IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16, IconPersonalizationOutline16,
-  IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, StateDot,
+  HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
+  IconEditOutline16, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
+  IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, relativeTime,
+  StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
-import { abbreviateHomePath } from '@deepseek-ai/dsh-client-runtime/client'
+import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
-import { relativeTime } from '../tree.ts'
 import css from './Rows.module.css'
 
 /** The standard locale seat, prop-passed from the browser root. */
@@ -114,7 +114,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   onToggle: () => void
   onCreate: () => void
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { settings: () => void; rename: () => void; delete: () => void } | undefined
+  actions?: { rename: () => void; delete: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -127,7 +127,6 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   const active = group.expanded && group.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
-    { id: 'settings', label: t('menu.settings'), icon: <IconPersonalizationOutline16 /> },
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutline16 />, danger: true },
   ]
@@ -166,10 +165,9 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
               setMenuOpen(false)
               // Unknown ids leave before the dispatch: a future menu row must
               // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- workspaceMenuItems carries exactly these three rows today. */
-              if (id !== 'settings' && id !== 'rename' && id !== 'delete') return
-              if (id === 'settings') actions.settings()
-              else if (id === 'rename') actions.rename()
+              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
+              if (id !== 'rename' && id !== 'delete') return
+              if (id === 'rename') actions.rename()
               else actions.delete()
             }}
             portal
@@ -282,6 +280,21 @@ function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ..
   )
 }
 
+/** Non-interactive active-Schedule marker; the enclosing row remains the only action. */
+function ActiveScheduleIndicator({ t, search = false }: { t: RowTranslate; search?: boolean }) {
+  const label = t('schedule.active')
+  return (
+    <span
+      className={clsx(css.scheduleIndicator, search && css.searchScheduleIndicator)}
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      <IconAlarmClockOutline16 />
+    </span>
+  )
+}
+
 /** Hover-card body: full title, relative time, and every relevant live status. */
 function SessionHoverContent({ node, now, t }: { node: SessionNode; now: number; t: RowTranslate }) {
   const statuses = sessionStatuses(node, t)
@@ -335,9 +348,10 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
           )}
         </span>
         <span className={css.searchResultTitle}>{result.title}</span>
+        {result.hasActiveSchedule && <ActiveScheduleIndicator t={t} search />}
       </span>
       <span className={css.searchResultMeta}>
-        <span className={css.searchResultWorkspace}>{result.workspace}</span>
+        <span className={css.searchResultWorkspace}>{result.workspace || t('group.ungrouped')}</span>
         {result.snippet !== undefined && (
           <span className={css.searchResultSnippet}>{result.snippet}</span>
         )}
@@ -361,30 +375,21 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
-export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false,
-  tabIndex, onFocus, onMoveFocus, t,
-}: {
+export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, t }: {
   node: SessionNode
   currentId: string | undefined
   now: number
   onOpen: (id: SessionNode['id']) => void
   /** Open the browser-owned session rename dialog (row menu action). */
-  onRename?: ((id: SessionNode['id'], currentTitle: string) => void) | undefined
+  onRename: (id: SessionNode['id'], currentTitle: string) => void
   /** Fork a session at its last completed turn (row menu action). */
-  onFork?: ((id: SessionNode['id']) => void) | undefined
+  onFork: (id: SessionNode['id']) => void
   /** Archive this session (row menu action; commits without a dialog). */
-  onArchive?: ((id: SessionNode['id']) => void) | undefined
+  onArchive: (id: SessionNode['id']) => void
   /** Present only on draggable rows (workspace-group sessions outside search). */
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
   flat?: boolean | undefined
-  /** Roving tab position supplied by the owning tree. */
-  tabIndex?: number | undefined
-  /** Notify the owning tree when this row receives focus. */
-  onFocus?: (() => void) | undefined
-  /** Move the owning tree's roving focus by one row. */
-  onMoveFocus?: ((direction: -1 | 1) => void) | undefined
   t: RowTranslate
 }) {
   const row = node
@@ -398,11 +403,10 @@ export function SessionNodeItem({
   // touches the session log, so it is not styled as destructive and needs no
   // confirmation dialog.
   const sessionMenuItems = [
-    ...(onRename === undefined ? [] : [{ id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> }]),
-    ...(onFork === undefined ? [] : [{ id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> }]),
-    ...(onArchive === undefined
-      ? []
-      : [{ id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> }]),
+    { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
+    { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> },
+    // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
+    { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
   ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
@@ -413,23 +417,8 @@ export function SessionNodeItem({
         drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
       )}
       role="treeitem"
-      tabIndex={tabIndex}
-      data-session-row={node.id}
       aria-selected={selected}
-      onFocus={onFocus}
       onClick={() => { onOpen(node.id) }}
-      onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onOpen(node.id)
-          return
-        }
-        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-          event.preventDefault()
-          onMoveFocus?.(event.key === 'ArrowUp' ? -1 : 1)
-        }
-      }}
       draggable={drag !== undefined}
       onDragStart={drag === undefined
         ? undefined
@@ -464,12 +453,13 @@ export function SessionNodeItem({
         </span>
       )}
       <span className={css.title}>{title}</span>
+      {row.hasActiveSchedule && <ActiveScheduleIndicator t={t} />}
       {/* A blank New Session row is a provisional placeholder: nothing has
           happened in it yet, so a "now" timestamp and the row verbs
           (rename/fork/archive) would all act on content that does not
           exist — both trailing cells stay off until the first prompt. */}
       {!row.blank && <span className={css.time}>{timeLabel(row.updatedAt, now, t)}</span>}
-      {!row.blank && sessionMenuItems.length > 0 && (
+      {!row.blank && (
         <span className={css.rowActions}>
           <Menu
             open={menuOpen}
@@ -477,9 +467,9 @@ export function SessionNodeItem({
             items={sessionMenuItems}
             onSelect={(id) => {
               setMenuOpen(false)
-              if (id === 'rename') onRename?.(node.id, row.title)
-              if (id === 'fork') onFork?.(node.id)
-              if (id === 'archive') onArchive?.(node.id)
+              if (id === 'rename') onRename(node.id, row.title)
+              if (id === 'fork') onFork(node.id)
+              if (id === 'archive') onArchive(node.id)
             }}
             portal
             closeOnPointerLeave

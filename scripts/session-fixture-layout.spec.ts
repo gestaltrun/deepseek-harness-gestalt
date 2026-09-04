@@ -1,15 +1,20 @@
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { type SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
-import { canonicalSessionFixture } from './session-fixture-layout.ts'
-import { verifySessionFixtureLayouts } from './verify-session-fixture-layout.ts'
+import {
+  canonicalSessionFixture,
+  inspectSessionFixtureLayouts,
+  isPhysicalSessionFixture,
+} from './session-fixture-layout.ts'
 
 const HEADER = '  {"type":"session","version":0,"id":"fixture","createdAt":1,"delegationDepth":0}  '
+const root = resolve(import.meta.dirname, '..')
 
 function chunkRun(): SessionEvent[] {
   return Array.from({ length: 4 }, (_, index) => ({
     type: 'assistant/chunk',
-    seq: index,
+    seq: SessionSeq(index),
     time: 10 + index,
     data: {
       turn: 1,
@@ -70,17 +75,36 @@ describe('canonicalSessionFixture', () => {
   })
 })
 
-describe('verifySessionFixtureLayouts', () => {
-  it('reports each non-canonical session fixture without rewriting it', () => {
-    const inspected = [
-      { path: 'canonical.jsonl', source: 'same\n', canonical: 'same\n' },
-      { path: 'nested/non-canonical.jsonl', source: 'before\n', canonical: 'after\n' },
-    ]
-
-    expect(verifySessionFixtureLayouts(inspected)).toEqual({
-      inspected: 2,
-      nonCanonical: ['nested/non-canonical.jsonl'],
-    })
-    expect(inspected[1]?.source).toBe('before\n')
+describe('isPhysicalSessionFixture', () => {
+  it('recognizes fixtures that preserve physical persistence encoding', () => {
+    expect(isPhysicalSessionFixture(
+      'packages/experimental/webworker-runtime/tests/fixtures/vfs-example/home/sessions/--dsh-workspace--/main/session.jsonl',
+    )).toBe(true)
+    expect(isPhysicalSessionFixture(
+      'scripts/snapshots/python-sdk-single-exe/advanced/session.1.jsonl',
+    )).toBe(true)
+    expect(isPhysicalSessionFixture(
+      'scripts/snapshots/python-sdk-single-exe/advanced/session.jsonl',
+    )).toBe(true)
+    expect(isPhysicalSessionFixture(
+      'scripts/snapshots/python-sdk-single-exe/restart/session.2.jsonl',
+    )).toBe(true)
+    expect(isPhysicalSessionFixture(
+      'packages/experimental/webworker-runtime/tests/fixtures/vfs-example/home/sessions/README.jsonl',
+    )).toBe(false)
+    expect(isPhysicalSessionFixture(
+      'scripts/snapshots/python-sdk-single-exe/advanced/requests.jsonl',
+    )).toBe(false)
+    expect(isPhysicalSessionFixture('apps/web/tests/snapshots/example/session.jsonl')).toBe(false)
   })
+})
+
+it('keeps every session-format JSONL fixture projected into canonical packed layout', () => {
+  const nonCanonical = inspectSessionFixtureLayouts(root)
+    .filter(fixture => fixture.source !== fixture.canonical)
+    .map(fixture => fixture.path)
+  expect(
+    nonCanonical,
+    'Run `pnpm run migrate:packed-session-fixtures` and commit the mechanical fixture rewrite.',
+  ).toEqual([])
 })

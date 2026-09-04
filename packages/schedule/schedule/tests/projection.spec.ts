@@ -1,149 +1,202 @@
-import { describe, expect, it } from 'vitest'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import {
-  applyScheduleProjection,
-  emptyScheduleProjectionState,
-  scheduleProjectionDefinition,
-} from '../src/projection.ts'
-import { ScheduleLogError } from '../src/domain.ts'
+import { afterEach, describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import SessionStore, { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import { apply as applySchedule } from '../src/index.ts'
+import { foldScheduleEvents, ScheduleId, ScheduleLogError } from '../src/domain.ts'
+import { scheduleProjectionDefinition, type ScheduleProjectionState } from '../src/projection.ts'
+import type { ScheduleRecord } from '../src/types.ts'
 
-function change(data: unknown, seq: number): SessionEvent {
+const contexts: Context[] = []
+const RESTORE_HEADER: SessionHeader = {
+  version: 0,
+  id: SessionId('schedule-projection'),
+  createdAt: 0,
+  isSeeded: false,
+}
+
+afterEach(async () => {
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+})
+
+function afterRecord(id: string, prompt = id): ScheduleRecord {
+  return {
+    id: ScheduleId(id),
+    kind: 'after',
+    prompt,
+    afterSeconds: 30,
+    scheduledAt: '2026-08-25T12:00:00.000Z',
+  }
+}
+
+function atRecord(id: string): ScheduleRecord {
+  return {
+    id: ScheduleId(id),
+    kind: 'at',
+    prompt: id,
+    scheduledAt: '2026-08-25T13:00:00.000Z',
+  }
+}
+
+function everyRecord(id: string): ScheduleRecord {
+  return {
+    id: ScheduleId(id),
+    kind: 'every',
+    prompt: id,
+    everySeconds: 300,
+    scheduledAt: '2026-08-25T14:00:00.000Z',
+  }
+}
+
+function change(data: unknown, seq: SessionSeq): SessionEvent {
   return { type: 'schedule/change', seq, time: seq, data } as SessionEvent
 }
 
-const create = {
-  version: 1,
-  operation: 'create',
-  schedule: {
-    id: 'schedule-1',
-    kind: 'after',
-    prompt: 'check logs',
-    afterSeconds: 30,
-    scheduledAt: '2026-08-18T01:00:00.000Z',
-  },
-} as const
+function created(record: ScheduleRecord, seq: SessionSeq): SessionEvent {
+  return change({ version: 1, operation: 'create', schedule: record }, seq)
+}
 
-describe('Schedule session projection', () => {
-  it('projects durable pause, resume, and delete changes as whole retained records', () => {
-    const created = applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0))
-    const paused = applyScheduleProjection(created, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 1))
-    expect(scheduleProjectionDefinition.wire.view(paused)).toEqual([{
-      ...create.schedule,
-      paused: true,
-    }])
+describe('Schedule Session projection', () => {
+  it('matches an empty replay, preserves creation order, and applies every terminal transition', () => {
+    let projected: ScheduleProjectionState = scheduleProjectionDefinition.init(RESTORE_HEADER, SessionLogOffset(0))
+    expect(projected).toEqual({ inheritedEventCount: 0, active: [], seenIds: [] })
+    expect(scheduleProjectionDefinition.wire.view(projected)).toEqual(foldScheduleEvents([]).active)
 
-    const resumed = applyScheduleProjection(paused, change({ version: 1, operation: 'resume', id: 'schedule-1' }, 2))
-    expect(scheduleProjectionDefinition.wire.view(resumed)).toEqual([{
-      ...create.schedule,
-      paused: false,
-    }])
-    const deleted = applyScheduleProjection(resumed, change({ version: 1, operation: 'delete', id: 'schedule-1' }, 3))
-    expect(scheduleProjectionDefinition.wire.view(deleted)).toEqual([])
-  })
-
-  it('ignores unrelated events but rejects malformed or transition-invalid durable changes', () => {
-    const empty = emptyScheduleProjectionState()
-    expect(applyScheduleProjection(empty, { type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } }))
-      .toBe(empty)
-    expect(() => applyScheduleProjection(empty, change({ version: 1, operation: 'pause', id: 'missing' }, 1)))
-      .toThrow(ScheduleLogError)
-    expect(() => applyScheduleProjection(empty, change({ version: 1, operation: 'pause', id: '' }, 2)))
-      .toThrow(ScheduleLogError)
-    const created = applyScheduleProjection(empty, change(create, 0))
-    expect(() => applyScheduleProjection(created, change(create, 1))).toThrow(/was reused/)
-    expect(() => applyScheduleProjection(created, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 2)))
-      .not.toThrow()
-    const paused = applyScheduleProjection(created, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 3))
-    expect(() => applyScheduleProjection(paused, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 4)))
-      .toThrow(/paused/)
-    expect(() => applyScheduleProjection(created, change({ version: 1, operation: 'resume', id: 'schedule-1' }, 5)))
-      .toThrow(/active/)
-    expect(() => applyScheduleProjection(paused, change({ version: 1, operation: 'dispatch', id: 'schedule-1' }, 6)))
-      .toThrow(/inactive/)
-  })
-
-  it('advances a fixed-rate dispatch and drops a one-shot after it fires', () => {
-    const every = {
-      version: 1,
-      operation: 'create',
-      schedule: {
-        id: 'schedule-every',
-        kind: 'every',
-        prompt: 'check metrics',
-        everySeconds: 300,
-        scheduledAt: '2026-08-18T01:00:00.000Z',
-      },
-    } as const
-    const created = applyScheduleProjection(emptyScheduleProjectionState(), change(every, 0))
-    const advanced = applyScheduleProjection(created, change({
-      version: 1,
-      operation: 'dispatch',
-      id: 'schedule-every',
-      acceptedAt: '2026-08-18T01:00:00.000Z',
-    }, 1))
-    expect(scheduleProjectionDefinition.wire.view(advanced)).toEqual([{
-      ...every.schedule,
-      scheduledAt: '2026-08-18T01:05:00.000Z',
-      paused: false,
-    }])
-
-    const oneShot = applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0))
-    const dispatched = applyScheduleProjection(oneShot, change({ version: 1, operation: 'dispatch', id: 'schedule-1' }, 1))
-    expect(scheduleProjectionDefinition.wire.view(dispatched)).toEqual([])
-  })
-
-  it('declares fork-owned event scope for standard Session projection transport', () => {
-    expect(scheduleProjectionDefinition).toMatchObject({
-      key: 'schedules',
-      eventScope: 'owned-suffix',
-    })
-    expect(scheduleProjectionDefinition.init()).toEqual(emptyScheduleProjectionState())
-  })
-
-  it('rejects reused ids and illegal pause, resume, and dispatch transitions', () => {
-    const created = applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0))
-    expect(() => applyScheduleProjection(created, change(create, 1))).toThrow(/was reused/)
-
-    const paused = applyScheduleProjection(created, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 1))
-    expect(() => applyScheduleProjection(paused, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 2)))
-      .toThrow(/pause targets/)
-    expect(() => applyScheduleProjection(created, change({ version: 1, operation: 'resume', id: 'schedule-1' }, 2)))
-      .toThrow(/resume targets/)
-    expect(() => applyScheduleProjection(paused, change({ version: 1, operation: 'dispatch', id: 'schedule-1' }, 2)))
-      .toThrow(/dispatch targets/)
-  })
-
-  it('advances an Every record and removes a terminal one-shot on dispatch', () => {
-    const every = {
-      version: 1,
-      operation: 'create',
-      schedule: {
-        id: 'schedule-every',
-        kind: 'every',
-        prompt: 'check metrics',
-        everySeconds: 300,
-        scheduledAt: '2026-08-18T01:00:00.000Z',
-      },
-    } as const
-    const advanced = applyScheduleProjection(
-      applyScheduleProjection(emptyScheduleProjectionState(), change(every, 0)),
+    const events: SessionEvent[] = [
+      created(afterRecord('after'), SessionSeq(0)),
+      created(atRecord('at'), SessionSeq(1)),
+      created(everyRecord('every'), SessionSeq(2)),
+      change({ version: 1, operation: 'delete', id: 'at' }, SessionSeq(3)),
+      change({ version: 1, operation: 'dispatch', id: 'after' }, SessionSeq(4)),
       change({
         version: 1,
         operation: 'dispatch',
-        id: 'schedule-every',
-        acceptedAt: '2026-08-18T01:07:00.000Z',
-      }, 1),
-    )
-    expect(scheduleProjectionDefinition.wire.view(advanced)).toEqual([{
-      ...every.schedule,
-      scheduledAt: '2026-08-18T01:10:00.000Z',
-      paused: false,
-    }])
+        id: 'every',
+        acceptedAt: '2026-08-25T14:02:00.000Z',
+      }, SessionSeq(5)),
+    ]
+    for (const event of events.slice(0, 3)) {
+      projected = scheduleProjectionDefinition.apply(projected, event)
+    }
+    expect(projected.active.map(record => record.id)).toEqual(['after', 'at', 'every'])
+    for (const event of events.slice(3)) {
+      projected = scheduleProjectionDefinition.apply(projected, event)
+    }
 
-    const terminal = applyScheduleProjection(
-      applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0)),
-      change({ version: 1, operation: 'dispatch', id: 'schedule-1' }, 1),
+    expect(projected).toEqual({ inheritedEventCount: 0, ...foldScheduleEvents(events) })
+    expect(projected.active).toEqual([{ ...everyRecord('every'), scheduledAt: '2026-08-25T14:05:00.000Z' }])
+  })
+
+  it('shares strict transitions with full replay and excludes the inherited fork prefix', () => {
+    const events: SessionEvent[] = [
+      created(afterRecord('parent'), SessionSeq(0)),
+      created(atRecord('child-at'), SessionSeq(1)),
+      created(everyRecord('child-every'), SessionSeq(2)),
+      change({
+        version: 1,
+        operation: 'dispatch',
+        id: 'child-every',
+        acceptedAt: '2026-08-25T14:02:00.000Z',
+      }, SessionSeq(3)),
+    ]
+    let projected: ScheduleProjectionState = scheduleProjectionDefinition.init(
+      { ...RESTORE_HEADER, isSeeded: true },
+      SessionLogOffset(1),
     )
-    expect(scheduleProjectionDefinition.wire.view(terminal)).toEqual([])
+    for (const event of events) projected = scheduleProjectionDefinition.apply(projected, event)
+    const beforeUnrelated = projected
+    const unrelated = { type: 'turn/start', seq: SessionSeq(4), time: 4, data: { turn: 1 } } as SessionEvent
+    projected = scheduleProjectionDefinition.apply(projected, unrelated)
+
+    expect(projected).toBe(beforeUnrelated)
+    expect(projected).toEqual({
+      inheritedEventCount: 1,
+      ...foldScheduleEvents([...events, unrelated], SessionLogOffset(1)),
+    })
+    expect(scheduleProjectionDefinition.wire.view(projected)).toEqual(projected.active)
+    expect(projected.active.map(record => record.id)).toEqual(['child-at', 'child-every'])
+  })
+
+  it('restores checkpoints, folds a bounded tail, and fails loud on damaged durable data', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SessionProjectionRegistry)
+    ctx.sessionProjections.register(scheduleProjectionDefinition)
+
+    const first = created(afterRecord('one'), SessionSeq(0))
+    const second = created(atRecord('two'), SessionSeq(1))
+    const initial = ctx.sessionProjections.restore(
+      {}, [first, second], SessionLogOffset(0), RESTORE_HEADER, SessionLogOffset(0),
+    )
+    expect(initial.snapshot.values.schedule?.map(record => record.id)).toEqual(['one', 'two'])
+
+    const removed = change({ version: 1, operation: 'delete', id: 'one' }, SessionSeq(2))
+    const resumed = ctx.sessionProjections.restore(
+      initial.checkpoint,
+      [second, removed],
+      SessionLogOffset(1),
+      RESTORE_HEADER,
+      SessionLogOffset(0),
+    )
+    expect(resumed.snapshot.values.schedule?.map(record => record.id)).toEqual(['two'])
+    expect(resumed.checkpoint.schedule).toMatchObject({ ver: 2, seq: 2 })
+
+    expect(() => ctx.sessionProjections.restore(
+      {},
+      [change({ version: 1, operation: 'delete', id: 'missing' }, SessionSeq(0))],
+      SessionLogOffset(0),
+      RESTORE_HEADER,
+      SessionLogOffset(0),
+    )).toThrow(ScheduleLogError)
+  })
+
+  it('rejects malformed or internally inconsistent checkpoint states', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SessionProjectionRegistry)
+    ctx.sessionProjections.register(scheduleProjectionDefinition)
+    const row = (val: unknown) => ({ schedule: { ver: 2, seq: SessionSeq(0), val } })
+
+    expect(ctx.sessionProjections.viewCheckpoint(row({
+      inheritedEventCount: 0,
+      active: [{ ...afterRecord('bad-time'), scheduledAt: 'not-an-instant' }],
+      seenIds: ['bad-time'],
+    }))).toEqual({})
+    expect(ctx.sessionProjections.viewCheckpoint(row({
+      inheritedEventCount: 0,
+      active: [afterRecord('missing')],
+      seenIds: [],
+    }))).toEqual({})
+    expect(ctx.sessionProjections.viewCheckpoint(row({
+      inheritedEventCount: 0,
+      active: [afterRecord('duplicate'), afterRecord('duplicate')],
+      seenIds: ['duplicate', 'duplicate'],
+    }))).toEqual({})
+    expect(ctx.sessionProjections.viewCheckpoint(row({
+      inheritedEventCount: 0,
+      active: [],
+      seenIds: [' bad-id'],
+    }))).toEqual({})
+  })
+
+  it('registers only while the Schedule plugin fiber is live', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    const fiber = ctx.plugin({ apply: applySchedule })
+    await fiber.await()
+
+    const session = ctx.sessions.create()
+    session.append('schedule/change', {
+      version: 1,
+      operation: 'create',
+      schedule: afterRecord('live'),
+    })
+    expect(ctx.sessionProjections.snapshot(session).values.schedule).toHaveLength(1)
+
+    await fiber.dispose()
+    expect(ctx.sessionProjections.snapshot(session).values).toEqual({})
   })
 })

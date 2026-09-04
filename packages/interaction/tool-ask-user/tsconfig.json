@@ -31,12 +31,6 @@
     },
     {
       "path": "../user-questions"
-    },
-    {
-      "path": "../member-question-sender"
-    },
-    {
-      "path": "../../runtime-diagnostics/invariants"
     }
   ]
 }

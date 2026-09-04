@@ -5,23 +5,9 @@
 
 DeepSeek Harness is licensed under [MIT](LICENSE). It depends on the third-party software listed below. Each project remains under its own license; nothing in this file changes those terms.
 
-This file lists **direct** dependencies declared by the workspace, copied repository Skills, and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests and `.agents/skills/SOURCES.json` by `scripts/gen-third-party-notices.ts`: a pre-commit hook regenerates it whenever a staged input changes, and `scripts/gen-third-party-notices.spec.ts` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run `pnpm run verify-third-party-notices` for the standalone check.
+This file lists **direct** dependencies declared by the workspace and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests by `scripts/gen-third-party-notices.ts`: a pre-commit hook regenerates it whenever a staged file changes one of its inputs, and `scripts/gen-third-party-notices.spec.ts` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run `pnpm run verify-third-party-notices` for the standalone check.
 
 The complete npm transitive closure, including the Landlock launcher workspace, is recorded with exact pinned versions in [`pnpm-lock.yaml`](pnpm-lock.yaml) — inspect it with `pnpm licenses list`. The Python closure is recorded separately in [`python/sdk/uv.lock`](python/sdk/uv.lock).
-
-## Repository agent Skills (`.agents/skills/`)
-
-These third-party workflows are copied into the repository for contributor agents. Each Skill directory retains the upstream license. [`.agents/skills/SOURCES.json`](.agents/skills/SOURCES.json) records the pinned source and repository-specific changes.
-
-| Skill | Upstream | Source revision | License | Repository changes |
-| --- | --- | --- | --- | --- |
-| `ego-browser` | [github.com/citrolabs/ego-lite](https://github.com/citrolabs/ego-lite) | [`ego-lite-app-0.4.7.3`](https://github.com/citrolabs/ego-lite) | MIT | resolve and validate the DSH profile for every Task Space operation path; require manual installation through the signed macOS application flow; align GitHub learning manifests with their tool results; reuse one DSH task space per user goal through .agents/local/runtime-memo.json |
-| `implement-spec` | [github.com/mattpocock/skills](https://github.com/mattpocock/skills) | [`6654f6b60cd9d5be8b54c6fafe44346dabeb3b76`](https://github.com/mattpocock/skills/tree/6654f6b60cd9d5be8b54c6fafe44346dabeb3b76/skills/in-progress/implement-spec) | MIT | none |
-| `retro` | [github.com/mattpocock/skills](https://github.com/mattpocock/skills) | [`6654f6b60cd9d5be8b54c6fafe44346dabeb3b76`](https://github.com/mattpocock/skills/tree/6654f6b60cd9d5be8b54c6fafe44346dabeb3b76/skills/in-progress/retro) | MIT | point Files and review steps at AGENTS.md, docs/, and dsh-code-review |
-| `show-me` | [github.com/humanlayer/skills](https://github.com/humanlayer/skills) | [`3c2629142c5d437428269b1b722b08c0b87f574d`](https://github.com/humanlayer/skills/tree/3c2629142c5d437428269b1b722b08c0b87f574d/plugins/show-me/skills/show-me) | MIT | none |
-| `skill-doctor` | [github.com/warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) | [`59d10d6d0fed69b76c392c7e12f8813a49edd6a2`](https://github.com/warpdotdev/common-skills/tree/59d10d6d0fed69b76c392c7e12f8813a49edd6a2/.agents/skills/skill-doctor) | MIT | render diffs with self-contained HTML instead of a bundled JavaScript dependency; cover Codex and Warp session parsing |
-| `unslop` | [github.com/cursor/plugins](https://github.com/cursor/plugins) | [`bdf7aa355337897f167153e05069aca505dae17c`](https://github.com/cursor/plugins/tree/bdf7aa355337897f167153e05069aca505dae17c/pstack/skills/unslop) | MIT | scope voice changes to user-facing prose and defer repository contracts to dsh-prose-standard |
-
 
 ## Vendored source (`vendor/`)
 
@@ -49,36 +35,16 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@anthropic-ai/claude-agent-sdk`](https://github.com/anthropics/claude-agent-sdk-typescript) | SEE LICENSE IN README.md |
 | [`@anthropic-ai/sdk`](https://github.com/anthropics/anthropic-sdk-typescript) | MIT |
 | [`@babel/code-frame`](https://github.com/babel/babel) | MIT |
-| [`@capacitor/app`](https://github.com/ionic-team/capacitor-plugins) | MIT |
-| [`@capacitor/browser`](https://github.com/ionic-team/capacitor-plugins) | MIT |
-| [`@capacitor/core`](https://github.com/ionic-team/capacitor) | MIT |
-| [`@capacitor/device`](https://github.com/ionic-team/capacitor-plugins) | MIT |
-| [`@codemirror/commands`](https://code.haverbeke.berlin/codemirror/commands) | MIT |
-| [`@codemirror/lang-cpp`](https://github.com/codemirror/lang-cpp) | MIT |
-| [`@codemirror/lang-css`](https://github.com/codemirror/lang-css) | MIT |
-| [`@codemirror/lang-go`](https://github.com/codemirror/lang-go) | MIT |
-| [`@codemirror/lang-html`](https://code.haverbeke.berlin/codemirror/lang-html) | MIT |
-| [`@codemirror/lang-java`](https://github.com/codemirror/lang-java) | MIT |
-| [`@codemirror/lang-javascript`](https://github.com/codemirror/lang-javascript) | MIT |
-| [`@codemirror/lang-json`](https://github.com/codemirror/lang-json) | MIT |
-| [`@codemirror/lang-markdown`](https://code.haverbeke.berlin/codemirror/lang-markdown) | MIT |
-| [`@codemirror/lang-php`](https://github.com/codemirror/lang-php) | MIT |
-| [`@codemirror/lang-python`](https://github.com/codemirror/lang-python) | MIT |
-| [`@codemirror/lang-rust`](https://github.com/codemirror/lang-rust) | MIT |
-| [`@codemirror/lang-sql`](https://github.com/codemirror/lang-sql) | MIT |
-| [`@codemirror/lang-vue`](https://github.com/codemirror/lang-vue) | MIT |
-| [`@codemirror/lang-xml`](https://github.com/codemirror/lang-xml) | MIT |
-| [`@codemirror/lang-yaml`](https://github.com/codemirror/lang-yaml) | MIT |
-| [`@codemirror/language`](https://code.haverbeke.berlin/codemirror/language) | MIT |
-| [`@codemirror/legacy-modes`](https://code.haverbeke.berlin/codemirror/legacy-modes) | MIT |
-| [`@codemirror/search`](https://code.haverbeke.berlin/codemirror/search) | MIT |
-| [`@codemirror/state`](https://code.haverbeke.berlin/codemirror/state) | MIT |
-| [`@codemirror/view`](https://code.haverbeke.berlin/codemirror/view) | MIT |
 | [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi) | MIT |
 | [`@joplin/turndown-plugin-gfm`](https://github.com/laurent22/joplin-turndown-plugin-gfm) | MIT |
 | [`@jridgewell/gen-mapping`](https://github.com/jridgewell/sourcemaps) | MIT |
-| [`@lezer/highlight`](https://github.com/lezer-parser/highlight) | MIT |
+| [`@lexical/history`](https://github.com/facebook/lexical) | MIT |
+| [`@lexical/plain-text`](https://github.com/facebook/lexical) | MIT |
+| [`@lexical/text`](https://github.com/facebook/lexical) | MIT |
+| [`@lexical/utils`](https://github.com/facebook/lexical) | MIT |
 | [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) | MIT |
+| [`@noble/hashes`](https://github.com/paulmillr/noble-hashes) | MIT |
+| [`@octokit/webhooks`](https://github.com/octokit/webhooks.js) | MIT |
 | [`@openai/codex`](https://github.com/openai/codex) | Apache-2.0 |
 | [`@opentelemetry/api`](https://github.com/open-telemetry/opentelemetry-js) | Apache-2.0 |
 | [`@opentelemetry/api-logs`](https://github.com/open-telemetry/opentelemetry-js) | Apache-2.0 |
@@ -91,31 +57,28 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@tanstack/react-virtual`](https://github.com/TanStack/virtual) | MIT |
 | [`@types/mdast`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@vscode/ripgrep`](https://github.com/microsoft/vscode-ripgrep) | MIT |
-| [`@xterm/addon-fit`](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) | MIT |
-| [`@xterm/xterm`](https://github.com/xtermjs/xterm.js) | MIT |
-| [`@zxing/browser`](https://github.com/zxing-js/browser) | MIT |
-| [`ajv`](https://github.com/ajv-validator/ajv) | MIT |
-| [`ali-oss`](https://github.com/ali-sdk/ali-oss) | MIT |
+| [`@xterm/headless`](https://github.com/xtermjs/xterm.js) | MIT |
+| [`@yarnpkg/parsers`](https://github.com/yarnpkg/berry) | BSD-2-Clause |
+| [`acorn`](https://github.com/acornjs/acorn) | MIT |
 | [`anser`](https://github.com/IonicaBizau/anser) | MIT |
+| [`buffer`](https://github.com/feross/buffer) | MIT |
 | [`chokidar`](https://github.com/paulmillr/chokidar) | MIT |
 | [`clsx`](https://github.com/lukeed/clsx) | MIT |
 | [`commander`](https://github.com/tj/commander.js) | MIT |
-| [`core-js`](https://github.com/zloirock/core-js) | MIT |
+| [`compression`](https://github.com/expressjs/compression) | MIT |
 | [`diff`](https://github.com/kpdecker/jsdiff) | BSD-3-Clause |
-| [`dompurify`](https://github.com/cure53/DOMPurify) | (MPL-2.0 OR Apache-2.0) |
 | [`e2b`](https://github.com/e2b-dev/e2b) | MIT |
-| [`electron-updater`](https://github.com/electron-userland/electron-builder) | MIT |
 | [`eventsource-parser`](https://github.com/rexxars/eventsource-parser) | MIT |
 | [`fflate`](https://github.com/101arrowz/fflate) | MIT |
-| [`https-proxy-agent`](https://github.com/TooTallNate/proxy-agents) | MIT |
 | [`immer`](https://github.com/immerjs/immer) | MIT |
+| [`ipaddr.js`](https://github.com/whitequark/ipaddr.js) | MIT |
 | [`js-yaml`](https://github.com/nodeca/js-yaml) | MIT |
 | [`katex`](https://github.com/KaTeX/KaTeX) | MIT |
 | [`koffi`](https://github.com/Koromix/koffi) | MIT |
+| [`lexical`](https://github.com/facebook/lexical) | MIT |
 | [`mdast-util-from-markdown`](https://github.com/syntax-tree/mdast-util-from-markdown) | MIT |
 | [`mdast-util-gfm`](https://github.com/syntax-tree/mdast-util-gfm) | MIT |
 | [`mdast-util-math`](https://github.com/syntax-tree/mdast-util-math) | MIT |
-| [`mermaid`](https://github.com/mermaid-js/mermaid) | MIT |
 | [`micromark-core-commonmark`](https://github.com/micromark/micromark/tree/main/packages/micromark-core-commonmark) | MIT |
 | [`micromark-extension-gfm`](https://github.com/micromark/micromark-extension-gfm) | MIT |
 | [`micromark-extension-math`](https://github.com/micromark/micromark-extension-math) | MIT |
@@ -125,24 +88,22 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`micromark-util-sanitize-uri`](https://github.com/micromark/micromark/tree/main/packages/micromark-util-sanitize-uri) | MIT |
 | [`micromark-util-symbol`](https://github.com/micromark/micromark/tree/main/packages/micromark-util-symbol) | MIT |
 | [`micromark-util-types`](https://github.com/micromark/micromark/tree/main/packages/micromark-util-types) | MIT |
-| [`minisearch`](https://github.com/lucaong/minisearch) | MIT |
+| [`negotiator`](https://github.com/jshttp/negotiator) | MIT |
 | [`node-addon-require-builtin`](https://www.npmjs.com/package/node-addon-require-builtin) | MIT |
 | [`node-pty`](https://github.com/microsoft/node-pty) | MIT |
 | [`open`](https://github.com/sindresorhus/open) | MIT |
-| [`pg`](https://github.com/brianc/node-postgres) | MIT |
 | [`picomatch`](https://github.com/micromatch/picomatch) | MIT |
 | [`react`](https://github.com/facebook/react) | MIT |
 | [`react-dom`](https://github.com/facebook/react) | MIT |
-| [`react-icons`](https://github.com:react-icons/react-icons) | MIT |
-| [`redis`](https://github.com/redis/node-redis) | MIT |
+| [`readable-stream`](https://github.com/nodejs/readable-stream) | MIT |
+| [`resolve.exports`](https://github.com/lukeed/resolve.exports) | MIT |
 | [`sharp`](https://github.com/lovell/sharp) | Apache-2.0 |
 | [`shiki`](https://github.com/shikijs/shiki) | MIT |
 | [`supports-color`](https://github.com/chalk/supports-color) | MIT |
-| [`tar`](https://github.com/isaacs/node-tar) | BlueOak-1.0.0 |
 | [`tsx`](https://github.com/privatenumber/tsx) | MIT |
 | [`turndown`](https://github.com/mixmark-io/turndown) | MIT |
 | [`typescript`](https://github.com/microsoft/TypeScript) | Apache-2.0 |
-| [`uqr`](https://github.com/unjs/uqr) | MIT |
+| [`undici`](https://github.com/nodejs/undici) | MIT |
 | [`use-sync-external-store`](https://github.com/facebook/react) | MIT |
 | [`ws`](https://github.com/websockets/ws) | MIT |
 | [`yaml`](https://github.com/eemeli/yaml) | ISC |
@@ -151,25 +112,25 @@ External packages that a workspace package resolves at runtime. The tier covers 
 
 pnpm applies local patches to the following packages at install time, so shipped artifacts carry modified copies; each patch file is the complete record of the modification:
 
-- `@electron/osx-sign@1.3.3` — [`patches/@electron__osx-sign@1.3.3.patch`](patches/@electron__osx-sign@1.3.3.patch)
+- `@yao-pkg/pkg@6.21.0` — [`patches/@yao-pkg__pkg@6.21.0.patch`](patches/@yao-pkg__pkg@6.21.0.patch)
 - `node-pty@1.2.0-beta.15` — [`patches/node-pty@1.2.0-beta.15.patch`](patches/node-pty@1.2.0-beta.15.patch)
 
 ## Official Claude Code platform payloads
 
 The project owner authorizes distribution of every version of the official `@anthropic-ai/claude-agent-sdk` package and the official Claude Code CLI/platform payloads that each version declares through `optionalDependencies`. This identity-scoped authorization does not classify their declared terms as permissive and does not cover any unrelated runtime package; version, declared-license, and payload-set changes still require the ordinary dependency, lockfile, compatibility, terms, and notices review.
 
-The installed SDK 0.3.220 declares the following optional platform packages. Each carries the official Claude Code 2.1.220 executable; the package identities and versions come from the SDK manifest, while the declared license field is verified against the platform payload installed for the current host.
+The installed SDK 0.3.241 declares the following optional platform packages. Each carries the official Claude Code 2.1.241 executable; the package identities and versions come from the SDK manifest, while the declared license field is verified against the platform payload installed for the current host.
 
 | Optional platform package | Version | Declared license |
 | --- | --- | --- |
-| [`@anthropic-ai/claude-agent-sdk-darwin-arm64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-darwin-arm64) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-darwin-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-darwin-x64) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-linux-arm64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-arm64) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-linux-arm64-musl`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-arm64-musl) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-linux-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-x64) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-linux-x64-musl`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-x64-musl) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-win32-arm64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-win32-arm64) | 0.3.220 | SEE LICENSE IN LICENSE.md |
-| [`@anthropic-ai/claude-agent-sdk-win32-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-win32-x64) | 0.3.220 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-darwin-arm64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-darwin-arm64) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-darwin-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-darwin-x64) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-linux-arm64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-arm64) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-linux-arm64-musl`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-arm64-musl) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-linux-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-x64) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-linux-x64-musl`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-linux-x64-musl) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-win32-arm64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-win32-arm64) | 0.3.241 | SEE LICENSE IN LICENSE.md |
+| [`@anthropic-ai/claude-agent-sdk-win32-x64`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk-win32-x64) | 0.3.241 | SEE LICENSE IN LICENSE.md |
 
 
 ## Development-only npm dependencies
@@ -179,54 +140,45 @@ External packages **directly declared** only by repository tooling, test infrast
 | Package | License |
 | --- | --- |
 | [`@braintree/sanitize-url`](https://github.com/braintree/sanitize-url) | MIT |
-| [`@capacitor/android`](https://github.com/ionic-team/capacitor) | MIT |
-| [`@capacitor/cli`](https://github.com/ionic-team/capacitor) | MIT |
-| [`@capacitor/ios`](https://github.com/ionic-team/capacitor) | MIT |
+| [`@lexical/headless`](https://github.com/facebook/lexical) | MIT |
 | [`@modelcontextprotocol/server-everything`](https://github.com/modelcontextprotocol/servers) | MIT / Apache-2.0 |
 | [`@modelcontextprotocol/server-filesystem`](https://github.com/modelcontextprotocol/servers) | MIT / Apache-2.0 |
 | [`@stylistic/eslint-plugin`](https://github.com/eslint-stylistic/eslint-stylistic) | MIT |
 | [`@testing-library/dom`](https://github.com/testing-library/dom-testing-library) | MIT |
 | [`@testing-library/react`](https://github.com/testing-library/react-testing-library) | MIT |
-| [`@types/ali-oss`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/babel__code-frame`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
+| [`@types/compression`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/js-yaml`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/jsdom`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
+| [`@types/negotiator`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/node`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
-| [`@types/pg`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/picomatch`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/react`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/react-dom`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
+| [`@types/readable-stream`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/spdx-expression-parse`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/turndown`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
+| [`@types/use-sync-external-store`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@types/ws`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@vitejs/plugin-react`](https://github.com/vitejs/vite-plugin-react) | MIT |
 | [`@vitest/coverage-v8`](https://github.com/vitest-dev/vitest) | MIT |
-| [`@wdio/cli`](https://github.com/webdriverio/webdriverio) | MIT |
-| [`@wdio/electron-service`](https://github.com/webdriverio/desktop-mobile) | MIT |
-| [`@wdio/globals`](https://github.com/webdriverio/webdriverio) | MIT |
-| [`@wdio/local-runner`](https://github.com/webdriverio/webdriverio) | MIT |
-| [`@wdio/mocha-framework`](https://github.com/webdriverio/webdriverio) | MIT |
-| [`@wdio/native-types`](https://github.com/webdriverio/desktop-mobile) | MIT |
-| [`@wdio/spec-reporter`](https://github.com/webdriverio/webdriverio) | MIT |
-| [`@wdio/types`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@yao-pkg/pkg`](https://github.com/yao-pkg/pkg) | MIT |
 | [`@yarnpkg/cli-dist`](https://github.com/yarnpkg/berry) | BSD-2-Clause |
 | [`cytoscape`](https://github.com/cytoscape/cytoscape.js) | MIT |
 | [`cytoscape-cose-bilkent`](https://github.com/cytoscape/cytoscape.js-cose-bilkent) | MIT |
 | [`dayjs`](https://github.com/iamkun/dayjs) | MIT |
 | [`debug`](https://github.com/debug-js/debug) | MIT |
-| [`electron`](https://github.com/electron/electron) | MIT |
-| [`electron-builder`](https://github.com/electron-userland/electron-builder) | MIT |
 | [`esbuild`](https://github.com/evanw/esbuild) | MIT |
 | [`eslint-plugin-sonarjs`](https://github.com/SonarSource/SonarJS) | LGPL-3.0-only |
 | [`execa`](https://github.com/sindresorhus/execa) | MIT |
-| [`fake-indexeddb`](https://github.com/dumbmatter/fakeIndexedDB) | Apache-2.0 |
 | [`fast-check`](https://github.com/dubzzz/fast-check) | MIT |
+| [`http-server`](https://github.com/http-party/http-server) | MIT |
 | [`istanbul-lib-report`](https://github.com/istanbuljs/istanbuljs) | BSD-3-Clause |
 | [`jscpd`](https://github.com/kucherenko/jscpd) | MIT |
 | [`jsdom`](https://github.com/jsdom/jsdom) | MIT |
-| [`knip`](https://github.com/webpro-nl/knip) | ISC |
 | [`lefthook`](https://github.com/evilmartians/lefthook) | MIT |
 | [`lightningcss`](https://github.com/parcel-bundler/lightningcss) | MPL-2.0 |
+| [`mermaid`](https://github.com/mermaid-js/mermaid) | MIT |
 | [`oxlint`](https://github.com/oxc-project/oxc) | MIT |
 | [`oxlint-tsgolint`](https://github.com/oxc-project/tsgolint) | MIT |
 | [`playwright`](https://github.com/microsoft/playwright) | Apache-2.0 |
@@ -240,7 +192,6 @@ External packages **directly declared** only by repository tooling, test infrast
 | [`vitepress`](https://github.com/vuejs/vitepress) | MIT |
 | [`vitepress-plugin-mermaid`](https://github.com/emersonbottero/vitepress-plugin-mermaid) | MIT |
 | [`vitest`](https://github.com/vitest-dev/vitest) | MIT |
-| [`webdriverio`](https://github.com/webdriverio/webdriverio) | MIT |
 
 `eslint-plugin-sonarjs` (LGPL-3.0-only) and `lightningcss` (MPL-2.0) run only as development tooling; their code is not linked into or distributed with any DeepSeek Harness artifact.
 
@@ -254,12 +205,6 @@ Direct dependencies of the `pyproject.toml` manifests, plus `uv` as the developm
 | [`pydantic`](https://github.com/pydantic/pydantic) | MIT | runtime dependency of `deepseek-harness-sdk` |
 | [`pytest`](https://github.com/pytest-dev/pytest) | MIT | test-only |
 | [`uv`](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | development workflow tool |
-
-## Fetched at build time
-
-| Package | License | Role |
-| --- | --- | --- |
-| [`@yao-pkg/pkg`](https://github.com/yao-pkg/pkg) | MIT | invoked by `scripts/build-exe-for-python-sdk.ts` to assemble the single-file SDK runtime executable |
 
 ## First-party native packages
 

@@ -1,15 +1,15 @@
 /** Web subagent catalog, navigation, and addressed-session composer owner. */
-import type {
-  ClientContext, SessionId, SubagentAddress,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ComposerChainProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import {
-  SubagentHeaderAction, SubagentHeaderLineage, type SubagentCatalogInjected,
-} from './SubagentHeaderLineage.tsx'
+import { SubagentHeaderLineage, type SubagentCatalogInjected } from './SubagentHeaderLineage.tsx'
 import {
   SubagentReadOnlyComposer, type SubagentReadOnlyMatch,
 } from './SubagentReadOnlyComposer.tsx'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import { en, NS, zh, type SubagentKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -29,25 +29,15 @@ export type {
 /** Required services for conversation slots and session navigation. */
 export const inject = ['sessions', 'slots', 'locale']
 
-/** Durable Side Chat label prefix; catalog rows with this title open as sidebar tabs. */
-const SIDE_LABEL_PREFIX = 'Side: '
-
-/** Optional Better Sidebar face used to open Side Chat rows without changing shell selection. */
-interface SidebarOpenFace {
-  isTabEnabled?(id: string): boolean
-  setPanelOpen?(open: boolean): void
-  openTab?(
-    seed: { type: string; id?: string; title?: string; meta?: unknown },
-    scope?: { sessionId: SessionId },
-  ): void
-}
-
 /** Claim the composer for one-shot history or an unavailable continuation owner. */
 function selectReadOnlySubagent(owner: ComposerChainProps): SubagentReadOnlyMatch | null {
   const subagent = owner.session?.subagent
   if (subagent === undefined || subagent === null) return null
   if (subagent.address.mode === 'one-shot') return { reason: 'one-shot' }
-  if (subagent.parentAvailable) return null
+  // The parent catalog is fetched ahead of the selected Session. Until it
+  // resolves, leave the normal disabled composer in place instead of briefly
+  // claiming that the parent is offline.
+  if (subagent.parentAvailable !== false) return null
   // A RUNNING parent-offline continuable child keeps the default composer:
   // its input is disabled there, but the same primary Stop stays available so
   // the child can be interrupted. Once it stops, this takeover returns.
@@ -61,34 +51,9 @@ function selectReadOnlySubagent(owner: ComposerChainProps): SubagentReadOnlyMatc
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-subagent: dictionaries')
   const sessions = ctx.sessions
-  const openCatalogChild = (address: SubagentAddress): void => {
-    const list = sessions.list.getSnapshot()
-    const summary = list.byId[address.childSessionId]
-    const catalogLabel = list.subagentsByParent[address.parentSessionId]?.entries
-      .find(entry => entry.kind === 'child' && entry.id === address.childSessionId)
-    const label = summary?.displayTitle
-      ?? (catalogLabel?.kind === 'child' ? catalogLabel.label : undefined)
-    if (label?.startsWith(SIDE_LABEL_PREFIX)) {
-      // Optional at gesture time: this package does not inject betterSidebar.
-      const sidebar = ctx.get('betterSidebar') as SidebarOpenFace | undefined
-      if (sidebar?.openTab !== undefined && sidebar.isTabEnabled?.('sidechat') !== false) {
-        const title = label.slice(SIDE_LABEL_PREFIX.length)
-        if (list.current !== address.parentSessionId) sessions.open(address.parentSessionId)
-        sidebar.setPanelOpen?.(true)
-        sidebar.openTab({
-          type: 'sidechat',
-          id: `sidechat:${address.childSessionId}`,
-          title,
-          meta: { threadId: address.childSessionId },
-        }, { sessionId: address.parentSessionId })
-        return
-      }
-    }
-    sessions.openSubagent(address)
-  }
   const catalogActions = (_parentSessionId: SessionId): SubagentCatalogInjected => ({
     openChild(address: SubagentAddress) {
-      openCatalogChild(address)
+      sessions.openSubagent(address)
     },
     refresh(parentSessionId: SessionId) {
       void sessions.refreshSubagents(parentSessionId)
@@ -104,16 +69,6 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: catalogActions,
     }, SubagentHeaderLineage),
-  )
-  ctx.slots.inject(
-    'conversation.session.header.actions',
-    () => ctx.slots.register({
-      name: 'conversation.session.header.actions',
-      id: 'subagent-descendants',
-      order: 10,
-      locale: NS,
-      inject: catalogActions,
-    }, SubagentHeaderAction),
   )
   ctx.slots.inject(
     'conversation.composer',

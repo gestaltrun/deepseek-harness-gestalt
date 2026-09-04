@@ -5,7 +5,6 @@
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type {} from '@deepseek-ai/dsh-session/types'
-import type {} from '@deepseek-ai/dsh-session-projection/types'
 
 /** Stable reminder identity that is unique and never reused within one session. */
 export type ScheduleId = Branded<'ScheduleId'>
@@ -83,20 +82,6 @@ export interface ScheduleDeleteChange {
   readonly id: ScheduleId
 }
 
-/** Pauses one currently deliverable reminder without changing its target. */
-export interface SchedulePauseChange {
-  readonly version: 1
-  readonly operation: 'pause'
-  readonly id: ScheduleId
-}
-
-/** Resumes one paused reminder without changing its target. */
-export interface ScheduleResumeChange {
-  readonly version: 1
-  readonly operation: 'resume'
-  readonly id: ScheduleId
-}
-
 /** Records that one active one-shot reminder entered the durable dispatch history. */
 export interface OneShotScheduleDispatchChange {
   readonly version: 1
@@ -117,35 +102,21 @@ export interface EveryScheduleDispatchChange {
 export type ScheduleDispatchChange = OneShotScheduleDispatchChange | EveryScheduleDispatchChange
 
 /** Strict version-1 durable Schedule mutation union. */
-export type ScheduleChange =
-  | ScheduleCreateChange
-  | ScheduleDeleteChange
-  | SchedulePauseChange
-  | ScheduleResumeChange
-  | ScheduleDispatchChange
+export type ScheduleChange = ScheduleCreateChange | ScheduleDeleteChange | ScheduleDispatchChange
 
 /** Current delivery timing derived from the durable record and wall clock. */
-export type ScheduleState = 'scheduled' | 'overdue' | 'paused'
+export type ScheduleState = 'scheduled' | 'overdue'
 
 /** Fixed v1 delivery boundary: the original session must be live. */
 export type ScheduleDeliveryMode = 'session-local'
 
-/** Complete model-facing view of one retained reminder. */
+/** Complete model-facing view of one active reminder. */
 export type ScheduleView = ScheduleRecord & {
-  /** Current timing or durable delivery suspension. */
+  /** Whether the target remains in the future. */
   readonly state: ScheduleState
   /** Reminder delivery never leaves the owning session. */
   readonly deliveryMode: ScheduleDeliveryMode
 }
-
-/** Whole projected value for one retained reminder. */
-export type ScheduleProjectionItem = ScheduleRecord & {
-  /** Durable delivery suspension; timing state is derived by the Client clock. */
-  readonly paused: boolean
-}
-
-/** Current retained reminders in their original creation order. */
-export type ScheduleProjection = readonly ScheduleProjectionItem[]
 
 /** Management operations whose persistence barrier may be uncertain. */
 export type SchedulePersistenceOperation = 'create' | 'list' | 'delete'
@@ -228,15 +199,15 @@ export type ScheduleToolError =
 /** Canonical `schedule_create` value. */
 export type ScheduleCreateValue = ScheduleView | ScheduleToolError
 
-/** Canonical `schedule_list` value containing retained active and paused reminders. */
+/** Canonical `schedule_list` value. */
 export type ScheduleListValue = ScheduleView[] | ScheduleToolError
 
-/** Successful active-or-paused `schedule_delete` value, including the non-mutating not-found result. */
+/** Successful `schedule_delete` value, including the non-mutating not-found result. */
 export type ScheduleDeleteResult =
   | { readonly id: ScheduleId; readonly deleted: true }
   | { readonly id: ScheduleId; readonly deleted: false; readonly code: 'schedule_not_found' }
 
-/** Canonical `schedule_delete` value for retained active or paused reminders. */
+/** Canonical `schedule_delete` value. */
 export type ScheduleDeleteValue = ScheduleDeleteResult | ScheduleToolError
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -251,7 +222,7 @@ declare module '@deepseek-ai/dsh-session/types' {
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
-    /** Retained Session-owned reminders, excluding an inherited fork prefix. */
-    schedules: ScheduleProjection
+    /** Complete active reminders owned by this Session's post-fork suffix. */
+    schedule: readonly ScheduleRecord[]
   }
 }

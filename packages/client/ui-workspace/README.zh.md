@@ -1,40 +1,121 @@
+---
+description: "dsh Web 客户端的共享 Workspace 浏览器与选择器插件：分组或扁平的会话行、添加/重命名/重排序、搜索、fork、归档，以及目录流选取子 slot。"
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-client-ui-workspace
 
 [English](README.md) | 中文
 
-共享 Workspace 浏览器与选择器插件。`WorkspaceBrowser` 填充侧边栏的 `sidebar.workspaces` slot，`WorkspacePicker` 则填充页面局部 Session Intent 主视觉区的 `conversation.hero.workspace` slot；两个界面使用同一套 Workspace 菜单和添加流程。
+## 概述
 
-`./presentation` 入口接收 Client Runtime 的原始 `SessionListState` 与 `WorkspaceView` 投影。`expandedSessionGroups` 执行与 `WorkspaceBrowser` 相同的 `deriveGroups` owner，`SessionListPresentation` 则执行同一个 `SessionNodeItem` 行，但不提供 Desktop 专属的 rename、fork 或 archive capability。每个公共 list 都提供自己的 accessible tree label，并拥有一个支持 Arrow、Enter 与 Space 的 roving tab stop；Desktop owner 省略 `tabIndex` 时，裸 `SessionNodeItem` 不会自行增加 tab stop。因此，窄屏产品 shell 可复用 Desktop 的分组、状态、无障碍和行语义，而不创建平行 Session 摘要或列表 renderer。
+`dsh-client-ui-workspace` 是 dsh Web 客户端的共享 Workspace 浏览器与选择器：用户在侧边栏浏览分组或扁平的 Session 行，在 Session Intent 主视觉区为新会话选择 Workspace，并可用添加、重命名、重排序、搜索、fork 与归档操作管理 Workspace 与 Session；两个界面共用同一套 Workspace 菜单与添加流程。待处理的用户交互以琥珀色警告点呈现，活动 Schedule projection 会在普通行与搜索结果中显示不可交互的闹钟，共享侧边栏投影还会隐藏 subagent 来源的会话。不同的规范化路径仍作为由 id 区分的独立 Workspace；添加文件夹走目录流子 slot，由组合的选择器包 client half 填充。
 
-该浏览器通过全局运行时钩子将 Session 行渲染为分组或扁平形式，并负责 Workspace 添加／重命名／重排序以及 Session 重排序。每个 Workspace 会记住自身是关闭还是显示 Session；打开后默认显示五条 Session，其余条目通过临时的**展开其余**控件显示，而关闭并重新打开整个 Workspace 后会恢复为五条。从 Workspace 行创建 Session 时会先打开该分组，使 Session 状态到达后新行保持可见。新的 pending 接收 Session 到达时同样会打开其邀请绑定的 Workspace，没有 Workspace 记账时才打开 Ungrouped，且不移动当前 selection；之后的人类折叠会保持，直至同一分组再到达一条 pending Session。Workspace 列表基线就绪后，浏览器持久化的展开状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 和单列表记账。视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 和跨 Workspace 的单列表则从最近更新时间顺序初始化。**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续 user prompt 或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表因没有单一 Workspace 记账，其顺序始终只保存在浏览器本地。单列表没有父级层次，因此不显示空的左侧状态槽；Session 存在可见状态时仍保留该槽。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
+## 目录
 
-折叠搜索是视图和添加操作旁的一枚区头按钮。在轨道中，添加和搜索会渲染为沿外壳共用横向进入路径移动的 36px 控件。激活搜索后，输入框会扩展并占据区头；点击外部只会收起经清除首尾空白后为空的查询——但轨道搜索手势仍在进行期间（直至列滑动结束、焦点落入输入框）除外，这样触发展开的那次点击不会收起它刚打开的搜索——而清除控件总会重置并收起搜索。非空白查询会以单一扁平结果列表替代任一浏览模式：不区分大小写的标题和 Workspace 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。英文搜索输入框及其防御性请求路径会移除 NUL，将查询限制在传输 schema 规定的 500 个 UTF-16 代码单元内且不会拆分代理项对，并保留现有的防抖与取消行为。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，同时给出警告。列表最多显示 20 条结果，并会在查询过宽时提示用户缩小范围；打开所选 Session 时既不会清除查询，也不会跳转至特定事件。
+- [使用本包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [进一步探索](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与延期工作](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
 
-该选择器通过全局 `useWorkspaces` hook 列出真实的 Host Workspace 实体。选择 Workspace 会调用 slot owner 的 `onPick` 回调，重新定位前端 Session 对象。不同的规范化路径即使 basename 和显示标题相同，仍会作为由 id 区分的独立 Workspace；侧边栏的悬停详情把 POSIX 家目录及其后代显示为 `~`／`~/…`，Windows 路径保持原样。每个注册各自声明一个**目录流子 slot**（`single` kind：`conversation.hero.workspace.directoryFlow`／`sidebar.workspaces.directoryFlow`），由组合的选择器包 client half 填入其选取交互——今天是 [`-native`](../../host/directory-picker-native/README.zh.md) 后端的无渲染 OS 选择器驱动，`-browse` 组合下则是应用内浏览对话框。平铺显示的 **添加工作区…** 操作仅在当前界面的 slot 被占用时渲染（每次菜单渲染读取占用状态；slot 为空意味着该组合没有目录选择能力——seam 文档化的无流程默认行为，此时侧边栏区头直接不渲染添加按钮，而非留下一个点了没反应的按钮）。本包持有触发与接纳：占用方通过 slot 的属主交互约定（`open`/`busy`/`onPicked`/`onCancel`/`onError`）每次打开上报一个所选路径，owner 通过对象层接纳它，并等待 Workspace 列表投影刷新后才选中已提交的 Workspace；取消操作不会显示提示，错误落入可重试的文件夹对话框，其 **重新选择** 会重新打开流程。添加只有一条路径：占用者自带的新建文件夹能力已经覆盖了全新目录，因此不再单设按名称创建的对话框。菜单只在确有多个目标可选时出现——没有 Workspace 可列时，锚点手势直接拉起流程，而不是弹出只有一行的浮层；在列表基线落地前，空列表不算最终结果。运行时 Session 与 Workspace 服务负责物化。Workspace 行内的 Delete 操作会打开确认框，说明保留边界、阻止重复提交，并在失败时保持打开；成功后，该分组会被移除，其 Session 则留在 Ungrouped 下。Session 行内的 Rename 操作打开同款浏览器持有的对话框，并以该行的显示标题预填：客户端不设名称冲突规则（host 负责规范化，可能以 `title-invalid` 拒绝，错误渲染在对话框告警区）；确认未修改的标题是有意允许的——这正是把当前自动标题钉住、不再被重新生成覆盖的手势。Session 行内的 Archive 操作不经确认对话框直接提交（非破坏性：日志和 workspace 记账席位保持不变），通过 `ctx.workspaces.archiveSession` 归档；归档集合回声落地后，该行从所有分组视图——workspace 分组、Ungrouped、内容搜索和平铺列表——中消失，失败只作为控制台诊断输出，树保持不变。空白的「新会话」行只是占位符：不渲染行菜单和时间标签（其中还没有发生任何事），重命名、fork 和归档都从首条提示词落地后才可用。
+-----
 
-Workspace 行的 ⋯ 菜单以**工作区设置**为首项。设置对话框是一页（`min(820px)` × `min(760px)`）：带名称的标题、路径、Git remote 代码行，以及协作卡片。云项目创建只需必填名称；已绑定项目的成员管理覆盖每行名册的头像、显示名、角色选择、职能标签编辑、在线点和移除，以及按 GitHub 登录名邀请（含可授予角色选择）和在设置重开时重新加载的权威可撤回待确认邀请行。Git remote 为可选项，有值时只读；非 Git Workspace 或没有 `origin` 的 checkout 仍会以规范化的 `local://workspace/<id>` remote 创建云项目。所有操作都经由可选的 `projectMembership` gateway prop 路由，由 Desktop 组合适配 `@deepseek-ai/dsh-project-membership-client` 并走 `/v1/projects` 路由；没有该 gateway 的组合仍显示菜单项，但不渲染升级主体。打开设置时会独立加载当前 Account 已有的 Project 与本地 Git remote，因此未绑定的 `projectByRemote` 404 不会清掉已成功读到的 origin。恢复时优先使用该 origin，否则使用该 Workspace 的 `local://workspace/<id>` remote，再在渲染名册前读取持久化的精确本地 binding。部分完成的创建若缺少 binding 会被修复；若 binding 已指向另一个 checkout，则界面报告冲突，绝不会仅因两个 checkout 同源就迁移 binding。创建 Project 会在结果到达界面前持久化 founder 的 Account／Project／Workspace binding。15 秒一次的待确认邀请轮询驱动两步邀请向导：第一张卡展示邀请人、Project、授予角色与可信 bound remote，并提供接受／拒绝，随后是必选的本地工作区关联步骤。关联候选项使用 checkout basename。decide 若报告 `INVITATION_NOT_PENDING`／`INVITATION_NOT_FOUND`／已撤回，向导关闭、从后续轮询丢掉该 id，并且不展示 Electron IPC 前缀。关闭关联步骤不会改变仍待确认邀请上的授予角色。Host 以无 shell 方式读取每个 checkout 的 `origin`，把 remote 一致的工作区标注「同源推荐」、已知不同源标注「异源」，也可让用户选择父目录，把邀请 remote 克隆并注册为新 Workspace。接受操作先持久化精确 Account／Project／Workspace binding，再提交 Platform membership；取消不会提交两者。没有「暂不关联」，关闭向导不做任何决定，邀请回到待确认池中。
+<a id="use-this-package"></a>
+## 使用本包
 
-Workspace 和 Session 悬浮卡片会复制对应行被截断的值：激活 Workspace 卡片会写入其完整目录路径，激活非空白 Session 卡片则会写入其完整显示标题。临时的空白「新会话」卡片保持只读，因为其本地化标签是占位文案，并非会话内容。只有浏览器接受剪贴板写入后，卡片才会显示由字典提供的已复制状态。
+用侧边栏浏览 Workspace 及其 Session、重排它们并新建会话；在 Session Intent 主视觉区用选择器为新会话选择 Workspace。打开的 Workspace 默认显示五条非空白 Session，并在首条提示词落地前把当前选中的空白**新会话**作为一条临时额外行。**展开其余**会显示隐藏条目；关闭再打开 Workspace 会恢复该折叠投影。
 
-Session 行内的 fork 操作在源会话最后一个已完成轮次处 fork，在客户端递增继承的持久化标题后再打开子会话；尾部半角或全角括号编号会原样式递增，无编号标题追加 ` (1)`。源会话与子会话在 workspace 组内始终作为同级行展示，谱系只保留为 session 数据。Fork 或改名失败都不会改变当前选中项，改名失败时已创建的子会话仍会留在列表中。
+### 重排序与视图选项
 
-Session 行渲染运行时的实时 `pendingInteraction` 分类：审批显示**等待审批**，计划审阅显示**计划待审**，普通问题显示**等待回答**。每个待处理交互都使用一枚琥珀色警告点，优先级高于运行指示器；普通行的悬浮卡片重复显示本地化状态，普通行和搜索结果行则都以相同文本提供面向辅助技术的视觉隐藏标签。运行状态使用蓝色指示器及其隐藏标签；空闲行会保留空的状态槽位。
+视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续 user prompt 或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表的顺序始终只保存在浏览器本地。折叠分组的拖拽边界按渲染行确定，并把来源行放在中间隐藏行之前，因此拖拽不会隐藏来源行。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
 
-两个目标 slot 都由其他插件声明，因此 `apply` 使用 `slots.inject()` 在各自的声明生命周期内完成注册，并在目标 slot 的声明恢复后重新注册。
+### 搜索
 
-共享侧边栏投影会隐藏持久化 Session 摘要中带有 `origin: 'subagent'` 的行；用户从所选父级的 subagent 页头目录进入这些对话。每个可见的普通行都会在经不间断的 subagent 谱系可达的任一后代运行时继承蓝色活动指示器；其悬停与无障碍文本会报告确切的运行中后代数量，同时不会把空闲 parent 描述为正在运行。普通 fork 仍然可见，并会终止此聚合，因为仅有谱系不会设置该 origin。待处理的用户交互优先于会话自身的运行中状态，二者无论哪一项存在都会保持为行的主要状态，而后代活动仍作为独立的悬停与无障碍状态保留。两者均不存在时，后代活动优先于绿色的未查看完成提醒；最后一个运行中的后代停止后，该提醒会重新出现。运行时仍保留隐藏行，供对话、标题与已寻址传输状态使用。
+折叠搜索是视图和添加操作旁的一枚区头按钮：激活后输入框会扩展并占据区头。非空白查询会以单一扁平结果列表替代任一浏览模式——不区分大小写的标题和 Workspace 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，同时给出警告。列表最多显示 20 条结果，打开所选 Session 时不会清除查询。
 
+### 管理会话
+
+Session 行内的 Rename 操作打开一个以该行显示标题预填的对话框；确认未修改的标题是有意允许的——这正是把当前自动标题钉住、不再被重新生成覆盖的手势。Archive 不经确认对话框直接提交，归档集合回声落地后，该行从所有分组视图中消失。Fork 在源会话最后一个已完成轮次处 fork，在客户端递增继承的持久化标题后再打开子会话。Workspace 行内的 Delete 操作会打开确认框，说明保留边界；成功后该分组被移除，其 Session 则留在 Ungrouped 下。
+
+### 待处理交互
+
+Session 行渲染运行时的实时 `pendingInteraction` 分类：审批显示**等待审批**，计划审阅显示**计划待审**，普通问题显示**等待回答**。每个待处理交互都使用一枚琥珀色警告点，优先级高于运行指示器。
+
+### 活动 Schedule 标识
+
+分组与平铺 Session 行以及搜索结果会在 `SessionSummary.projectionValues.schedule` 为非空数组时显示一枚轮廓闹钟。标识位于标题之后；普通行的更新时间仍位于标识之后，搜索结果则没有更新时间。它不是按钮，没有独立 pointer 行为或 Tab stop，点击所在区域仍会打开整行。本地化 tooltip 与同义读屏标签均为**有活动定时任务**。
+
+对于 cold Session，该值有意采用尽力而为语义。身份匹配且可用的 projection-cache 行可以在不打开 Session 的情况下预热闹钟；cache 缺失或陈旧可能造成短暂漏显或残留。标识只表示当前列表值包含尚未 dispatch 或 delete 的 Schedule 记录，不表示 Schedule runtime 当前 live 或能够唤醒该 Session。
+
+-----
+
+<a id="understand-the-implementation"></a>
+## 理解实现
+
+<details>
+<summary>实现细节——点击展开</summary>
+
+本包是一条组合：两个目标 slot 都由其他插件声明，因此 `apply` 使用 `slots.inject()` 在各自的声明生命周期内完成注册，并在目标 slot 的声明恢复后重新注册。
+
+### 目录流子 slot
+
+每个注册各自声明一个**目录流子 slot**（`single` kind：`conversation.hero.workspace.directoryFlow`／`sidebar.workspaces.directoryFlow`），由组合的选择器包 client half 填入其选取交互——`-native` 后端的无渲染 OS 选择器驱动，`-browse` 组合下则是应用内浏览对话框。平铺显示的**添加工作区…** 操作仅在当前界面的 slot 被占用时渲染；slot 为空意味着该组合没有目录选择能力。本包持有触发与接纳：占用方通过 slot 的属主交互约定（`open`/`busy`/`onPicked`/`onCancel`/`onError`）每次打开上报一个所选路径，owner 通过对象层接纳它，并等待 Workspace 列表投影刷新后才选中已提交的 Workspace。
+
+### 视图状态
+
+Workspace 列表基线就绪后，浏览器持久化的展开状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 与单列表记账。真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 与跨 Workspace 单列表从最近更新时间顺序初始化。共享侧边栏投影会隐藏持久化 Session 摘要中带有 `origin: 'subagent'` 的行；每个可见普通行都会在经不间断的 subagent 谱系可达的任一后代运行时继承蓝色活动指示器。同一份纯派生还会为分组、平铺与搜索节点读取列表 projection value 中的 Schedule key；本包只使用纯类型依赖 `@deepseek-ai/dsh-schedule/client`，不会导入 Schedule runtime 或 `ui-schedule`。
+
+### 悬浮卡片
+
+Workspace 与 Session 悬浮卡片会复制对应行被截断的值：激活 Workspace 卡片会写入其完整目录路径，激活非空白 Session 卡片则会写入其完整显示标题。临时的空白「新会话」卡片保持只读，因为其本地化标签是占位文案，并非会话内容。
+
+</details>
+
+-----
+
+<a id="further-exploration"></a>
+## 进一步探索
+
+以下页面覆盖侧边栏宿主、主视觉区界面与选取后端。
+
+- [ui-sidebar](../ui-sidebar/README.zh.md)——承载 `sidebar.workspaces` 子 slot 的侧边栏外壳。
+- [ui-conversation](../ui-conversation/README.zh.md)——承载 Session Intent 主视觉区选择器子 slot 的聊天界面。
+- [directory-picker-native](../../host/directory-picker-native/README.zh.md)——填充目录流子 slot 的 OS 选择器后端。
+- [Workspace Controller](../../api/workspace-controller/README.zh.md)——负责 Workspace 与排序的 Host 变更和框架无关 Client 投影。
+
+-----
+
+<a id="model-experience"></a>
 ## 模型体验
 
-无。选择器属于浏览器界面；这里没有任何内容进入模型请求。
+无。该包是浏览器端 UI 插件层，不注册任何面向模型的内容。
 
 #### KV Cache 影响
 
 无；该包既不组装也不发送提供方请求。
 
-## 已知限制与暂缓事项
+## 已知限制与延期工作
 
-- **没有模糊内容搜索或事件深链接**：内容后端采用字面 token／短语匹配，选择结果会打开 Session，而不是匹配的事件。
+<a id="known-limitations-and-deferred-work"></a>
+
+
+这些限制定义搜索深度、归档界面与选取载体；它们是当前包约束。
+
+- **没有模糊内容搜索或事件深链接**：内容后端采用字面 token/短语匹配，选择结果会打开 Session，而不是匹配的事件。
 - **没有 Session 删除与取消归档控件**：会话可以归档，但已归档会话没有查看或取消归档入口；删除 Workspace 注册记录不会删除 Session。
-- **待处理的用户交互不会聚合到折叠的真实 Workspace 分组上**：折叠 Workspace 内正在等待的行不会点亮分组头指示，只有展开该分组后才可见；新 pending 接收 Session 到达时会打开其邀请绑定的 Workspace，没有 Workspace 记账时才打开 Ungrouped。
-- **原生文件夹选择依赖本地 Host 载体**：在 `-native` 组合下，进程内部署或远程浏览器部署无法打开本地操作系统对话框；模态框会显示平台故障，并允许重试。可远程的选取是 `-browse` 组合的应用内流程。
+- **待处理的用户交互不会聚合到折叠的分组上**：折叠分组内正在等待的行不会点亮分组头指示，只有展开该分组后才可见。
+- **原生文件夹选择依赖本地 Host 载体**：在 `-native` 组合下，进程内部署或远程浏览器部署无法打开本地操作系统对话框；可远程的选取是 `-browse` 组合的应用内流程。
+
+<a id="dev-note"></a>
+### 开发备注
+
+<details>
+<summary>维护者的工作上下文——点击展开</summary>
+
+无。
+
+</details>
+
+**运行时不变式：** 不发布伴生入口。这是纯消费插件，只注册展示组件和 locale dictionary；inject face 是无状态 RPC wrapper 加 create-and-open 调用，不发出事件或持有跨插件可变状态。

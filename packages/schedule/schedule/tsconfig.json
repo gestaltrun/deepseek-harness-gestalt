@@ -39,9 +39,6 @@
       "path": "../../session/session-projection"
     },
     {
-      "path": "../../typert/protocol"
-    },
-    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

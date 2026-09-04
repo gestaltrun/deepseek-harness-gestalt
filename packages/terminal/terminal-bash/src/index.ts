@@ -4,18 +4,15 @@
  * @module @deepseek-ai/dsh-terminal-bash
  */
 
-import { randomUUID } from 'node:crypto'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { TerminalBackendCleanupError } from '@deepseek-ai/dsh-terminal'
-import type { TerminalBackend, TerminalBackendSpawnSpec } from '@deepseek-ai/dsh-terminal'
+import type { TerminalBackend, TerminalBackendSpawnSpec, TerminalSendOperation } from '@deepseek-ai/dsh-terminal'
 import type { SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
-import { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import { ENCODING_PREAMBLE } from '@deepseek-ai/dsh-pwsh-local'
 import { type Config, type ResolvedConfig, resolveConfig, type ShellDialect, validateConfig } from './config.ts'
 import { LocalPtySession } from './session.ts'
@@ -26,12 +23,13 @@ export type { Config as TerminalLocalConfig } from './config.ts'
 
 /** Cordis plugin name. */
 export const name = 'terminal-bash'
-/** Required services: PTY registry, shared confinement policy, and process substrate. */
-export const inject = ['terminals', 'sandboxPolicy', 'subprocess']
+/** Required services: terminal registry, shared confinement policy, projection registry, and process substrate. */
+export const inject = ['terminals', 'sandboxPolicy', 'sessionProjections', 'subprocess']
 
 interface SandboxModeFenceState {
   pty: Context['terminals']
   sandboxPolicy: Context['sandboxPolicy']
+  sessionProjections: Context['sessionProjections']
 }
 
 const sandboxModeFences = new WeakMap<Agent, SandboxModeFenceState>()
@@ -41,15 +39,21 @@ function ensureSandboxModeFence(ctx: Context, owner: Agent): void {
   if (existing !== undefined) {
     existing.pty = ctx.terminals
     existing.sandboxPolicy = ctx.sandboxPolicy
+    existing.sessionProjections = ctx.sessionProjections
     return
   }
-  const state: SandboxModeFenceState = { pty: ctx.terminals, sandboxPolicy: ctx.sandboxPolicy }
+  const state: SandboxModeFenceState = {
+    pty: ctx.terminals,
+    sandboxPolicy: ctx.sandboxPolicy,
+    sessionProjections: ctx.sessionProjections,
+  }
   sandboxModeFences.set(owner, state)
   owner.ctx.on('internal/dispatch', (_mode, eventName, args) => {
     if (eventName !== 'session/event') return
     const [session, event] = args as [Session, SessionEvent]
     if (session !== owner.session || event.type !== 'sandbox/mode') return
-    const currentMode = effectiveSandboxMode(session.events) ?? state.sandboxPolicy.defaultMode
+    const folded = state.sessionProjections.stateOf(session, 'sandboxMode') ?? null
+    const currentMode = folded ?? state.sandboxPolicy.defaultMode
     if (event.data.mode === currentMode || !state.pty.hasOwnerActivity(owner)) return
     throw new Error(
       `cannot change sandbox mode from "${currentMode}" to "${event.data.mode}" while persistent terminal sessions are open or being created; wait for creation to settle and close them first`,
@@ -57,11 +61,7 @@ function ensureSandboxModeFence(ctx: Context, owner: Agent): void {
   }, { global: true })
 }
 
-function childEnvironment(
-  spec: TerminalBackendSpawnSpec,
-  dialect: ShellDialect,
-  pwshHome: string | undefined,
-): Record<string, string> {
+function childEnvironment(spec: TerminalBackendSpawnSpec, dialect: ShellDialect): Record<string, string> {
   // The subprocess provider supplies its own scrubbed ambient base; these are
   // deliberate terminal-specific overrides layered after it.
   const common = {
@@ -73,17 +73,9 @@ function childEnvironment(
     DSH_PTY_SESSION_ID: spec.sessionId,
   }
   if (dialect === 'pwsh') {
-    // Spawn writes pwshHome before this call. pwsh ignores PS1/PROMPT_COMMAND;
-    // the isolated profile under that home installs the prompt. NO_COLOR
-    // keeps the renderer quiet.
-    const home = pwshHome as string
-    return {
-      ...common,
-      NO_COLOR: '1',
-      HOME: home,
-      USERPROFILE: home,
-      XDG_CONFIG_HOME: join(home, '.config'),
-    }
+    // pwsh ignores PS1/PROMPT_COMMAND; its prompt is installed by the startup
+    // bootstrap instead, and NO_COLOR keeps the renderer quiet.
+    return { ...common, NO_COLOR: '1' }
   }
   return {
     ...common,
@@ -96,57 +88,17 @@ function childEnvironment(
   }
 }
 
-const PWSH_PROMPT_HEAD = CONTROLLED_PROMPT.slice(0, Math.ceil(CONTROLLED_PROMPT.length / 2))
-const PWSH_PROMPT_TAIL = CONTROLLED_PROMPT.slice(PWSH_PROMPT_HEAD.length)
-/** Text `Write-Output` prints after the spawn `prompt` function is defined. */
-export const PWSH_SETUP_DONE = '__DSH_PWSH_SETUP_DONE__'
-const PWSH_SETUP_DONE_HEAD = PWSH_SETUP_DONE.slice(0, Math.ceil(PWSH_SETUP_DONE.length / 2))
-const PWSH_SETUP_DONE_TAIL = PWSH_SETUP_DONE.slice(PWSH_SETUP_DONE_HEAD.length)
 /**
- * pwsh `prompt` function written at spawn, then a `Write-Output` of
- * {@link PWSH_SETUP_DONE}. OSC `133;D;` + BEL is built with `[char]27` /
- * `[char]7` because raw ESC in submitted input is unreliable under
- * PSReadLine. The printable prompt and the done token are each two
- * concatenated literals so a PTY echo of this source cannot match either.
+ * The pwsh prompt function that emits the shared OSC `133;D;` + BEL marker
+ * before every prompt, mirroring bash's PROMPT_COMMAND. `[char]27`/`[char]7`
+ * build the control bytes at runtime because raw ESC characters in submitted
+ * input are unreliable under PSReadLine.
  */
 export const PWSH_PROMPT_SETUP =
-  `function prompt { [Console]::Write([char]27 + ']133;D;' + [int]$LASTEXITCODE + [char]7); ('${PWSH_PROMPT_HEAD}' + '${PWSH_PROMPT_TAIL}') }; Write-Output ('${PWSH_SETUP_DONE_HEAD}' + '${PWSH_SETUP_DONE_TAIL}')`
-const PWSH_INPUT_ENCODING =
-  '[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)'
-/**
- * Profile-owned stdin loop. `PSConsoleHostReadLine` and a stub PSReadLine
- * module both dumped UTF-16 `Stop` / PerfTrack text (`32479597008`,
- * `32480892916`). `[Console]::In.ReadLine` consumes a submitted LF line
- * without handing the TTY to the console host. `exit` inside
- * `Invoke-Expression` leaves the profile script; `finally` then exits
- * the process so the tool can reset (`32482201265`).
- */
-export const PWSH_STDIN_REPL =
-  'try { while ($true) { [Console]::Write((prompt)); $__dshLine = [Console]::In.ReadLine(); if ($null -eq $__dshLine) { break }; try { Invoke-Expression $__dshLine } catch { Write-Host $_ } } } finally { [Environment]::Exit($(if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 })) }'
-async function writePwshIsolatedHome(): Promise<string> {
-  const home = join(tmpdir(), `dsh-pwsh-home-${randomUUID()}`)
-  const body = `${ENCODING_PREAMBLE}\n${PWSH_INPUT_ENCODING}\n${PWSH_PROMPT_SETUP}\n${PWSH_STDIN_REPL}\n`
-  const profiles = [
-    join(home, '.config', 'powershell', 'Microsoft.PowerShell_profile.ps1'),
-    join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1'),
-  ]
-  for (const profile of profiles) {
-    await mkdir(dirname(profile), { recursive: true })
-    await writeFile(profile, body)
-  }
-  return home
-}
+  "function prompt { [Console]::Write([char]27 + ']133;D;' + [int]$LASTEXITCODE + [char]7); '" + CONTROLLED_PROMPT + "' }"
 
-function spawnArgv(
-  ctx: Context,
-  config: ResolvedConfig,
-  policy: SandboxExecutionPolicy,
-  pwshHome?: string,
-): string[] {
-  const shellArgs = pwshHome === undefined
-    ? config.shellArgs
-    : config.shellArgs.filter(arg => arg !== '-NoProfile')
-  const argv = [config.shellPath, ...shellArgs]
+function spawnArgv(ctx: Context, config: ResolvedConfig, policy: SandboxExecutionPolicy): string[] {
+  const argv = [config.shellPath, ...config.shellArgs]
   if (policy.mode === 'danger-full-access') return argv
   const sandbox = ctx.get('sandbox')
   if (sandbox === undefined) {
@@ -159,68 +111,62 @@ function spawnArgv(
 // TODO(pty-initialize-race-home): Fold this outer abort race into
 // LocalPtySession.initialize when the send-state consolidation lands; the
 // session already owns the send lifecycle the race protects.
-function startupTimeoutError(viewport: string, scrollback?: string): Error {
-  const scrollbackPart = scrollback === undefined ? '' : `; scrollback=${JSON.stringify(scrollback.slice(-400))}`
-  return new Error(
-    `PTY shell did not reach readiness before startup timeout; viewport=${JSON.stringify(viewport.slice(-400))}${scrollbackPart}`,
-  )
-}
-
 async function startupSession(
   session: LocalPtySession,
   dialect: ShellDialect,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
+  let startupOperation: TerminalSendOperation | undefined
   const start = async (): Promise<void> => {
     if (dialect === 'bash') {
       await session.initialize(signal)
       return
     }
-    // pwsh cannot install its prompt from the environment. Interactive
-    // writes after `PS …>` never execute on Linux CI. Isolated HOME plus
-    // PSReadLine (`32474124270`), PSConsoleHostReadLine (`32479597008`),
-    // and a stub PSReadLine module (`32480892916`) all failed. The
-    // isolated profile therefore runs PWSH_STDIN_REPL. Wait for
-    // PWSH_SETUP_DONE and CONTROLLED_PROMPT, and keep the home until
-    // session close. session_exit, per-send timeout, and the spawn-wall
-    // timeoutMs reject.
-    const startedAt = Date.now()
+    // pwsh cannot install its prompt from the environment. Write the prompt
+    // function through the session, pin UTF-8 output before user input, and
+    // accept only backend stdin_read evidence; echoed setup source containing
+    // the printable prompt is not readiness. Follow-up sends bridge silence
+    // settlements during startup, while one absolute deadline bounds them.
     let viewport = ''
-    let sawToken = false
     for (;;) {
-      const operation = session.startSend({
-        text: '',
-        submit: false,
+      const first = viewport.length === 0
+      startupOperation = session.startSend({
+        text: first ? ENCODING_PREAMBLE + PWSH_PROMPT_SETUP : '',
+        submit: first,
         ...signal !== undefined ? { signal } : {},
       })
-      const result = await operation.done
+      const result = await startupOperation.done
       if (result.waitReason === 'session_exit') throw new Error('PTY shell exited during startup')
-      if (result.waitReason === 'timeout') throw startupTimeoutError(result.viewport)
+      if (result.waitReason === 'timeout') throw new Error('PTY shell did not reach readiness before startup timeout')
       viewport = result.viewport
-      const scrollback = session.read({ offset: 0, count: 20 }).text
-      if (viewport.includes(PWSH_SETUP_DONE) || scrollback.includes(PWSH_SETUP_DONE)) {
-        if (!sawToken) {
-          session.motd = viewport.includes(PWSH_SETUP_DONE) ? viewport : scrollback
-          sawToken = true
-        }
-        if (viewport.includes(CONTROLLED_PROMPT) || scrollback.includes(CONTROLLED_PROMPT)) break
-      }
-      if (Date.now() - startedAt >= timeoutMs) throw startupTimeoutError(viewport, scrollback)
+      if (result.waitReason === 'stdin_read') break
     }
+    session.motd = viewport
   }
-  if (signal === undefined) {
-    await start()
-    return
+  const races: Promise<void>[] = []
+  let onAbort: (() => void) | undefined
+  if (signal !== undefined) {
+    const aborted = Promise.withResolvers<never>()
+    onAbort = () => { aborted.reject(signal.reason) }
+    signal.addEventListener('abort', onAbort, { once: true })
+    races.push(aborted.promise)
   }
-  const aborted = Promise.withResolvers<never>()
-  const onAbort = (): void => { aborted.reject(signal.reason) }
-  signal.addEventListener('abort', onAbort, { once: true })
+  let deadlineTimer: NodeJS.Timeout | undefined
+  if (dialect === 'pwsh') {
+    const deadline = Promise.withResolvers<never>()
+    deadlineTimer = setTimeout(() => {
+      startupOperation?.cancel()
+      deadline.reject(new Error('PTY shell did not reach readiness before startup timeout'))
+    }, timeoutMs)
+    races.push(deadline.promise)
+  }
   try {
-    signal.throwIfAborted()
-    await Promise.race([start(), aborted.promise])
+    signal?.throwIfAborted()
+    await Promise.race([start(), ...races])
   } finally {
-    signal.removeEventListener('abort', onAbort)
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer)
+    if (signal !== undefined && onAbort !== undefined) signal.removeEventListener('abort', onAbort)
   }
 }
 
@@ -246,42 +192,26 @@ export class BashTerminalBackend implements TerminalBackend {
     spec.signal?.throwIfAborted()
     ensureSandboxModeFence(this.ctx, spec.owner)
     const policy = this.ctx.sandboxPolicy.resolve({ session: spec.owner.session })
-    const pwshHome = this.config.shellDialect === 'pwsh' ? await writePwshIsolatedHome() : undefined
-    const argv = spawnArgv(this.ctx, this.config, policy, pwshHome)
+    const argv = spawnArgv(this.ctx, this.config, policy)
     if (argv[0] === undefined) throw new Error('terminal-bash: sandbox returned empty argv')
-    let session: LocalPtySession | undefined
+    const terminal = await this.spawnTerminal({
+      argv,
+      cwd: spec.cwd ?? policy.workspaceRoot,
+      env: childEnvironment(spec, this.config.shellDialect),
+      rows: this.config.rows,
+      cols: this.config.cols,
+      graceMs: this.config.disposeGraceMs,
+      signal: spec.signal,
+    })
+    const session = this.createSession(terminal, this.config)
     try {
-      const terminal = await this.spawnTerminal({
-        argv,
-        cwd: spec.cwd ?? policy.workspaceRoot,
-        env: childEnvironment(spec, this.config.shellDialect, pwshHome),
-        rows: this.config.rows,
-        cols: this.config.cols,
-        graceMs: this.config.disposeGraceMs,
-        signal: spec.signal,
-      })
-      session = this.createSession(terminal, this.config)
-      if (pwshHome !== undefined) {
-        const previousClose = typeof session.close === 'function' ? session.close.bind(session) : undefined
-        session.close = async (reason: string) => {
-          try {
-            if (previousClose !== undefined) await previousClose(reason)
-          } finally {
-            await rm(pwshHome, { recursive: true, force: true })
-          }
-        }
-      }
       await startupSession(session, this.config.shellDialect, this.config.timeoutMs, spec.signal)
       return session
     } catch (error) {
-      if (session !== undefined) {
-        try {
-          await session.close('PTY startup failed')
-        } catch (closeError: unknown) {
-          throw new TerminalBackendCleanupError(error, closeError)
-        }
-      } else if (pwshHome !== undefined) {
-        await rm(pwshHome, { recursive: true, force: true })
+      try {
+        await session.close('PTY startup failed')
+      } catch (closeError: unknown) {
+        throw new TerminalBackendCleanupError(error, closeError)
       }
       throw error
     }

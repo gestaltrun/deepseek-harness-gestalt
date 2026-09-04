@@ -1,151 +1,91 @@
-/** Pure Schedule unit for the standard Session projection transport. */
+/**
+ * Strict Session projection of the Schedule domain's active reminder set.
+ * @module @deepseek-ai/dsh-schedule/projection
+ */
 
 import { z } from 'zod'
-import type { ZodType } from 'zod'
+import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { advanceDispatchedSchedule, decodeScheduleChange, ScheduleLogError } from './domain.ts'
-import type {
-  ScheduleChange,
-  ScheduleId,
-  ScheduleProjection,
-  ScheduleProjectionItem,
-  ScheduleRecord,
-} from './types.ts'
+import { applyScheduleChanges, decodeScheduleChange } from './domain.ts'
+import type { FoldedSchedules } from './domain.ts'
+import type { ScheduleChange, ScheduleId, ScheduleRecord } from './types.ts'
 
-/** Plain-JSON fold state persisted by the projection cache. */
-export interface ScheduleProjectionState {
-  readonly schedules: readonly { readonly record: ScheduleRecord; readonly paused: boolean }[]
-  readonly seenIds: readonly ScheduleId[]
+/** Persisted projection state: the immutable inherited cut plus the complete Schedule fold. */
+export interface ScheduleProjectionState extends FoldedSchedules {
+  readonly inheritedEventCount: SessionLogOffsetType
 }
+
+const scheduleId = z.unknown().transform((value, context): ScheduleId => {
+  try {
+    const change = decodeScheduleChange({ version: 1, operation: 'delete', id: value }) as Extract<
+      ScheduleChange,
+      { operation: 'delete' }
+    >
+    return change.id
+  } catch {
+    context.addIssue({ code: 'custom', message: 'invalid Schedule id' })
+    return z.NEVER
+  }
+})
+
+const scheduleRecord = z.unknown().transform((value, context): ScheduleRecord => {
+  try {
+    const change = decodeScheduleChange({ version: 1, operation: 'create', schedule: value }) as Extract<
+      ScheduleChange,
+      { operation: 'create' }
+    >
+    return change.schedule
+  } catch {
+    context.addIssue({ code: 'custom', message: 'invalid Schedule record' })
+    return z.NEVER
+  }
+})
+
+const scheduleRecords = z.array(scheduleRecord) as unknown as z.ZodType<readonly ScheduleRecord[]>
+
+const scheduleProjectionStateSchema = z.object({
+  inheritedEventCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(SessionLogOffset),
+  active: scheduleRecords,
+  seenIds: z.array(scheduleId),
+}).strict().superRefine((state, context) => {
+  const seen = new Set(state.seenIds)
+  if (seen.size !== state.seenIds.length) {
+    context.addIssue({ code: 'custom', message: 'seen Schedule ids must be unique' })
+  }
+  const active = new Set<ScheduleId>()
+  for (const record of state.active) {
+    if (!seen.has(record.id)) {
+      context.addIssue({ code: 'custom', message: 'every active Schedule id must have been seen' })
+    }
+    if (active.has(record.id)) {
+      context.addIssue({ code: 'custom', message: 'active Schedule ids must be unique' })
+    }
+    active.add(record.id)
+  }
+}) as unknown as z.ZodType<ScheduleProjectionState>
+
+/** Projection definition sharing the Schedule domain's strict transition authority. */
+export const scheduleProjectionDefinition = {
+  key: 'schedule',
+  stateSchema: scheduleProjectionStateSchema,
+  init: (_header, inheritedEventCount) => ({ inheritedEventCount, active: [], seenIds: [] }),
+  apply: (state, event) => {
+    if (event.seq < state.inheritedEventCount || event.type !== 'schedule/change') return state
+    return {
+      inheritedEventCount: state.inheritedEventCount,
+      ...applyScheduleChanges(state, [decodeScheduleChange(event.data)]),
+    }
+  },
+  wire: {
+    viewSchema: scheduleRecords,
+    view: state => state.active,
+  },
+  stateVersion: 2,
+} satisfies ProjectionDefinition<'schedule', ScheduleProjectionState>
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
-    /** Plain retained-record state, including identities already consumed by this Session. */
-    schedules: ScheduleProjectionState
+    schedule: ScheduleProjectionState
   }
 }
-
-/**
- * Construct a fresh empty projection state.
- * @returns Plain empty state with no retained or seen identities.
- */
-export function emptyScheduleProjectionState(): ScheduleProjectionState {
-  return Object.freeze({ schedules: Object.freeze([]), seenIds: Object.freeze([]) })
-}
-
-/** Replace one retained entry without changing its create-order position. */
-function replace(
-  state: ScheduleProjectionState,
-  index: number,
-  record: ScheduleRecord,
-  paused: boolean,
-): ScheduleProjectionState {
-  const schedules = [...state.schedules]
-  schedules[index] = Object.freeze({ record, paused })
-  return Object.freeze({ schedules: Object.freeze(schedules), seenIds: state.seenIds })
-}
-
-/** Apply one decoded change, rejecting transition-invalid durable history. */
-function applyChange(state: ScheduleProjectionState, change: ScheduleChange): ScheduleProjectionState {
-  if (change.operation === 'create') {
-    if (state.seenIds.includes(change.schedule.id)) {
-      throw new ScheduleLogError(`schedule id ${JSON.stringify(change.schedule.id)} was reused`)
-    }
-    return Object.freeze({
-      schedules: Object.freeze([
-        ...state.schedules,
-        Object.freeze({ record: change.schedule, paused: false }),
-      ]),
-      seenIds: Object.freeze([...state.seenIds, change.schedule.id]),
-    })
-  }
-
-  const index = state.schedules.findIndex(schedule => schedule.record.id === change.id)
-  if (index < 0) {
-    throw new ScheduleLogError(`schedule ${change.operation} targets inactive id ${JSON.stringify(change.id)}`)
-  }
-  const current = state.schedules[index]
-  /* v8 ignore next -- findIndex established the indexed entry. */
-  if (current === undefined) return state
-
-  switch (change.operation) {
-    case 'delete':
-      return Object.freeze({
-        schedules: Object.freeze(state.schedules.filter((_schedule, candidate) => candidate !== index)),
-        seenIds: state.seenIds,
-      })
-    case 'pause':
-      if (current.paused) {
-        throw new ScheduleLogError(`schedule pause targets inactive or paused id ${JSON.stringify(change.id)}`)
-      }
-      return replace(state, index, current.record, true)
-    case 'resume':
-      if (!current.paused) {
-        throw new ScheduleLogError(`schedule resume targets inactive or active id ${JSON.stringify(change.id)}`)
-      }
-      return replace(state, index, current.record, false)
-    case 'dispatch': {
-      if (current.paused) {
-        throw new ScheduleLogError(`schedule dispatch targets inactive id ${JSON.stringify(change.id)}`)
-      }
-      const next: ScheduleRecord | undefined = advanceDispatchedSchedule(current.record, change)
-      if (next !== undefined) return replace(state, index, next, false)
-      return Object.freeze({
-        schedules: Object.freeze(state.schedules.filter((_schedule, candidate) => candidate !== index)),
-        seenIds: state.seenIds,
-      })
-    }
-  }
-}
-
-/**
- * Fold one committed Session event into the Schedule projection.
- * @param state - Plain retained-record state covering prior owned events.
- * @param event - Next committed Session event.
- * @returns Updated state, or the same reference for an unrelated event.
- * @throws {@link ScheduleLogError} when durable Schedule JSON or its transition is invalid.
- */
-export function applyScheduleProjection(
-  state: ScheduleProjectionState,
-  event: SessionEvent,
-): ScheduleProjectionState {
-  if (event.type !== 'schedule/change') return state
-  return applyChange(state, decodeScheduleChange(event.data))
-}
-
-const shared = {
-  id: z.string().min(1),
-  prompt: z.string().min(1),
-  scheduledAt: z.string(),
-} as const
-
-const recordSchema = z.discriminatedUnion('kind', [
-  z.object({ ...shared, kind: z.literal('after'), afterSeconds: z.number().int().positive() }).strict(),
-  z.object({ ...shared, kind: z.literal('at') }).strict(),
-  z.object({ ...shared, kind: z.literal('every'), everySeconds: z.number().int().positive() }).strict(),
-])
-const projectionSchema = z.array(z.discriminatedUnion('kind', [
-  z.object({ ...shared, kind: z.literal('after'), afterSeconds: z.number().int().positive(), paused: z.boolean() }).strict(),
-  z.object({ ...shared, kind: z.literal('at'), paused: z.boolean() }).strict(),
-  z.object({ ...shared, kind: z.literal('every'), everySeconds: z.number().int().positive(), paused: z.boolean() }).strict(),
-])) as unknown as ZodType<ScheduleProjection>
-const projectionStateSchema = z.object({
-  schedules: z.array(z.object({ record: recordSchema, paused: z.boolean() }).strict()),
-  seenIds: z.array(z.string().min(1)),
-}).strict() as unknown as ZodType<ScheduleProjectionState>
-
-/** Schedule's fork-aware Session projection definition. */
-export const scheduleProjectionDefinition = {
-  key: 'schedules',
-  stateSchema: projectionStateSchema,
-  init: emptyScheduleProjectionState,
-  apply: applyScheduleProjection,
-  wire: {
-    viewSchema: projectionSchema,
-    view: (state: ScheduleProjectionState) => Object.freeze(state.schedules.map(({ record, paused }): ScheduleProjectionItem =>
-      Object.freeze({ ...record, paused }))),
-  },
-  eventScope: 'owned-suffix',
-  stateVersion: 1,
-} satisfies ProjectionDefinition<'schedules', ScheduleProjectionState>

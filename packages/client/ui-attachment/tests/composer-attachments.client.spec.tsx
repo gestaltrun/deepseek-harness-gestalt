@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, within } from '@testing-library/react'
+import { cleanup, fireEvent, render } from '@testing-library/react'
 import type {
   ComposerAttachment, ComposerAttachmentsOwnerProps, ComposerAttachmentsProps,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -31,9 +31,6 @@ const t = ((key: string, params?: Readonly<Record<string, unknown>>): string => 
     'image.scrollRight': '向右滚动图片',
     'image.dropBlocked': '当前无法添加图片',
     'image.dropTitle': '图片拖动到此处即可添加',
-    'annotation.pinMode': '标注图片',
-    'annotation.pinModeExit': '退出标注',
-    'annotation.gifRefuse': '动画 GIF 不能放置标注点',
   }
   if (key === 'image.remove') {
     const name = params?.name
@@ -159,64 +156,5 @@ describe('ComposerAttachments', () => {
     expect(view.getByAltText('待发送图片')).toBeTruthy()
     fireEvent.click(view.getByTitle('查看原图'))
     expect(view.getByAltText('原图')).toBeTruthy()
-  })
-
-  it('annotates a PNG preview, refuses an animated GIF, and closes the editor', () => {
-    const png = attachment('png', 'shot.png')
-    const gif = {
-      ...attachment('gif', 'animated.gif'),
-      file: new File([Uint8Array.of(1)], 'animated.gif', { type: 'image/gif' }),
-    }
-    const onPlace = vi.fn()
-    const onSelect = vi.fn()
-    const onCloseEditor = vi.fn()
-    const pinOverlayFor = (item: ComposerAttachment) => ({
-      pins: item.id === png.id ? [{ id: 'pin-1', x: 20, y: 30, index: 1 }] : [],
-      modeLabel: '标注图片',
-      exitLabel: '退出标注',
-      onPlace,
-      onSelect,
-      onCloseEditor,
-      editor: item.id === png.id ? <span>note editor</span> : undefined,
-    })
-    const view = render(<ComposerAttachments {...props({ attachments: [png, gif], pinOverlayFor })} />)
-
-    fireEvent.click(view.getAllByTitle('查看原图')[0]!)
-    expect(view.getByText('note editor')).toBeTruthy()
-    expect(view.queryByRole('alert')).toBeNull()
-    fireEvent.click(view.getByRole('button', { name: '标注图片' }))
-    expect(view.getByRole('button', { name: '退出标注' })).toBeTruthy()
-    fireEvent.click(view.getByRole('button', { name: 'Pin 1' }))
-    expect(onSelect).toHaveBeenCalledWith('pin-1')
-    const preview = view.getByRole('dialog', { name: '原图预览' })
-    const image = within(preview).getByRole('img', { name: 'shot.png' })
-    vi.spyOn(image, 'getBoundingClientRect').mockReturnValue({
-      width: 100, height: 100, top: 0, left: 0, bottom: 100, right: 100, x: 0, y: 0, toJSON: () => ({}),
-    })
-    fireEvent.click(image, { clientX: 25, clientY: 40 })
-    expect(onPlace).toHaveBeenCalled()
-    fireEvent.click(view.getByRole('button', { name: '退出标注' }))
-    expect(view.getByRole('button', { name: '标注图片' })).toBeTruthy()
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(onCloseEditor).toHaveBeenCalled()
-    expect(view.queryByRole('dialog', { name: '原图预览' })).toBeNull()
-
-    fireEvent.click(view.getAllByTitle('查看原图')[1]!)
-    fireEvent.click(view.getByRole('button', { name: '标注图片' }))
-    expect(view.getByRole('alert').textContent).toBe('动画 GIF 不能放置标注点')
-    expect(view.getByRole('button', { name: '标注图片' })).toBeTruthy()
-    fireEvent.click(within(view.getByRole('dialog', { name: '原图预览' })).getByRole('img', { name: 'animated.gif' }))
-    expect(onPlace).toHaveBeenCalledTimes(1)
-  })
-
-  it('omits the annotate control when the overlay factory returns nothing', () => {
-    const image = attachment('draft-1', 'pixel.png')
-    const view = render(<ComposerAttachments {...props({
-      attachments: [image],
-      pinOverlayFor: () => undefined,
-    })} />)
-    fireEvent.click(view.getByTitle('查看原图'))
-    expect(view.getByRole('dialog', { name: '原图预览' })).toBeTruthy()
-    expect(view.queryByRole('button', { name: '标注图片' })).toBeNull()
   })
 })

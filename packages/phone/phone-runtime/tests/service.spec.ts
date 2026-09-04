@@ -482,6 +482,26 @@ describe('phone runtime service lifecycle', () => {
     ])
   })
 
+  it('maps landscape iOS capture pixels onto swapped WDA bounds from sticky portrait screenSize', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 440, height: 956, scale: 3 },
+      }],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'tap',
+      x: 2_868,
+      y: 660,
+    })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 956, y: 220 } },
+    ])
+  })
+
   it('normalizes iOS screenshot pixels onto device logical points and caches the scale', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)

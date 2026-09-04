@@ -204,10 +204,12 @@ async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
 /**
  * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
  * Public tap and gesture coordinates are capture pixels. Android forwards
- * them unchanged; iOS reads and caches `device.info.screenSize.scale` for
- * the current runtime generation and converts them to XCTest logical points.
- * Physical handsets are valid targets; only ids absent from the latest
- * published listing fail locally before any RPC.
+ * them unchanged; iOS reads and caches `device.info.screenSize` for the
+ * current runtime generation and converts those pixels to XCTest logical
+ * points. Sticky portrait `screenSize` is swapped when capture pixels are
+ * landscape so WDA never receives an x greater than the current logical
+ * width. Physical handsets are valid targets; only ids absent from the
+ * latest published listing fail locally before any RPC.
  * @param request - Branded device id plus capture-pixel or non-coordinate input.
  * @param signal - Caller's optional cancellation signal.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids

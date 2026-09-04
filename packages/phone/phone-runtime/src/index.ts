@@ -19,7 +19,7 @@ import { readAndroidLogicalDisplay } from './android-display.ts'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
-import { ioParams, iosScreenScale } from './io.ts'
+import { ioParams, iosScreenSize, type IosScreenSize } from './io.ts'
 import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { runMobilecliScreenshot } from './screenshot-process.ts'
@@ -165,7 +165,7 @@ type ResolvedConfig = Omit<Required<Config>, 'executablePath' | 'provisioningPro
 interface IoGeneration {
   readonly client: MobilecliRpc
   readonly lifetime: AbortController
-  readonly iosScreenScales: Map<DeviceId, number>
+  readonly iosScreenSizes: Map<DeviceId, IosScreenSize>
 }
 
 function assertDurationField(name: string, value: number): void {
@@ -286,7 +286,7 @@ export class PhoneDevices extends Service {
   private child: MobilecliServerProcess | undefined
   private rpcClient: MobilecliRpc | undefined
   private publishedList: PhoneDeviceList | undefined
-  private iosScreenScales = new Map<DeviceId, number>()
+  private iosScreenSizes = new Map<DeviceId, IosScreenSize>()
   private readonly openNativeAndroidH264 = openAndroidSystemH264
   private readonly readAndroidLogicalDisplay = readAndroidLogicalDisplay
   private startupOutcome: Promise<void> | undefined
@@ -400,7 +400,7 @@ export class PhoneDevices extends Service {
       this.resolutionFailure = undefined
       this.lost = undefined
       this.lifetime = new AbortController()
-      this.iosScreenScales = new Map()
+      this.iosScreenSizes = new Map()
       this.child = new MobilecliServerProcess({
         executablePath: resolved,
         port: this.resolved.serverPort,
@@ -658,10 +658,12 @@ export class PhoneDevices extends Service {
   /**
    * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
    * Public tap and gesture coordinates are capture pixels. Android forwards
-   * them unchanged; iOS reads and caches `device.info.screenSize.scale` for
-   * the current runtime generation and converts them to XCTest logical points.
-   * Physical handsets are valid targets; only ids absent from the latest
-   * published listing fail locally before any RPC.
+   * them unchanged; iOS reads and caches `device.info.screenSize` for the
+   * current runtime generation and converts those pixels to XCTest logical
+   * points. Sticky portrait `screenSize` is swapped when capture pixels are
+   * landscape so WDA never receives an x greater than the current logical
+   * width. Physical handsets are valid targets; only ids absent from the
+   * latest published listing fail locally before any RPC.
    * @param request - Branded device id plus capture-pixel or non-coordinate input.
    * @param signal - Caller's optional cancellation signal.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -675,25 +677,25 @@ export class PhoneDevices extends Service {
     const known = this.requireKnown(request.deviceId, 'io')
     await this.whenReady(signal)
     const generation = this.captureIoGeneration()
-    const scale = await this.ioScale(generation, known, request, signal)
+    const screen = await this.ioScreen(generation, known, request, signal)
     await this.roundTripInGeneration(
       generation,
       IO_METHODS[request.method],
-      ioParams(request, scale),
+      ioParams(request, screen),
       signal,
       this.resolved.requestTimeoutMs,
     )
   }
 
-  /** Resolve and cache the iOS capture-pixel to XCTest logical-point scale. */
-  private async ioScale(
+  /** Resolve and cache the iOS capture-pixel to XCTest logical-point screen size. */
+  private async ioScreen(
     generation: IoGeneration,
     known: PhoneDeviceRef,
     request: PhoneIoRequest,
     signal?: AbortSignal,
-  ): Promise<number> {
+  ): Promise<number | IosScreenSize> {
     if (known.platform !== 'ios' || request.method === 'text' || request.method === 'button') return 1
-    const cached = generation.iosScreenScales.get(known.id)
+    const cached = generation.iosScreenSizes.get(known.id)
     if (cached !== undefined) return cached
     const result = await this.roundTripInGeneration(
       generation,
@@ -702,9 +704,9 @@ export class PhoneDevices extends Service {
       signal,
       this.resolved.requestTimeoutMs,
     )
-    const scale = iosScreenScale(result)
-    generation.iosScreenScales.set(known.id, scale)
-    return scale
+    const screen = iosScreenSize(result)
+    generation.iosScreenSizes.set(known.id, screen)
+    return screen
   }
 
   /** Capture the process, cancellation, and coordinate cache of the current generation. */
@@ -714,7 +716,7 @@ export class PhoneDevices extends Service {
     return {
       client: this.rpcClient as MobilecliRpc,
       lifetime: this.lifetime,
-      iosScreenScales: this.iosScreenScales,
+      iosScreenSizes: this.iosScreenSizes,
     }
   }
 
@@ -1178,7 +1180,7 @@ export class PhoneDevices extends Service {
     await this.startupOutcome?.catch(() => {})
     await this.queueTail
     const child = this.child
-    this.iosScreenScales.clear()
+    this.iosScreenSizes.clear()
     this.clearPublishedList()
     if (child !== undefined) await child.stop()
     if (child !== this.child) return

@@ -523,11 +523,8 @@ export class PhoneConnectionController {
       this.setPhase({ kind: 'error', failure: { kind: 'unauthorized' } })
       return
     }
-    if (this.session?.agentManaged === true) {
-      this.teardown()
-      this.lastTransient = 'unavailable'
-      this.checkAgentAfterFailure()
-    }
+    // Tap/gesture JSON-RPC errors stay on the live picture. Agent recovery
+    // is for mint, picture, and socket death — not a single out-of-bounds tap.
   }
 
   private scheduleRetry(): void {

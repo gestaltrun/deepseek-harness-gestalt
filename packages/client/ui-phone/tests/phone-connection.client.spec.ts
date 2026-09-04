@@ -367,23 +367,29 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(gateway.agentStatusDevices).toEqual(['UDID-9'])
   })
 
-  it('checks the managed Android agent immediately after a real io rejection', async () => {
-    const gateway = new FakeGateway()
-    gateway.queueMint({ session: { ...SESSION_A, agentManaged: true } })
-    gateway.queueAgentStatus({ installed: false })
-    const controller = controllerOn(gateway, new ManualScheduler())
-    controller.connect()
-    await flush()
-    gateway.lastSocket!.accept()
-    gateway.lastSocket!.receive(JSON.stringify({
-      jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'input command failed' },
-    }))
-    expect(controller.snapshot()).toEqual({ kind: 'checking-agent' })
-    await flush()
-    expect(controller.snapshot()).toEqual({
-      kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' },
-    })
-    expect(gateway.agentStatusDevices).toEqual(['emulator-5554'])
+  it('keeps a managed session live after a tap JSON-RPC error', async () => {
+    for (const session of [
+      { ...SESSION_A, agentManaged: true },
+      { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true },
+    ]) {
+      const gateway = new FakeGateway()
+      gateway.queueMint({ session })
+      const controller = new PhoneConnectionController({
+        gateway, deviceId: session.deviceId, schedule: new ManualScheduler().schedule,
+      })
+      controller.connect()
+      await flush()
+      gateway.lastSocket!.accept()
+      controller.noteSurface('h264', 2_868, 1_320)
+      expect(controller.tap(1, 0.5)).toBe(true)
+      const socket = gateway.lastSocket!
+      socket.receive(JSON.stringify({
+        jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'input command failed' },
+      }))
+      expect(controller.snapshot()).toMatchObject({ kind: 'live' })
+      expect(gateway.agentStatusDevices).toEqual([])
+      expect(socket.opened).toBe(true)
+    }
   })
 
   it('offers install or reinstall after a managed picture failure based on agent status', async () => {
@@ -764,6 +770,7 @@ describe('PhoneConnectionController io', () => {
 
   it('moves to the offline error arm when the device stops answering io', async () => {
     const gateway = new FakeGateway()
+    gateway.queueMint({ session: { ...SESSION_A, agentManaged: true } })
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
     controller.tap(0.5, 0.5)
@@ -771,6 +778,7 @@ describe('PhoneConnectionController io', () => {
       jsonrpc: '2.0', id: 1, error: { code: -32010, message: 'PHONE_DEVICE_NOT_FOUND' },
     }))
     expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
+    expect(gateway.agentStatusDevices).toEqual([])
   })
 
   it('moves to the unauthorized error arm on an upstream authorization failure', async () => {

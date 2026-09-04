@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-04-ui-phone-sidebar-picker-live-listing.md
-2026-09-04-ui-phone-sidebar-picker-live-listing.md: c971601bb3a248736bc61732d6d3d0230600c7fa
-2026-09-04-ui-phone-sidebar-picker-live-listing.zh.md: 06f849790374001f50b48c55b6258aea9b236dd6
+2026-09-04-ui-phone-sidebar-picker-live-listing.md: 77e4bd4850fb04eb020322dbbe49fe19dea8d35c
+2026-09-04-ui-phone-sidebar-picker-live-listing.zh.md: edfe85d2bbb90a7c781d44dde5332c424525b7ec

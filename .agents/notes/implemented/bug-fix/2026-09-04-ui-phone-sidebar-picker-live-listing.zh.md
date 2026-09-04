@@ -12,7 +12,7 @@ Host 已列出的 USB 真机（`GET /phone/devices` 的 `ios.reals[]`）会出�
 
 PhoneTab 与 PhoneConnectedView 订阅 Session Surface 的 `PhoneListingSource`，并在 tab 已挂载且启用时按 `PHONE_LISTING_POLL_INTERVAL_MS`（5000 ms，Host `phone-runtime` `pollIntervalMs` 默认值）轮询 `GET /phone/devices`。`startPhoneListingPoll` 持有该间隔；失败的刷新保留上一份已提交清单。设置 overlay 可以保留另一份 listing 实例；PhoneTab 与 PhoneConnectedView 使用的 Session Surface listing 自行轮询。
 
-占用不是死胡同。`showPhonePicker` 把标题改回 `手机`、把 `meta` 写成 `{}`（没有 `kind: 'device'`）。`updateTab` 只在 patch 带 `meta` 字段时写入，因此空对象就是选择器载荷。已连接视图的「选择设备」调用该辅助函数，回到带「重新检测环境」的选择器。
+占用不是死胡同。`showPhonePicker` 把标题改回选择器标题解析函数（手机 / Phone）、把 `meta` 写成 `{}`（没有 `kind: 'device'`）。`updateTab` 只在 patch 带 `meta` 字段时写入，因此空对象就是选择器载荷。已连接视图的「选择设备」调用该辅助函数，回到带「重新检测环境」的选择器。
 
 ## Alternatives considered
 

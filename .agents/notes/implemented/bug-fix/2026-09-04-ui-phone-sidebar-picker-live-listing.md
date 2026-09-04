@@ -12,7 +12,7 @@ USB reals that Host already listed (`GET /phone/devices` `ios.reals[]`) appeared
 
 PhoneTab and PhoneConnectedView subscribe to the Session Surface `PhoneListingSource` and poll `GET /phone/devices` every `PHONE_LISTING_POLL_INTERVAL_MS` (5000 ms, Host `phone-runtime` `pollIntervalMs` default) while the tab is mounted and enabled. `startPhoneListingPoll` owns that interval; a failed refresh keeps the last committed listing. Settings overlay may keep a separate listing instance; the Session Surface listing used by PhoneTab and PhoneConnectedView polls itself.
 
-Occupation is not a dead end. `showPhonePicker` `updateTab`s title `手机` and `meta: {}` (no `kind: 'device'`). `updateTab` writes `meta` only when the patch field is present, so the empty object is the picker payload. The connected view’s 选择设备 control calls that helper and returns to the picker with 「重新检测环境」.
+Occupation is not a dead end. `showPhonePicker` `updateTab`s the picker title resolver (手机 / Phone) and `meta: {}` (no `kind: 'device'`). `updateTab` writes `meta` only when the patch field is present, so the empty object is the picker payload. The connected view’s 选择设备 control calls that helper and returns to the picker with 「重新检测环境」.
 
 ## Alternatives considered
 

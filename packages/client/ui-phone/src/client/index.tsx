@@ -28,7 +28,7 @@ import {
   selectPhoneDeviceFromOverlay, waitForPhoneGate,
 } from './desktop-device-open.ts'
 import {
-  installPhoneTab, openPhoneDevicePanel, phoneDeviceTabMetaOf,
+  installPhoneTab, openPhoneDevicePanel, phoneDeviceTabMetaOf, relabelOpenPhoneTab,
   type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabOpenFace, type PhoneTabView,
 } from './registry.ts'
 import { en, NS, zh, type PhoneSettingsKey } from './locales.ts'
@@ -109,12 +109,16 @@ export function apply(ctx: ClientContext, config: Config): void {
   const scope = ctx.settingsScope.bind<PhoneSettings>({ namespace: PHONE_SETTINGS_NAMESPACE })
   const listing = createHttpPhoneListingSource()
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-phone: settings dictionaries')
+  const t = ctx.locale.bind(NS)
+  const title = (): string => t('tab')
+  const occupiedTitle = (name: string): string => `${t('occupied')}${name}`
   const tabEnabled = (): boolean => {
     const snapshot = scope.getSnapshot()
     if (snapshot.status === 'ready') return enabledValue(snapshot.value) ?? compositionEnabled
     return compositionEnabled
   }
   const sidebar = ctx.get('betterSidebar') as PhoneTabOpenFace
+  ctx.on('locale/change', () => { relabelOpenPhoneTab(sidebar, title, occupiedTitle) })
   let selectionEpoch = 0
   let activeSelection: AbortController | undefined
   ctx.effect(() => () => {
@@ -135,7 +139,7 @@ export function apply(ctx: ClientContext, config: Config): void {
       const devices = [...fresh.android, ...fresh.ios]
       const device = devices.find(candidate => candidate.id === deviceId && candidate.online)
       if (device === undefined) return
-      openPhoneDevicePanel(sidebar, () => true, device.id, device.name)
+      openPhoneDevicePanel(sidebar, () => true, device.id, device.name, occupiedTitle)
     } catch (error) {
       if (!selection.signal.aborted) throw error
     } finally {
@@ -179,6 +183,8 @@ export function apply(ctx: ClientContext, config: Config): void {
     view,
     isEnabled: tabEnabled,
     gate,
+    title,
+    occupiedTitle,
     createController: serial => new PhoneConnectionController({
       gateway: createHttpPhoneGateway(),
       deviceId: serial,

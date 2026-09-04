@@ -6,8 +6,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import {
-  assertPhoneTabSymmetry, installPhoneTab,
-  PHONE_TAB_ID, type PhoneTabView,
+  assertPhoneTabSymmetry, installPhoneTab, PHONE_TAB_ID, PHONE_TAB_TITLE,
+  phoneTabTitleOf, type PhoneTabView,
 } from './client/registry.ts'
 import { createHttpPhoneListingSource } from './client/phone-listing.ts'
 
@@ -105,6 +105,8 @@ const install: InvariantInstaller = async (ctx: Context, fail: InvariantFailure)
         view: stubView,
         isEnabled: () => false,
         gate: { snapshot: () => false, subscribe: () => () => undefined },
+        title: () => PHONE_TAB_TITLE,
+        occupiedTitle: phoneTabTitleOf,
         createController: () => {
           throw new Error('the symmetry probe never renders a tab body')
         },

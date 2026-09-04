@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildPhoneTabDescriptor, createPhoneTabSwitcher, installPhoneTab, PHONE_TAB_ID, PHONE_TAB_TITLE,
-  openPhoneDevicePanel, phoneDeviceTabMetaOf, showPhonePicker,
+  openPhoneDevicePanel, phoneDeviceTabMetaOf, phoneTabTitleOf, showPhonePicker,
   type PhoneListingSource, type PhoneTabDescriptor, type PhoneTabView,
 } from '../src/client/registry.ts'
 
@@ -67,6 +67,22 @@ class ContractSidebar {
   setPanelOpen(open: boolean): void {
     this.panelOpen = open
   }
+
+  getSnapshot(): {
+    readonly state: {
+      readonly splits: { readonly kind: 'leaf'; readonly tabs: readonly FakeTab[]; readonly active: string | null }
+      readonly bottomSplits: { readonly kind: 'leaf'; readonly tabs: readonly []; readonly active: null }
+      readonly floats: readonly []
+    }
+  } {
+    return {
+      state: {
+        splits: { kind: 'leaf', tabs: this.tabs, active: this.activeId ?? null },
+        bottomSplits: { kind: 'leaf', tabs: [], active: null },
+        floats: [],
+      },
+    }
+  }
 }
 
 function stubView(): PhoneTabView {
@@ -80,10 +96,15 @@ const NULL_SOURCE: PhoneListingSource = {
   subscribe: () => () => {},
 }
 
+const zhTitle = (): string => PHONE_TAB_TITLE
+const zhOccupiedTitle = (name: string): string => phoneTabTitleOf(name)
+const enTitle = (): string => 'Phone'
+const enOccupiedTitle = (name: string): string => `Phone · ${name}`
+
 describe('single phone tab with in-place switching', () => {
   it('opens a Settings device in the singleton visible panel', () => {
     const sidebar = new ContractSidebar()
-    openPhoneDevicePanel(sidebar, () => true, 'fbcd1d21', 'MI 8')
+    openPhoneDevicePanel(sidebar, () => true, 'fbcd1d21', 'MI 8', zhOccupiedTitle)
     expect(sidebar.tabs).toEqual([{
       id: PHONE_TAB_ID,
       type: PHONE_TAB_ID,
@@ -91,7 +112,7 @@ describe('single phone tab with in-place switching', () => {
       meta: { kind: 'device', serial: 'fbcd1d21', name: 'MI 8' },
     }])
     expect(sidebar.panelOpen).toBe(true)
-    openPhoneDevicePanel(sidebar, () => false, 'other', 'Blocked')
+    openPhoneDevicePanel(sidebar, () => false, 'other', 'Blocked', zhOccupiedTitle)
     expect(sidebar.tabs).toHaveLength(1)
   })
 
@@ -100,13 +121,15 @@ describe('single phone tab with in-place switching', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
+      title: zhTitle,
+      occupiedTitle: zhOccupiedTitle,
       switchDevice: (tabId, serial, name) => {
         sidebar.updateTab(tabId, {
-          title: `手机·${name}`,
+          title: zhOccupiedTitle(name),
           meta: { kind: 'device', serial, name },
         })
       },
-      showPicker: (tabId) => { showPhonePicker(sidebar, tabId) },
+      showPicker: (tabId) => { showPhonePicker(sidebar, tabId, zhTitle) },
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -121,13 +144,15 @@ describe('single phone tab with in-place switching', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
+      title: zhTitle,
+      occupiedTitle: zhOccupiedTitle,
       switchDevice: (tabId, serial, name) => {
         sidebar.updateTab(tabId, {
-          title: `手机·${name}`,
+          title: zhOccupiedTitle(name),
           meta: { kind: 'device', serial, name },
         })
       },
-      showPicker: (tabId) => { showPhonePicker(sidebar, tabId) },
+      showPicker: (tabId) => { showPhonePicker(sidebar, tabId, zhTitle) },
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -155,6 +180,8 @@ describe('single phone tab with in-place switching', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
+      title: zhTitle,
+      occupiedTitle: zhOccupiedTitle,
       switchDevice: () => {},
       showPicker: () => {},
       createController: () => {
@@ -184,12 +211,12 @@ describe('single phone tab with in-place switching', () => {
   it('clears occupation meta so the picker body with 重新检测环境 can render', () => {
     const sidebar = new ContractSidebar()
     sidebar.openTab({ type: PHONE_TAB_ID })
-    const switchDevice = createPhoneTabSwitcher(sidebar, () => true)
+    const switchDevice = createPhoneTabSwitcher(sidebar, () => true, zhOccupiedTitle)
     switchDevice(PHONE_TAB_ID, 'emulator-5554', 'Pixel_6_API_35')
     expect(phoneDeviceTabMetaOf(sidebar.tabs[0]!.meta)).toEqual({
       kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35',
     })
-    showPhonePicker(sidebar, PHONE_TAB_ID)
+    showPhonePicker(sidebar, PHONE_TAB_ID, zhTitle)
     expect(sidebar.tabs[0]).toMatchObject({ title: PHONE_TAB_TITLE, meta: {} })
     expect(phoneDeviceTabMetaOf(sidebar.tabs[0]!.meta)).toBeUndefined()
   })
@@ -211,6 +238,8 @@ describe('single phone tab with in-place switching', () => {
       },
       isEnabled: () => false,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
+      title: zhTitle,
+      occupiedTitle: zhOccupiedTitle,
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -241,6 +270,8 @@ describe('single phone tab with in-place switching', () => {
       },
       isEnabled: () => gate,
       gate: { snapshot: () => gate, subscribe: () => () => undefined },
+      title: zhTitle,
+      occupiedTitle: zhOccupiedTitle,
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -268,5 +299,17 @@ describe('single phone tab with in-place switching', () => {
     env.showPicker(PHONE_TAB_ID)
     expect(phoneDeviceTabMetaOf(sidebar.tabs[0]!.meta)).toBeUndefined()
     expect(sidebar.tabs[0]!.title).toBe(PHONE_TAB_TITLE)
+  })
+
+  it('uses English occupied titles when the title functions resolve English copy', () => {
+    const sidebar = new ContractSidebar()
+    const switchDevice = createPhoneTabSwitcher(sidebar, () => true, enOccupiedTitle)
+    sidebar.openTab({ type: PHONE_TAB_ID })
+    switchDevice(PHONE_TAB_ID, 'emulator-5554', 'Pixel_6_API_35')
+    expect(sidebar.tabs[0]!.title).toBe('Phone · Pixel_6_API_35')
+    showPhonePicker(sidebar, PHONE_TAB_ID, enTitle)
+    expect(sidebar.tabs[0]!.title).toBe('Phone')
+    openPhoneDevicePanel(sidebar, () => true, 'emulator-5554', 'Pixel_6_API_35', enOccupiedTitle)
+    expect(sidebar.tabs[0]!.title).toBe('Phone · Pixel_6_API_35')
   })
 })

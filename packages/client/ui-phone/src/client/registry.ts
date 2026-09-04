@@ -16,7 +16,7 @@ import type { PhoneConnectionController } from './phone-connection.ts'
 /** The tab descriptor id; also the `SidebarTab.type` of opened phone tabs. */
 export const PHONE_TAB_ID = 'phone'
 
-/** Product copy of the + menu row and the picker tab title (locked mockup). */
+/** zh fallback of the + menu row and picker tab title for Node invariant tests. */
 export const PHONE_TAB_TITLE = '手机'
 
 /** + menu sort order: after the built-in browser (50), before the default 100. */
@@ -142,7 +142,9 @@ export function assertPhoneTabSymmetry(
 }
 
 /**
- * Tab title while a device occupies the tab (`手机·<name>`, mockup cell B).
+ * zh fallback tab title while a device occupies the tab (`手机·<name>`).
+ * Browser live titles use {@link PhoneTabOptions.occupiedTitle}; Node tests
+ * that call this helper directly keep the Chinese concatenation.
  * @param name - Display name of the device.
  * @returns the sidebar tab title.
  */
@@ -180,7 +182,7 @@ export function phoneDeviceTabMetaOf(meta: unknown): PhoneDeviceTabMeta | undefi
 export interface PhoneSidebarTab {
   /** Minted instance id (`phone`; the strip keeps exactly one tab). */
   readonly id: string
-  /** Tab title (手机, or 手机·<name> while a device occupies the tab). */
+  /** Tab title (picker copy, or occupied copy while a device occupies the tab). */
   readonly title?: string
   /** Plugin-owned payload persisted with the layout. */
   readonly meta?: unknown
@@ -200,32 +202,90 @@ export interface PhoneTabSwitchFace {
   updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void
 }
 
+/** Minimal split-tree node needed to locate the active Phone tab. */
+export type PhoneSidebarSplit = {
+  readonly kind: 'leaf'
+  readonly tabs: readonly (PhoneSidebarTab & { readonly type: string })[]
+  readonly active: string | null
+} | {
+  readonly kind: 'split'
+  readonly children: readonly PhoneSidebarSplit[]
+}
+
+/** Minimal current-state projection needed for live title relabeling. */
+export interface PhoneSidebarState {
+  readonly splits: PhoneSidebarSplit
+  readonly bottomSplits: PhoneSidebarSplit
+  readonly floats: readonly { readonly tab: PhoneSidebarTab & { readonly type: string } }[]
+}
+
 /** Sidebar verbs used when Settings opens a device into the visible panel. */
 export interface PhoneTabOpenFace extends PhoneTabSwitchFace {
   /** Create or focus the singleton Phone tab. */
   openTab(seed: { readonly type: string }): void
   /** Make the right panel visible after the device is selected. */
   setPanelOpen(open: boolean): void
+  /** Read the active Session's current sidebar projection. */
+  getSnapshot(): { readonly state?: PhoneSidebarState }
+}
+
+/**
+ * Find the singleton Phone tab in the active Session without changing state.
+ * @param state - current active Session sidebar state.
+ * @returns the open or floating Phone tab when one exists.
+ */
+export function openPhoneTabOf(state: PhoneSidebarState | undefined): PhoneSidebarTab | undefined {
+  if (state === undefined) return undefined
+  const visit = (node: PhoneSidebarSplit): PhoneSidebarTab | undefined => {
+    if (node.kind === 'leaf') return node.tabs.find(tab => tab.type === PHONE_TAB_ID)
+    for (const child of node.children) {
+      const tab = visit(child)
+      if (tab !== undefined) return tab
+    }
+    return undefined
+  }
+  return visit(state.splits)
+    ?? visit(state.bottomSplits)
+    ?? state.floats.find(float => float.tab.type === PHONE_TAB_ID)?.tab
+}
+
+/**
+ * Relabel an open Phone tab from its persisted occupation metadata.
+ * @param sidebar - current sidebar projection and title update operation.
+ * @param title - picker title resolver.
+ * @param occupiedTitle - occupied title resolver.
+ */
+export function relabelOpenPhoneTab(
+  sidebar: Pick<PhoneTabOpenFace, 'getSnapshot' | 'updateTab'>,
+  title: () => string,
+  occupiedTitle: (name: string) => string,
+): void {
+  const tab = openPhoneTabOf(sidebar.getSnapshot().state)
+  if (tab === undefined) return
+  const meta = phoneDeviceTabMetaOf(tab.meta)
+  sidebar.updateTab(tab.id, { title: meta === undefined ? title() : occupiedTitle(meta.name) })
 }
 
 /**
  * Build the in-place device switcher against one sidebar face: the single
- * tab's meta flips to the chosen device and the title follows `手机·<name>`
- * — no second tab is created (U1). A disabled deployment drops the switch:
- * with detection off no stream session can be minted, so the entry must not
- * pretend otherwise.
+ * tab's meta flips to the chosen device and the title follows
+ * `occupiedTitle(name)` — no second tab is created (U1). A disabled
+ * deployment drops the switch: with detection off no stream session can be
+ * minted, so the entry must not pretend otherwise.
  * @param sidebar - the better-sidebar face resolved from the client context.
  * @param isEnabled - current `ui-phone.enabled` gate read at call time.
+ * @param occupiedTitle - occupied tab title for one device display name.
  * @returns the switcher the picker rows and the device dropdown call.
  */
 export function createPhoneTabSwitcher(
   sidebar: PhoneTabSwitchFace,
   isEnabled: () => boolean,
+  occupiedTitle: (name: string) => string,
 ): (tabId: string, serial: string, name: string) => void {
   return (tabId, serial, name) => {
     if (!isEnabled()) return
     sidebar.updateTab(tabId, {
-      title: phoneTabTitleOf(name),
+      title: occupiedTitle(name),
       meta: { kind: 'device', serial, name },
     })
   }
@@ -238,9 +298,14 @@ export function createPhoneTabSwitcher(
  * `meta` when the patch field is present.
  * @param sidebar - the better-sidebar face resolved from the client context.
  * @param tabId - Phone tab instance id (`phone`).
+ * @param title - picker tab title resolver.
  */
-export function showPhonePicker(sidebar: PhoneTabSwitchFace, tabId: string): void {
-  sidebar.updateTab(tabId, { title: PHONE_TAB_TITLE, meta: {} })
+export function showPhonePicker(
+  sidebar: PhoneTabSwitchFace,
+  tabId: string,
+  title: () => string,
+): void {
+  sidebar.updateTab(tabId, { title: title(), meta: {} })
 }
 
 /**
@@ -249,17 +314,19 @@ export function showPhonePicker(sidebar: PhoneTabSwitchFace, tabId: string): voi
  * @param isEnabled - Current durable Phone gate.
  * @param serial - Online device identity.
  * @param name - Device title shown in the tab strip.
+ * @param occupiedTitle - occupied tab title for one device display name.
  */
 export function openPhoneDevicePanel(
   sidebar: PhoneTabOpenFace,
   isEnabled: () => boolean,
   serial: string,
   name: string,
+  occupiedTitle: (name: string) => string,
 ): void {
   if (!isEnabled()) return
   sidebar.openTab({ type: PHONE_TAB_ID })
   sidebar.updateTab(PHONE_TAB_ID, {
-    title: phoneTabTitleOf(name),
+    title: occupiedTitle(name),
     meta: { kind: 'device', serial, name },
   })
   sidebar.setPanelOpen(true)
@@ -311,7 +378,7 @@ export interface PhoneTabDescriptor {
   readonly available?: (ctx: unknown, scope: unknown, state: unknown) => boolean
   /** Strip pill value per render; null hides it. */
   readonly badge?: (ctx: unknown, scope: unknown, state: unknown) => string | number | null | undefined
-  /** Single instance: the strip keeps exactly one 「手机」 tab (U1). */
+  /** Single instance: the strip keeps exactly one Phone tab (U1). */
   readonly single?: boolean
   /** Tab body renderer invoked with the sidebar's tab props. */
   readonly component: (props: PhoneTabBodyProps) => ReactNode
@@ -343,6 +410,10 @@ export interface PhoneTabOptions {
   readonly gate: PhoneGateSource
   /** Live connection controller factory for one device tab. */
   readonly createController: (serial: string) => PhoneConnectionController
+  /** + menu and picker tab title, resolved at render time. */
+  readonly title: () => string
+  /** Occupied tab title for one device display name. */
+  readonly occupiedTitle: (name: string) => string
 }
 
 /**
@@ -365,7 +436,7 @@ export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): Pho
   }
   return {
     id: PHONE_TAB_ID,
-    title: PHONE_TAB_TITLE,
+    title: options.title,
     icon: options.view.icon,
     order: PHONE_TAB_ORDER,
     available: () => true,
@@ -382,15 +453,15 @@ export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): Pho
  * this package's invariant companion). Fails loud when the Side card client
  * has not published `betterSidebar`, mirroring the ui-workbench adapter.
  * @param ctx - client context whose service store exposes betterSidebar.
- * @param options - gates, sources, chrome, and the controller factory.
+ * @param options - gates, sources, chrome, title functions, and the controller factory.
  */
 export function installPhoneTab(ctx: Context, options: PhoneTabOptions): void {
   const sidebar = ctx.get('betterSidebar') as (SidebarRegistry & PhoneTabSwitchFace) | undefined
   if (sidebar === undefined) {
     throw new Error('ui-phone: betterSidebar is not published; mount the Side card client first')
   }
-  const switchDevice = createPhoneTabSwitcher(sidebar, options.isEnabled)
-  const showPicker = (tabId: string): void => { showPhonePicker(sidebar, tabId) }
+  const switchDevice = createPhoneTabSwitcher(sidebar, options.isEnabled, options.occupiedTitle)
+  const showPicker = (tabId: string): void => { showPhonePicker(sidebar, tabId, options.title) }
   ctx.effect(
     () => sidebar.registerTab(buildPhoneTabDescriptor({ ...options, switchDevice, showPicker })),
     PHONE_TAB_EFFECT,

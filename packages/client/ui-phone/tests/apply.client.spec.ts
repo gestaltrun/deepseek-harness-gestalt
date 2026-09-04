@@ -10,11 +10,11 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, Config, inject } from '../src/client/index.tsx'
-import { NS, zh } from '../src/client/locales.ts'
+import { en, NS, zh } from '../src/client/locales.ts'
 import { RecordingSidebar } from '../src/invariant.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
 import {
-  buildPhoneTabDescriptor, installPhoneTab,
+  buildPhoneTabDescriptor, installPhoneTab, PHONE_TAB_TITLE, phoneTabTitleOf,
   type PhoneListingSource, type PhoneTabView,
 } from '../src/client/registry.ts'
 import { createHttpPhoneListingSource } from '../src/client/phone-listing.ts'
@@ -37,6 +37,8 @@ interface RegisteredTab {
 class SidebarUnderTest extends RecordingSidebar {
   readonly updates: Array<{ tabId: string; patch: { readonly title?: string; readonly meta?: unknown } }> = []
   readonly opens: string[] = []
+  phoneTab: { readonly id: string; readonly type: string; readonly title?: string; readonly meta?: unknown } | undefined
+  activeTabId: string | null = null
   panelOpen = false
 
   override getTab(id: string): RegisteredTab | undefined {
@@ -45,10 +47,30 @@ class SidebarUnderTest extends RecordingSidebar {
 
   updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void {
     this.updates.push({ tabId, patch })
+    if (this.phoneTab?.id === tabId && patch.title !== undefined) {
+      this.phoneTab = { ...this.phoneTab, title: patch.title }
+    }
   }
 
   openTab(seed: { readonly type: string }): void {
     this.opens.push(seed.type)
+  }
+
+  getSnapshot(): {
+    readonly state: {
+      readonly splits: { readonly kind: 'leaf'; readonly tabs: readonly NonNullable<SidebarUnderTest['phoneTab']>[]; readonly active: string | null }
+      readonly bottomSplits: { readonly kind: 'leaf'; readonly tabs: readonly []; readonly active: null }
+      readonly floats: readonly []
+    }
+  } {
+    const tab = this.phoneTab
+    return {
+      state: {
+        splits: { kind: 'leaf', tabs: tab === undefined ? [] : [tab], active: this.activeTabId },
+        bottomSplits: { kind: 'leaf', tabs: [], active: null },
+        floats: [],
+      },
+    }
   }
 
   setPanelOpen(open: boolean): void {
@@ -58,6 +80,10 @@ class SidebarUnderTest extends RecordingSidebar {
 
 function stubView(): PhoneTabView {
   return { icon: () => null, component: () => null }
+}
+
+function resolvedTitle(title: string | (() => string)): string {
+  return typeof title === 'function' ? title() : title
 }
 
 function sourceWith(onlineCount: number): PhoneListingSource {
@@ -123,6 +149,8 @@ describe('ui-phone client apply', () => {
         view: stubView(),
         isEnabled: () => false,
         gate: { snapshot: () => false, subscribe: () => () => undefined },
+        title: () => PHONE_TAB_TITLE,
+        occupiedTitle: phoneTabTitleOf,
         createController: () => {
           throw new Error('not expected in this spec')
         },
@@ -134,7 +162,7 @@ describe('ui-phone client apply', () => {
     const sidebar = new SidebarUnderTest()
     await mount(sidebar)
     const descriptor = sidebar.getTab('phone')!
-    expect(descriptor.title).toBe('手机')
+    expect(resolvedTitle(descriptor.title)).toBe('手机')
     expect(descriptor.order).toBe(55)
     // U1: the strip keeps exactly one 「手机」 tab; devices switch in place.
     expect(descriptor.single).toBe(true)
@@ -597,6 +625,8 @@ describe('ui-phone client apply', () => {
         gate: { snapshot: () => false, subscribe: () => () => undefined },
         switchDevice: () => {},
         showPicker: () => {},
+        title: () => PHONE_TAB_TITLE,
+        occupiedTitle: phoneTabTitleOf,
         createController: () => {
           throw new Error('not expected in this spec')
         },
@@ -610,6 +640,66 @@ describe('ui-phone client apply', () => {
     const sidebar = new SidebarUnderTest()
     await mount(sidebar)
     expect(sidebar.getTab('phone')!.badge(undefined, undefined, undefined)).toBeNull()
+  })
+
+  it('relabels an already-open picker when the locale changes', async () => {
+    const sidebar = new SidebarUnderTest()
+    sidebar.phoneTab = { id: 'phone', type: 'phone', title: '手机', meta: {} }
+    sidebar.activeTabId = 'terminal:1'
+    const { ctx } = await mount(sidebar, undefined, Config({ enabled: true }))
+    ctx.locale.setLocale('en')
+    expect(sidebar.updates.at(-1)).toEqual({ tabId: 'phone', patch: { title: 'Phone' } })
+    ctx.locale.setLocale('zh')
+    expect(sidebar.updates.at(-1)).toEqual({ tabId: 'phone', patch: { title: '手机' } })
+    expect(sidebar.opens).toEqual([])
+  })
+
+  it('relabels an already-open occupied tab without changing its meta', async () => {
+    const sidebar = new SidebarUnderTest()
+    const meta = { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' }
+    sidebar.phoneTab = { id: 'phone', type: 'phone', title: '手机·Pixel_6_API_35', meta }
+    const { ctx } = await mount(sidebar, undefined, Config({ enabled: true }))
+    ctx.locale.setLocale('en')
+    expect(sidebar.updates.at(-1)).toEqual({
+      tabId: 'phone', patch: { title: 'Phone · Pixel_6_API_35' },
+    })
+    expect(sidebar.phoneTab?.meta).toBe(meta)
+    ctx.locale.setLocale('zh')
+    expect(sidebar.updates.at(-1)).toEqual({
+      tabId: 'phone', patch: { title: '手机·Pixel_6_API_35' },
+    })
+    expect(sidebar.phoneTab?.meta).toBe(meta)
+    expect(sidebar.opens).toEqual([])
+  })
+
+  it('localizes the + menu title and occupied title from the English dictionary', async () => {
+    const sidebar = new SidebarUnderTest()
+    const { ctx } = await mount(sidebar, undefined, Config({ enabled: true }))
+    ctx.locale.setLocale('en')
+    const descriptor = sidebar.getTab('phone')!
+    expect(resolvedTitle(descriptor.title)).toBe('Phone')
+    const occupied = sidebar.getTab('phone')!.component({
+      tab: {
+        id: 'phone', title: 'Phone · Pixel_6_API_35',
+        meta: { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' },
+      },
+      visible: false,
+    }) as { props: { onOpenDevice(serial: string, name: string): void; onShowPicker(): void } }
+    occupied.props.onOpenDevice('emulator-5554', 'Pixel_6_API_35')
+    expect(sidebar.updates.at(-1)).toEqual({
+      tabId: 'phone',
+      patch: {
+        title: 'Phone · Pixel_6_API_35',
+        meta: { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' },
+      },
+    })
+    occupied.props.onShowPicker()
+    expect(sidebar.updates.at(-1)).toEqual({
+      tabId: 'phone',
+      patch: { title: 'Phone', meta: {} },
+    })
+    expect(en.tab).toBe('Phone')
+    expect(en.occupied).toBe('Phone · ')
   })
 
   it('removes the registration when the plugin fiber disposes', async () => {

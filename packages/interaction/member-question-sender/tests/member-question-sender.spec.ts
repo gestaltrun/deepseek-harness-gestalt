@@ -485,7 +485,9 @@ describe('member-question sender', () => {
       })
       await vi.advanceTimersByTimeAsync(50)
       await expired
-      expect(asking.snapshotEvents()[1]?.data).toMatchObject({ outcome: 'expired' })
+      expect(asking.snapshotEvents()[1]).toMatchObject({
+        type: 'member-question/outcome', ignorable: true, data: { outcome: 'expired' },
+      })
       await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
         questionId,
         outcome: 'expired',
@@ -508,7 +510,9 @@ describe('member-question sender', () => {
       name: 'MemberQuestionSenderError',
       code: 'QUESTION_WITHDRAWN',
     })
-    expect(asking.snapshotEvents()[1]?.data).toMatchObject({ outcome: 'withdrawn' })
+    expect(asking.snapshotEvents()[1]).toMatchObject({
+      type: 'member-question/outcome', ignorable: true, data: { outcome: 'withdrawn' },
+    })
   })
 
   it('rejects with QUESTION_WITHDRAWN when withdraw() is called', async () => {

@@ -105,8 +105,10 @@ export {
   applyChildComposition,
   captureDelegatedPolicyOverrides,
   childSessionMeta,
+  foldChildRequestHeader,
   inheritParentAgentRoute,
   resolveChildAgentOptions,
+  resumeChildAgentOptions,
   resolveChildDepth,
   SubagentDepthError,
 } from './child-agent.ts'

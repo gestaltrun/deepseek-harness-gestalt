@@ -12,7 +12,7 @@ describe('collectSidebarBrowserTabs', () => {
       splits: {
         kind: 'split',
         children: [
-          { kind: 'leaf', tabs: [{ id: 'editor:1', type: 'editor' }, { id: 'browser:1', type: 'browser', meta: { official: { tabId: 't' } } }] },
+          { kind: 'leaf', tabs: [{ id: 'editor:1', type: 'editor' }, { id: 'browser:1', type: 'browser', meta: { official: { tabId: 't' } }, path: 'https://example.test/' }] },
           { kind: 'leaf', tabs: [{ id: 'git:1', type: 'git' }] },
         ],
       },
@@ -21,7 +21,7 @@ describe('collectSidebarBrowserTabs', () => {
         tabs: [{ id: 'browser:2', type: 'browser' }],
       },
     })).toEqual([
-      { id: 'browser:1', meta: { official: { tabId: 't' } } },
+      { id: 'browser:1', meta: { official: { tabId: 't' } }, path: 'https://example.test/' },
       { id: 'browser:2' },
     ])
   })

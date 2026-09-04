@@ -39,7 +39,7 @@ Ship **DeepSeek Gestalt**, a Desktop Host: an Electron window that starts a bund
 27. As a first-time Desktop user with an empty Workspace list, I want the existing "add a folder" flow, so that there is no new onboarding wizard.
 28. As a Desktop user, I want adding a Workspace to keep the native directory picker, so that Desktop does not replace Web Host capabilities.
 29. As a Desktop user, I want a failed Web Host to show an error in the window and retry once, so that the Desktop Host itself does not die with the child.
-30. As a Desktop user, I want a cold start to show a blank window plus the drag strip until the URL is ready, so that I am not stuck on a custom splash.
+30. As a Desktop user, I want a cold start to show the GESTALT boot mark in the window from the first frame until the Session Surface is ready, so that Web Host spawn is visible instead of a blank window or a flash of the web loading page.
 31. As a developer, I want `pnpm gestalt:dev` to start Desktop Host which starts Web Host from the source tree, so that I can iterate without packaging.
 32. As a developer, I want the Desktop overlay applied only through an extra `--patch`, so that the default web profile is not polluted.
 33. As a Desktop user, I want the app id `com.gestalt.deepseek` and first Desktop Bundle `0.1.0`, so that updates and notarization have a stable identity.
@@ -105,7 +105,7 @@ Prior art: CLI tests that wait for `dsh web: http://127.0.0.1:<port>`; sidebar a
 - Universal macOS fat binary
 - Silent download or silent install
 - New profile, second user-data home, or remembering window size
-- Custom splash screen, back/forward, or replacing the native directory picker
+- A separate splash window, back/forward, or replacing the native directory picker
 - Changing default `dsh web` composition to probe for a Desktop bridge
 - Operating-system, browser, email, SMS, or other external reminder delivery
 

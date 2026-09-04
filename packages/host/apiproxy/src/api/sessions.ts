@@ -314,8 +314,10 @@ export interface SessionsApi {
   Promise<RpcResponse<{ events: HistoryEntry[]; hasMore: boolean; projections?: SessionProjectionsBlock }>>
 
   /**
-   * Reads a fresh advisory model directory for an ordinary session. Provider
-   * lookups run independently; subagents reject with `agent-busy`.
+   * Reads a fresh advisory model directory for a Session, including a
+   * session-backed subagent. Provider lookups run independently. A child
+   * without a live Agent is served from its log (owned `request/header`, else
+   * the creation descriptor) and is not resumed.
    */
   models(request: RpcRequest<{ sessionId: SessionId }>): Promise<RpcResponse<SessionModels>>
 
@@ -325,7 +327,8 @@ export interface SessionsApi {
   /**
    * Selects the complete model selection for this session. Exact model metadata
    * validates an optional reasoning effort, while catalog membership remains
-   * advisory. Session-backed subagents reject with `agent-busy`.
+   * advisory. A session-backed subagent is served from its live Agent or
+   * persisted onto its log without resuming an Activation.
    */
   selectModel(request: RpcRequest<{
     sessionId: SessionId
@@ -400,8 +403,9 @@ export interface SessionsApi {
   }>): Promise<RpcResponse<{ attachment: FileAttachmentRef }>>
 
   /**
-   * Edits, removes, or strictly steers one pending queued occurrence on an ordinary session.
-   * Session-backed subagents reject with `agent-busy`.
+   * Edits, removes, or strictly steers one pending queued occurrence on a
+   * live attached Agent. A session-backed child without a live Agent answers
+   * `queue-item-not-found` without resume.
    */
   updateQueue(request: RpcRequest<{ sessionId: SessionId; itemId: MessageId; action: QueueAction }>):
   Promise<RpcResponse<{ accepted: true }>>

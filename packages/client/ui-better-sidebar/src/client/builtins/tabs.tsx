@@ -183,13 +183,22 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       order: 35,
       // Every side conversation reserves a client identity. The first prompt,
       // not opening the tab, publishes the Host Session under that identity.
-      createTab: () => {
-        const threadId = `session-${crypto.randomUUID()}` as SessionId
+      createTab: (_state, seed) => {
+        const fromCatalog = seed?.meta !== undefined
+        const seededThreadId = fromCatalog
+          ? sidechatThreadIdOf({
+            id: seed?.id ?? 'sidechat',
+            type: 'sidechat',
+            title: seed?.title ?? t('sideChatUntitled'),
+            meta: seed.meta,
+          })
+          : undefined
+        const threadId = seededThreadId ?? (`session-${crypto.randomUUID()}` as SessionId)
         return { tab: {
-          id: `sidechat:${threadId}`,
+          id: fromCatalog && seed?.id !== undefined ? seed.id : `sidechat:${threadId}`,
           type: 'sidechat',
-          title: t('sideChatUntitled'),
-          meta: { threadId, provisional: true },
+          title: fromCatalog && seed?.title !== undefined ? seed.title : t('sideChatUntitled'),
+          meta: fromCatalog ? seed.meta : { threadId, provisional: true },
         } }
       },
       // One tab per thread: an already-open thread focuses instead of

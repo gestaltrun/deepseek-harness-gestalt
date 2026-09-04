@@ -53,6 +53,7 @@ await writeFile(
   join(root, 'out', 'operated-platform.json'),
   JSON.stringify(publicOperatedPlatformConfig, undefined, 2) + '\n',
 )
+await cp(join(root, 'src', 'boot.html'), join(root, 'out', 'boot.html'))
 await writePackagedSub2ApiSources({ root, platform: packPlatform, arch: packArch })
 await mkdir(join(root, 'out', 'build'), { recursive: true })
 await cp(join(root, 'build', 'icon.png'), join(root, 'out', 'build', 'icon.png'))

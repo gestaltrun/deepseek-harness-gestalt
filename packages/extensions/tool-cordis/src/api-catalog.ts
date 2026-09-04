@@ -5113,7 +5113,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'KnobState',
-    declaration: 'export interface KnobState {\n    preset: string | null;\n    sandbox: SandboxMode | null;\n    approval: ApprovalPolicy | null;\n}',
+    declaration: 'export interface KnobState {\n    preset: string | null;\n    sandbox: SandboxMode | null;\n    approval: ApprovalPolicy | null;\n    delegated: boolean;\n}',
   },
   {
     name: 'KvFacet',

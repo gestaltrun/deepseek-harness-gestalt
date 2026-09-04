@@ -6,7 +6,7 @@ import type { SidebarBrowserTab } from './reconcile.ts'
 
 /** One leaf or split in the snapshot workbench tree. */
 type SplitNode =
-  | { kind: 'leaf'; tabs: ReadonlyArray<{ id: string; type: string; meta?: unknown }> }
+  | { kind: 'leaf'; tabs: ReadonlyArray<{ id: string; type: string; meta?: unknown; path?: string }> }
   | { kind: 'split'; children: readonly SplitNode[] }
 
 /** Snapshot state slice this adapter reads. */
@@ -29,12 +29,13 @@ export function collectSidebarBrowserTabs(state: SidebarStateSlice | undefined):
   return [...leaves(state.splits), ...leaves(state.bottomSplits)].map(tab => ({
     id: tab.id,
     ...(tab.meta === undefined ? {} : { meta: tab.meta }),
+    ...(tab.path === undefined ? {} : { path: tab.path }),
   }))
 }
 
 function leaves(
   node: SplitNode | undefined,
-): Array<{ id: string; type: string; meta?: unknown }> {
+): Array<{ id: string; type: string; meta?: unknown; path?: string }> {
   if (node === undefined) return []
   if (node.kind === 'leaf') return node.tabs.filter(tab => tab.type === 'browser')
   return node.children.flatMap(child => leaves(child))

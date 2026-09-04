@@ -158,3 +158,29 @@
   font: var(--dsw-font-xs-13);
   color: var(--dsw-alias-label-tertiary);
 }
+
+.createError {
+  flex: none;
+  padding: 0 20px 12px;
+  overflow-wrap: anywhere;
+  text-align: center;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.retry {
+  align-self: center;
+  flex: none;
+  margin: 0 auto 20px;
+  padding: 4px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  font: var(--dsw-font-xxs-12);
+}
+
+.retry:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}

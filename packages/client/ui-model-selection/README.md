@@ -8,7 +8,7 @@ The Host-reported provider/model/reasoning `ModelSelection` is the single select
 
 When the Host reports that no adapter serves the session's route (`session.models.routable`), this plugin raises a composer block through `ctx.conversation.blocks` and the input goes inert with this plugin's own copy; recovering clears it without a reload. It follows `routable` and nothing else: a `null` — before the first load, or after one failed — never blocks, or a slow Host would lock a working composer, and catalog membership never blocks either, because a route serving a model it stopped advertising is missing from the groups yet perfectly usable. The trigger's own `Select model` fallback still covers that case, which is display, not a gate.
 
-Directories are per-session, resolved lazily through `ctx.modelDirectories.directoryFor(sessionId)`, and disposed with the session scope. A feature route can expose model selection for its own Agent lifecycle, including retaining a validated provisional choice for first admission. Catalog-addressed subagent Sessions without such a route expose neither entry, because ordinary Agent-bound model RPCs would activate persisted child history outside the direct-parent continuation path.
+Directories are per-session, resolved lazily through `ctx.modelDirectories.directoryFor(sessionId)`, and disposed with the session scope. A feature route can expose model selection for its own Agent lifecycle, including retaining a validated provisional choice for first admission. A Session with no model route exposes neither entry.
 
 Every resident directory refetches directly on forwarded `llm/adapters-updated` and `settings/document-updated` owner events. Provider topology, provider catalogs, and the default selection therefore converge without the Host or client runtime deriving a separate model-change alias.
 
@@ -24,6 +24,5 @@ Switching the route can reduce or invalidate provider-side cache reuse for subse
 
 ## Known Limitations and Deferred Work
 
-- **No generic addressed-subagent selection** — a catalog-addressed subagent without a feature-owned model route deliberately exposes no independent model-selection contract.
 - **Directory names are presentation-only** — selection and persistence use provider/model/effort ids; a provider whose catalog or exact-model metadata lookup fails lists as an unselectable failure row until reload.
 - **No arbitrary effort input** — the composer offers only the exact model's adapter-advertised levels; an adapter without reasoning metadata leaves the Effort row absent.

@@ -7,9 +7,8 @@
  * so the host-reported current selection is the single fact both surfaces echo
  * — a switch made in either entry is what the other shows next. Failures
  * ride each entry's own retry surface (popup shell error/retry; seat menu
- * inline error) without forking the state. Addressed subagent sessions expose
- * neither entry because those Agent-bound RPCs would activate persisted
- * history outside the direct-parent continuation path.
+ * inline error) without forking the state. Feature-owned Sessions without a
+ * model route, and unmaterialized receiving Sessions, expose neither entry.
  */
 // Type-only: the carrier types, the forwarded Host-event face and the ctx.remote merge.
 import type { ModelSelection, SessionModels } from '@deepseek-ai/dsh-api-remotes/client'
@@ -131,13 +130,13 @@ export function apply(ctx: ClientContext): void {
         kind: 'popupSelect',
         options: async (session) => {
           if (sessions.modelRoute(session.sessionId) === undefined) {
-            throw new Error('model selection is unavailable for addressed subagent sessions')
+            throw new Error('model selection is unavailable for this session')
           }
           return optionsOf(await models.directoryFor(session.sessionId).load(), t)
         },
         onSelect: async (option, session) => {
           if (sessions.modelRoute(session.sessionId) === undefined) {
-            throw new Error('model selection is unavailable for addressed subagent sessions')
+            throw new Error('model selection is unavailable for this session')
           }
           const directory = models.directoryFor(session.sessionId)
           const selection = selectionOf(directory.store.getSnapshot(), option.id)

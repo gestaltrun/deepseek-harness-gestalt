@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
@@ -122,6 +122,20 @@ describe('OfficialBrowserTab', () => {
     const b = bench()
     render(<OfficialBrowserTab ctx={b.ctx} tab={{ id: 'browser:2' }} scope={{ sessionId: SESSION }} />)
     expect(screen.getByText('dock.creating')).toBeTruthy()
+    expect(b.ensureOfficial).toHaveBeenCalledWith('browser:2')
+  })
+
+  it('retries a recorded create failure through the workbench bridge', () => {
+    const b = bench()
+    render(
+      <OfficialBrowserTab
+        ctx={b.ctx}
+        tab={{ id: 'browser:2', meta: { createError: 'runtime gone' } }}
+        scope={{ sessionId: SESSION }}
+      />,
+    )
+    expect(screen.getByText('dock.createFailed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'dock.retry' }))
     expect(b.ensureOfficial).toHaveBeenCalledWith('browser:2')
   })
 

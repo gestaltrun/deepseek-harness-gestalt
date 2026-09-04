@@ -1,8 +1,8 @@
 /**
  * Workbench adapter, node half. After the better-sidebar snapshot registers
  * its prefs namespace, this plugin writes `tabsEnabled.browser: true` and
- * `browserInterceptLinks: false` so the official page chrome occupies the
- * snapshot browser tab.
+ * turns link takeover on (`browserInterceptLinks` / `browserInterceptHttps`)
+ * so GUI link clicks open official pages in the snapshot browser tab.
  */
 
 import { FiberState, type Context, type Fiber } from '@deepseek-ai/cordis'

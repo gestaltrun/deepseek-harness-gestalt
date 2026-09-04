@@ -58,12 +58,12 @@ Complete this phase when every ready ticket has one accountable writer and no mu
 
 ## Supervise asynchronous workers
 
-1. Treat dispatch as a monitored handoff. Register every independent Codex task in one active wait set and keep the root task alive with bounded waits while any selected worker is running. Preserve task cursors and re-wait after unchanged timeouts without narrating them.
-2. Let a completion or attention event resume the root task. Read the result, answer worker needs, route follow-up work, and return the task to the wait set until it reaches a terminal state. Continue supervising the other workers in parallel.
-3. Require a human blocker to end with `[BLOCKED · Issue #N]`, one concrete requested action, and the evidence that makes it necessary. Surface that request from the root task; never leave the user to discover it in an implementation task.
-4. Keep follow-up ownership in the root task. The user need not ask to continue before the root observes completion. Yield only for missing authority or input, or after all selected workers are terminal and their results have been incorporated into the delivery graph.
+1. Treat dispatch as a monitored handoff. Register every independent executor — a Codex task, a fresh Codex session, or a background `subagent` run — in one active wait set and keep the root session alive with bounded waits while any selected worker is running. Preserve task cursors and re-wait after unchanged timeouts without narrating them.
+2. Let a completion or attention event resume the root session. Read the result, answer worker needs, route follow-up work, and return the executor to the wait set until it reaches a terminal state. Continue supervising the other workers in parallel.
+3. Require a human blocker to end with `[BLOCKED · Issue #N]`, one concrete requested action, and the evidence that makes it necessary. Surface that request from the root session; never leave the user to discover it in an implementation task.
+4. Keep follow-up ownership in the root session. The user need not ask to continue before the root observes completion. Yield only for missing authority or input, or after all selected workers are terminal and their results have been incorporated into the delivery graph.
 
-Complete this phase when every dispatched task's final state has been observed and acted on, and no selected worker remains unwatched.
+Complete this phase when every dispatched executor's final state has been observed and acted on, and no selected worker remains unwatched.
 
 ## Enforce the worker contract
 

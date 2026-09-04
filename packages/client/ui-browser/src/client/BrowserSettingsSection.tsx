@@ -29,6 +29,11 @@ export interface BrowserSettingsInjected {
   setDefaultPersistentName: (name: string) => void
   /** Append one named Profile to the roster. */
   addNamedProfile: (name: string) => void
+  /**
+   * Replace one roster name. The persistent default follows the rename when
+   * it still pointed at the old name.
+   */
+  renameNamedProfile: (from: string, to: string) => void
   /** Remove one named Profile and clear it as the persistent default when it was selected. */
   removeNamedProfile: (name: string) => void
 }
@@ -50,15 +55,23 @@ const KINDS: readonly { id: BrowserProfileKindSetting; labelKey: BrowserKey }[] 
  * @param props - composed slot props.
  */
 export function BrowserSettingsSection({
-  t, useSettings, setDefaultKind, setDefaultPersistentName, addNamedProfile, removeNamedProfile,
+  t, useSettings, setDefaultKind, setDefaultPersistentName,
+  addNamedProfile, renameNamedProfile, removeNamedProfile,
 }: BrowserSettingsSectionProps) {
   const defaultKind = useSettings(s => s.defaultKind)
   const defaultPersistentName = useSettings(s => s.defaultPersistentName)
   const namedProfiles = useSettings(s => s.namedProfiles)
   const [draft, setDraft] = useState('')
+  const [edits, setEdits] = useState<Record<string, string>>({})
   const trimmed = draft.trim()
   const invalid = trimmed.length > 0 && !isBrowserProfileName(trimmed)
   const duplicate = namedProfiles.includes(trimmed)
+  const commitRename = (from: string): void => {
+    const next = (edits[from] ?? from).trim()
+    if (next === from) return
+    if (!isBrowserProfileName(next) || namedProfiles.includes(next)) return
+    renameNamedProfile(from, next)
+  }
   return (
     <section className={css.section} data-browser-settings>
       <h2 className={css.title}>{t('settings.title')}</h2>
@@ -84,6 +97,7 @@ export function BrowserSettingsSection({
           <label className={css.field}>
             {t('settings.defaultPersistentName')}
             <select
+              className={css.control}
               value={defaultPersistentName}
               onChange={(event) => { setDefaultPersistentName(event.target.value) }}
             >
@@ -101,19 +115,53 @@ export function BrowserSettingsSection({
           ? <p className={css.empty}>{t('settings.roster.empty')}</p>
           : (
             <ul className={css.roster}>
-              {namedProfiles.map(name => (
-                <li key={name} className={css.rosterRow}>
-                  <span>{name}</span>
-                  <Button type="button" onClick={() => { removeNamedProfile(name) }}>
-                    {t('settings.roster.remove')}
-                  </Button>
-                </li>
-              ))}
+              {namedProfiles.map((name) => {
+                const value = edits[name] ?? name
+                const next = value.trim()
+                const renameInvalid = next.length > 0 && !isBrowserProfileName(next)
+                const renameDuplicate = next !== name && namedProfiles.includes(next)
+                const canRename = next !== name && !renameInvalid && !renameDuplicate
+                return (
+                  <li key={name} className={css.rosterRow}>
+                    <input
+                      className={`${css.control} ${css.rosterName}`}
+                      type="text"
+                      value={value}
+                      aria-label={t('settings.roster.name')}
+                      aria-invalid={renameInvalid || undefined}
+                      onChange={(event) => {
+                        setEdits(current => ({ ...current, [name]: event.target.value }))
+                      }}
+                      onBlur={() => { commitRename(name) }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          commitRename(name)
+                        }
+                      }}
+                    />
+                    <span className={css.rosterActions}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!canRename}
+                        onClick={() => { commitRename(name) }}
+                      >
+                        {t('settings.roster.rename')}
+                      </Button>
+                      <Button type="button" size="sm" onClick={() => { removeNamedProfile(name) }}>
+                        {t('settings.roster.remove')}
+                      </Button>
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           )}
         <label className={css.field}>
           {t('settings.roster.add')}
           <input
+            className={css.control}
             type="text"
             value={draft}
             aria-invalid={invalid || undefined}

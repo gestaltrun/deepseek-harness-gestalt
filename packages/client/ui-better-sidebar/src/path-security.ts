@@ -38,6 +38,20 @@ export async function ensureWorkspacePath(cwd: string, target: string): Promise<
 }
 
 /**
+ * Resolve an existing file for the sidebar's read-only views without
+ * workspace containment. Explicit file opens (editor tabs, `sidebar_open`,
+ * the media and HTML preview routes) may target paths outside the session
+ * workspace; symlink resolution still applies. Write routes keep the
+ * containment guard through {@link ensureWorkspaceWritePath}.
+ *
+ * @param target - Client-supplied absolute path.
+ * @returns The canonical absolute path used for the read.
+ */
+export async function resolveReadablePath(target: string): Promise<string> {
+  return resolveRealPath(requireAbsolute(target), 'target')
+}
+
+/**
  * Validate a write destination, including destinations that do not exist yet.
  * Existing targets are resolved to catch symlinks; missing targets are checked
  * against the nearest existing ancestor before the caller creates or renames.

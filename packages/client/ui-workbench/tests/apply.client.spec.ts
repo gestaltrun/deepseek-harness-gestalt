@@ -45,18 +45,19 @@ describe('ui-workbench host apply', () => {
   it('writes the official-browser enable patch onto the snapshot namespace', async () => {
     const ctx = new Context()
     const settings = new SettingsService(ctx)
-    settings.values.set(NS, { tabsEnabled: { editor: true, browser: false }, browserInterceptLinks: true })
+    settings.values.set(NS, { tabsEnabled: { editor: true, browser: false }, browserInterceptLinks: false })
     await apply(ctx)
     expect(settings.updates).toEqual([{
       tabsEnabled: { editor: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 
   it('does not write when the snapshot already has the product state', async () => {
     const ctx = new Context()
     const settings = new SettingsService(ctx)
-    settings.values.set(NS, { tabsEnabled: { git: true }, browserInterceptLinks: false })
+    settings.values.set(NS, { tabsEnabled: { git: true }, browserInterceptLinks: true, browserInterceptHttps: true })
     await apply(ctx)
     expect(settings.updates).toEqual([])
   })
@@ -86,7 +87,7 @@ describe('ui-workbench host apply', () => {
     await expect(apply(ctx)).rejects.toThrow(/dsh-better-sidebar settings namespace is not registered/)
   })
 
-  it('joins the snapshot fiber before writing the disable patch', async () => {
+  it('joins the snapshot fiber before writing the product patch', async () => {
     const ctx = new Context()
     const settings = new SettingsService(ctx)
     ctx.provide('loader', {
@@ -102,7 +103,8 @@ describe('ui-workbench host apply', () => {
     await apply(ctx)
     expect(settings.updates).toEqual([{
       tabsEnabled: { editor: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 
@@ -122,7 +124,8 @@ describe('ui-workbench host apply', () => {
     await apply(ctx)
     expect(settings.updates).toEqual([{
       tabsEnabled: { browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 
@@ -287,7 +290,8 @@ describe('ui-workbench host apply', () => {
     await ctx.plugin({ inject, apply }).await()
     expect(settings.updates).toEqual([{
       tabsEnabled: { git: true, browser: true },
-      browserInterceptLinks: false,
+      browserInterceptLinks: true,
+      browserInterceptHttps: true,
     }])
   })
 })

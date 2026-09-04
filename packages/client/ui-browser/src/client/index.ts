@@ -88,6 +88,13 @@ export function apply(ctx: ClientContext): void {
         if (current.namedProfiles.includes(name)) return
         void scope.set('namedProfiles', [...current.namedProfiles, name])
       },
+      renameNamedProfile: (from, to) => {
+        if (!isBrowserProfileName(to) || from === to) return
+        const current = preferences.getSnapshot()
+        if (!current.namedProfiles.includes(from) || current.namedProfiles.includes(to)) return
+        void scope.set('namedProfiles', current.namedProfiles.map(entry => entry === from ? to : entry))
+        if (current.defaultPersistentName === from) void scope.set('defaultPersistentName', to)
+      },
       removeNamedProfile: (name) => {
         const current = preferences.getSnapshot()
         void scope.set('namedProfiles', current.namedProfiles.filter(entry => entry !== name))

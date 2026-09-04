@@ -10,10 +10,10 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore from '@deepseek-ai/dsh-session'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { Inbox } from '@deepseek-ai/dsh-agent'
 import { TypertLookupFailure } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
-import { createUserMessage, MessageId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
@@ -538,14 +538,19 @@ describe('subagent ownership fence', () => {
       meta: { cwd: '/proj', parentSession: parent.id, origin: 'subagent' },
     })
     const cancel = vi.fn()
-    const updateInbox = vi.fn(() => 'applied' as const)
+    const inbox = new Inbox(originSession, { inserted: () => {}, discarded: () => {}, claimed: () => {} })
+    const queuedMessage = createUserMessage({
+      content: [{ type: 'text', text: 'queued follow-up' }],
+      source: { kind: 'user' },
+    })
+    inbox.append('next-turn', queuedMessage)
     const originChild = {
       id: originSession.id,
       session: originSession,
       status: 'idle',
       ctx,
       cancel,
-      updateInbox,
+      inbox,
     } as unknown as Agent
     ctx.agents.register(originChild)
 
@@ -563,16 +568,11 @@ describe('subagent ownership fence', () => {
 
     const queued = await api.sessions.updateQueue(request({
       sessionId: originChild.id,
-      itemId: MessageId('queued-item'),
+      itemId: queuedMessage.id,
       action: { kind: 'remove' },
     }))
-    expect(queued.result.ok).toBe(false)
-    if (!queued.result.ok) expect(queued.result.error.code).toBe('agent-busy')
-    expect(updateInbox).not.toHaveBeenCalled()
-
-    const models = await api.sessions.models(request({ sessionId: startingChild.id }))
-    expect(models.result.ok).toBe(false)
-    if (!models.result.ok) expect(models.result.error.code).toBe('agent-busy')
+    expect(queued.result.ok).toBe(true)
+    expect(inbox.nextTurn).toEqual([])
 
     const create = await api.sessions.create(request({ sessionId: originChild.id, cwd: '/proj' }))
     expect(create.result.ok).toBe(false)
@@ -789,10 +789,14 @@ describe('sessions.prompt synchronous rejection', () => {
     })
     const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
 
-    const models = await api.sessions.models(request({ sessionId }))
-    expect(models.result.ok).toBe(false)
-    if (!models.result.ok) {
-      expect(models.result.error).toMatchObject({
+    const prompt = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: 'follow up' }],
+    }))
+    expect(prompt.result.ok).toBe(false)
+    if (!prompt.result.ok) {
+      expect(prompt.result.error).toMatchObject({
         code: 'agent-busy',
         details: { reason: 'use subagent delivery for this child session' },
       })

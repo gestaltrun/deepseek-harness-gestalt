@@ -482,6 +482,11 @@ export function tombstoneSideThread(state: SidebarState, tab: SidebarTab): Sideb
   return { ...state, closedSideThreads: [...state.closedSideThreads, threadId] }
 }
 
+/** True when no docked tab remains in a workbench tree. */
+function workbenchHasNoTabs(node: SplitNode): boolean {
+  return allLeaves(node).every(leaf => leaf.tabs.length === 0)
+}
+
 /** Close a tab; an emptied leaf is removed unless it is the only pane. */
 export function closeTab(state: SidebarState, paneId: string, tabId: string): SidebarState {
   const key = treeOf(state, paneId)
@@ -493,8 +498,11 @@ export function closeTab(state: SidebarState, paneId: string, tabId: string): Si
     if (leaf.active === tabId) leaf.active = leaf.tabs[leaf.tabs.length - 1]?.id ?? null
     if (leaf.tabs.length === 0) emptied = true
   })
-  const closedState: SidebarState = { ...state, [key]: emptied ? removeLeafAt(splits, paneId) : splits }
-  return closed === undefined ? closedState : tombstoneSideThread(closedState, closed)
+  let next: SidebarState = { ...state, [key]: emptied ? removeLeafAt(splits, paneId) : splits }
+  if (closed !== undefined) next = tombstoneSideThread(next, closed)
+  if (key === 'splits' && workbenchHasNoTabs(next.splits)) next = { ...next, panelOpen: false }
+  if (key === 'bottomSplits' && workbenchHasNoTabs(next.bottomSplits)) next = { ...next, bottomOpen: false }
+  return next
 }
 
 /** Activate a tab in its pane (the pane's own tree). */

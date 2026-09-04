@@ -43,19 +43,26 @@
   gap: 8px;
 }
 
-.field input[type='text'],
-.field select {
+.control {
   box-sizing: border-box;
   width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
-  background: var(--dsw-alias-bg-l2);
-  color: inherit;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
   font: inherit;
+  font-size: 14px;
+  line-height: 22px;
 }
 
-.field input[aria-invalid='true'] {
+.control:focus {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.control[aria-invalid='true'] {
   border-color: var(--dsw-alias-label-error);
 }
 
@@ -71,8 +78,19 @@
 .rosterRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
+}
+
+.rosterName {
+  flex: 1;
+  min-width: 0;
+}
+
+.rosterActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
 }
 
 .error {

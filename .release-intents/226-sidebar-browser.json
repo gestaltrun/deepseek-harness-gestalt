@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "226-sidebar-browser",
+  "summary": {
+    "en": "Open official browser links in the Desktop workbench, keep subagent model and permission controls usable, and restore Side Chat opens plus queued-message actions.",
+    "zh": "Desktop 工作台内打开官方浏览器链接，修复子代理模型与权限控件，并恢复 Side Chat 打开与排队消息操作。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": []
+}

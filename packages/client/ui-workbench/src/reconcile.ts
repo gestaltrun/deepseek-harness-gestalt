@@ -21,6 +21,8 @@ export interface SidebarBrowserTab {
   readonly id: string
   /** Persisted plugin meta, if any. */
   readonly meta?: unknown
+  /** Seed URL recorded by a link or `sidebar_open` open, if any. */
+  readonly path?: string
 }
 
 /** One reconcile step the adapter runner applies. */

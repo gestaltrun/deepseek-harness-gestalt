@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  officialProfileFromChrome, officialProfileOf, officialTabMeta, officialTargetKey, officialTargetOf,
+  officialCreateErrorOf, officialProfileFromChrome, officialProfileOf, officialTabMeta,
+  officialTargetKey, officialTargetOf,
 } from '../src/official-tab-meta.ts'
 
 const TARGET = {
@@ -40,5 +41,12 @@ describe('official tab meta', () => {
       name: 'test',
     })
     expect(officialProfileFromChrome({ kind: 'persistent' })).toBeUndefined()
+  })
+
+  it('reads a recorded create failure only from a non-empty string', () => {
+    expect(officialCreateErrorOf(undefined)).toBeUndefined()
+    expect(officialCreateErrorOf(null)).toBeUndefined()
+    expect(officialCreateErrorOf({ createError: '' })).toBeUndefined()
+    expect(officialCreateErrorOf({ createError: 'runtime gone' })).toBe('runtime gone')
   })
 })

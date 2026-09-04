@@ -13,7 +13,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { BootPage } from './boot-page.ts'
 import { markDesktopOverlayDocument } from './desktop-overlay-mode.ts'
 import { getStaticModules } from './seed.ts'
-import { STATE_LABELS } from './loader-status.ts'
+import { markShellReady, STATE_LABELS } from './loader-status.ts'
 import './base.css'
 
 /** Module transport hook replaced by jsdom tests. */
@@ -73,9 +73,11 @@ export class AppWebEntry {
       this.ctx = ctx
       await this.runPluginBoot(ctx, prefetching)
       await this.mountApp(ctx)
+      markShellReady()
     } catch (reason) {
       console.error(reason)
       this.page.fail(reason instanceof Error ? reason.message : String(reason))
+      markShellReady()
     }
   }
 

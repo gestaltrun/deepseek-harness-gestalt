@@ -46,6 +46,7 @@ import {
   inheritParentAgentRoute,
   resolveChildAgentOptions,
   resolveChildDepth,
+  resumeChildAgentOptions,
 } from './child-agent.ts'
 import type { DelegatedPolicyOverrides } from './child-agent.ts'
 import { assertSubagentMaxDepth } from './depth.ts'
@@ -980,10 +981,7 @@ export class SubagentContinuationManager {
         childId,
         provider: descriptor.provider,
         parent,
-        agentOptions: {
-          ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
-          ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
-        },
+        agentOptions: resumeChildAgentOptions(loaded.events, descriptor),
         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
         signal: options.signal,
       })

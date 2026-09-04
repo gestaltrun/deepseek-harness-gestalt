@@ -99,6 +99,12 @@ export interface KnobState {
   sandbox: SandboxMode | null
   /** Last `approval/policy` payload, or null. */
   approval: ApprovalPolicy | null
+  /**
+   * Whether a `source: 'delegation'` sandbox or approval event has been
+   * folded. Delegated children pin approval to `'never'`, so the product
+   * select follows the inherited sandbox rather than reporting `custom`.
+   */
+  delegated: boolean
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -115,10 +121,11 @@ const knobStateSchema: zod.ZodType<KnobState> = zod.object({
     zod.literal('danger-full-access'),
   ]).nullable(),
   approval: zod.union([zod.literal('ask'), zod.literal('never')]).nullable(),
+  delegated: zod.boolean(),
 }).strict()
 
 /** State for the empty log: every knob at its composition default. */
-const EMPTY_KNOBS: KnobState = { preset: null, sandbox: null, approval: null }
+const EMPTY_KNOBS: KnobState = { preset: null, sandbox: null, approval: null, delegated: false }
 
 /**
  * One-event knob transition (the projection unit's `apply`). Uninterested
@@ -132,9 +139,17 @@ export function applyKnobEvent(state: KnobState, event: SessionEvent): KnobState
     case 'permission/preset':
       return { ...state, preset: event.data.preset }
     case 'sandbox/mode':
-      return { ...state, sandbox: event.data.mode }
+      return {
+        ...state,
+        sandbox: event.data.mode,
+        delegated: state.delegated || event.data.source === 'delegation',
+      }
     case 'approval/policy':
-      return { ...state, approval: event.data.policy }
+      return {
+        ...state,
+        approval: event.data.policy,
+        delegated: state.delegated || event.data.source === 'delegation',
+      }
     default:
       return state
   }
@@ -264,7 +279,7 @@ export class PermissionPresetService extends Service {
         init: () => EMPTY_KNOBS,
         apply: applyKnobEvent,
         wire: { viewSchema: selectSchema, view: state => this.selectFor(state) },
-        stateVersion: 1,
+        stateVersion: 2,
       })
     })
 
@@ -325,6 +340,12 @@ export class PermissionPresetService extends Service {
   /** Resolve the preset for one folded knob state (the shared mathematics of `current` and the projection unit). */
   private derive(state: KnobState): string {
     const sandbox = state.sandbox ?? this.ctx.shell.sandboxMode
+    if (state.delegated) {
+      for (const [name, spec] of Object.entries(this.presets)) {
+        if (spec.sandbox === sandbox) return name
+      }
+      return CUSTOM_PRESET
+    }
     const approval = state.approval ?? this.ctx.approval.config.policy ?? 'ask'
     const matches = (spec: PresetSpec): boolean => spec.sandbox === sandbox && spec.approval === approval
     if (state.preset !== null) {
@@ -442,6 +463,9 @@ export class PermissionPresetService extends Service {
       preset: selected ?? null,
       sandbox: sandbox ?? null,
       approval: approval ?? null,
+      delegated: events.some(event =>
+        (event.type === 'sandbox/mode' || event.type === 'approval/policy')
+        && event.data.source === 'delegation'),
     }
     const effective = this.derive(state)
     if (selected === undefined && effective !== CUSTOM_PRESET) {

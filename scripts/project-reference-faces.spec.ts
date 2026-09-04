@@ -50,6 +50,10 @@ function workspaceFixture(options: {
   const split = join(root, 'packages/api/split')
   mkdirSync(shared, { recursive: true })
   mkdirSync(split, { recursive: true })
+  mkdirSync(join(root, 'apps/web/tests'), { recursive: true })
+  writeFileSync(join(root, 'apps/web/tests/example.e2e.ts'), "import './scaffold.ts'\n")
+  writeFileSync(join(root, 'apps/web/tests/scaffold.ts'), 'export {}\n')
+  writeJson(join(root, 'apps/web/tsconfig.json'), { exclude: ['tests/example.e2e.ts'] })
   writeJson(join(root, 'tsconfig.base.json'), {})
   writeJson(join(root, 'tsconfig.base.client.json'), { extends: './tsconfig.base.json' })
   writeJson(join(shared, 'package.json'), { name: '@deepseek-ai/dsh-shared' })
@@ -65,6 +69,7 @@ function workspaceFixture(options: {
   writeJson(join(split, 'tsconfig.host.json'), { references: [{ path: '../../core/shared' }] })
   writeJson(join(split, 'tsconfig.client.json'), { references: [{ path: '../../core/shared' }] })
   writeJson(join(root, 'tsconfig.host.json'), {
+    include: ['apps/web/tests/example.e2e.ts'],
     references: options.host.map(path => ({ path })),
   })
   writeJson(join(root, 'tsconfig.client.json'), {
@@ -84,6 +89,35 @@ describe('Project Reference compiler faces', () => {
     })
 
     expect(collectWebHostTestFaceViolations(root)).toEqual([])
+  })
+
+  it('rejects a missing Web compiler config', () => {
+    const root = webHostTestFixture()
+    rmSync(join(root, 'apps/web/tsconfig.json'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: required Web Host-test compiler-face config is missing',
+    ])
+  })
+
+  it('rejects a missing Host compiler config', () => {
+    const root = webHostTestFixture()
+    rmSync(join(root, 'tsconfig.host.json'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'tsconfig.host.json: required Web Host-test compiler-face config is missing',
+    ])
+  })
+
+  it('reports both missing compiler configs in repo-relative order', () => {
+    const root = webHostTestFixture()
+    rmSync(join(root, 'apps/web/tsconfig.json'))
+    rmSync(join(root, 'tsconfig.host.json'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: required Web Host-test compiler-face config is missing',
+      'tsconfig.host.json: required Web Host-test compiler-face config is missing',
+    ])
   })
 
   it('rejects a scaffold consumer missing from the Web exclusion', () => {
@@ -119,8 +153,21 @@ describe('Project Reference compiler faces', () => {
     })
 
     expect(collectWebHostTestFaceViolations(root)).toEqual([
-      'apps/web/tsconfig.json: stale exact Web test entry "tests/missing.e2e.ts" does not exist',
-      'tsconfig.host.json: stale exact Web test entry "apps/web/tests/missing.snapshot.ts" does not exist',
+      'apps/web/tsconfig.json: stale exact Web test entry "tests/missing.e2e.ts" is not a file',
+      'tsconfig.host.json: stale exact Web test entry "apps/web/tests/missing.snapshot.ts" is not a file',
+    ])
+  })
+
+  it('rejects a directory at an exact Web test path without reading it', () => {
+    const root = webHostTestFixture({
+      webExclude: ['tests/example.e2e.ts', 'tests/directory.e2e.ts'],
+      hostInclude: ['apps/web/tests/example.e2e.ts', 'apps/web/tests/directory.e2e.ts'],
+    })
+    mkdirSync(join(root, 'apps/web/tests/directory.e2e.ts'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: stale exact Web test entry "tests/directory.e2e.ts" is not a file',
+      'tsconfig.host.json: stale exact Web test entry "apps/web/tests/directory.e2e.ts" is not a file',
     ])
   })
 

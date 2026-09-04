@@ -1,6 +1,6 @@
 /** Validate compiler-face isolation across workspace Project Reference graphs. */
 
-import { existsSync, globSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
@@ -166,14 +166,20 @@ export function collectGestaltCompilerFaceViolations(
 export function collectWebHostTestFaceViolations(root: string): string[] {
   const webConfigPath = resolve(root, 'apps/web/tsconfig.json')
   const hostConfigPath = resolve(root, 'tsconfig.host.json')
-  if (!existsSync(webConfigPath) || !existsSync(hostConfigPath)) return []
+  const violations: string[] = []
+  if (!existsSync(webConfigPath)) {
+    violations.push('apps/web/tsconfig.json: required Web Host-test compiler-face config is missing')
+  }
+  if (!existsSync(hostConfigPath)) {
+    violations.push('tsconfig.host.json: required Web Host-test compiler-face config is missing')
+  }
+  if (violations.length > 0) return violations
 
   const webConfig = projectConfig(root, webConfigPath)
   const hostConfig = projectConfig(root, hostConfigPath)
   const webExcludes = stringEntries(webConfig.exclude)
   const hostIncludes = stringEntries(hostConfig.include)
   const scaffoldConsumers = discoverDirectScaffoldConsumers(root)
-  const violations: string[] = []
 
   if (scaffoldConsumers.size === 0) {
     violations.push('apps/web/tests: no static direct ./scaffold.ts imports discovered; Web Host-test compiler-face validation requires a non-empty corpus')
@@ -197,8 +203,10 @@ export function collectWebHostTestFaceViolations(root: string): string[] {
 function discoverDirectScaffoldConsumers(root: string): Set<string> {
   const consumers = new Set<string>()
   for (const relativePath of globSync('apps/web/tests/*.{ts,tsx}', { cwd: root })) {
+    const absolutePath = resolve(root, relativePath)
+    if (statSync(absolutePath, { throwIfNoEntry: false })?.isFile() !== true) continue
     const normalizedPath = normalizePath(relativePath)
-    const sourceText = readFileSync(resolve(root, relativePath), 'utf8')
+    const sourceText = readFileSync(absolutePath, 'utf8')
     const scriptKind = relativePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
     const sourceFile = ts.createSourceFile(normalizedPath, sourceText, ts.ScriptTarget.Latest, true, scriptKind)
     if (sourceFile.statements.some(statement => isStaticScaffoldImport(statement))) {
@@ -224,8 +232,8 @@ function collectStaleWebTestEntries(
   for (const entry of entries) {
     if (!isExactWebTestFileEntry(entry, prefix)) continue
     const repoRelative = configPath === 'apps/web/tsconfig.json' ? `apps/web/${entry}` : entry
-    if (!existsSync(resolve(root, repoRelative))) {
-      violations.push(`${configPath}: stale exact Web test entry ${JSON.stringify(normalizePath(entry))} does not exist`)
+    if (statSync(resolve(root, repoRelative), { throwIfNoEntry: false })?.isFile() !== true) {
+      violations.push(`${configPath}: stale exact Web test entry ${JSON.stringify(normalizePath(entry))} is not a file`)
     }
   }
 }

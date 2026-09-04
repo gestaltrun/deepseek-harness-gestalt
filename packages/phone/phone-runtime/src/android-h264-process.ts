@@ -61,7 +61,7 @@ export function openAndroidSystemH264(
   const executablePath = resolveAdbExecutable(
     options.environment,
     platform,
-    internals.isExecutable ?? executableOnHost,
+    internals.isExecutable ?? (path => executableOnHost(path, platform)),
   )
   const args = screenrecordArgs(options.deviceId, options.size)
   const tree = internals.launch?.({ executablePath, args, environment: options.environment })

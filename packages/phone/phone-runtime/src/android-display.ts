@@ -1,6 +1,6 @@
 /** Current Android logical display size from `adb dumpsys display`. */
 
-import { accessSync, constants } from 'node:fs'
+import { accessSync, constants, statSync } from 'node:fs'
 import { posix, win32 } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { childEnv } from '@deepseek-ai/dsh-subprocess'
@@ -84,7 +84,7 @@ export function readAndroidLogicalDisplay(
   const executablePath = resolveAdbExecutable(
     options.environment,
     platform,
-    internals.isExecutable ?? executableOnHost,
+    internals.isExecutable ?? (path => executableOnHost(path, platform)),
   )
   const args = ['-s', options.deviceId, 'shell', 'dumpsys', 'display'] as const
   let result: { readonly stdout: string; readonly status: number | null }
@@ -104,13 +104,22 @@ export function readAndroidLogicalDisplay(
 }
 
 /**
- * Whether a candidate SDK adb path can be executed on this Host.
+ * Whether a candidate SDK adb path is runnable on the selected Host platform.
  * @param path - Absolute or relative executable path.
- * @returns true when `accessSync` reports execute permission.
+ * @param platform - Host platform selecting existence or POSIX execute permission.
+ * @param access - Filesystem access probe.
+ * @param stat - Filesystem metadata probe.
+ * @returns true when the path is a file and the platform-appropriate access check succeeds.
  */
-export function executableOnHost(path: string): boolean {
+export function executableOnHost(
+  path: string,
+  platform: NodeJS.Platform = process.platform,
+  access: typeof accessSync = accessSync,
+  stat: typeof statSync = statSync,
+): boolean {
   try {
-    accessSync(path, constants.X_OK)
+    if (!stat(path).isFile()) return false
+    access(path, platform === 'win32' ? constants.F_OK : constants.X_OK)
     return true
   } catch {
     return false

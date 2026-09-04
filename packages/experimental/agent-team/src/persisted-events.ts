@@ -130,6 +130,10 @@ function parse<T>(type: TeamEventType, schema: z.ZodType<T>, value: unknown): T 
   }
 }
 
+function assertNeverEvent(event: never): never {
+  throw new Error(`unhandled persisted Agent Teams event type ${String((event as TeamSessionEvent).type)}`)
+}
+
 /** Decode a same-Team v1/v2 record to a current v2 event without decoding foreign nested payloads. */
 export function decodePersistedTeamEvent(selectedTeamId: TeamId, event: TeamSessionEvent): TeamSessionEvent | undefined {
   const rawTeamId = ownDataProperty(event.data, 'teamId')
@@ -172,5 +176,8 @@ export function decodePersistedTeamEvent(selectedTeamId: TeamId, event: TeamSess
         : parse(event.type, deliveredV2Schema, event.data)
       return { ...event, data: { version: 2, teamId: data.teamId, messageId: data.messageId, targetId: data.targetId } }
     }
+    /* v8 ignore next -- closed Team event union is exhaustive. */
+    default:
+      return assertNeverEvent(event)
   }
 }

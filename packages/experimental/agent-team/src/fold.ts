@@ -13,9 +13,14 @@ import type {
 import { TeamId as toTeamId } from './types.ts'
 import { assertTaskGraphCandidate } from './task-graph.ts'
 import { decodePersistedTeamEvent, isTeamEvent } from './persisted-events.ts'
+import type { TeamSessionEvent } from './persisted-events.ts'
 export { isTeamEvent } from './persisted-events.ts'
 
 const numericTaskIdPattern = /^task-(\d+)$/u
+
+function assertNeverEvent(event: never): never {
+  throw new Error(`unhandled Agent Teams event type ${String((event as TeamSessionEvent).type)}`)
+}
 
 /** Mutable internal replay state. */
 export interface TeamFoldState {
@@ -112,9 +117,9 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
       state.delivered.add(decoded.data.messageId)
       break
     }
-    /* v8 ignore next 2 -- TeamEventType is closed and every member is handled above. */
+    /* v8 ignore next -- closed Team event union is exhaustive. */
     default:
-      return
+      return assertNeverEvent(decoded)
   }
 }
 

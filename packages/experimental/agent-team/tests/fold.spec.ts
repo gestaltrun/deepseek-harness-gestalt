@@ -19,6 +19,23 @@ function event<T extends SessionEventType>(type: T, data: SessionEventMap[T], se
   return { type, data, seq, time: seq } as SessionEvent<T>
 }
 
+
+function rawTeamEvent(
+  type: 'team/member' | 'team/task' | 'team/message/queued' | 'team/message/delivered',
+  data: unknown,
+  seq: number,
+): SessionEvent {
+  return { type, data, seq, time: seq } as unknown as SessionEvent
+}
+
+function v2TeamEvent<T extends 'team/member' | 'team/task' | 'team/message/queued' | 'team/message/delivered'>(
+  type: T,
+  data: SessionEventMap[T],
+  seq: number,
+): SessionEvent<T> {
+  return { type, data, seq, time: seq } as SessionEvent<T>
+}
+
 /** Queued-minus-delivered mail, the recovery mailbox the fold is responsible for. */
 function pending(state: TeamFoldState): TeamMessageSnapshot[] {
   return [...state.messages.values()].filter(message => !state.delivered.has(message.id))
@@ -69,15 +86,15 @@ function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnaps
 describe('Agent Teams fold', () => {
   it('folds current-team records and ignores inherited records', () => {
     const records: SessionEvent[] = [
-      event('team/member', { version: 1, teamId: TeamId('ancestor'), member: member() }, 0),
-      event('team/member', { version: 1, teamId: TEAM, member: member() }, 1),
-      event('team/member', {
+      rawTeamEvent('team/member', { version: 1, teamId: TeamId('ancestor'), member: member() }, 0),
+      rawTeamEvent('team/member', { version: 1, teamId: TEAM, member: member() }, 1),
+      rawTeamEvent('team/member', {
         version: 1,
         teamId: TEAM,
         member: member({ phase: 'active' }),
       }, 2),
-      event('team/task', { version: 1, teamId: TEAM, task: task({ id: TeamTaskId('task-7') }) }, 3),
-      event('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 4),
+      rawTeamEvent('team/task', { version: 1, teamId: TEAM, task: task({ id: TeamTaskId('task-7') }) }, 3),
+      rawTeamEvent('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 4),
     ]
     const state = foldTeam(ROOT, records)
 
@@ -92,29 +109,29 @@ describe('Agent Teams fold', () => {
   })
 
   it('enforces teammate identity and lifecycle', () => {
-    const base = event('team/member', { version: 1, teamId: TEAM, member: member() }, 0)
-    expect(() => foldTeam(ROOT, [event('team/member', {
+    const base = rawTeamEvent('team/member', { version: 1, teamId: TEAM, member: member() }, 0)
+    expect(() => foldTeam(ROOT, [rawTeamEvent('team/member', {
       version: 1,
       teamId: TEAM,
       member: member({ phase: 'active' }),
     }, 0)])).toThrow(/must begin provisioning/)
-    expect(() => foldTeam(ROOT, [base, event('team/member', {
+    expect(() => foldTeam(ROOT, [base, rawTeamEvent('team/member', {
       version: 1,
       teamId: TEAM,
       member: member({ name: 'renamed', phase: 'active' }),
     }, 1)])).toThrow(/immutable identity/)
-    expect(() => foldTeam(ROOT, [base, event('team/member', {
+    expect(() => foldTeam(ROOT, [base, rawTeamEvent('team/member', {
       version: 1,
       teamId: TEAM,
       member: member({ phase: 'active' }),
-    }, 1), event('team/member', {
+    }, 1), rawTeamEvent('team/member', {
       version: 1,
       teamId: TEAM,
       member: member({ phase: 'failed' }),
     }, 2)])).toThrow(/invalid active -> failed/)
 
     const duplicateName = member({ id: SessionId('child-b') })
-    expect(() => foldTeam(ROOT, [base, event('team/member', {
+    expect(() => foldTeam(ROOT, [base, rawTeamEvent('team/member', {
       version: 1,
       teamId: TEAM,
       member: duplicateName,
@@ -122,13 +139,13 @@ describe('Agent Teams fold', () => {
   })
 
   it('enforces task revision continuity', () => {
-    const first = event('team/task', { version: 1, teamId: TEAM, task: task() }, 0)
-    expect(() => foldTeam(ROOT, [event('team/task', {
+    const first = rawTeamEvent('team/task', { version: 1, teamId: TEAM, task: task() }, 0)
+    expect(() => foldTeam(ROOT, [rawTeamEvent('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 2 }),
     }, 0)])).toThrow(/begin at revision 1/)
-    expect(() => foldTeam(ROOT, [first, event('team/task', {
+    expect(() => foldTeam(ROOT, [first, rawTeamEvent('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 3 }),
@@ -136,8 +153,8 @@ describe('Agent Teams fold', () => {
   })
 
   it('rejects every invalid persisted task dependency relation', () => {
-    const first = event('team/task', { version: 1, teamId: TEAM, task: task() }, 0)
-    const second = event('team/task', {
+    const first = rawTeamEvent('team/task', { version: 1, teamId: TEAM, task: task() }, 0)
+    const second = rawTeamEvent('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({
@@ -147,7 +164,7 @@ describe('Agent Teams fold', () => {
     }, 1)
     const invalid: Array<{ records: SessionEvent[]; message: RegExp }> = [
       {
-        records: [event('team/task', {
+        records: [rawTeamEvent('team/task', {
           version: 1,
           teamId: TEAM,
           task: task({ blockedBy: [TeamTaskId('missing')] }),
@@ -155,7 +172,7 @@ describe('Agent Teams fold', () => {
         message: /blocker task "missing" .* is missing or deleted/,
       },
       {
-        records: [event('team/task', {
+        records: [rawTeamEvent('team/task', {
           version: 1,
           teamId: TEAM,
           task: task({ blockedBy: [TeamTaskId('task-1')] }),
@@ -163,14 +180,14 @@ describe('Agent Teams fold', () => {
         message: /cannot block itself/,
       },
       {
-        records: [first, event('team/task', {
+        records: [first, rawTeamEvent('team/task', {
           ...second.data,
           task: { ...second.data.task, blockedBy: [TeamTaskId('task-1'), TeamTaskId('task-1')] },
         }, 1)],
         message: /repeats blocker/,
       },
       {
-        records: [first, second, event('team/task', {
+        records: [first, second, rawTeamEvent('team/task', {
           version: 1,
           teamId: TEAM,
           task: task({ revision: 2, blockedBy: [TeamTaskId('task-2')] }),
@@ -178,7 +195,7 @@ describe('Agent Teams fold', () => {
         message: /dependency cycle/,
       },
       {
-        records: [first, second, event('team/task', {
+        records: [first, second, rawTeamEvent('team/task', {
           version: 1,
           teamId: TEAM,
           task: task({ revision: 2, status: 'deleted' }),
@@ -193,7 +210,7 @@ describe('Agent Teams fold', () => {
   })
 
   it('leaves numeric allocation unchanged for a branded nonstandard task id', () => {
-    const state = foldTeam(ROOT, [event('team/task', {
+    const state = foldTeam(ROOT, [rawTeamEvent('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ id: TeamTaskId('external-task') }),
@@ -202,7 +219,7 @@ describe('Agent Teams fold', () => {
   })
 
   it('rejects a persisted numeric task id outside the safe integer range', () => {
-    expect(() => foldTeam(ROOT, [event('team/task', {
+    expect(() => foldTeam(ROOT, [rawTeamEvent('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ id: TeamTaskId('task-9007199254740992') }),
@@ -210,8 +227,8 @@ describe('Agent Teams fold', () => {
   })
 
   it('enforces mailbox queue and acknowledgement relations', () => {
-    const queued = event('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 0)
-    const delivered = event('team/message/delivered', {
+    const queued = rawTeamEvent('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 0)
+    const delivered = rawTeamEvent('team/message/delivered', {
       version: 1,
       teamId: TEAM,
       messageId: TeamMessageId('message-1'),
@@ -220,7 +237,7 @@ describe('Agent Teams fold', () => {
     expect(pending(foldTeam(ROOT, [queued, delivered]))).toEqual([])
     expect(() => foldTeam(ROOT, [queued, queued])).toThrow(/queued twice/)
     expect(() => foldTeam(ROOT, [delivered])).toThrow(/delivered before queueing/)
-    expect(() => foldTeam(ROOT, [queued, event('team/message/delivered', {
+    expect(() => foldTeam(ROOT, [queued, rawTeamEvent('team/message/delivered', {
       ...delivered.data,
       targetId: SessionId('other'),
     }, 1)])).toThrow(/target changed/)
@@ -230,15 +247,15 @@ describe('Agent Teams fold', () => {
   it('validates every current-version persisted payload before folding it', () => {
     const malformed = [
       {
-        ...event('team/member', { version: 1, teamId: TEAM, member: member() }, 0),
+        ...rawTeamEvent('team/member', { version: 1, teamId: TEAM, member: member() }, 0),
         data: { version: 1, teamId: TEAM, member: { ...member(), name: 42 } },
       },
       {
-        ...event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+        ...rawTeamEvent('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
         data: { version: 1, teamId: TEAM, task: { ...task(), blockedBy: [42] } },
       },
       {
-        ...event('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 0),
+        ...rawTeamEvent('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 0),
         data: {
           version: 1,
           teamId: TEAM,
@@ -246,7 +263,7 @@ describe('Agent Teams fold', () => {
         },
       },
       {
-        ...event('team/message/delivered', {
+        ...rawTeamEvent('team/message/delivered', {
           version: 1,
           teamId: TEAM,
           messageId: TeamMessageId('message-1'),
@@ -260,11 +277,11 @@ describe('Agent Teams fold', () => {
         },
       },
       {
-        ...event('team/member', { version: 1, teamId: TEAM, member: member() }, 0),
+        ...rawTeamEvent('team/member', { version: 1, teamId: TEAM, member: member() }, 0),
         data: { version: 1, teamId: TEAM, member: member(), unexpected: true },
       },
       {
-        ...event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+        ...rawTeamEvent('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
         data: { version: 1, teamId: 42, task: task() },
       },
     ] as unknown as SessionEvent[]
@@ -290,9 +307,9 @@ describe('Agent Teams fold', () => {
   it('folds mixed v1 and v2 records to current state', () => {
     const state = foldTeam(ROOT, [
       { type: 'team/member', seq: 0, time: 0, data: { version: 1, teamId: TEAM, member: member() } } as unknown as SessionEvent,
-      event('team/member', { version: 2, teamId: TEAM, member: member({ phase: 'active' }) }, 1),
+      v2TeamEvent('team/member', { version: 2, teamId: TEAM, member: member({ phase: 'active' }) }, 1),
       { type: 'team/task', seq: 2, time: 2, data: { version: 1, teamId: TEAM, task: task() } } as unknown as SessionEvent,
-      event('team/task', { version: 2, teamId: TEAM, task: task({ revision: 2, status: 'completed' }) }, 3),
+      v2TeamEvent('team/task', { version: 2, teamId: TEAM, task: task({ revision: 2, status: 'completed' }) }, 3),
     ])
     expect(state.members.get(CHILD)?.phase).toBe('active')
     expect(state.tasks.get(TeamTaskId('task-1'))?.status).toBe('completed')
@@ -300,7 +317,7 @@ describe('Agent Teams fold', () => {
 
   it('retains merge-extensible content blocks while rejecting malformed core variants', () => {
     const extension = { type: 'plugin/custom', payload: { value: 1 } } as never
-    const state = foldTeam(ROOT, [event('team/message/queued', {
+    const state = foldTeam(ROOT, [rawTeamEvent('team/message/queued', {
       version: 1,
       teamId: TEAM,
       message: { ...message({ content: [extension] }), delivery: 'quiet' },
@@ -310,8 +327,8 @@ describe('Agent Teams fold', () => {
 
   it('rejects unsupported event versions without mutating an empty state', () => {
     const state = emptyTeamFoldState(ROOT)
-    const invalid = event('team/task', {
-      version: 3 as 1,
+    const invalid = rawTeamEvent('team/task', {
+      version: 3,
       teamId: TEAM,
       task: task(),
     }, 0)
@@ -320,8 +337,8 @@ describe('Agent Teams fold', () => {
   })
 
   it('ignores unsupported inherited Team records before decoding their version', () => {
-    const inherited = event('team/task', {
-      version: 2 as 1,
+    const inherited = rawTeamEvent('team/task', {
+      version: 9,
       teamId: TeamId('ancestor'),
       task: task(),
     }, 0)
@@ -330,7 +347,7 @@ describe('Agent Teams fold', () => {
 
   it('ignores malformed nested records inherited from another Team', () => {
     const inherited = {
-      ...event('team/task', {
+      ...rawTeamEvent('team/task', {
         version: 1,
         teamId: TeamId('ancestor'),
         task: task(),

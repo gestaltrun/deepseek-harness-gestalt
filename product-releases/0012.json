@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sequence": 12,
+  "intentIds": [
+    "desktop-updater-available-recheck"
+  ],
+  "summaries": [
+    {
+      "en": "Refresh the offered Desktop update version while Download is still showing, so a later GitHub Release replaces a stale target.",
+      "zh": "在仍显示「下载」时刷新 Desktop 提供的更新版本，使后续 GitHub Release 替换过期目标。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": true,
+      "previousVersion": "0.1.15",
+      "version": "0.1.16",
+      "tag": "gestalt-v0.1.16",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Refresh the offered Desktop update version while Download is still showing, so a later GitHub Release replaces a stale target.",
+          "zh": "在仍显示「下载」时刷新 Desktop 提供的更新版本，使后续 GitHub Release 替换过期目标。"
+        }
+      ]
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.3"
+    }
+  }
+}

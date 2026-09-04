@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "nextSequence": 10,
+  "nextSequence": 11,
   "consumedIntentIds": [
     "414-desktop-recovery-version",
     "414-release-orchestration",
@@ -12,6 +12,7 @@
     "499-alb-relay-idle-timeout",
     "502-windows-coverage-retry",
     "507-windows-atomic-replace",
+    "554-desktop-cancel-github-login",
     "555-platform-membership-http"
   ]
 }

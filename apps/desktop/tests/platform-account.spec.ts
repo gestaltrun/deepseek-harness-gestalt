@@ -16,6 +16,7 @@ import {
 import {
   DesktopAccountController,
   EncryptedDesktopAccountStore,
+  UnavailableDesktopAccountController,
   type DesktopAccountStore,
   type PersistedDesktopAccount,
 } from '../src/platform-account.ts'
@@ -265,6 +266,311 @@ describe('DesktopAccountController', () => {
     expect(store.record?.installationId).toBe(installationId)
     expect(store.record?.session).toBeUndefined()
     expect(store.material.get('personal-pairing')).toBe('preserved')
+  })
+
+  it('cancels a pending login locally and permits a fresh authorization attempt', async () => {
+    const service = platform()
+    const store = new MemoryDesktopStore()
+    const scheduled: Array<() => void> = []
+    const opened: string[] = []
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport: service,
+      store,
+      now: () => NOW,
+      systemBrowser: { open: async (url) => { opened.push(url) } },
+      schedule: (task) => {
+        scheduled.push(task)
+        return { unref() {}, [Symbol.dispose]() {} } as never
+      },
+    })
+    await controller.start()
+    await controller.acceptPrivacy()
+    await controller.beginLogin()
+
+    await controller.cancelLogin()
+
+    expect(controller.getSnapshot()).toEqual({ status: 'idle', privacyAccepted: true })
+    expect(store.record?.pending).toBeUndefined()
+    expect(store.record?.pendingPrivateKey).toBeUndefined()
+
+    await controller.beginLogin()
+    expect(opened).toHaveLength(2)
+    expect(store.record?.pending).toBeDefined()
+    expect(controller.getSnapshot()).toEqual({ status: 'polling', privacyAccepted: true })
+  })
+
+  it('aborts an authorizing request before its transport responds', async () => {
+    let requestSignal: AbortSignal | undefined
+    const beginLogin = vi.fn<PlatformAccountTransport['beginLogin']>((_input, options) => {
+      requestSignal = options?.signal
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('authorization cancelled', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const transport: PlatformAccountTransport = {
+      environment: ENVIRONMENT,
+      beginLogin,
+      pollLogin: vi.fn(),
+      refresh: vi.fn(),
+      current: vi.fn(),
+      signOut: vi.fn(),
+    }
+    const store = new MemoryDesktopStore()
+    const open = vi.fn()
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport,
+      store,
+      systemBrowser: { open },
+      now: () => NOW,
+    })
+    await controller.start()
+    await controller.acceptPrivacy()
+    const authorization = controller.beginLogin()
+    await vi.waitFor(() => { expect(controller.getSnapshot().status).toBe('authorizing') })
+
+    const cancellation = controller.cancelLogin()
+    await Promise.all([authorization, cancellation])
+
+    expect(requestSignal?.aborted).toBe(true)
+    expect(open).not.toHaveBeenCalled()
+    expect(store.record?.pending).toBeUndefined()
+    expect(controller.getSnapshot()).toEqual({ status: 'idle', privacyAccepted: true })
+  })
+
+  it('does not open the browser when cancellation arrives during pending-state persistence', async () => {
+    const pendingSave = deferred<undefined>()
+    let saveCount = 0
+    const store = new MemoryDesktopStore()
+    vi.spyOn(store, 'save').mockImplementation(async (record) => {
+      saveCount += 1
+      if (saveCount === 1) await pendingSave.promise
+      store.record = structuredClone(record)
+    })
+    const open = vi.fn()
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport: platform(),
+      store,
+      systemBrowser: { open },
+      now: () => NOW,
+    })
+    await controller.start()
+    await controller.acceptPrivacy()
+    const authorization = controller.beginLogin()
+    await vi.waitFor(() => { expect(saveCount).toBe(1) })
+
+    const cancellation = controller.cancelLogin()
+    pendingSave.resolve(undefined)
+    await Promise.all([authorization, cancellation])
+
+    expect(open).not.toHaveBeenCalled()
+    expect(store.record?.pending).toBeUndefined()
+    expect(controller.getSnapshot()).toEqual({ status: 'idle', privacyAccepted: true })
+  })
+
+  it('cancels and disposes only after the system-browser operation is quiescent', async () => {
+    for (const action of ['cancel', 'dispose'] as const) {
+      const browserOpen = deferred<undefined>()
+      let browserSignal: AbortSignal | undefined
+      const open = vi.fn(async (_url: string, options?: { signal?: AbortSignal }) => {
+        browserSignal = options?.signal
+        await browserOpen.promise
+      })
+      const controller = new DesktopAccountController({
+        presentation: { name: 'Test Desktop', platform: 'linux' as const },
+        environment: ENVIRONMENT,
+        transport: platform(),
+        store: new MemoryDesktopStore(),
+        systemBrowser: { open },
+        now: () => NOW,
+      })
+      await controller.start()
+      await controller.acceptPrivacy()
+      const authorization = controller.beginLogin()
+      await vi.waitFor(() => { expect(open).toHaveBeenCalledOnce() })
+
+      const completion = action === 'cancel' ? controller.cancelLogin() : controller.dispose()
+      let settled = false
+      void completion.then(() => { settled = true })
+      await Promise.resolve()
+
+      expect(browserSignal?.aborted).toBe(true)
+      expect(settled).toBe(false)
+      browserOpen.resolve(undefined)
+      await Promise.all([authorization, completion])
+
+      if (action === 'cancel') {
+        expect(controller.getSnapshot()).toEqual({ status: 'idle', privacyAccepted: true })
+      }
+    }
+  })
+
+  it('refuses a completed poll that arrives after the operator cancels', async () => {
+    const poll = deferred<LoginPollResult>()
+    const pollLogin = vi.fn(async () => poll.promise)
+    const transport: PlatformAccountTransport = {
+      environment: ENVIRONMENT,
+      beginLogin: vi.fn(),
+      pollLogin,
+      refresh: vi.fn(),
+      current: vi.fn(),
+      signOut: vi.fn(),
+    }
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey
+      .export({ format: 'pem', type: 'pkcs8' }).toString()
+    const store = new MemoryDesktopStore()
+    store.record = {
+      installationId: parseInstallationId('cancel-poll'),
+      pending: {
+        id: 'cancel-attempt' as never,
+        state: 'state',
+        authorizationUrl: 'https://github.com/login/oauth/authorize',
+        pollingToken: 'polling-token',
+        expiresAt: NOW + 300_000,
+      },
+      pendingPrivateKey: privateKey,
+    }
+    const scheduled: Array<() => void> = []
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport,
+      store,
+      systemBrowser: { open: vi.fn() },
+      now: () => NOW,
+      schedule: (task) => {
+        scheduled.push(task)
+        return { unref() {} } as never
+      },
+    })
+    await controller.start()
+    scheduled.shift()?.()
+    await vi.waitFor(() => { expect(pollLogin).toHaveBeenCalledOnce() })
+
+    const cancellation = controller.cancelLogin()
+    poll.resolve({ status: 'complete', ...desktopSession() })
+    await cancellation
+
+    expect(store.record?.session).toBeUndefined()
+    expect(store.record?.pending).toBeUndefined()
+    expect(controller.getSnapshot()).toEqual({ status: 'idle', privacyAccepted: false })
+  })
+
+  it('keeps the live snapshot consistent with the store when a completed poll races cancel', async () => {
+    const poll = deferred<LoginPollResult>()
+    const pollLogin = vi.fn(async () => poll.promise)
+    const transport: PlatformAccountTransport = {
+      environment: ENVIRONMENT,
+      beginLogin: vi.fn(),
+      pollLogin,
+      refresh: vi.fn(),
+      current: vi.fn(),
+      signOut: vi.fn(),
+    }
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey
+      .export({ format: 'pem', type: 'pkcs8' }).toString()
+    const store = new MemoryDesktopStore()
+    store.record = {
+      installationId: parseInstallationId('cancel-poll-race'),
+      pending: {
+        id: 'cancel-attempt-race' as never,
+        state: 'state',
+        authorizationUrl: 'https://github.com/login/oauth/authorize',
+        pollingToken: 'polling-token',
+        expiresAt: NOW + 300_000,
+      },
+      pendingPrivateKey: privateKey,
+    }
+    const scheduled: Array<() => void> = []
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport,
+      store,
+      systemBrowser: { open: vi.fn() },
+      now: () => NOW,
+      schedule: (task) => {
+        scheduled.push(task)
+        return { unref() {} } as never
+      },
+    })
+    await controller.start()
+    scheduled.shift()?.()
+    await vi.waitFor(() => { expect(pollLogin).toHaveBeenCalledOnce() })
+
+    const cancellation = controller.cancelLogin()
+    poll.resolve({ status: 'complete', ...desktopSession() })
+    await cancellation
+
+    const snapshot = controller.getSnapshot()
+    const session = store.record?.session
+    if (session !== undefined) {
+      expect(snapshot).toEqual({
+        status: 'signed-in',
+        privacyAccepted: false,
+        account: session.account,
+      })
+    } else {
+      expect(snapshot).toEqual({ status: 'idle', privacyAccepted: false })
+      expect(store.record?.pending).toBeUndefined()
+    }
+  })
+
+  it('does not reinterpret an active Account Session as a cancelled login', async () => {
+    const service = platform()
+    const store = new MemoryDesktopStore()
+    const scheduled: Array<() => void> = []
+    let authorizationUrl = ''
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport: service,
+      store,
+      now: () => NOW,
+      systemBrowser: { open: async (url) => { authorizationUrl = url } },
+      schedule: (task) => {
+        scheduled.push(task)
+        return { unref() {}, [Symbol.dispose]() {} } as never
+      },
+    })
+    await controller.start()
+    await controller.acceptPrivacy()
+    await controller.beginLogin()
+    const state = new URL(authorizationUrl).searchParams.get('state')
+    if (state === null) throw new Error('missing state')
+    await service.completeGitHubCallback({ code: 'github-code', state })
+    scheduled.shift()?.()
+    await vi.waitFor(() => { expect(controller.getSnapshot().status).toBe('signed-in') })
+
+    const before = controller.getSnapshot()
+    await expect(controller.cancelLogin()).resolves.toBe(before)
+    expect(controller.getSnapshot().status).toBe('signed-in')
+    expect(store.record?.session).toBeDefined()
+  })
+
+  it('leaves idle and unavailable snapshots unchanged', async () => {
+    const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
+      environment: ENVIRONMENT,
+      transport: platform(),
+      store: new MemoryDesktopStore(),
+      systemBrowser: { open: vi.fn() },
+      now: () => NOW,
+    })
+    await controller.start()
+    const idle = controller.getSnapshot()
+    await expect(controller.cancelLogin()).resolves.toBe(idle)
+
+    const unavailable = new UnavailableDesktopAccountController('secure storage unavailable')
+    const snapshot = unavailable.getSnapshot()
+    await expect(unavailable.cancelLogin()).resolves.toBe(snapshot)
   })
 })
 

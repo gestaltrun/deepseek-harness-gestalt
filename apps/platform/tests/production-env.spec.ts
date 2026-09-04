@@ -513,7 +513,14 @@ describe('production and deploy names', () => {
         objectPrefix: 'remote-attachments/production',
         timeoutMs: 10000,
       },
+      membershipStoragePath: '/var/lib/dsh/projects',
     })
+    expect(loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_MEMBERSHIP_STORAGE: '/tmp/platform-membership',
+    }).membershipStoragePath).toBe('/tmp/platform-membership')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_MEMBERSHIP_STORAGE: '   ',
+    })).toThrow('PLATFORM_MEMBERSHIP_STORAGE')
     expect(loadOperatedPlatformConfig({
       ...completeDeployEnv(), PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'postgres',
     }).remoteAttachments.storage).toBe('postgres')
@@ -696,6 +703,8 @@ describe('operated Platform composition', () => {
     expect(productComposition).not.toContain('dev.gestaltrun.invalid')
     expect(productComposition).not.toContain('rejectUnauthorized: false')
     expect(productComposition).not.toContain('PLATFORM_REDIS_TLS')
+    expect(productComposition).toContain('FileProjectMembership')
+    expect(productComposition).toContain('ProjectMembershipHttp')
     expect(productComposition).toContain('PersonalPairingProvider')
     expect(productComposition).not.toContain('DevelopmentKeylessPairingHandshakeProvider')
     expect(productComposition).not.toContain('MemoryPersonalPairingAuthorityStore')
@@ -704,6 +713,8 @@ describe('operated Platform composition', () => {
     expect(productComposition).toContain('OssRemoteAttachmentStore')
     expect(productComposition).toContain('createEcsRamRoleOssClient')
     expect(dockerfileSource).toContain('ali-oss@6.23.0')
+    expect(dockerfileSource).toContain('VOLUME ["/var/lib/dsh/projects"]')
+    expect(dockerfileSource).toContain('mkdir -p /var/lib/dsh/projects')
     expect(productComposition).toContain('PostgresRemoteAttachmentStore')
     expect(productComposition).not.toContain('production-env-cli')
     expect(readFileSync(new URL('../src/production-env.ts', import.meta.url), 'utf8')).not.toContain('process.exit')
@@ -809,6 +820,7 @@ describe('Platform release workflows', () => {
     expect(prepareSource).toContain('-e PLATFORM_APSARADB_CA_BASE64')
     expect(hostDeploySource).toContain('--log-opt max-size=20m')
     expect(hostDeploySource).toContain('--log-opt max-file=3')
+    expect(hostDeploySource).toContain('-v dsh-platform-membership:/var/lib/dsh/projects')
     expect(hostDeploySource).toContain('dist/oss-lifecycle-cli.mjs')
     expect(hostDeploySource).toContain('dsh-platform-candidate')
     expect(hostDeploySource).toContain('wait_for_storage 18080')

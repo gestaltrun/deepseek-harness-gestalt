@@ -1,0 +1,34 @@
+{
+  "version": "0.1.14",
+  "tag": "gestalt-v0.1.14",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "1eb488ab472404b506e3a8adc88b310e30d47f62"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.14 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "产品变更",
+          "items": [
+            "Desktop GitHub 登录在授权或轮询期间可以取消。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.14 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Product changes",
+          "items": [
+            "Allow cancelling Desktop GitHub login while authorizing or polling."
+          ]
+        }
+      ]
+    }
+  }
+}

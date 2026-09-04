@@ -33,7 +33,16 @@ export { ACCOUNT_PRIVACY_NOTICE }
 export interface PlatformAccountTransport {
   /** Deployment identity owning every request. */
   readonly environment: SelectedPlatformEnvironment
-  beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView>
+  /**
+   * Start one external authorization attempt.
+   * @param input - Installation identity and public proof key.
+   * @param options - Optional cancellation for the pending HTTP request.
+   * @returns the authorization URL and polling capability.
+   */
+  beginLogin(
+    input: InstallationLoginIdentity & { publicKey: JsonWebKey },
+    options?: { signal?: AbortSignal },
+  ): Promise<LoginAttemptView>
   pollLogin(input: { attemptId: LoginAttemptId; pollingToken: string; proof: AccountProof }): Promise<LoginPollResult>
   refresh(input: { refreshToken: string; proof: AccountProof }): Promise<AccountSessionView>
   current(input: { accessToken: string; proof: AccountProof }): Promise<PlatformAccountView>
@@ -60,8 +69,15 @@ export class PlatformAccountHttpTransport implements PlatformAccountTransport {
     this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
-  beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView> {
-    return this.json('/v1/account/login-attempts', { method: 'POST', body: JSON.stringify(input) }, parseLoginAttemptView)
+  beginLogin(
+    input: InstallationLoginIdentity & { publicKey: JsonWebKey },
+    options: { signal?: AbortSignal } = {},
+  ): Promise<LoginAttemptView> {
+    return this.json('/v1/account/login-attempts', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    }, parseLoginAttemptView)
   }
 
   pollLogin(input: { attemptId: LoginAttemptId; pollingToken: string; proof: AccountProof }): Promise<LoginPollResult> {
@@ -332,8 +348,13 @@ export interface PlatformAccountInstallationSnapshot {
 
 /** Native or Desktop system-browser capability used for OAuth authorization. */
 export interface SystemBrowser {
-  /** Open one trusted HTTPS authorization URL outside the app webview. */
-  open(url: string): void | Promise<void>
+  /**
+   * Open one trusted HTTPS authorization URL outside the app webview.
+   * When `options.signal` aborts, the call still settles only after this adapter owns no in-flight open work.
+   * @param url - GitHub authorization URL from a login attempt.
+   * @param options - Optional abort for owned open work.
+   */
+  open(url: string, options?: { signal?: AbortSignal }): void | Promise<void>
 }
 
 /** Serial owner for current-installation lifecycle mutations. */

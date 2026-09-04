@@ -695,6 +695,24 @@ describe('PlatformAccountHttpTransport', () => {
     })).resolves.toEqual(ATTEMPT)
   })
 
+  it('forwards authorization cancellation to Fetch', async () => {
+    const abort = new AbortController()
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBe(abort.signal)
+      return new Response(JSON.stringify(ATTEMPT), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const transport = new PlatformAccountHttpTransport({ environment: DEVELOPMENT, fetch })
+
+    await transport.beginLogin({
+      installationId: parseInstallationId('mobile-1'),
+      installationKind: 'mobile',
+      presentation: { name: 'Transport installation', platform: 'ios' },
+      publicKey: {},
+    }, { signal: abort.signal })
+
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
   it('routes every operation to the selected environment with JSON and proof headers', async () => {
     const calls: Array<[string, RequestInit]> = []
     const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

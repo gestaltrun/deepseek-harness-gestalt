@@ -3,11 +3,13 @@
 FROM node:24-bookworm-slim
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin platform
+RUN mkdir -p /var/lib/dsh/projects && chown platform:platform /var/lib/dsh/projects
 WORKDIR /app
 RUN npm install ali-oss@6.23.0 pg@8.23.0 redis@6.2.1 --omit=dev
 COPY --chown=platform:platform dist ./dist
 COPY --chown=platform:platform public ./public
 USER platform
+VOLUME ["/var/lib/dsh/projects"]
 ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080

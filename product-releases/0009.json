@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sequence": 9,
+  "intentIds": [
+    "555-platform-membership-http"
+  ],
+  "summaries": [
+    {
+      "en": "Mount Project Membership HTTP in the production Platform image so Cloud Projects can create, invite, and heartbeat against gestaltrun.com.",
+      "zh": "生产 Platform 镜像挂载 Project Membership HTTP，使 Cloud Project 的创建、邀请和心跳可走 gestaltrun.com。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": false,
+      "version": "0.1.13"
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": true,
+      "previousVersion": "0.1.2",
+      "version": "0.1.3",
+      "tag": "platform-v0.1.3",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Mount Project Membership HTTP in the production Platform image so Cloud Projects can create, invite, and heartbeat against gestaltrun.com.",
+          "zh": "生产 Platform 镜像挂载 Project Membership HTTP，使 Cloud Project 的创建、邀请和心跳可走 gestaltrun.com。"
+        }
+      ]
+    }
+  }
+}

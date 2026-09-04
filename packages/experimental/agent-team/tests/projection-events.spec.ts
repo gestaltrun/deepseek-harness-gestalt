@@ -14,6 +14,14 @@ function event<T extends SessionEventType>(type: T, data: SessionEventMap[T], se
   return { type, data, seq, time: seq } as SessionEvent<T>
 }
 
+function rawTeamEvent(
+  type: 'team/member' | 'team/task' | 'team/message/queued' | 'team/message/delivered',
+  data: unknown,
+  seq: SessionSeq,
+): SessionEvent {
+  return { type, data, seq, time: seq } as unknown as SessionEvent
+}
+
 function project(rootId: SessionId, events: readonly SessionEvent[]): TeamProjectionState {
   let state = teamProjectionDefinition.init({ version: 0, id: rootId, createdAt: 0, isSeeded: false })
   for (const event of events) state = teamProjectionDefinition.apply(state, event)
@@ -311,8 +319,8 @@ describe('Agent Teams projection events', () => {
   })
 
   it('records unknown same-team versions as sticky failures', () => {
-    const invalid = event('team/task', {
-      version: 3 as 2,
+    const invalid = rawTeamEvent('team/task', {
+      version: 3,
       teamId: TEAM,
       task: task(),
     }, SessionSeq(0))
@@ -327,8 +335,8 @@ describe('Agent Teams projection events', () => {
   })
 
   it('isolates unsupported inherited Team records from the current Team', () => {
-    const inherited = event('team/task', {
-      version: 1 as 2,
+    const inherited = rawTeamEvent('team/task', {
+      version: 1,
       teamId: TeamId('ancestor'),
       task: task(),
     }, SessionSeq(0))

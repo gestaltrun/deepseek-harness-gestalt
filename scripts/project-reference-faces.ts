@@ -1,6 +1,6 @@
 /** Validate compiler-face isolation across workspace Project Reference graphs. */
 
-import { existsSync, globSync } from 'node:fs'
+import { existsSync, globSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
@@ -52,6 +52,8 @@ export const GESTALT_COMPILER_FACES: Readonly<Record<ProjectFace, readonly strin
 
 interface ProjectReferenceConfig {
   readonly extends?: unknown
+  readonly include?: readonly unknown[]
+  readonly exclude?: readonly unknown[]
   readonly references?: ReadonlyArray<{ readonly path?: unknown }>
 }
 
@@ -83,7 +85,10 @@ const GESTALT_PROJECT_PATTERNS = [
  */
 export function collectProjectReferenceFaceViolations(root: string): string[] {
   const splitRoots = splitProjectRoots(root)
-  const violations = collectGestaltCompilerFaceViolations(root)
+  const violations = [
+    ...collectGestaltCompilerFaceViolations(root),
+    ...collectWebHostTestFaceViolations(root),
+  ]
   const pending = [resolve(root, 'tsconfig.host.json'), resolve(root, 'tsconfig.client.json')]
   const visited = new Set<string>()
   for (let configPath = pending.pop(); configPath !== undefined; configPath = pending.pop()) {
@@ -150,6 +155,93 @@ export function collectGestaltCompilerFaceViolations(
     }
   }
   return violations.sort()
+}
+
+/**
+ * Find Web tests whose direct scaffold dependency is missing from either compiler face.
+ *
+ * @param root - Repository root containing the Web tests and aggregate tsconfigs.
+ * @returns Repo-relative diagnostics for missing or stale exact Web test entries.
+ */
+export function collectWebHostTestFaceViolations(root: string): string[] {
+  const webConfigPath = resolve(root, 'apps/web/tsconfig.json')
+  const hostConfigPath = resolve(root, 'tsconfig.host.json')
+  if (!existsSync(webConfigPath) || !existsSync(hostConfigPath)) return []
+
+  const webConfig = projectConfig(root, webConfigPath)
+  const hostConfig = projectConfig(root, hostConfigPath)
+  const webExcludes = stringEntries(webConfig.exclude)
+  const hostIncludes = stringEntries(hostConfig.include)
+  const scaffoldConsumers = discoverDirectScaffoldConsumers(root)
+  const violations: string[] = []
+
+  if (scaffoldConsumers.size === 0) {
+    violations.push('apps/web/tests: no static direct ./scaffold.ts imports discovered; Web Host-test compiler-face validation requires a non-empty corpus')
+  }
+
+  for (const consumer of scaffoldConsumers) {
+    const webEntry = consumer.slice('apps/web/'.length)
+    if (!webExcludes.has(webEntry)) {
+      violations.push(`apps/web/tsconfig.json: ${consumer} statically imports "./scaffold.ts" and must be listed exactly as ${JSON.stringify(webEntry)} in exclude`)
+    }
+    if (!hostIncludes.has(consumer)) {
+      violations.push(`tsconfig.host.json: ${consumer} statically imports "./scaffold.ts" and must be listed exactly in include`)
+    }
+  }
+
+  collectStaleWebTestEntries(root, 'apps/web/tsconfig.json', webExcludes, 'tests/', violations)
+  collectStaleWebTestEntries(root, 'tsconfig.host.json', hostIncludes, 'apps/web/tests/', violations)
+  return violations.sort()
+}
+
+function discoverDirectScaffoldConsumers(root: string): Set<string> {
+  const consumers = new Set<string>()
+  for (const relativePath of globSync('apps/web/tests/*.{ts,tsx}', { cwd: root })) {
+    const normalizedPath = normalizePath(relativePath)
+    const sourceText = readFileSync(resolve(root, relativePath), 'utf8')
+    const scriptKind = relativePath.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+    const sourceFile = ts.createSourceFile(normalizedPath, sourceText, ts.ScriptTarget.Latest, true, scriptKind)
+    if (sourceFile.statements.some(statement => isStaticScaffoldImport(statement))) {
+      consumers.add(normalizedPath)
+    }
+  }
+  return consumers
+}
+
+function isStaticScaffoldImport(statement: ts.Statement): boolean {
+  return ts.isImportDeclaration(statement)
+    && ts.isStringLiteral(statement.moduleSpecifier)
+    && statement.moduleSpecifier.text === './scaffold.ts'
+}
+
+function collectStaleWebTestEntries(
+  root: string,
+  configPath: string,
+  entries: ReadonlySet<string>,
+  prefix: string,
+  violations: string[],
+): void {
+  for (const entry of entries) {
+    if (!isExactWebTestFileEntry(entry, prefix)) continue
+    const repoRelative = configPath === 'apps/web/tsconfig.json' ? `apps/web/${entry}` : entry
+    if (!existsSync(resolve(root, repoRelative))) {
+      violations.push(`${configPath}: stale exact Web test entry ${JSON.stringify(normalizePath(entry))} does not exist`)
+    }
+  }
+}
+
+function isExactWebTestFileEntry(entry: string, prefix: string): boolean {
+  if (!entry.startsWith(prefix) || entry.slice(prefix.length).includes('/')) return false
+  if (/[?*{}[\]]/.test(entry)) return false
+  return /\.(?:e2e|snapshot|acceptance|perf|spec|test)\.(?:ts|tsx)$/.test(entry)
+}
+
+function stringEntries(values: readonly unknown[] | undefined): Set<string> {
+  return new Set((values ?? []).filter((value): value is string => typeof value === 'string').map(normalizePath))
+}
+
+function normalizePath(path: string): string {
+  return path.replaceAll('\\', '/')
 }
 
 function discoverGestaltCompilerFaces(root: string): Record<ProjectFace, Set<string>> {

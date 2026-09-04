@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { parseConfigFileTextToJson } from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   collectGestaltCompilerFaceViolations,
   collectProjectReferenceFaceViolations,
+  collectWebHostTestFaceViolations,
 } from './project-reference-faces.ts'
 
 const roots: string[] = []
@@ -18,10 +18,26 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-function readConfig(path: string): { readonly include?: readonly string[]; readonly exclude?: readonly string[] } {
-  const result = parseConfigFileTextToJson(path, readFileSync(path, 'utf8'))
-  if (result.error) throw new Error(`Cannot parse ${path}`)
-  return result.config as { readonly include?: readonly string[]; readonly exclude?: readonly string[] }
+function webHostTestFixture(options: {
+  readonly source?: string
+  readonly webExclude?: readonly string[]
+  readonly hostInclude?: readonly string[]
+} = {}): string {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
+  roots.push(root)
+  mkdirSync(join(root, 'apps/web/tests'), { recursive: true })
+  writeFileSync(
+    join(root, 'apps/web/tests/example.e2e.ts'),
+    options.source ?? "import { launchWebScaffold } from './scaffold.ts'\nvoid launchWebScaffold\n",
+  )
+  writeFileSync(join(root, 'apps/web/tests/scaffold.ts'), 'export const launchWebScaffold = 1\n')
+  writeJson(join(root, 'apps/web/tsconfig.json'), {
+    exclude: options.webExclude ?? ['tests/example.e2e.ts'],
+  })
+  writeJson(join(root, 'tsconfig.host.json'), {
+    include: options.hostInclude ?? ['apps/web/tests/example.e2e.ts'],
+  })
+  return root
 }
 
 function workspaceFixture(options: {
@@ -58,21 +74,62 @@ function workspaceFixture(options: {
 }
 
 describe('Project Reference compiler faces', () => {
-  it('assigns Web Host tests to the Host aggregate only', () => {
-    const repositoryRoot = join(import.meta.dirname, '..')
-    const web = readConfig(join(repositoryRoot, 'apps/web/tsconfig.json'))
-    const host = readConfig(join(repositoryRoot, 'tsconfig.host.json'))
+  it('accepts the production compiler-face configuration', () => {
+    expect(collectProjectReferenceFaceViolations(join(import.meta.dirname, '..'))).toEqual([])
+  })
 
-    expect(web.exclude).toEqual(expect.arrayContaining([
-      'tests/annotation-persistence.e2e.ts',
-      'tests/annotation-images.e2e.ts',
-      'tests/web-acceptance.acceptance.ts',
-    ]))
-    expect(host.include).toEqual(expect.arrayContaining([
-      'apps/web/tests/annotation-persistence.e2e.ts',
-      'apps/web/tests/annotation-images.e2e.ts',
-      'apps/web/tests/web-acceptance.acceptance.ts',
-    ]))
+  it('discovers a static direct scaffold import', () => {
+    const root = webHostTestFixture({
+      source: "import scaffold, { type WebScaffold } from './scaffold.ts'\nvoid scaffold\nvoid (0 as unknown as WebScaffold)\n",
+    })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([])
+  })
+
+  it('rejects a scaffold consumer missing from the Web exclusion', () => {
+    const root = webHostTestFixture({ webExclude: [] })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: apps/web/tests/example.e2e.ts statically imports "./scaffold.ts" and must be listed exactly as "tests/example.e2e.ts" in exclude',
+    ])
+  })
+
+  it('rejects a scaffold consumer missing from the Host include', () => {
+    const root = webHostTestFixture({ hostInclude: [] })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'tsconfig.host.json: apps/web/tests/example.e2e.ts statically imports "./scaffold.ts" and must be listed exactly in include',
+    ])
+  })
+
+  it('rejects stale exact Web test entries but ignores helpers and globs', () => {
+    const root = webHostTestFixture({
+      webExclude: [
+        'tests/example.e2e.ts',
+        'tests/missing.e2e.ts',
+        'tests/support.ts',
+        'tests/*.snapshot.ts',
+      ],
+      hostInclude: [
+        'apps/web/tests/example.e2e.ts',
+        'apps/web/tests/missing.snapshot.ts',
+        'apps/web/tests/support.ts',
+        'apps/web/tests/**/*.ts',
+      ],
+    })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: stale exact Web test entry "tests/missing.e2e.ts" does not exist',
+      'tsconfig.host.json: stale exact Web test entry "apps/web/tests/missing.snapshot.ts" does not exist',
+    ])
+  })
+
+  it('rejects an empty scaffold discovery corpus', () => {
+    const root = webHostTestFixture({ source: "const path = './scaffold.ts'\nvoid path\n" })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tests: no static direct ./scaffold.ts imports discovered; Web Host-test compiler-face validation requires a non-empty corpus',
+    ])
   })
 
   it('allows neutral projects in either graph and matching split leaves', () => {

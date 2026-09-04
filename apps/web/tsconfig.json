@@ -60,7 +60,6 @@
     "tests/stats-paged-history.e2e.ts",
     "tests/sidebar-scrollbar.e2e.ts",
     "tests/rail-search-expand.e2e.ts",
-    "tests/conversation-column-overflow.e2e.ts",
     "tests/ptc-round.e2e.ts",
     "tests/composer-draft-scroll.e2e.ts",
     "tests/cordis-tool-round.e2e.ts",
@@ -108,7 +107,14 @@
     "tests/composer-tab-geometry.e2e.ts",
     "tests/complex-history.perf.ts",
     "tests/pwsh-terminal.e2e.ts",
-    "tests/workflow-run.e2e.ts"
+    "tests/workflow-run.e2e.ts",
+    "tests/desktop-chrome.e2e.ts",
+    "tests/desktop-schedule.snapshot.ts",
+    "tests/schedule-board.e2e.ts",
+    "tests/text-annotation.e2e.ts",
+    "tests/sidechat-round.e2e.ts",
+    "tests/member-question-receiving.e2e.ts",
+    "tests/member-question-receiving.snapshot.ts"
   ],
   "references": [
     {

@@ -1540,7 +1540,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>',
-        description: 'Forward one `device.io.tap` / `gesture` / `text` / `button` round trip. Public tap and gesture coordinates are capture pixels. Android forwards them unchanged; iOS reads and caches `device.info.screenSize` for the current runtime generation and converts those pixels to XCTest logical points. Sticky portrait `screenSize` is swapped when capture pixels are landscape so WDA never receives an x greater than the current logical width. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
+        description: 'Forward one `device.io.tap` / `gesture` / `text` / `button` round trip. Public tap and gesture coordinates are capture pixels. Android forwards them unchanged; iOS reads and caches `device.info.screenSize` for the current runtime generation and converts those pixels to XCTest logical points. Sticky portrait `screenSize` swaps when the request\'s live capture surface is landscape (`captureWidth` greater than `captureHeight`); omitted size falls back to overflow of one scaled point. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
         parameters: [{ name: 'request', description: 'Branded device id plus capture-pixel or non-coordinate input.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_PROTOCOL` when an iOS `device.info` answer lacks a valid positive screen size, and otherwise per the class-documented failure modes.'],
       },
@@ -5589,7 +5589,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneIoRequest',
-    declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
+    declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n    readonly captureWidth?: number;\n    readonly captureHeight?: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n    readonly captureWidth?: number;\n    readonly captureHeight?: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
   },
   {
     name: 'PhoneIosState',

@@ -69,30 +69,78 @@ describe('iOS input coordinate normalization', () => {
 
   it('maps landscape capture pixels onto swapped WDA logical bounds', () => {
     const beibei = { width: 440, height: 956, scale: 3 }
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 99, y: 660 }, beibei)).toEqual({
+    const landscape = { captureWidth: 2_868, captureHeight: 1_320 }
+    expect(ioParams({
+      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 660, ...landscape,
+    }, beibei)).toEqual({
       deviceId: 'ios', x: 33, y: 220,
     })
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 2_868, y: 660 }, beibei)).toEqual({
+    expect(ioParams({
+      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 2_000, ...landscape,
+    }, beibei)).toEqual({
+      deviceId: 'ios', x: 33, y: 440,
+    })
+    expect(ioParams({
+      deviceId: deviceId('ios'), method: 'tap', x: 2_868, y: 660, ...landscape,
+    }, beibei)).toEqual({
       deviceId: 'ios', x: 956, y: 220,
     })
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 3_000, y: 1_400 }, beibei)).toEqual({
+    expect(ioParams({
+      deviceId: deviceId('ios'), method: 'tap', x: 3_000, y: 1_400, ...landscape,
+    }, beibei)).toEqual({
       deviceId: 'ios', x: 956, y: 440,
     })
     expect(ioParams({
       deviceId: deviceId('ios'),
       method: 'gesture',
+      ...landscape,
       actions: [
-        { type: 'pointerMove', x: 2_868, y: 0 },
+        { type: 'pointerMove', x: 99, y: 660 },
         { type: 'pointerDown' },
         { type: 'pointerMove', x: 2_868, y: 1_320 },
       ],
     }, beibei)).toEqual({
       deviceId: 'ios',
       actions: [
-        { type: 'pointerMove', x: 956, y: 0 },
+        { type: 'pointerMove', x: 33, y: 220 },
         { type: 'pointerDown' },
         { type: 'pointerMove', x: 956, y: 440 },
       ],
+    })
+  })
+
+  it('keeps portrait capture pixels on unswapped WDA bounds', () => {
+    const beibei = { width: 440, height: 956, scale: 3 }
+    const portrait = { captureWidth: 1_320, captureHeight: 2_868 }
+    expect(ioParams({
+      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 660, ...portrait,
+    }, beibei)).toEqual({
+      deviceId: 'ios', x: 33, y: 220,
+    })
+    expect(ioParams({
+      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 2_000, ...portrait,
+    }, beibei)).toEqual({
+      deviceId: 'ios', x: 33, y: 667,
+    })
+  })
+
+  it('falls back to overflow of one scaled point when capture size is omitted', () => {
+    const beibei = { width: 440, height: 956, scale: 3 }
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 99, y: 2_000 }, beibei)).toEqual({
+      deviceId: 'ios', x: 33, y: 667,
+    })
+    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 2_868, y: 660 }, beibei)).toEqual({
+      deviceId: 'ios', x: 956, y: 220,
+    })
+    expect(ioParams({
+      deviceId: deviceId('ios'),
+      method: 'tap',
+      x: 99,
+      y: 2_000,
+      captureWidth: Number.NaN,
+      captureHeight: 1_320,
+    }, beibei)).toEqual({
+      deviceId: 'ios', x: 33, y: 667,
     })
   })
 

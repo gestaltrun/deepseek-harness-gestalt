@@ -20,8 +20,25 @@ type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
 ```ts type-equiv
 /** One JSON-RPC `device.io.*` request addressed by branded device id. */
 type PhoneIoRequest =
-  | { readonly deviceId: DeviceId; readonly method: 'tap'; readonly x: number; readonly y: number }
-  | { readonly deviceId: DeviceId; readonly method: 'gesture'; readonly actions: readonly Record<string, unknown>[] }
+  | {
+    readonly deviceId: DeviceId
+    readonly method: 'tap'
+    readonly x: number
+    readonly y: number
+    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
+    readonly captureWidth?: number
+    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
+    readonly captureHeight?: number
+  }
+  | {
+    readonly deviceId: DeviceId
+    readonly method: 'gesture'
+    readonly actions: readonly Record<string, unknown>[]
+    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
+    readonly captureWidth?: number
+    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
+    readonly captureHeight?: number
+  }
   | { readonly deviceId: DeviceId; readonly method: 'text'; readonly text: string }
   | { readonly deviceId: DeviceId; readonly method: 'button'; readonly button: string }
 ```
@@ -206,10 +223,11 @@ async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
  * Public tap and gesture coordinates are capture pixels. Android forwards
  * them unchanged; iOS reads and caches `device.info.screenSize` for the
  * current runtime generation and converts those pixels to XCTest logical
- * points. Sticky portrait `screenSize` is swapped when capture pixels are
- * landscape so WDA never receives an x greater than the current logical
- * width. Physical handsets are valid targets; only ids absent from the
- * latest published listing fail locally before any RPC.
+ * points. Sticky portrait `screenSize` swaps when the request's live capture
+ * surface is landscape (`captureWidth` greater than `captureHeight`); omitted
+ * size falls back to overflow of one scaled point. Physical handsets are
+ * valid targets; only ids absent from the latest published listing fail
+ * locally before any RPC.
  * @param request - Branded device id plus capture-pixel or non-coordinate input.
  * @param signal - Caller's optional cancellation signal.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids

@@ -494,10 +494,21 @@ describe('phone runtime service lifecycle', () => {
     await context.phoneDevices.io({
       deviceId: IOS_REAL,
       method: 'tap',
+      x: 99,
+      y: 660,
+      captureWidth: 2_868,
+      captureHeight: 1_320,
+    })
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'tap',
       x: 2_868,
       y: 660,
+      captureWidth: 2_868,
+      captureHeight: 1_320,
     })
     expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 33, y: 220 } },
       { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 956, y: 220 } },
     ])
   })

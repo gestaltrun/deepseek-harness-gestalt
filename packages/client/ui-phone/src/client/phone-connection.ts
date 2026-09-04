@@ -386,7 +386,13 @@ export class PhoneConnectionController {
   tap(u: number, v: number): boolean {
     if (this.surface === undefined) return false
     const { x, y } = devicePointOf({ u, v }, this.surface)
-    return this.send({ method: 'tap', x, y })
+    return this.send({
+      method: 'tap',
+      x,
+      y,
+      captureWidth: this.surface.width,
+      captureHeight: this.surface.height,
+    })
   }
 
   /**
@@ -405,6 +411,8 @@ export class PhoneConnectionController {
     return this.send({
       method: 'gesture',
       actions: phoneSwipeActions([start, end]),
+      captureWidth: surface.width,
+      captureHeight: surface.height,
     })
   }
 

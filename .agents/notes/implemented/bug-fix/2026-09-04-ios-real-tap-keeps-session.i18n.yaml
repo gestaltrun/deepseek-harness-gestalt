@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-04-ios-real-tap-keeps-session.md
-2026-09-04-ios-real-tap-keeps-session.md: 1e93242891e5be07565ca786f33d920a999d6f8a
-2026-09-04-ios-real-tap-keeps-session.zh.md: 846560b36320f039f905e7ba1c5dd5c09ee1db5c
+2026-09-04-ios-real-tap-keeps-session.md: df875106ac4eadc9eb072f7601c8d94ed7f7576b
+2026-09-04-ios-real-tap-keeps-session.zh.md: f2b45ebd06bcecfc826fb928055a466e3d7a376b

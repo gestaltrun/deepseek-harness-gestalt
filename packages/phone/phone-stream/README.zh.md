@@ -9,7 +9,7 @@
 - `POST /phone/agent/status` 与 `POST /phone/agent/install` — 为清单中的 Android 与 iOS 真机检测、安装或强制重装设备控制代理，并拒绝 iOS 模拟器。Android 安装在产品内保持一键完成；OEM 系统确认或开发者安全开关仍必须在手机上同意。签名 identity、provisioning profile 选择、Developer Mode、设备解锁与信任仍由用户处理。未配置 `provisioningProfilePath` 时返回带配置动作的 `PHONE_AGENT_PROFILE_REQUIRED`，不退化成通用上游失败。
 - `GET /phone/devices` — 依据最近一次 `phoneDevices.listDevices()` 应答分组后的设备清单（`android`、`ios.simulators`、`ios.reals`；每项含 `id`/`name`/`kind`/`state`/`online`，`state` 原样保留上游状态，以及 Host `dumpsys display` `logicalFrame` 上的可选 Android `logicalDisplay`）；先执行 `/api` 信任栅栏，仅限精确路径的 GET。`PHONE_DEVICE_NOT_FOUND` 以外的 `PhoneDevicesError` 以 502 返回 `{ error: { code, message, issue? } }`，保留每个 `PHONE_REAL_DEVICE_ISSUE` 分支，并把 `PHONE_UNRESOLVED` 安装指引带到浏览器。
 - `GET /phone/stream/<id>/<mjpeg|h264>?token=` — 反代 `device.screencapture`。先执行 `/api` 信任栅栏，再执行 loopback Host 栅栏，最后校验 HMAC；过期、伪造或非 loopback 请求返回 403。代理接受上游 `device.screencapture` 的两种应答形态——裸字节流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封（会话 URL 必须留在回环栅栏内）——并把 multipart MJPEG 体在单一归一化边界下重新发出：丢弃非图像段（JSON 通知），帧字节原样保留。
-- `GET /phone/ws/io` 升级 — 在 `/api` 信任栅栏之后转发 `device.io.tap` / `gesture` / `text` / `button` JSON-RPC；未信任的升级在协议协商前被拒绝。
+- `GET /phone/ws/io` 升级 — 在 `/api` 信任栅栏之后转发 `device.io.tap` / `gesture` / `text` / `button` JSON-RPC；tap 与 gesture 可携带 live `captureWidth`/`captureHeight`，使 iOS WDA 方向跟随采集面。未信任的升级在协议协商前被拒绝。
 
 ## 配置
 

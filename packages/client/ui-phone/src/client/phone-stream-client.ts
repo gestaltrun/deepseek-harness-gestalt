@@ -77,8 +77,23 @@ export class PhoneStreamHttpError extends Error {
 
 /** io request vocabulary the browser sends; coordinates are device pixels. */
 export type PhoneClientIoRequest =
-  | { readonly method: 'tap'; readonly x: number; readonly y: number }
-  | { readonly method: 'gesture'; readonly actions: readonly Record<string, unknown>[] }
+  | {
+    readonly method: 'tap'
+    readonly x: number
+    readonly y: number
+    /** Live capture width in device pixels from the measured surface. */
+    readonly captureWidth?: number
+    /** Live capture height in device pixels from the measured surface. */
+    readonly captureHeight?: number
+  }
+  | {
+    readonly method: 'gesture'
+    readonly actions: readonly Record<string, unknown>[]
+    /** Live capture width in device pixels from the measured surface. */
+    readonly captureWidth?: number
+    /** Live capture height in device pixels from the measured surface. */
+    readonly captureHeight?: number
+  }
   | { readonly method: 'text'; readonly text: string }
   | { readonly method: 'button'; readonly button: string }
 
@@ -104,14 +119,32 @@ export interface PhoneIoReply {
 export function encodePhoneIoFrame(id: number, deviceId: string, request: PhoneClientIoRequest): string {
   switch (request.method) {
     case 'tap':
-      return JSON.stringify({ jsonrpc: '2.0', id, method: 'tap', params: { deviceId, x: request.x, y: request.y } })
+      return JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'tap',
+        params: { deviceId, x: request.x, y: request.y, ...captureSizeParams(request) },
+      })
     case 'gesture':
-      return JSON.stringify({ jsonrpc: '2.0', id, method: 'gesture', params: { deviceId, actions: request.actions } })
+      return JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'gesture',
+        params: { deviceId, actions: request.actions, ...captureSizeParams(request) },
+      })
     case 'text':
       return JSON.stringify({ jsonrpc: '2.0', id, method: 'text', params: { deviceId, text: request.text } })
     case 'button':
       return JSON.stringify({ jsonrpc: '2.0', id, method: 'button', params: { deviceId, button: request.button } })
   }
+}
+
+function captureSizeParams(
+  request: Extract<PhoneClientIoRequest, { method: 'tap' | 'gesture' }>,
+): { readonly captureWidth: number; readonly captureHeight: number } | Record<string, never> {
+  return request.captureWidth === undefined || request.captureHeight === undefined
+    ? {}
+    : { captureWidth: request.captureWidth, captureHeight: request.captureHeight }
 }
 
 /**

@@ -62,8 +62,25 @@ export type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
 
 /** One JSON-RPC `device.io.*` request addressed by branded device id. */
 export type PhoneIoRequest =
-  | { readonly deviceId: DeviceId; readonly method: 'tap'; readonly x: number; readonly y: number }
-  | { readonly deviceId: DeviceId; readonly method: 'gesture'; readonly actions: readonly Record<string, unknown>[] }
+  | {
+    readonly deviceId: DeviceId
+    readonly method: 'tap'
+    readonly x: number
+    readonly y: number
+    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
+    readonly captureWidth?: number
+    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
+    readonly captureHeight?: number
+  }
+  | {
+    readonly deviceId: DeviceId
+    readonly method: 'gesture'
+    readonly actions: readonly Record<string, unknown>[]
+    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
+    readonly captureWidth?: number
+    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
+    readonly captureHeight?: number
+  }
   | { readonly deviceId: DeviceId; readonly method: 'text'; readonly text: string }
   | { readonly deviceId: DeviceId; readonly method: 'button'; readonly button: string }
 

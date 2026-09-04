@@ -22,7 +22,7 @@ export interface IosScreenSize {
 /**
  * Parse mobilecli 1.0.5's `device.info` screen size. Width and height stay
  * the sticky portrait logical bounds on a rotated real iPhone; callers swap
- * them when capture pixels are landscape.
+ * them from the live capture surface.
  * @param result - Upstream JSON-RPC result value.
  * @returns the positive logical size and device-pixel scale.
  */
@@ -116,18 +116,36 @@ function scaledActionField(
 
 /**
  * WDA logical bounds for this request. Sticky `device.info.screenSize` stays
- * portrait on a landscape iPhone; capture pixels that overflow those bounds
- * after dividing by scale use the swapped size.
+ * portrait on a landscape iPhone. A live capture surface (width greater than
+ * height) always swaps those bounds; omitted size falls back to overflow of
+ * one scaled point.
  */
 function wdaLogicalBounds(request: PhoneIoRequest, screen: IosScreenSize): IosScreenSize {
-  const hint = capturePixelHint(request)
-  if (hint === undefined) return screen
   const unswapped = { width: screen.width, height: screen.height }
   const swapped = { width: screen.height, height: screen.width }
+  const surface = captureSurface(request)
+  if (surface !== undefined) {
+    return surface.width > surface.height && screen.width < screen.height
+      ? { ...screen, ...swapped }
+      : { ...screen, ...unswapped }
+  }
+  const hint = capturePixelHint(request)
+  if (hint === undefined) return screen
   const x = hint.x / screen.scale
   const y = hint.y / screen.scale
   if (x <= unswapped.width && y <= unswapped.height) return { ...screen, ...unswapped }
   return { ...screen, ...swapped }
+}
+
+function captureSurface(
+  request: PhoneIoRequest,
+): { readonly width: number; readonly height: number } | undefined {
+  if (request.method !== 'tap' && request.method !== 'gesture') return undefined
+  const width = request.captureWidth
+  const height = request.captureHeight
+  if (typeof width !== 'number' || typeof height !== 'number') return undefined
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined
+  return { width, height }
 }
 
 function capturePixelHint(

@@ -660,10 +660,11 @@ export class PhoneDevices extends Service {
    * Public tap and gesture coordinates are capture pixels. Android forwards
    * them unchanged; iOS reads and caches `device.info.screenSize` for the
    * current runtime generation and converts those pixels to XCTest logical
-   * points. Sticky portrait `screenSize` is swapped when capture pixels are
-   * landscape so WDA never receives an x greater than the current logical
-   * width. Physical handsets are valid targets; only ids absent from the
-   * latest published listing fail locally before any RPC.
+   * points. Sticky portrait `screenSize` swaps when the request's live capture
+   * surface is landscape (`captureWidth` greater than `captureHeight`); omitted
+   * size falls back to overflow of one scaled point. Physical handsets are
+   * valid targets; only ids absent from the latest published listing fail
+   * locally before any RPC.
    * @param request - Branded device id plus capture-pixel or non-coordinate input.
    * @param signal - Caller's optional cancellation signal.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids

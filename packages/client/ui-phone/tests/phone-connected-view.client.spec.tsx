@@ -469,7 +469,9 @@ describe('PhoneConnectedView screen frame aspect', () => {
     fireEvent.pointerUp(frame(), { clientX: 300, clientY: 100 })
     expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 633, y: 195 },
+      params: {
+        deviceId: 'emulator-5554', x: 633, y: 195, captureWidth: 844, captureHeight: 390,
+      },
     })
   })
 
@@ -492,7 +494,9 @@ describe('PhoneConnectedView screen frame aspect', () => {
     fireEvent.pointerUp(frame(), { clientX: 300, clientY: 100 })
     expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 1686, y: 540 },
+      params: {
+        deviceId: 'emulator-5554', x: 1686, y: 540, captureWidth: 2248, captureHeight: 1080,
+      },
     })
   })
 
@@ -579,7 +583,9 @@ describe('PhoneConnectedView screen frame aspect', () => {
       fireEvent.pointerUp(frame(), { clientX: 300, clientY: 100 })
       expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
         jsonrpc: '2.0', id: 1, method: 'tap',
-        params: { deviceId: 'emulator-5554', x: 1800, y: 540 },
+        params: {
+          deviceId: 'emulator-5554', x: 1800, y: 540, captureWidth: 2400, captureHeight: 1080,
+        },
       })
 
       bitmap.set(1080, 2400)
@@ -607,7 +613,9 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.pointerUp(frame(), { clientX: 100, clientY: 100 })
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 195, y: 211 },
+      params: {
+        deviceId: 'emulator-5554', x: 195, y: 211, captureWidth: 390, captureHeight: 844,
+      },
     })
   })
 
@@ -632,6 +640,8 @@ describe('PhoneConnectedView touch and keys', () => {
       jsonrpc: '2.0', id: 1, method: 'gesture',
       params: {
         deviceId: 'emulator-5554',
+        captureWidth: 390,
+        captureHeight: 844,
         actions: [
           { type: 'pointerMove', x: 39, y: 42 },
           { type: 'pointerDown' },
@@ -651,6 +661,8 @@ describe('PhoneConnectedView touch and keys', () => {
       jsonrpc: '2.0', id: 1, method: 'gesture',
       params: {
         deviceId: 'emulator-5554',
+        captureWidth: 390,
+        captureHeight: 844,
         actions: [
           { type: 'pointerMove', x: 39, y: 42 },
           { type: 'pointerDown' },
@@ -693,7 +705,9 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.pointerUp(frame(), { clientX: 53, clientY: 54 })
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 103, y: 114 },
+      params: {
+        deviceId: 'emulator-5554', x: 103, y: 114, captureWidth: 390, captureHeight: 844,
+      },
     })
   })
 
@@ -719,6 +733,8 @@ describe('PhoneConnectedView touch and keys', () => {
         jsonrpc: '2.0', id: 1, method: 'gesture',
         params: {
           deviceId: 'emulator-5554',
+          captureWidth: 390,
+          captureHeight: 844,
           actions: [
             { type: 'pointerMove', x: 195, y: originY },
             { type: 'pointerDown' },
@@ -827,7 +843,9 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.pointerUp(frame(), { clientX: 50, clientY: 50 })
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 0, y: 0 },
+      params: {
+        deviceId: 'emulator-5554', x: 0, y: 0, captureWidth: 390, captureHeight: 844,
+      },
     })
   })
 

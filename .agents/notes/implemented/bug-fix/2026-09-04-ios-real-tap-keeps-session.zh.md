@@ -12,7 +12,7 @@ Mint 把 iOS 真机会话标为 `agentManaged: true` 并首选 H264。GUI 发送
 
 ## 决策
 
-Host `ioParams` 用缓存的 `device.info.screenSize`（不只是 scale）把 iOS 采集像素换成 XCTest 逻辑点。缩放后的像素超出锁死的竖屏边界时，对调宽高，使 WDA 收到横屏逻辑点，且 x 不超过当前逻辑宽度。竖屏 tap 仍走未对调尺寸。Android 仍按采集像素原样转发。
+Host `ioParams` 用缓存的 `device.info.screenSize`（不只是 scale）把 iOS 采集像素换成 XCTest 逻辑点。横竖屏 WDA 边界由 [live 采集面方向笔记](2026-09-04-ios-landscape-tap-orientation.zh.md) 拥有。Android 仍按采集像素原样转发。
 
 `handleFrame` 在 tap / gesture JSON-RPC 错误上保持 live 画面。agent 恢复仍用于 mint、画面与 socket 死亡。IO `-32010` 仍是 device-offline，未授权报文仍是 unauthorized，包括 `agentManaged` 会话。
 
@@ -28,12 +28,12 @@ Host `ioParams` 用缓存的 `device.info.screenSize`（不只是 scale）把 iO
 
 ## 后果
 
-iOS 真机横屏 tap 落在对调后的 WDA 边界内，且不进入 checking-agent。缩放后 x 仍落在竖屏宽度内的左侧横屏 tap 按未对调转发；该点对 WDA 已在当前方向的合法范围内。画面与 socket 死亡仍会复检托管 agent。
+iOS 真机横屏 tap 的 JSON-RPC 错误不进入 checking-agent。画面与 socket 死亡仍会复检托管 agent。左侧横屏映射由 [live 采集面方向笔记](2026-09-04-ios-landscape-tap-orientation.zh.md) 拥有。
 
 ## Testing
 
-`io.spec.ts` 与 `service.spec.ts` 把贝贝猫横屏采集像素（锁死 `440×956`、scale 3 下的 `2868×1320`）映射到对调后的逻辑点并夹紧越界。`phone-connection.client.spec.ts` 在 tap JSON-RPC 错误后保持 `agentManaged` 的 iOS 真机或 Android 会话 live，并仍走 device-offline 与 unauthorized 分支。
+`phone-connection.client.spec.ts` 在 tap JSON-RPC 错误后保持 `agentManaged` 的 iOS 真机或 Android 会话 live，并仍走 device-offline 与 unauthorized 分支。横屏 WDA 映射覆盖见 [live 采集面方向笔记](2026-09-04-ios-landscape-tap-orientation.zh.md)。
 
 ## Related
 
-Android 横屏 H264 画面框对调仍由 [VideoFrame rotation 笔记](2026-09-05-android-h264-videoframe-rotation.zh.md) 拥有。
+iOS WDA 方向由 [横屏点击笔记](2026-09-04-ios-landscape-tap-orientation.zh.md) 拥有。Android 横屏 H264 画面框对调仍由 [VideoFrame rotation 笔记](2026-09-05-android-h264-videoframe-rotation.zh.md) 拥有。

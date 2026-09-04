@@ -20,7 +20,7 @@ Xcode 安装或更新、Apple 许可接受、首次启动授权、Apple ID、系
 
 只要任一 runtime 或平台通道仍处于短暂状态，Browser 就会继续拉取 Host 完整快照，并在终态停止。这覆盖设置订阅方出现之前已经开始的 Host 启动激活。runtime 以进程树而非直接子进程持有 `mobilecli server start`：npm 的 Node 启动器可能派生原生服务进程，generation 替换或 teardown 必须在下一代绑定指定回环端口之前终止二者。一次性 `agent status` 与 `agent install` 命令复用同一个进程树持有者，使取消操作在返回前终止原生后代进程。
 
-GUI 与 Agent 的坐标词汇在两个平台上都保持为采集画面像素。Android 原样转发这些像素。XCTest 消费逻辑点，因此第一次 iOS tap 或 gesture 会读取官方 `device.info.screenSize`，校验其中 width、height 与 scale 均为正有限数，为当前 mobilecli generation 缓存 scale，并在转发前换算每个 tap 或 gesture 的 `x`/`y` 坐标。generation 替换会清空缓存。iOS 屏幕尺寸缺失或畸形时以 `PHONE_PROTOCOL` 失败，不会返回成功但不生效。
+GUI 与 Agent 的坐标词汇在两个平台上都保持为采集画面像素。Android 原样转发这些像素。XCTest 消费逻辑点，因此第一次 iOS tap 或 gesture 会读取官方 `device.info.screenSize`，校验其中 width、height 与 scale 均为正有限数，为当前 mobilecli generation 缓存该尺寸，并在转发前换算每个 tap 或 gesture 的 `x`/`y` 坐标。横竖屏 WDA 边界跟随 live 采集面（[方向](../bug-fix/2026-09-04-ios-landscape-tap-orientation.zh.md)）。generation 替换会清空缓存。iOS 屏幕尺寸缺失或畸形时以 `PHONE_PROTOCOL` 失败，不会返回成功但不生效。
 
 ## Alternatives considered
 

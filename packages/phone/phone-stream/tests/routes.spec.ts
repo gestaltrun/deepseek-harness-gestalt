@@ -737,6 +737,44 @@ describe('phone stream Host routes', () => {
     socket.close()
   })
 
+  it('forwards live capture size from a tap frame onto Host io', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    await mint(origin)
+    const seen: unknown[] = []
+    const original = context.phoneDevices.io.bind(context.phoneDevices)
+    context.phoneDevices.io = async (request, signal) => {
+      seen.push(request)
+      return original(request, signal)
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => { resolve() })
+      socket.once('error', reject)
+    })
+    const reply = new Promise<unknown>((resolve) => {
+      socket.once('message', (data) => { resolve(parseWebSocketJson(data)) })
+    })
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tap',
+      params: {
+        deviceId: ANDROID, x: 99, y: 660, captureWidth: 2_868, captureHeight: 1_320,
+      },
+    }))
+    expect(await reply).toEqual({ jsonrpc: '2.0', id: 8, result: { status: 'ok' } })
+    expect(seen).toEqual([{
+      deviceId: ANDROID,
+      method: 'tap',
+      x: 99,
+      y: 660,
+      captureWidth: 2_868,
+      captureHeight: 1_320,
+    }])
+    socket.close()
+  })
+
   it('refuses to mint URLs for an unknown device and an untrusted Host', async () => {
     const { origin } = await mount()
     const host = new URL(origin).host
@@ -809,6 +847,11 @@ describe('phone stream Host routes', () => {
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 13, method: 42, params: { deviceId: 'emulator-5554' } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tap', params: { deviceId: 'emulator-5554', x: 1 } }))
+    expect(await next()).toMatchObject({ error: { code: -32000 } })
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0', id: 14, method: 'tap',
+      params: { deviceId: 'emulator-5554', x: 1, y: 2, captureWidth: 2_868 },
+    }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'gesture', params: { deviceId: 'emulator-5554', actions: [{ type: 'move' }] } }))
     expect(await next()).toEqual({ jsonrpc: '2.0', id: 3, result: { status: 'ok' } })

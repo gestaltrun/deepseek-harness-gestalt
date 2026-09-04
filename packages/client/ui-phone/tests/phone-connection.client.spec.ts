@@ -646,7 +646,9 @@ describe('PhoneConnectionController io', () => {
     expect(controller.tap(0.5, 0.25)).toBe(true)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 180, y: 180 },
+      params: {
+        deviceId: 'emulator-5554', x: 180, y: 180, captureWidth: 360, captureHeight: 720,
+      },
     })
   })
 
@@ -689,7 +691,9 @@ describe('PhoneConnectionController io', () => {
     expect(controller.tap(0.75, 0.5)).toBe(true)
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 633, y: 195 },
+      params: {
+        deviceId: 'emulator-5554', x: 633, y: 195, captureWidth: 844, captureHeight: 390,
+      },
     })
   })
 
@@ -716,6 +720,8 @@ describe('PhoneConnectionController io', () => {
       jsonrpc: '2.0', id: 1, method: 'gesture',
       params: {
         deviceId: 'emulator-5554',
+        captureWidth: 360,
+        captureHeight: 720,
         actions: [
           { type: 'pointerMove', x: 0, y: 0 },
           { type: 'pointerDown' },

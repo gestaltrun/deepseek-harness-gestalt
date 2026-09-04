@@ -29,11 +29,33 @@ describe('io frame codec', () => {
     expect(JSON.parse(encodePhoneIoFrame(1, 'emulator-5554', { method: 'tap', x: 12, y: 34 }))).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap', params: { deviceId: 'emulator-5554', x: 12, y: 34 },
     })
+    expect(JSON.parse(encodePhoneIoFrame(5, 'emulator-5554', {
+      method: 'tap', x: 99, y: 660, captureWidth: 2_868, captureHeight: 1_320,
+    }))).toEqual({
+      jsonrpc: '2.0', id: 5, method: 'tap',
+      params: {
+        deviceId: 'emulator-5554', x: 99, y: 660, captureWidth: 2_868, captureHeight: 1_320,
+      },
+    })
     expect(JSON.parse(encodePhoneIoFrame(2, 'emulator-5554', {
       method: 'gesture', actions: [{ type: 'pointerDown', x: 1, y: 2 }],
     }))).toEqual({
       jsonrpc: '2.0', id: 2, method: 'gesture',
       params: { deviceId: 'emulator-5554', actions: [{ type: 'pointerDown', x: 1, y: 2 }] },
+    })
+    expect(JSON.parse(encodePhoneIoFrame(6, 'emulator-5554', {
+      method: 'gesture',
+      actions: [{ type: 'pointerMove', x: 99, y: 660 }],
+      captureWidth: 2_868,
+      captureHeight: 1_320,
+    }))).toEqual({
+      jsonrpc: '2.0', id: 6, method: 'gesture',
+      params: {
+        deviceId: 'emulator-5554',
+        actions: [{ type: 'pointerMove', x: 99, y: 660 }],
+        captureWidth: 2_868,
+        captureHeight: 1_320,
+      },
     })
     expect(JSON.parse(encodePhoneIoFrame(3, 'R3CN30', { method: 'text', text: '验证码' }))).toEqual({
       jsonrpc: '2.0', id: 3, method: 'text', params: { deviceId: 'R3CN30', text: '验证码' },

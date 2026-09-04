@@ -489,10 +489,21 @@ function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
   const id = deviceId(rawId)
   switch (method) {
     case 'tap':
-      return { deviceId: id, method: 'tap', x: requireInteger(record.x, 'x'), y: requireInteger(record.y, 'y') }
+      return {
+        deviceId: id,
+        method: 'tap',
+        x: requireInteger(record.x, 'x'),
+        y: requireInteger(record.y, 'y'),
+        ...optionalCaptureSize(record),
+      }
     case 'gesture':
       if (!Array.isArray(record.actions)) throw new HttpError(400, 'bad-request', 'gesture actions must be an array')
-      return { deviceId: id, method: 'gesture', actions: record.actions as readonly Record<string, unknown>[] }
+      return {
+        deviceId: id,
+        method: 'gesture',
+        actions: record.actions as readonly Record<string, unknown>[],
+        ...optionalCaptureSize(record),
+      }
     case 'text':
       if (typeof record.text !== 'string') throw new HttpError(400, 'bad-request', 'text is required')
       return { deviceId: id, method: 'text', text: record.text }
@@ -506,11 +517,31 @@ function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
   }
 }
 
+function optionalCaptureSize(
+  record: Record<string, unknown>,
+): { readonly captureWidth: number; readonly captureHeight: number } | Record<string, never> {
+  const widthPresent = record.captureWidth !== undefined
+  const heightPresent = record.captureHeight !== undefined
+  if (!widthPresent && !heightPresent) return {}
+  if (!widthPresent || !heightPresent) {
+    throw new HttpError(400, 'bad-request', 'captureWidth and captureHeight must be sent together')
+  }
+  const captureWidth = requirePositiveInteger(record.captureWidth, 'captureWidth')
+  const captureHeight = requirePositiveInteger(record.captureHeight, 'captureHeight')
+  return { captureWidth, captureHeight }
+}
+
 function requireInteger(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value)) {
     throw new HttpError(400, 'bad-request', `${name} must be an integer`)
   }
   return value
+}
+
+function requirePositiveInteger(value: unknown, name: string): number {
+  const integer = requireInteger(value, name)
+  if (integer <= 0) throw new HttpError(400, 'bad-request', `${name} must be a positive integer`)
+  return integer
 }
 
 function writeForbidden(res: ServerResponse): void {

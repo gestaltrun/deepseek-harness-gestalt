@@ -430,7 +430,12 @@ describe('provisional identity lifecycle', () => {
       { id: 'child', parentId: 'parent', origin: 'subagent' },
     ])
     const gate = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
-    b.api.onSubagentList = () => gate.promise
+    b.api.onSubagentList = (_payload, signal) => new Promise((resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+      }, { once: true })
+      void gate.promise.then(resolve, reject)
+    })
     b.svc.openForRender(sid('child'))
     await Promise.resolve()
     expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
@@ -439,20 +444,10 @@ describe('provisional identity lifecycle', () => {
     const settled = vi.fn()
     const disposal = b.ctx.fiber.dispose().then(settled)
     await Promise.resolve()
-    expect(settled).not.toHaveBeenCalled()
-
-    gate.resolve(ok({
-      entries: [{
-        kind: 'child', id: sid('grandchild'), mode: 'continuable', label: 'Grandchild',
-        activity: 'inactive', hasChildren: false,
-      }] as never[],
-      parentAvailable: true,
-    }))
+    expect(b.api.lastSubagentListSignal?.aborted).toBe(true)
     await disposal
     expect(settled).toHaveBeenCalledOnce()
-    expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]).toMatchObject({
-      entries: [], state: 'loading',
-    })
+    expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]).toBeUndefined()
     expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
   })
 

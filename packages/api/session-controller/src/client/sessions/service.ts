@@ -262,8 +262,9 @@ export class ClientSessions implements ISessions {
       this.deferredRemovals.clear()
       this.watched = undefined
       for (const [id, record] of scopes) this.startScopeDrop(id, record)
-      await this.drainScopeDrops()
       await this.manager.dispose()
+      this.projectList()
+      await this.drainScopeDrops()
     }, 'session-controller.client.sessions')
     rootCtx.reflect.provide('sessions', this, undefined)
   }

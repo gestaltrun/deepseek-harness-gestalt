@@ -487,34 +487,32 @@ describe('subagent catalogs', () => {
   it('does not publish a late catalog after manager disposal', async () => {
     const api = new FakeApiClient()
     const gate = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
-    api.onSubagentList = () => gate.promise
+    api.onSubagentList = (_payload, signal) => new Promise((resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+      }, { once: true })
+      void gate.promise.then(resolve, reject)
+    })
     const manager = new SessionManager(fakeRemote(api))
     const notified = vi.fn()
     manager.subscribe(notified)
     const refresh = manager.refreshSubagents(S1)
     await Promise.resolve()
     expect(api.callsOf('subagents.list')).toEqual([S1])
+    expect(api.lastSubagentListSignal?.aborted).toBe(false)
     notified.mockClear()
 
     const settled = vi.fn()
     const disposal = manager.dispose().then(settled)
     await Promise.resolve()
-    expect(settled).not.toHaveBeenCalled()
-
-    gate.resolve(ok({
-      entries: [{
-        kind: 'child', id: S2, mode: 'continuable', label: 'worker',
-        activity: 'inactive', hasChildren: false,
-      }] as never[],
-      parentAvailable: true,
-    }))
+    expect(api.lastSubagentListSignal?.aborted).toBe(true)
     await disposal
-    await refresh
+    await expect(refresh).resolves.toBeUndefined()
     expect(settled).toHaveBeenCalledOnce()
-    expect(manager.getListSnapshot().subagentsByParent[S1]).toMatchObject({
-      entries: [], state: 'loading',
-    })
+    expect(manager.getListSnapshot().subagentsByParent[S1]).toBeUndefined()
     expect(notified).not.toHaveBeenCalled()
+    expect(api.callsOf('subagents.list')).toEqual([S1])
+    await expect(manager.refreshSubagents(S1)).resolves.toBeUndefined()
     expect(api.callsOf('subagents.list')).toEqual([S1])
   })
 

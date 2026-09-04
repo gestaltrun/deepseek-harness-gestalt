@@ -77,6 +77,8 @@ function catalogAvailability(parentAvailable: boolean | undefined): {
 
 interface CatalogInflight {
   readonly promise: Promise<void>
+  readonly controller: AbortController
+  readonly generation: number
   readonly expandableRows: Set<SessionId>
   readonly activityRows: Map<SessionId, 'running' | 'inactive'>
   /** Removal-time invalidation replayed over the response this request predates. */
@@ -265,13 +267,16 @@ export class SessionManager {
     this.catalogDebounce.clear()
     this.catalogStale.clear()
     this.openCatalogs.clear()
-    this.provisionalSummaries.clear()
+    const inflight = [...this.catalogInflight.values()]
+    for (const item of inflight) item.controller.abort()
+    await Promise.allSettled(inflight.map(item => item.promise))
+    this.catalogInflight.clear()
     this.catalogs.clear()
-    const catalogWork = [...this.catalogInflight.values()].map(inflight => inflight.promise)
+    this.provisionalSummaries.clear()
+    this.listSnapshotCache = this.buildListSnapshot()
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
     for (const session of sessions) void this.startSessionDisposal(session)
-    await Promise.allSettled(catalogWork)
     await this.drainSessionDisposals()
   }
 
@@ -414,6 +419,7 @@ export class SessionManager {
     if (this.disposed) return Promise.resolve()
     const existing = this.catalogInflight.get(parentSessionId)
     if (existing !== undefined) return existing.promise
+    const controller = new AbortController()
     const generation = this.catalogGeneration
     const previous = this.catalogs.get(parentSessionId)
     const expandableRows = new Set<SessionId>()
@@ -427,12 +433,20 @@ export class SessionManager {
       error: null,
     })
     this.notifier.markDirty()
+    const inflight: CatalogInflight = {
+      promise: Promise.resolve(),
+      controller,
+      generation,
+      expandableRows,
+      activityRows,
+      parentAvailableOverride: undefined,
+    }
     const operation = (async () => {
       try {
-        const result = await this.remote.subagents.list(parentSessionId)
-        if (this.disposed || generation !== this.catalogGeneration) return
+        const result = await this.remote.subagents.list(parentSessionId, controller.signal)
+        if (!this.catalogCurrent(parentSessionId, inflight)) return
         if (result.ok) {
-          const parentAvailable = this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
+          const parentAvailable = inflight.parentAvailableOverride
             ?? result.value.parentAvailable
           this.catalogs.set(parentSessionId, {
             ...result.value,
@@ -451,30 +465,33 @@ export class SessionManager {
               previous?.entries ?? [], expandableRows, activityRows,
             ),
             ...catalogAvailability(
-              this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
-                ?? previous?.parentAvailable,
+              inflight.parentAvailableOverride ?? previous?.parentAvailable,
             ),
             state: 'error',
             error: result.error,
           })
         }
       } catch (error: unknown) {
-        if (this.disposed || generation !== this.catalogGeneration) return
+        if (!this.catalogCurrent(parentSessionId, inflight)
+          || this.disposed
+          || controller.signal.aborted) return
         if (!isRemoteFailure(error)) throw error
         this.catalogs.set(parentSessionId, {
           entries: this.withCatalogMutations(
             previous?.entries ?? [], expandableRows, activityRows,
           ),
           ...catalogAvailability(
-            this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
-              ?? previous?.parentAvailable,
+            inflight.parentAvailableOverride ?? previous?.parentAvailable,
           ),
           state: 'error',
           error,
         })
       } finally {
-        this.catalogInflight.delete(parentSessionId)
-        if (this.disposed || generation !== this.catalogGeneration) return
+        const current = this.catalogCurrent(parentSessionId, inflight)
+        if (this.catalogInflight.get(parentSessionId) === inflight) {
+          this.catalogInflight.delete(parentSessionId)
+        }
+        if (!current) return
         // Re-arm the trailing pull before the dirty notify: the response the
         // caller observed predates the stale-marking change, so the follow-up
         // refresh is the only carrier of that change.
@@ -482,13 +499,17 @@ export class SessionManager {
         this.notifier.markDirty()
       }
     })()
-    this.catalogInflight.set(parentSessionId, {
-      promise: operation,
-      expandableRows,
-      activityRows,
-      parentAvailableOverride: undefined,
-    })
+    inflight.promise = operation
+    this.catalogInflight.set(parentSessionId, inflight)
     return operation
+  }
+
+  /** True while this catalog request is still the live owner and the manager is not disposed. */
+  private catalogCurrent(parentSessionId: SessionId, inflight: CatalogInflight): boolean {
+    return !this.disposed
+      && inflight.generation === this.catalogGeneration
+      && !inflight.controller.signal.aborted
+      && this.catalogInflight.get(parentSessionId) === inflight
   }
 
   /**

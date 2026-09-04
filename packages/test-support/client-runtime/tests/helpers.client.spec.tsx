@@ -127,6 +127,7 @@ describe('Session fixture lifecycle', () => {
       title: 'Side: New thread',
     })
     const binding = runtime.sessions.binding('draft')
+    expect(runtime.sessions.behavior('draft').sessionId).toBe('draft')
     expect(binding?.sessionId).toBe('draft')
     expect(runtime.sessions.scope('draft')).toBe(binding?.ctx)
     expect(runtime.sessions.sessionOf(binding!.ctx)).toBe(binding?.session)

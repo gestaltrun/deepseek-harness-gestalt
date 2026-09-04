@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "desktop-updater-available-recheck",
+  "summary": {
+    "en": "Refresh the offered Desktop update version while Download is still showing, so a later GitHub Release replaces a stale target.",
+    "zh": "在仍显示「下载」时刷新 Desktop 提供的更新版本，使后续 GitHub Release 替换过期目标。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": []
+}

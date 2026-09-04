@@ -102,6 +102,9 @@ export interface AutoUpdaterLifecycle {
 
 /**
  * Drive updater phases. autoDownload stays false; the user must confirm.
+ * `available` still rechecks the GitHub feed on the same interval without
+ * leaving that phase; a newer `update-available` replaces `newVersion`.
+ * A recheck error while `available` keeps the offered version.
  * @param options.updater - electron-updater port.
  * @param options.onStateChange - notify the page / menu.
  * @param options.autoInstallOnAppQuit - macOS Squirrel prefetch after download; ordinary quit still does not install.
@@ -139,6 +142,7 @@ export function startAutoUpdater(options: {
   }
 
   const handleError = (error: unknown): void => {
+    if (current.state === 'available') return
     clearStageTimer()
     transition('error', {
       ...versionDetail(availableVersion),
@@ -149,31 +153,44 @@ export function startAutoUpdater(options: {
   const check = (): void => {
     if (
       disposed || checking
-      || current.state === 'available' || current.state === 'downloading'
+      || current.state === 'downloading'
       || current.state === 'preparing' || current.state === 'downloaded'
       || current.state === 'installing'
     ) return
+    const silent = current.state === 'available'
     checking = true
-    transition('checking')
-    void options.updater.checkForUpdates().catch(handleError).finally(() => { checking = false })
+    if (!silent) transition('checking')
+    void options.updater.checkForUpdates().catch((error: unknown) => {
+      if (!silent) handleError(error)
+    }).finally(() => { checking = false })
   }
 
   options.updater.autoDownload = false
   // macOS Squirrel only prefetches after HTTP download when this is true.
   // MacUpdater does not install on an ordinary quit.
   options.updater.autoInstallOnAppQuit = options.autoInstallOnAppQuit === true
-  const handleChecking = (): void => { transition('checking') }
+  const handleChecking = (): void => {
+    if (current.state === 'available' || current.state === 'downloading'
+      || current.state === 'preparing' || current.state === 'downloaded'
+      || current.state === 'installing') return
+    transition('checking')
+  }
   const handleAvailable = (info: unknown): void => {
+    if (current.state === 'downloading' || current.state === 'preparing'
+      || current.state === 'downloaded' || current.state === 'installing') return
     availableVersion = versionOf(info)
     lastCheckedAt = now()
     transition('available', versionDetail(availableVersion))
   }
   const handleNotAvailable = (): void => {
+    if (current.state === 'downloading' || current.state === 'preparing'
+      || current.state === 'downloaded' || current.state === 'installing') return
     availableVersion = undefined
     lastCheckedAt = now()
     transition('idle')
   }
   const handleProgress = (info: unknown): void => {
+    if (current.state !== 'downloading') return
     transition('downloading', {
       ...versionDetail(availableVersion),
       ...percentDetail(percentOf(info)),

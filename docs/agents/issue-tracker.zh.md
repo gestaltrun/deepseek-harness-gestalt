@@ -33,7 +33,7 @@ CI preflight 独立于生命周期激活来校验 Draft 与 ready PR 的元数�
 
 Issue Priority 同步是 `.github/issue-management/config.json` 中的一项显式部署选项。仅当仓库支持对应字段时，才把 `priorityField` 设为组织 Issue field 的名称；策略随后读取每个被引用 Issue 的字段值，并在 API 出错时失败。设为 `null` 会关闭该集成：策略不会发出 Issue field 请求，并把被引用 Issue 视为未设置 Priority。Gestalt tracker 使用 `null`，因为其工作流没有为 Priority 同步配置 Issue field 授权。
 
-组织 Project 生命周期投影是一项显式部署选项。仅当仓库 owner 与 `.github/issue-management/config.json` 中的 `projectOrganization` 一致、该配置指定了目标组织 Project，并且仓库为具备所需仓库与组织权限的已安装 GitHub App 提供 `DSH_ISSUE_APP_CLIENT_ID` 和 `DSH_ISSUE_APP_PRIVATE_KEY` 时，才将仓库变量 `DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED` 设为 `true`。工作流会在请求 installation token 前验证两者使用同一 owner。该变量缺失或不等于 `true` 时，owner 校验、token 创建和 Project mutation step 都会跳过，而 job 保持成功。生命周期与审计请求始终要求 App token；`pullRequestReadAuthentication` 绝不会使这些读写请求变为匿名。Gestalt tracker 保持禁用此选项，因为其组织 Project 与 GitHub App 授权尚未配置。`projectOrganization` 为未来可选部署标识 `gestaltrun`，但缺少仓库变量和凭据时不会启用生命周期。
+组织 Project 生命周期投影是一项显式部署选项。仅当仓库 owner 与 `.github/issue-management/config.json` 中的 `projectOrganization` 一致、该配置指定了目标组织 Project，并且仓库为具备所需仓库与组织权限的已安装 GitHub App 提供 `DSH_ISSUE_APP_CLIENT_ID` 和 `DSH_ISSUE_APP_PRIVATE_KEY` 时，才将仓库变量 `DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED` 设为 `true`。工作流会在请求 installation token 前验证两者使用同一 owner。该变量缺失或不等于 `true` 时，owner 校验、token 创建和 Project mutation step 都会跳过，而 job 保持成功。生命周期与审计请求始终要求 App token；`pullRequestReadAuthentication` 绝不会使这些读写请求变为匿名。Gestalt 组织 tracker 保持禁用此选项，因为尚未确认 Project 标识与 GitHub App 授权。当前 `projectOrganization` 是故意与仓库 owner 不同的禁用哨兵，因此意外启用会在 token 创建前的 owner 校验中失败；未来部署只能在确认目标 Project 与凭据后替换该值。
 
 ## 将 PR 作为 triage 入口
 

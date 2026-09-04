@@ -16,7 +16,7 @@ Issue 策略同时包含仓库检查和可选的组织 Project 生命周期投�
 
 仅当仓库变量 `DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED` 严格等于 `true` 时，组织 Project 生命周期投影才会运行。禁用此选项时，owner 校验、token 创建和 mutation step 都会跳过，而生命周期 job 保持成功。启用该选项的部署要求 `projectOrganization` 与事件仓库 owner 一致；工作流会在 checkout 可信策略之后、创建 token 之前检查此约束，生命周期入口则会在任何 API 请求前再次检查。随后，部署会用已配置的 App 凭证创建仓库范围的 installation token，并使用同一 owner 的组织权限执行 ProjectV2 操作。
 
-Gestalt 组织 tracker 保持禁用 Project 生命周期投影，因为其 Project 与 GitHub App 授权尚未配置。`projectOrganization` 为未来可选部署标识 `gestaltrun`；仅 owner 对齐不会在缺少仓库变量和凭据时启用生命周期。
+Gestalt 组织 tracker 保持禁用 Project 生命周期投影，因为尚未确认 Project 标识与 GitHub App 授权。当前 `projectOrganization` 是故意与仓库 owner 不同的禁用哨兵，因此意外启用会在 token 创建前的 owner 校验中失败。未来部署只能在确认目标 Project 与凭据后替换该哨兵。
 
 部署启用投影后，[事件驱动的评审状态决策](2026-08-10-event-directed-pr-review-status.zh.md)继续负责生命周期事件和状态迁移语义。
 

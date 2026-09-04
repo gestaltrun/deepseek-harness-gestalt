@@ -85,6 +85,14 @@ describe('permissions projection unit', () => {
     expect(value?.options.map(option => option.value)).toEqual(['workspace-write', 'danger-full-access'])
   })
 
+  it('reports custom when a delegated child inherits a sandbox with no preset', async () => {
+    const { ctx, session } = await harness()
+    session.append('sandbox/mode', { mode: 'read-only', source: 'delegation' })
+    session.append('approval/policy', { policy: 'never', source: 'delegation' })
+    const value = ctx.sessionProjections.snapshot(session).values.permissions
+    expect(value?.currentValue).toBe('custom')
+  })
+
   it('has no permissions key without the service, and drops it on unload (HMR safety)', async () => {
     const { ctx, session } = await harness({ withPermission: false })
     expect('permissions' in ctx.sessionProjections.snapshot(session).values).toBe(false)

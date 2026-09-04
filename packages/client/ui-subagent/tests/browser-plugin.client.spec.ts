@@ -187,4 +187,62 @@ describe('apply', () => {
       meta: { threadId: side },
     }, { sessionId: sid('parent') })
   })
+
+  it('opens a catalog-only Side Chat row and falls back when the tab is unavailable', async () => {
+    const side = sid('side-catalog')
+    const { ctx, face } = await fullBench([
+      summary({ id: sid('parent'), displayTitle: 'parent', running: true }),
+    ])
+    const snapshot = face.list.getSnapshot()
+    snapshot.current = sid('parent')
+    snapshot.subagentsByParent = {
+      [sid('parent')]: {
+        entries: [
+          { kind: 'diagnostic', id: sid('corrupt'), reason: 'corrupt' },
+          { kind: 'child', id: sid('other'), mode: 'continuable', label: 'Side: other', activity: 'inactive', hasChildren: false },
+          { kind: 'child', id: side, mode: 'continuable', label: 'Side: catalog', activity: 'inactive', hasChildren: false },
+        ],
+        parentAvailable: true,
+        state: 'ready',
+        error: null,
+      },
+    }
+    const openTab = vi.fn()
+    const sidebar = {
+      isTabEnabled: (): boolean => false,
+      openTab,
+    }
+    ctx.provide('betterSidebar', sidebar)
+    const catalogEntry = ctx.slots.entries('conversation.session.header.lineage')
+      .find(entry => entry.component === SubagentHeaderLineage)!
+    const actions = (catalogEntry.inject as unknown as (id: SessionId) => SubagentCatalogInjected)(sid('parent'))
+    const address: SubagentAddress = {
+      parentSessionId: sid('parent'),
+      childSessionId: side,
+      mode: 'continuable',
+    }
+    actions.openChild(address)
+    expect(openTab).not.toHaveBeenCalled()
+    expect(face.actionCalls).toEqual([{ method: 'openSubagent', args: [address] }])
+
+    sidebar.isTabEnabled = () => true
+    face.actionCalls.length = 0
+    actions.openChild(address)
+    expect(face.actionCalls).toEqual([])
+    expect(openTab).toHaveBeenCalledWith({
+      type: 'sidechat',
+      id: 'sidechat:side-catalog',
+      title: 'catalog',
+      meta: { threadId: side },
+    }, { sessionId: sid('parent') })
+
+    face.actionCalls.length = 0
+    const missing: SubagentAddress = {
+      parentSessionId: sid('parent'),
+      childSessionId: sid('missing'),
+      mode: 'continuable',
+    }
+    actions.openChild(missing)
+    expect(face.actionCalls).toEqual([{ method: 'openSubagent', args: [missing] }])
+  })
 })

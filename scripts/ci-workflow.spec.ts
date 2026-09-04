@@ -656,9 +656,9 @@ describe('Issue lifecycle workflow', () => {
     const lifecycleJob = workflowJob(lifecycle, 'lifecycle')
     if (!Array.isArray(lifecycleJob.steps)) throw new TypeError('Issue lifecycle job must define steps')
 
-    // The deployment option skips the complete lifecycle job before token creation.
-    // Within an enabled deployment, review-state gates prevent approved/commented
-    // reviews from minting a Project/Issue App token or touching the board.
+    // The job remains listed and successful when lifecycle is disabled; owner
+    // validation, token creation, and board mutation steps skip. In an enabled
+    // deployment, review-state gates limit write steps to changes_requested reviews.
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
     const lifecycleEnabled = "${{ vars.DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED == 'true' }}"

@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent, SessionEventMap, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type {
   TeamId,
@@ -93,36 +93,6 @@ const teamMessageSnapshotSchema = z.object({
   content: z.array(contentBlockSchema),
 }).strict() as z.ZodType<TeamMessageSnapshot>
 
-const teamEventSelectorSchema = z.object({
-  version: nonNegativeSafeInteger,
-  teamId: teamIdSchema,
-}).loose()
-
-const teamMemberEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  member: teamMemberSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/member']>
-
-const teamTaskEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  task: teamTaskSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/task']>
-
-const teamMessageQueuedEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  message: teamMessageSnapshotSchema,
-}).strict() as z.ZodType<SessionEventMap['team/message/queued']>
-
-const teamMessageDeliveredEventSchema = z.object({
-  version: z.literal(2),
-  teamId: teamIdSchema,
-  messageId: teamMessageIdSchema,
-  targetId: sessionIdSchema,
-}).strict() as z.ZodType<SessionEventMap['team/message/delivered']>
-
 /** Current Team state selected by durable Team identity. */
 export interface TeamState {
   readonly id: TeamId
@@ -170,64 +140,18 @@ const teamProjectionEntrySchema = z.object({
   failure: z.string().optional(),
 }).strict() as z.ZodType<TeamProjectionState>
 
-/** Whether one event belongs to the Team domain. */
-export type TeamEventType =
-  | 'team/member'
-  | 'team/task'
-  | 'team/message/queued'
-  | 'team/message/delivered'
-
-/** One event owned by the Team domain. */
-type TeamSessionEvent = SessionEvent<TeamEventType>
-
-/**
- * Test whether a Session event belongs to the Team domain.
- * @param event - candidate Session event.
- * @returns whether the event has a Team-owned type.
- */
-export function isTeamEvent(event: SessionEvent): event is TeamSessionEvent {
-  return event.type === 'team/member'
-    || event.type === 'team/task'
-    || event.type === 'team/message/queued'
-    || event.type === 'team/message/delivered'
-}
-
-/** Decode one persisted Team value and retain the schema failure as its cause. */
-function parsePersisted<T>(type: TeamEventType, schema: z.ZodType<T>, value: unknown): T {
-  try {
-    return schema.parse(value)
-  } catch (error: unknown) {
-    throw new Error(`persisted Agent Teams ${type} payload is invalid`, { cause: error })
-  }
-}
-
-/** Decode the complete current-version payload selected by one Team event type. */
-function parseCurrentTeamEvent(event: TeamSessionEvent): TeamSessionEvent {
-  switch (event.type) {
-    case 'team/member':
-      return { ...event, data: parsePersisted(event.type, teamMemberEventSchema, event.data) }
-    case 'team/task':
-      return { ...event, data: parsePersisted(event.type, teamTaskEventSchema, event.data) }
-    case 'team/message/queued':
-      return { ...event, data: parsePersisted(event.type, teamMessageQueuedEventSchema, event.data) }
-    case 'team/message/delivered':
-      return { ...event, data: parsePersisted(event.type, teamMessageDeliveredEventSchema, event.data) }
-    /* v8 ignore next 2 -- TeamEventType is closed and every member is handled above. */
-    default:
-      return event
-  }
-}
+export { isTeamEvent } from './persisted-events.ts'
+import { decodePersistedTeamEvent, isTeamEvent } from './persisted-events.ts'
+import type { TeamSessionEvent } from './persisted-events.ts'
+export type { TeamEventType } from './persisted-events.ts'
 
 function applyProjectionEvent(state: TeamProjectionState, event: SessionEvent): void {
   if (state.failure !== undefined) return
   if (!isTeamEvent(event)) return
   try {
-    const selector = parsePersisted(event.type, teamEventSelectorSchema, event.data)
-    if (selector.teamId !== state.id) return
-    if (selector.version !== 2) {
-      throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
-    }
-    applyCurrentTeamEvent(state, parseCurrentTeamEvent(event))
+    const decoded = decodePersistedTeamEvent(state.id, event)
+    if (decoded === undefined) return
+    applyCurrentTeamEvent(state, decoded)
   } catch (error: unknown) {
     /* v8 ignore next -- the owned Team transition throws Error instances. */
     state.failure = error instanceof Error ? error.message : String(error)
@@ -306,7 +230,7 @@ function applyCurrentTeamEvent(state: TeamState, event: TeamSessionEvent): void 
 /** Host-only Team projection selected by the projected Session identity. */
 export const teamProjectionDefinition = {
   key: 'agentTeam',
-  stateVersion: 3,
+  stateVersion: 4,
   stateSchema: teamProjectionEntrySchema,
   init: header => emptyTeamState(header.id),
   apply: (state, event) => {

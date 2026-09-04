@@ -61,7 +61,6 @@ function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnaps
     senderId: ROOT,
     senderName: 'lead',
     targetId: CHILD,
-    delivery: 'quiet',
     content: [{ type: 'text', text: 'hello' }],
     ...overrides,
   }
@@ -78,7 +77,7 @@ describe('Agent Teams fold', () => {
         member: member({ phase: 'active' }),
       }, 2),
       event('team/task', { version: 1, teamId: TEAM, task: task({ id: TeamTaskId('task-7') }) }, 3),
-      event('team/message/queued', { version: 1, teamId: TEAM, message: message() }, 4),
+      event('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 4),
     ]
     const state = foldTeam(ROOT, records)
 
@@ -211,7 +210,7 @@ describe('Agent Teams fold', () => {
   })
 
   it('enforces mailbox queue and acknowledgement relations', () => {
-    const queued = event('team/message/queued', { version: 1, teamId: TEAM, message: message() }, 0)
+    const queued = event('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 0)
     const delivered = event('team/message/delivered', {
       version: 1,
       teamId: TEAM,
@@ -239,11 +238,11 @@ describe('Agent Teams fold', () => {
         data: { version: 1, teamId: TEAM, task: { ...task(), blockedBy: [42] } },
       },
       {
-        ...event('team/message/queued', { version: 1, teamId: TEAM, message: message() }, 0),
+        ...event('team/message/queued', { version: 1, teamId: TEAM, message: { ...message(), delivery: 'quiet' } }, 0),
         data: {
           version: 1,
           teamId: TEAM,
-          message: { ...message(), content: [{ type: 'text', text: 42 }] },
+          message: { ...message(), delivery: 'quiet', content: [{ type: 'text', text: 42 }] },
         },
       },
       {
@@ -270,10 +269,33 @@ describe('Agent Teams fold', () => {
       },
     ] as unknown as SessionEvent[]
 
-    for (const candidate of malformed) {
-      expect(() => foldTeam(ROOT, [candidate]))
+    malformed.forEach((candidate, index) => {
+      expect(() => foldTeam(ROOT, [candidate]), `malformed fixture ${index}`)
         .toThrow(/persisted Agent Teams .* payload is invalid/)
-    }
+    })
+  })
+
+  it.each(['quiet', 'wakeup'] as const)('normalizes v1 queued %s delivery to the current message', (delivery) => {
+    const state = foldTeam(ROOT, [{
+      type: 'team/message/queued', seq: 0, time: 0,
+      data: { version: 1, teamId: TEAM, message: { ...message(), delivery } },
+    } as unknown as SessionEvent])
+    expect(pending(state)[0]).toMatchObject({
+      id: TeamMessageId('message-1'), senderId: ROOT, senderName: 'lead', targetId: CHILD,
+      content: [{ type: 'text', text: 'hello' }],
+    })
+    expect(pending(state)[0]).not.toHaveProperty('delivery')
+  })
+
+  it('folds mixed v1 and v2 records to current state', () => {
+    const state = foldTeam(ROOT, [
+      { type: 'team/member', seq: 0, time: 0, data: { version: 1, teamId: TEAM, member: member() } } as unknown as SessionEvent,
+      event('team/member', { version: 2, teamId: TEAM, member: member({ phase: 'active' }) }, 1),
+      { type: 'team/task', seq: 2, time: 2, data: { version: 1, teamId: TEAM, task: task() } } as unknown as SessionEvent,
+      event('team/task', { version: 2, teamId: TEAM, task: task({ revision: 2, status: 'completed' }) }, 3),
+    ])
+    expect(state.members.get(CHILD)?.phase).toBe('active')
+    expect(state.tasks.get(TeamTaskId('task-1'))?.status).toBe('completed')
   })
 
   it('retains merge-extensible content blocks while rejecting malformed core variants', () => {
@@ -281,7 +303,7 @@ describe('Agent Teams fold', () => {
     const state = foldTeam(ROOT, [event('team/message/queued', {
       version: 1,
       teamId: TEAM,
-      message: message({ content: [extension] }),
+      message: { ...message({ content: [extension] }), delivery: 'quiet' },
     }, 0)])
     expect(pending(state)[0]?.content).toEqual([extension])
   })
@@ -289,11 +311,11 @@ describe('Agent Teams fold', () => {
   it('rejects unsupported event versions without mutating an empty state', () => {
     const state = emptyTeamFoldState(ROOT)
     const invalid = event('team/task', {
-      version: 2 as 1,
+      version: 3 as 1,
       teamId: TEAM,
       task: task(),
     }, 0)
-    expect(() => { applyTeamEvent(state, invalid) }).toThrow(/unsupported Agent Teams event version 2/)
+    expect(() => { applyTeamEvent(state, invalid) }).toThrow(/unsupported Agent Teams event version 3/)
     expect(isEmptyFold(state)).toBe(true)
   })
 
@@ -306,7 +328,7 @@ describe('Agent Teams fold', () => {
     expect(isEmptyFold(foldTeam(ROOT, [inherited]))).toBe(true)
   })
 
-  it('still validates complete current-version records inherited from another Team', () => {
+  it('ignores malformed nested records inherited from another Team', () => {
     const inherited = {
       ...event('team/task', {
         version: 1,
@@ -319,7 +341,6 @@ describe('Agent Teams fold', () => {
         task: { ...task(), subject: 42 },
       },
     } as unknown as SessionEvent
-    expect(() => foldTeam(ROOT, [inherited]))
-      .toThrow(/persisted Agent Teams team\/task payload is invalid/)
+    expect(isEmptyFold(foldTeam(ROOT, [inherited]))).toBe(true)
   })
 })

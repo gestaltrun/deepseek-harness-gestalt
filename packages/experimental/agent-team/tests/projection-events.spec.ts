@@ -77,6 +77,20 @@ function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnaps
 }
 
 describe('Agent Teams projection events', () => {
+  it('invalidates v3-only cached state', () => {
+    expect(teamProjectionDefinition.stateVersion).toBe(4)
+  })
+  it('normalizes mixed v1 and v2 records to current projected state', () => {
+    const projected = projectTeam(ROOT, [
+      { type: 'team/member', seq: SessionSeq(0), time: 0, data: { version: 1, teamId: TEAM, member: member() } } as unknown as SessionEvent,
+      event('team/member', { version: 2, teamId: TEAM, member: member({ phase: 'active' }) }, SessionSeq(1)),
+      { type: 'team/message/queued', seq: SessionSeq(2), time: 2, data: { version: 1, teamId: TEAM, message: { ...message(), delivery: 'wakeup' } } } as unknown as SessionEvent,
+    ])
+    expect(projected.members[0]?.phase).toBe('active')
+    expect(projected.messages[0]).toEqual(message())
+    expect(projected.messages[0]).not.toHaveProperty('delivery')
+  })
+
   it('projects current-team records independently from inherited records', () => {
     const records: SessionEvent[] = [
       event('team/member', { version: 2, teamId: TeamId('ancestor'), member: member() }, SessionSeq(0)),
@@ -253,7 +267,7 @@ describe('Agent Teams projection events', () => {
         data: {
           version: 2,
           teamId: TEAM,
-          message: { ...message(), content: [{ type: 'text', text: 42 }] },
+          message: { ...message(), delivery: 'quiet', content: [{ type: 'text', text: 42 }] },
         },
       },
       {
@@ -296,9 +310,9 @@ describe('Agent Teams projection events', () => {
     expect(pending(state)[0]?.content).toEqual([extension])
   })
 
-  it('records unsupported event versions without applying them', () => {
+  it('records unknown same-team versions as sticky failures', () => {
     const invalid = event('team/task', {
-      version: 1 as 2,
+      version: 3 as 2,
       teamId: TEAM,
       task: task(),
     }, SessionSeq(0))
@@ -308,7 +322,7 @@ describe('Agent Teams projection events', () => {
       task: task(),
     }, SessionSeq(1))
     const state = project(ROOT, [invalid, later])
-    expect(state.failure).toMatch(/unsupported Agent Teams event version 1/)
+    expect(state.failure).toMatch(/unsupported Agent Teams event version 3/)
     expect(isEmptyState(state)).toBe(true)
   })
 

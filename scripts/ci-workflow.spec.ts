@@ -661,7 +661,8 @@ describe('Issue lifecycle workflow', () => {
     // reviews from minting a Project/Issue App token or touching the board.
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
-    expect(lifecycleJob.if).toBe("${{ vars.DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED == 'true' }}")
+    const lifecycleEnabled = "${{ vars.DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED == 'true' }}"
+    expect(lifecycleJob.if).toBe(lifecycleEnabled)
     // Keep the subscription-type gates: issue-lifecycle does not re-subscribe
     // ready_for_review (issue-policy owns that) and only reacts to submitted
     // review events.
@@ -676,6 +677,7 @@ describe('Issue lifecycle workflow', () => {
     const ownerStep = steps.find(s => s.name === 'Validate project owner')
     const tokenStep = steps.find(s => s.name === 'Create project token')
     const handleStep = steps.find(s => s.name === 'Handle repository event')
+    expect(lifecycleJob.if).toBe(lifecycleEnabled)
     expect(steps.indexOf(ownerStep)).toBeLessThan(steps.indexOf(tokenStep))
     expect(ownerStep).toMatchObject({ run: 'node .github/issue-management/policy.mjs deployment' })
     expect(tokenStep).toMatchObject({

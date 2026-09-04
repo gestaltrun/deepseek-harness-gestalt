@@ -94,7 +94,7 @@ function repositoryApiPath(path) {
   return `/repos/${repositoryCoordinates().fullName}${path}`
 }
 
-function validateLifecycleDeployment(environment = process.env) {
+export function validateLifecycleDeployment(environment = process.env) {
   const { owner } = repositoryCoordinates(environment)
   if (config.projectOrganization !== owner) {
     throw new Error(

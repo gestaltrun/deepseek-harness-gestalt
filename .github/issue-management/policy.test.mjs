@@ -15,6 +15,7 @@ import {
   requiresPullRequestPolicy,
   validateBody,
   validateIssue,
+  validateLifecycleDeployment,
   validatePullRequest,
 } from './policy.mjs'
 
@@ -172,6 +173,16 @@ test('routes policy requests to the repository from the workflow event', () => {
   assert.throws(
     () => repositoryCoordinates({ GITHUB_REPOSITORY: 'deepseek-harness-gestalt' }),
     /GITHUB_REPOSITORY 必须为 owner\/name/,
+  )
+})
+
+test('rejects lifecycle when the configured Project owner differs from the event repository', () => {
+  assert.throws(
+    () => validateLifecycleDeployment({ GITHUB_REPOSITORY: 'gestaltrun/deepseek-harness-gestalt' }),
+    /deepseek-harness != gestaltrun/,
+  )
+  assert.doesNotThrow(() =>
+    validateLifecycleDeployment({ GITHUB_REPOSITORY: 'deepseek-harness/deepseek-harness' }),
   )
 })
 

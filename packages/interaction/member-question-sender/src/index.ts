@@ -36,6 +36,11 @@ import {
   type ProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type {
+  AskUserQuestionAnswer,
+  AskUserQuestionMemberRoute,
+  AskUserQuestionRequest,
+} from '@deepseek-ai/dsh-user-questions'
 import { MemberQuestionSenderError } from './errors.ts'
 import type { MemberQuestionSenderErrorCode } from './errors.ts'
 import type {
@@ -384,6 +389,33 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         )),
       ))
     }, 'member-question-sender: publish pending withdrawals')
+    if (ctx.get('userQuestions') !== undefined) {
+      ctx.root.on('user-questions/request', (request, next) => {
+        if (request.memberRoute === undefined) return next()
+        return this.answerMemberQuestion(request, request.memberRoute)
+      }, { prepend: true })
+    }
+  }
+
+  /** Claim one member-routed user-question request and preserve sender outcomes unchanged. */
+  private async answerMemberQuestion(
+    request: AskUserQuestionRequest,
+    route: AskUserQuestionMemberRoute,
+  ): Promise<AskUserQuestionAnswer> {
+    const result = await this.send({
+      ...route,
+      questions: request.questions,
+    }, {
+      ...request.agent === undefined ? {} : { session: request.agent.session },
+      ...request.signal === undefined ? {} : { signal: request.signal },
+    })
+    return result.outcome === 'answered'
+      ? { answers: result.answers.map(answer => ({
+        id: answer.id,
+        selected: [...answer.selected],
+        ...answer.custom === undefined ? {} : { custom: answer.custom },
+      })) }
+      : { answers: [] }
   }
 
   override async send(
@@ -655,7 +687,7 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         question: question.question,
       })),
       originSessionId: payload.originSessionId,
-    })
+    }, { ignorable: true })
   }
 
   /**
@@ -719,7 +751,7 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
       questionId: pending.questionId,
       outcome: result.outcome,
       ...result.outcome === 'answered' ? { answers: result.answers } : {},
-    })
+    }, { ignorable: true })
     pending.resolve(result)
   }
 
@@ -729,7 +761,7 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
     pending.session?.append('member-question/outcome', {
       questionId: pending.questionId,
       outcome: failure.outcome,
-    })
+    }, { ignorable: true })
     pending.reject(new MemberQuestionSenderError(failure.message, failure.code, {
       ...failure.cause === undefined ? {} : { cause: failure.cause },
     }))

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import { parseCompanionSessionId, parseMemberQuestionProjectId } from '@deepseek-ai/dsh-remote-protocol'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import UserQuestionService, {
@@ -36,13 +38,13 @@ interface OptionSchemaShape {
   }
 }
 
-async function setup() {
+async function setup(config: toolAskUser.Config = {}) {
   const ctx = new Context()
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(UserQuestionService)
-  await ctx.plugin(toolAskUser)
+  await ctx.plugin(toolAskUser, config)
   return ctx
 }
 
@@ -119,6 +121,63 @@ describe('ask_user_question tool', () => {
         question: 'Which package manager should I use?',
         options: [{ label: 'pnpm', description: 'Use pnpm workspaces.' }],
       }],
+    }])
+  })
+
+  it('routes member questions only through ctx.userQuestions.ask', async () => {
+    const ctx = await setup({
+      routeResolver: () => Promise.resolve({
+        projectId: parseMemberQuestionProjectId('project-atlas'),
+        toProjectMember: 'account-peer' as PlatformAccountId,
+        origin: {
+          projectName: 'Atlas',
+          originSessionTitle: 'Rollback planning',
+          askerAccountId: 'account-asker' as PlatformAccountId,
+          askerRole: 'admin',
+          askerDisplayName: 'Ada',
+          askerAvatarUrl: 'https://example.test/ada.png',
+        },
+      }),
+    })
+    const seen: AskUserQuestionRequest[] = []
+    registerQuestionAnswerer(ctx, {
+      async ask(request) {
+        seen.push(request)
+        return { answers: [{ id: 'window', selected: ['24 hours'] }] }
+      },
+    })
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: ToolCallId('ask-member'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'window', question: 'Which rollback window?' }],
+        to_project_member: 'AdaPeer',
+        background: 'The ingest pipeline fails under load.',
+      },
+    })
+
+    expect(result).toMatchObject({ isError: false })
+    expect(seen).toEqual([{
+      questions: [{ id: 'window', question: 'Which rollback window?' }],
+      signal: testToolSignal,
+      memberRoute: {
+        projectId: parseMemberQuestionProjectId('project-atlas'),
+        toProjectMember: 'account-peer' as PlatformAccountId,
+        background: 'The ingest pipeline fails under load.',
+        references: [],
+        documents: [],
+        origin: {
+          projectName: 'Atlas',
+          originSessionTitle: 'Rollback planning',
+          askerAccountId: 'account-asker' as PlatformAccountId,
+          askerRole: 'admin',
+          askerDisplayName: 'Ada',
+          askerAvatarUrl: 'https://example.test/ada.png',
+        },
+        originSessionId: parseCompanionSessionId('unbound-origin'),
+      },
     }])
   })
 

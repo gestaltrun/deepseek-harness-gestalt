@@ -3,6 +3,7 @@
  * @module @deepseek-ai/dsh-member-question-sender/types
  */
 
+import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import type {
   CompanionMemberQuestionAnswer,
   CompanionMemberQuestionItem,
@@ -24,7 +25,10 @@ export type MemberQuestionReference = CompanionMemberQuestionReference
 export type MemberQuestionItem = CompanionMemberQuestionItem
 
 /** Decision Brief origin of one routed member question. */
-export type MemberQuestionOrigin = CompanionMemberQuestionOrigin
+export type MemberQuestionOrigin = Omit<CompanionMemberQuestionOrigin, 'askerAccountId'> & {
+  /** Branded Platform account reference of the asking member. */
+  readonly askerAccountId: PlatformAccountId
+}
 
 /** One settling answer echoed by question id. */
 export type MemberQuestionAnswer = CompanionMemberQuestionAnswer
@@ -56,7 +60,7 @@ export interface EncodedMemberQuestionDocument {
  */
 export interface MemberQuestionSendPayload {
   /** Account reference of the single addressee. */
-  readonly toProjectMember: string
+  readonly toProjectMember: PlatformAccountId
   /** Cloud project whose peer grant addresses that member. */
   readonly projectId: ProjectId
   /** Agent-authored background; already bounded by the asking tool. */
@@ -165,7 +169,7 @@ export interface MemberQuestionAskedRecord {
   /** Branded question identity correlated with the matching outcome. */
   readonly questionId: MemberQuestionId
   /** Account reference of the single addressee. */
-  readonly toProjectMember: string
+  readonly toProjectMember: PlatformAccountId
   /** Cloud project whose peer grant addresses that member. */
   readonly projectId: ProjectId
   /** Agent-authored background already admitted by the asking tool. */

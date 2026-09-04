@@ -19,6 +19,12 @@
     },
     {
       "path": "../../llm/llm"
+    },
+    {
+      "path": "../../platform/platform-account"
+    },
+    {
+      "path": "../../platform/remote-protocol"
     }
   ]
 }

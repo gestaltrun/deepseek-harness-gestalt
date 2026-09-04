@@ -24,6 +24,12 @@
       "path": "../../core/agent"
     },
     {
+      "path": "../../platform/platform-account"
+    },
+    {
+      "path": "../../platform/remote-protocol"
+    },
+    {
       "path": "../../core/system-prompt"
     },
     {

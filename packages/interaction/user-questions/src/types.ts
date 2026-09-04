@@ -1,7 +1,14 @@
 /** Client-safe question, answer, and event types. @module @deepseek-ai/dsh-user-questions/types */
 
 import type { Scoped } from '@deepseek-ai/dsh-scope'
-import type { Agent } from '@deepseek-ai/dsh-agent/types'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import type {
+  CompanionMemberQuestionOrigin,
+  CompanionMemberQuestionReference,
+  CompanionSessionId,
+  ProjectId,
+} from '@deepseek-ai/dsh-remote-protocol'
 
 /** One selectable answer offered to the user. */
 export interface AskUserQuestionOption {
@@ -109,6 +116,26 @@ export interface AskUserQuestionAnswer {
   answers: AskUserQuestionAnswerItem[]
 }
 
+/** Minimal validated route for a Host member-question answerer. */
+export interface AskUserQuestionMemberRoute {
+  /** Cloud project containing the addressed member. */
+  readonly projectId: ProjectId
+  /** Durable Account id selected by the authenticated roster resolver. */
+  readonly toProjectMember: PlatformAccountId
+  /** Agent-authored Decision Brief background. */
+  readonly background: string
+  /** Workspace references using the Companion member-question vocabulary. */
+  readonly references: readonly CompanionMemberQuestionReference[]
+  /** Optional reference bytes aligned by index and path with `references`. */
+  readonly documents?: readonly { readonly path: string; readonly bytes: Uint8Array }[]
+  /** Authenticated public identity rendered with the Decision Brief. */
+  readonly origin: Omit<CompanionMemberQuestionOrigin, 'askerAccountId'> & {
+    readonly askerAccountId: PlatformAccountId
+  }
+  /** Protocol-native Session identity that owns the routed ask. */
+  readonly originSessionId: CompanionSessionId
+}
+
 /** Client-safe payload declared for the user-question answerer waterfall. */
 export interface AskUserQuestionRequestEvent {
   /** Questions to display. */
@@ -117,6 +144,8 @@ export interface AskUserQuestionRequestEvent {
   agent?: Agent
   /** Cancellation lifetime of the pending request. */
   signal?: AbortSignal
+  /** Optional Host-only member route claimed by a composed unscoped answerer. */
+  memberRoute?: AskUserQuestionMemberRoute
 }
 
 declare module '@deepseek-ai/cordis' {

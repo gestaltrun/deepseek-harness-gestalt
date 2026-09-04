@@ -30,7 +30,7 @@ User-interaction Service Definition. It owns `ctx.userQuestions`, the service a 
 
 ### Key Types
 
-- `AskUserQuestionRequest` — `{ questions: [{ id, question, detail?, header?, options?, multiSelect?, intent? }], agent?, signal? }`; `detail` supplies supporting text that providers render with the question without turning it into an option label. When present, `agent` must be the registry's exact live runtime root.
+- `AskUserQuestionRequest` — `{ questions: [{ id, question, detail?, header?, options?, multiSelect?, intent? }], agent?, signal?, memberRoute? }`; `detail` supplies supporting text that providers render with the question without turning it into an option label. When present, `agent` must be the registry's exact live runtime root. `memberRoute` is the minimal Host-only asker input. It reuses type-only remote-protocol origin/reference types and preserves branded Project, Account, and Companion Session identities without depending on the sender package; local answerers delegate it with `next()`.
 - `AskUserQuestionOption` — `{ label, description? }`.
 - `AskUserQuestionIntent` — `{ kind: 'plan-review', approve }`; the tagged presentation intent below.
 - `AskUserQuestionAnswer` — `{ answers: [{ id, selected, custom? }] }`.
@@ -38,7 +38,7 @@ User-interaction Service Definition. It owns `ctx.userQuestions`, the service a 
 
 For a single-select question, `custom` overrides the selected choice and `selected` is empty. For a multi-select question, `custom` may supplement the labels in `selected`. A UI may preserve a skipped item as `{ id, selected: [] }`, keeping the existing answer shape while retaining other answers in the batch.
 
-When a request carries an agent, `ask()` authenticates its exact identity through the live `AgentRegistry` and admits only a runtime root. Durable lineage is not authority: a session with historical delegation depth may ask after it is resumed as a new runtime root, while a live child owned by another agent is rejected even if its durable depth is zero. The Web answerer receives only Agent-scoped requests; an agentless programmatic request remains available to unscoped local waterfall listeners and fails with `NO_PROVIDER` when none accepts it.
+When a request carries an agent, `ask()` authenticates its exact identity through the live `AgentRegistry` and admits only a runtime root. Durable lineage is not authority: a session with historical delegation depth may ask after it is resumed as a new runtime root, while a live child owned by another agent is rejected even if its durable depth is zero. The Web answerer receives only Agent-scoped requests; Host-root unscoped listeners can claim a `memberRoute` request before that scoped chain, while ordinary requests delegate through registration order. An agentless programmatic request remains available to unscoped local waterfall listeners and fails with `NO_PROVIDER` when none accepts it.
 
 ### Presentation intent
 

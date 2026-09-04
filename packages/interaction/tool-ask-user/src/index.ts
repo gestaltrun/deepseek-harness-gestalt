@@ -13,14 +13,15 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import {
+  parseCompanionSessionId,
+  type CompanionMemberQuestionOrigin,
+  type ProjectId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-user-questions'
-import type { MemberQuestionOrigin } from '@deepseek-ai/dsh-member-question-sender'
-import {
-  parseCompanionSessionId,
-  parseMemberQuestionProjectId,
-} from '@deepseek-ai/dsh-remote-protocol'
 import {
   AskUserQuestionError,
   BACKGROUND_MAX_CODE_POINTS,
@@ -65,11 +66,13 @@ export interface OriginResolverInput {
 /** Authenticated Project, Decision Brief origin, and live-roster Account for one eligible addressee. */
 export interface MemberQuestionRoute {
   /** Cloud Project whose current roster contains the addressee. */
-  readonly projectId: string
+  readonly projectId: ProjectId
   /** Authenticated Decision Brief origin from the same roster read. */
-  readonly origin: MemberQuestionOrigin
+  readonly origin: Omit<CompanionMemberQuestionOrigin, 'askerAccountId'> & {
+    readonly askerAccountId: PlatformAccountId
+  }
   /** Durable Account id matched from the live roster, never the model-supplied login. */
-  readonly toProjectMember: string
+  readonly toProjectMember: PlatformAccountId
 }
 
 /** Resolve one authenticated route, or no value when the addressee is absent from the current Project roster. */
@@ -264,10 +267,9 @@ export function apply(ctx: Context, config: Config = {}): void {
           })),
         }
       }
-      const sender = ctx.get('memberQuestionSender')
-      if (sender === undefined || resolved.routeResolver === undefined) {
+      if (resolved.routeResolver === undefined) {
         throw new AskUserQuestionError(
-          'SENDER_UNAVAILABLE: to_project_member requires ctx.memberQuestionSender and a routeResolver',
+          'SENDER_UNAVAILABLE: to_project_member requires a routeResolver and a composed member-question answerer',
           'SENDER_UNAVAILABLE',
         )
       }
@@ -289,23 +291,23 @@ export function apply(ctx: Context, config: Config = {}): void {
         )
       }
       const routed = await validateRoutedReferences(args.references, workspaceRoot)
-      const result = await sender.send({
-        toProjectMember: route.toProjectMember,
-        projectId: parseMemberQuestionProjectId(route.projectId),
-        background,
+      const result = await ctx.userQuestions.ask({
         questions,
-        references: (routed.references ?? []).map(reference => ({
-          path: reference.path,
-          reason: reference.reason ?? reference.path,
-        })),
-        documents: routed.documents,
-        origin: route.origin,
-        originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
-      }, {
-        ...exec.agent !== undefined ? { session: exec.agent.session } : {},
+        ...exec.agent !== undefined ? { agent: exec.agent } : {},
         signal: exec.signal,
+        memberRoute: {
+          toProjectMember: route.toProjectMember,
+          projectId: route.projectId,
+          background,
+          references: (routed.references ?? []).map(reference => ({
+            path: reference.path,
+            reason: reference.reason ?? reference.path,
+          })),
+          documents: routed.documents,
+          origin: route.origin,
+          originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
+        },
       })
-      if (result.outcome === 'declined') return { answers: [] }
       return {
         answers: result.answers.map(answer => ({
           id: answer.id,

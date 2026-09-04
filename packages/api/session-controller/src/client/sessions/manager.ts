@@ -258,6 +258,8 @@ export class SessionManager {
 
   /**
    * Stop owned timers and every remaining Session instance.
+   * After this returns, list refresh, reconnect, catalog refresh, and live
+   * Host sinks are no-ops.
    * @returns when every Session Remote iterator has completed teardown.
    */
   async dispose(): Promise<void> {
@@ -416,7 +418,7 @@ export class SessionManager {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
-    if (this.disposed) return Promise.resolve()
+    if (!this.accepting()) return Promise.resolve()
     const existing = this.catalogInflight.get(parentSessionId)
     if (existing !== undefined) return existing.promise
     const controller = new AbortController()
@@ -504,7 +506,7 @@ export class SessionManager {
 
   /** True while this catalog request is still the live owner and the manager is not disposed. */
   private catalogCurrent(parentSessionId: SessionId, inflight: CatalogInflight): boolean {
-    return !this.disposed
+    return this.accepting()
       && inflight.generation === this.catalogGeneration
       && !inflight.controller.signal.aborted
       && this.catalogInflight.get(parentSessionId) === inflight
@@ -516,7 +518,7 @@ export class SessionManager {
    * @param open - current menu state.
    */
   setSubagentCatalogOpen(parentSessionId: SessionId, open: boolean): void {
-    if (this.disposed) return
+    if (!this.accepting()) return
     if (open) {
       this.openCatalogs.add(parentSessionId)
       void this.refreshSubagents(parentSessionId)
@@ -534,6 +536,7 @@ export class SessionManager {
 
   /** Full refresh via session.list (single-flight: an in-flight call is reused). */
   refreshList(): Promise<void> {
+    if (!this.accepting()) return Promise.resolve()
     if (this.listInflight !== null) return this.listInflight
     this.listState = 'loading'
     this.listError = null
@@ -730,7 +733,13 @@ export class SessionManager {
   }
 
   /** Apply immediately and retain for replay when a list response is in flight. */
+  /** False after {@link dispose}; live Host and list writers must no-op. */
+  private accepting(): boolean {
+    return !this.disposed
+  }
+
   private recordMutation(mutation: SessionListMutation): void {
+    if (!this.accepting()) return
     this.listMutations?.push(mutation)
     this.summaries = applyMutation(this.summaries, mutation)
     // Eager edge reconciliation — a snapshot-build-time pass would miss consecutive status frames.
@@ -765,6 +774,7 @@ export class SessionManager {
    * @param frame - baseline or live control replacement from Session Controller.
    */
   handleControlFrame(frame: SessionControlFrame): void {
+    if (!this.accepting()) return
     if (frame.type === 'baseline') {
       this.replaceControlBaseline(frame.value)
       return
@@ -812,6 +822,7 @@ export class SessionManager {
    * @param summary - current Host summary for the added Session.
    */
   handleSessionAdded(summary: SessionSummary): void {
+    if (!this.accepting()) return
     this.provisionalSummaries.delete(summary.sessionId)
     this.mergeSummary(summary)
     this.sessions.get(summary.sessionId)?.handleBlank(summary.blank)
@@ -836,6 +847,7 @@ export class SessionManager {
    * @param sessionId - removed Session identity.
    */
   handleSessionRemoved(sessionId: SessionId): void {
+    if (!this.accepting()) return
     const summary = this.summaries.find(candidate => candidate.sessionId === sessionId)
     const durableSubagent = summary?.origin === 'subagent' || this.addresses.has(sessionId)
     this.recordMutation(durableSubagent
@@ -869,6 +881,7 @@ export class SessionManager {
    * @param running - current Agent running state.
    */
   handleSessionStatus(sessionId: SessionId, running: boolean): void {
+    if (!this.accepting()) return
     this.recordMutation({ kind: 'status', sessionId, running })
     this.sessions.get(sessionId)?.handleRunning(running)
     this.updateCatalogActivity(sessionId, running)
@@ -880,6 +893,7 @@ export class SessionManager {
    * @param updatedAt - durable message timestamp.
    */
   handleSessionActivity(sessionId: SessionId, updatedAt: number): void {
+    if (!this.accepting()) return
     this.recordMutation({ kind: 'activity', sessionId, updatedAt })
   }
 
@@ -889,6 +903,7 @@ export class SessionManager {
    * @param message - caller-visible failure description.
    */
   handleSessionError(sessionId: SessionId, message: string): void {
+    if (!this.accepting()) return
     this.sessions.get(sessionId)?.handleAgentError(message)
   }
 
@@ -897,6 +912,7 @@ export class SessionManager {
    * Opened Session follow streams resume independently through API Gateway.
    */
   handleConnected(): void {
+    if (!this.accepting()) return
     void this.refreshList()
     const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
@@ -906,7 +922,7 @@ export class SessionManager {
 
   /** Debounce membership refetches while one parent catalog is selected or open. */
   private scheduleCatalogRefresh(parentSessionId: SessionId): void {
-    if (this.disposed || this.catalogDebounce.has(parentSessionId)) return
+    if (!this.accepting() || this.catalogDebounce.has(parentSessionId)) return
     const timer = setTimeout(() => {
       this.catalogDebounce.delete(parentSessionId)
       // The in-flight response predates the membership frame that scheduled

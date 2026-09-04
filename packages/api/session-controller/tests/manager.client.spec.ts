@@ -484,6 +484,43 @@ describe('subagent catalogs', () => {
     ])
   })
 
+  it('ignores list refresh, reconnect, and control sinks after disposal', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1)] as never[] }))
+    const manager = new SessionManager(fakeRemote(api))
+    await manager.refreshList()
+    const notified = vi.fn()
+    manager.subscribe(notified)
+    const snapshot = manager.getListSnapshot()
+    await manager.dispose()
+    notified.mockClear()
+    const listCalls = api.callsOf('session.list').length
+    const catalogCalls = api.callsOf('subagents.list').length
+
+    await manager.refreshList()
+    manager.handleConnected()
+    manager.handleSessionAdded(summary(S2, { blank: true }))
+    manager.handleSessionRemoved(S1)
+    manager.handleSessionStatus(S1, true)
+    manager.handleSessionActivity(S1, 999)
+    manager.handleControlFrame({
+      type: 'projection', sessionId: S1, key: 'title', value: 'After dispose', seq: 9,
+    })
+    manager.handleControlFrame({
+      type: 'jobs', sessionId: S1, jobs: [{ id: 'job-1', name: 'x', state: 'running' }] as never,
+    })
+    manager.handleControlFrame({
+      type: 'queue', sessionId: S1, items: [{ id: 'q1' }] as never,
+    })
+    await Promise.resolve()
+
+    expect(manager.getListSnapshot()).toEqual(snapshot)
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+    expect(notified).not.toHaveBeenCalled()
+    expect(api.callsOf('session.list')).toHaveLength(listCalls)
+    expect(api.callsOf('subagents.list')).toHaveLength(catalogCalls)
+  })
+
   it('aborts an in-flight catalog list on dispose without a Host response', async () => {
     const api = new FakeApiClient()
     api.onSubagentList = (_payload, signal) => new Promise((_resolve, reject) => {

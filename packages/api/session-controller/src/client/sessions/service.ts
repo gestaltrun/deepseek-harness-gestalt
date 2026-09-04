@@ -218,6 +218,8 @@ export class ClientSessions implements ISessions {
   private watched: SessionId | undefined
   /** Removed-while-staged sessions whose teardown waits for the stage to move away. */
   private readonly deferredRemovals = new Set<SessionId>()
+  /** True after the root sessions effect starts teardown; lifecycle writers must not rematerialize. */
+  private disposed = false
 
   /**
    * @param ctx - client root context (scope fibers mount under it).
@@ -255,6 +257,7 @@ export class ClientSessions implements ISessions {
       this.followCurrent()
     })
     rootCtx.effect(() => async () => {
+      this.disposed = true
       disposeStageFollower()
       disposeManagerProjection()
       const scopes = [...this.scopes]
@@ -476,6 +479,9 @@ export class ClientSessions implements ISessions {
    * @returns the identity-stable Agent Context.
    */
   resolveAgentScope(id: SessionId): AgentContext {
+    if (this.disposed) {
+      throw new Error(`sessions.resolveAgentScope: ClientSessions is disposed (${id})`)
+    }
     return (this.scopes.get(id) ?? this.materializeScope(id)).ctx
   }
 
@@ -521,6 +527,7 @@ export class ClientSessions implements ISessions {
    * Extends list eligibility and mints the ordinary binding without selecting it.
    * @param descriptor - preallocated identity, parent lineage, and display title.
    * @returns disposer that removes the unpublished row and its scope exactly once.
+   * @throws when ClientSessions is disposed.
    */
   stageProvisional(descriptor: {
     sessionId: SessionId
@@ -528,10 +535,14 @@ export class ClientSessions implements ISessions {
     origin: 'subagent'
     title: string
   }): () => void {
+    if (this.disposed) {
+      throw new Error(`sessions.stageProvisional: ClientSessions is disposed (${descriptor.sessionId})`)
+    }
     this.manager.stageProvisional(descriptor)
     this.projectList()
     this.resolve(descriptor.sessionId)
     return () => {
+      if (this.disposed) return
       this.manager.dropProvisional(descriptor.sessionId)
       this.projectList()
       this.dropReleasedProvisional(descriptor.sessionId)
@@ -546,6 +557,7 @@ export class ClientSessions implements ISessions {
    * @param sessionId - listed, addressed, or staged Session identity.
    */
   openForRender(sessionId: SessionId): void {
+    if (this.disposed) return
     if (this.manager.isProvisional(sessionId)) return
     const record = this.resolve(sessionId)
     if (record === undefined) return
@@ -561,6 +573,7 @@ export class ClientSessions implements ISessions {
    * failed one retries the next time current is touched).
    */
   private followCurrent(): void {
+    if (this.disposed) return
     const snapshot = this.list.getSnapshot()
     const current = snapshot.current
     // A masked gap (current blanked while the selection's session is
@@ -589,7 +602,7 @@ export class ClientSessions implements ISessions {
   private resolve(id: SessionId): ScopeRecord | undefined {
     const existing = this.scopes.get(id)
     if (existing !== undefined) return existing
-    if (!this.eligible(id)) return undefined
+    if (this.disposed || !this.eligible(id)) return undefined
     return this.materializeScope(id)
   }
 

@@ -446,6 +446,31 @@ describe('provisional identity lifecycle', () => {
     expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
   })
 
+  it('does not rematerialize scopes or start Host I/O on a retained service after disposal', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
+    expect(b.svc.binding(sid('draft'))).toBeDefined()
+    const listCalls = b.api.callsOf('session.list').length
+    const followCalls = b.api.callsOf('session.follow').length
+    const catalogCalls = b.api.callsOf('subagents.list').length
+    await b.ctx.fiber.dispose()
+
+    expect(b.svc.binding(sid('parent'))).toBeUndefined()
+    expect(b.svc.scope(sid('parent'))).toBeUndefined()
+    expect(() => { b.svc.stageProvisional(draft) }).toThrow(/disposed/)
+    expect(() => { b.svc.openForRender(sid('parent')) }).not.toThrow()
+    expect(() => { b.svc.resolveAgentScope(sid('parent')) }).toThrow(/disposed/)
+    expect(() => { release() }).not.toThrow()
+    expect(b.svc.scope(sid('parent'))).toBeUndefined()
+    expect(b.api.callsOf('session.list')).toHaveLength(listCalls)
+    expect(b.api.callsOf('session.follow')).toHaveLength(followCalls)
+    expect(b.api.callsOf('subagents.list')).toHaveLength(catalogCalls)
+    expect(b.api.followStarts).toEqual([])
+  })
+
   it('drops a provisional scope when the Client Sessions plugin unloads', async () => {
     const b = bench()
     const readiness = b.ctx.plugin(() => undefined)

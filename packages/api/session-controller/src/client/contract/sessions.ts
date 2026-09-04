@@ -126,8 +126,10 @@ export interface ISessions {
    * Does not change `list.current`. The same identity and binding survive a matching
    * Host `session-added` publication; a later disposer must not remove that published row.
    * @param descriptor - preallocated identity, parent lineage, and display title.
-   * @returns disposer that removes the unpublished row and its scope exactly once; no-op after publication or a prior release.
-   * @throws when the identity is already staged or already listed.
+   * @returns disposer that removes the unpublished row and its scope exactly once.
+   *   No-op after publication, a prior release, or ClientSessions disposal.
+   * @throws when the identity is already staged or already listed, or when
+   *   ClientSessions is disposed.
    */
   stageProvisional(descriptor: {
     sessionId: SessionId

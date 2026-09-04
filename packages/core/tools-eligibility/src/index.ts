@@ -124,14 +124,21 @@ export function apply(ctx: Context, config: Config): void {
     return state.contribution.commit(additions)
   }
 
-  const notifyRefresh = (notifications: Array<() => readonly unknown[]>): void => {
+  const runRefresh = (containObserverFailures: boolean): void => {
+    const notifications: Array<() => readonly unknown[]> = []
+    for (const state of states.values()) {
+      const notify = commitRefresh(state)
+      if (notify !== undefined) notifications.push(notify)
+    }
     const failures: unknown[] = []
-    for (const notify of notifications) {
-      failures.push(...notify())
+    for (const notify of notifications) failures.push(...notify())
+    if (failures.length === 0) return
+    const aggregate = new AggregateError(failures, 'tool eligibility settings refresh observers failed')
+    if (containObserverFailures) {
+      ctx.logger.warn(aggregate)
+      return
     }
-    if (failures.length > 0) {
-      throw new AggregateError(failures, 'tool eligibility settings refresh observers failed')
-    }
+    throw aggregate
   }
 
   ctx.on('agent/created', ({ agent }) => { attach(agent) })
@@ -142,15 +149,18 @@ export function apply(ctx: Context, config: Config): void {
     state.contribution.dispose()
   })
   ctx.inject(['settings'], (settingsCtx) => {
+    let sourceSet = false
+    let containNextRefresh = false
     settingsCtx.settings.installSection(ctx, TOOL_ELIGIBILITY_SETTINGS_NAMESPACE, Config, entry, {
-      setSource: (current) => { source = current },
+      setSource: (current) => {
+        containNextRefresh = sourceSet
+        sourceSet = true
+        source = current
+      },
       onChange: () => {
-        const notifications: Array<() => readonly unknown[]> = []
-        for (const state of states.values()) {
-          const notify = commitRefresh(state)
-          if (notify !== undefined) notifications.push(notify)
-        }
-        notifyRefresh(notifications)
+        const contain = containNextRefresh
+        containNextRefresh = false
+        runRefresh(contain)
       },
     })
   })

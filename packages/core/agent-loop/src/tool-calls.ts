@@ -274,15 +274,12 @@ function appendToolResult(
   result: ToolExecutionResult,
   callSeq: SessionSeq,
 ): void {
-  const baseMessage = createToolResultMessage({
+  const message = createToolResultMessage({
     callId: block.id,
     content: result.content,
     isError: result.isError,
+    ...!result.isError && result.loadedTools !== undefined ? { loadedTools: result.loadedTools } : {},
   })
-  const resultBlock = baseMessage.content[0]
-  const message = !result.isError && result.loadedTools !== undefined && resultBlock?.type === 'tool-result'
-    ? { ...baseMessage, content: [{ ...resultBlock, loadedTools: result.loadedTools }] as [typeof resultBlock] }
-    : baseMessage
   session.append('tool/result', {
     turn, step,
     message,

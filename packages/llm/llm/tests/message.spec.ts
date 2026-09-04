@@ -74,6 +74,19 @@ describe('message construction', () => {
     expect(Object.isFrozen(message.source)).toBe(true)
   })
 
+  it('preserves discovered schemas on the frozen tool-result block', () => {
+    const loadedTools = [{ name: 'weather', description: 'Weather', parameters: { type: 'object' } }]
+    const message = createToolResultMessage({
+      callId: ToolCallId('search-1'),
+      content: [{ type: 'text', text: 'result' }],
+      isError: false,
+      loadedTools,
+    })
+
+    expect(message.content[0].loadedTools).toEqual(loadedTools)
+    expect(Object.isFrozen(message.content[0].loadedTools)).toBe(true)
+  })
+
   it('couples tool-result content and its cited call seq to one call identity', () => {
     const callId = ToolCallId('call-1')
     const message = createToolResultMessage({

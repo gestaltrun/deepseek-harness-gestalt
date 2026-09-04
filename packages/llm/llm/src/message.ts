@@ -4,7 +4,7 @@ import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
 import type { MessageId, ToolCallId } from './brand.ts'
-import type { ContentBlock, ToolResultBlock } from './types.ts'
+import type { ContentBlock, ToolResultBlock, ToolSchema } from './types.ts'
 
 /** Provider/model identity and adapter-private replay data for an assistant message. */
 export interface AssistantProvenance {
@@ -223,6 +223,8 @@ export interface ToolResultMessageInput {
   readonly callId: ToolCallId
   readonly content: ContentBlock[]
   readonly isError: boolean
+  /** Exact deferred schemas discovered by this successful result. */
+  readonly loadedTools?: ToolSchema[]
 }
 
 /**
@@ -238,6 +240,7 @@ export function createToolResultMessage(input: ToolResultMessageInput): ToolResu
       toolCallId: input.callId,
       content: input.content,
       isError: input.isError,
+      ...input.loadedTools === undefined ? {} : { loadedTools: input.loadedTools },
     }],
   })
 }

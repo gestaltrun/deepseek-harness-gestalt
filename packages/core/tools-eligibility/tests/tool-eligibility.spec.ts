@@ -459,6 +459,36 @@ describe('allow-only tool eligibility', () => {
     expect(absentRegistry.ctx.tools.eligibilityAllow(absentRegistry.agent)).toBeUndefined()
   })
 
+  it('contains observer failures while Settings provider detach commits fallback for every Agent', async () => {
+    const { agent: first, ctx, settingsRow } = await harness()
+    const second = await addSecondAgent(ctx)
+    const publications: Agent[] = []
+    const changes: Array<[readonly string[] | undefined, readonly string[] | undefined]> = []
+    const publicationFailure = new Error('detach publication failed')
+    const changeFailure = new Error('detach tools change failed')
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => ctx.logger)
+    ctx.on('tool-eligibility/published', (agent) => {
+      publications.push(agent)
+      throw publicationFailure
+    })
+    ctx.on('tools/change', () => {
+      changes.push([ctx.tools.eligibilityAllow(first), ctx.tools.eligibilityAllow(second)])
+      throw changeFailure
+    })
+
+    await expect(settingsRow.dispose()).resolves.toBeUndefined()
+
+    expect(ctx.tools.eligibilityAllow(first)).toEqual(['late-tool', 'preset-tool'])
+    expect(ctx.tools.eligibilityAllow(second)).toEqual(['late-tool', 'preset-tool'])
+    expect(publications).toEqual([first, second])
+    expect(changes).toEqual([
+      [['late-tool', 'preset-tool'], ['late-tool', 'preset-tool']],
+      [['late-tool', 'preset-tool'], ['late-tool', 'preset-tool']],
+    ])
+    const aggregate = warn.mock.calls.flatMap(([value]) => value instanceof AggregateError ? [value] : [])[0]
+    expect(aggregate?.errors).toEqual(expect.arrayContaining([publicationFailure, changeFailure]))
+  })
+
   it('coalesces settings refreshes that preserve the normalized addition', async () => {
     const { agent, ctx } = await harness()
     await ctx.settings.replace(TOOL_ELIGIBILITY_SETTINGS_NAMESPACE, {

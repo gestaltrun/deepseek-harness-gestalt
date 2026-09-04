@@ -761,6 +761,58 @@ describe('PTC mode native-tool denial through the agent loop', () => {
     })
   })
 
+  it.each(['post-content', 'post-error', 'finalizer', 'cancel'] as const)(
+    'omits discovery metadata when the final result is replaced by %s',
+    async (replacement) => {
+      const adapter = new MockAdapter([[
+        ...multiCall([{ id: 'search-final', name: 'tool_search', args: { query: 'weather forecast' } }]),
+        ...textResponse('ok'),
+      ]])
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(SessionProjectionRegistry)
+      await ctx.plugin(SystemPrompt, { persona: '' })
+      await ctx.plugin(ToolRuntime, { toolSearch: { maxResultBytes: 64 * 1024 } })
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(AgentLoop, { agents: [] })
+      ctx.llm.registerAdapter(['mock'], adapter)
+      ctx.tools.register({
+        ...defineContentToolFixture({
+          name: 'weather_forecast', description: 'Weather forecast by city.', parameters: {},
+          async execute() { return [{ type: 'text', text: 'forecast' }] },
+        }),
+        deferLoading: true,
+      })
+      if (replacement === 'post-content') {
+        ctx.on('tools/post-execute', async () => ({ kind: 'accept', content: [{ type: 'text', text: 'replaced' }] }))
+      } else if (replacement === 'post-error') {
+        ctx.on('tools/post-execute', async () => ({ kind: 'block', feedback: [{ type: 'text', text: 'blocked' }] }))
+      } else if (replacement === 'finalizer') {
+        const search = ctx.tools.get('tool_search')
+        if (search === undefined) throw new Error('tool_search missing')
+        Object.assign(search, { finalizeContent: () => [{ type: 'text', text: 'finalized' }] })
+      }
+
+      const agent = await ctx.agentLoop.create(SessionId(`deferred-${replacement}`), { provider: 'mock', model: 'mock' })
+      if (replacement === 'cancel') {
+        ctx.on('tools/post-execute', async (exec, _result, next) => {
+          if (exec.name === 'tool_search') agent.cancel({ kind: 'user' })
+          return next()
+        })
+      }
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'find weather' }], source: { kind: 'user' } }))
+      await waitForIdle(ctx, agent)
+
+      const results = events(agent).filter(event => event.type === 'tool/result')
+      expect(results).toHaveLength(1)
+      const resultBlock = results[0]!.data.message.content[0]
+      expect(resultBlock).toMatchObject({ type: 'tool-result' })
+      expect(resultBlock).not.toHaveProperty('loadedTools')
+      if (replacement === 'post-error' || replacement === 'cancel') expect(resultBlock).toMatchObject({ isError: true })
+    },
+  )
+
   it('denies a model-direct native-tool call under PTC mode: tool body never runs and session records UNKNOWN_TOOL', async () => {
     let toolInvoked = false
     const tool = defineContentToolFixture({

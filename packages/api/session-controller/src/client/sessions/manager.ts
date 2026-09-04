@@ -84,8 +84,8 @@ interface CatalogInflight {
 }
 
 type SessionListMutation =
-  | { kind: 'upsert'; summary: SessionSummary }
-  | { kind: 'remove'; sessionId: SessionId }
+  | { kind: 'upsert'; summary: SessionSummary; provisional?: true }
+  | { kind: 'remove'; sessionId: SessionId; provisional?: true }
   | { kind: 'status'; sessionId: SessionId; running: boolean }
   | { kind: 'activity'; sessionId: SessionId; updatedAt: number }
   /** Local first-send flip: the sender clears blank without waiting for a host frame. */
@@ -98,6 +98,8 @@ export class SessionManager {
   private readonly sessionDisposals = new Set<Promise<void>>()
   /** Once true, catalog and list writers must not publish or start trailing work. */
   private disposed = false
+  /** Bumped at dispose so in-flight catalog work can ignore a later generation. */
+  private catalogGeneration = 0
   /** Latest transient queues, retained independently of Session object materialization. */
   private readonly queues = new Map<SessionId, readonly SessionQueuedItem[]>()
   /**
@@ -258,6 +260,7 @@ export class SessionManager {
    */
   async dispose(): Promise<void> {
     this.disposed = true
+    this.catalogGeneration++
     for (const timer of this.catalogDebounce.values()) clearTimeout(timer)
     this.catalogDebounce.clear()
     this.catalogStale.clear()
@@ -369,7 +372,7 @@ export class SessionManager {
       blank: true,
     }
     this.provisionalSummaries.set(descriptor.sessionId, summary)
-    this.recordMutation({ kind: 'upsert', summary })
+    this.recordMutation({ kind: 'upsert', summary, provisional: true })
   }
 
   /**
@@ -378,7 +381,7 @@ export class SessionManager {
    */
   dropProvisional(sessionId: SessionId): void {
     if (!this.provisionalSummaries.delete(sessionId)) return
-    this.recordMutation({ kind: 'remove', sessionId })
+    this.recordMutation({ kind: 'remove', sessionId, provisional: true })
   }
 
   /**
@@ -411,6 +414,7 @@ export class SessionManager {
     if (this.disposed) return Promise.resolve()
     const existing = this.catalogInflight.get(parentSessionId)
     if (existing !== undefined) return existing.promise
+    const generation = this.catalogGeneration
     const previous = this.catalogs.get(parentSessionId)
     const expandableRows = new Set<SessionId>()
     const activityRows = new Map<SessionId, 'running' | 'inactive'>()
@@ -426,7 +430,7 @@ export class SessionManager {
     const operation = (async () => {
       try {
         const result = await this.remote.subagents.list(parentSessionId)
-        if (this.disposed) return
+        if (this.disposed || generation !== this.catalogGeneration) return
         if (result.ok) {
           const parentAvailable = this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
             ?? result.value.parentAvailable
@@ -455,7 +459,7 @@ export class SessionManager {
           })
         }
       } catch (error: unknown) {
-        if (this.disposed) return
+        if (this.disposed || generation !== this.catalogGeneration) return
         if (!isRemoteFailure(error)) throw error
         this.catalogs.set(parentSessionId, {
           entries: this.withCatalogMutations(
@@ -470,7 +474,7 @@ export class SessionManager {
         })
       } finally {
         this.catalogInflight.delete(parentSessionId)
-        if (this.disposed) return
+        if (this.disposed || generation !== this.catalogGeneration) return
         // Re-arm the trailing pull before the dirty notify: the response the
         // caller observed predates the stale-marking change, so the follow-up
         // refresh is the only carrier of that change.
@@ -535,11 +539,15 @@ export class SessionManager {
             ...hostBaseline.filter(summary => !this.provisionalSummaries.has(summary.sessionId)),
           ]
           const publishedIds = new Set(result.value.items.map(summary => summary.sessionId))
-          // Provisional upsert/remove recorded before this response must not
-          // replace or delete a Host row that published the same id.
+          // Only provisional-owner upsert/remove may be dropped for a Host-published
+          // id. Ordinary create/status mutations still replay.
           const replay = mutations.filter((mutation) => {
-            if (mutation.kind === 'remove') return !publishedIds.has(mutation.sessionId)
-            if (mutation.kind === 'upsert') return !publishedIds.has(mutation.summary.sessionId)
+            if (mutation.kind === 'remove' && mutation.provisional === true) {
+              return !publishedIds.has(mutation.sessionId)
+            }
+            if (mutation.kind === 'upsert' && mutation.provisional === true) {
+              return !publishedIds.has(mutation.summary.sessionId)
+            }
             return true
           })
           // Seed first observations from the pull-time baseline BEFORE replaying

@@ -444,8 +444,8 @@ export class TestSessions implements ISessions {
   }
 
   /**
-   * Insert a renderer-only identity with the ordinary binding/scope contract.
-   * Fixture benches do not talk to a Host; `updateSummary` publishes the row.
+   * Stage a renderer-only identity with the ordinary ISessions binding/scope
+   * contract. Fixture benches publish through {@link TestSessions.updateSummary}.
    * @param descriptor - preallocated identity, parent lineage, and display title.
    * @returns disposer that removes the unpublished row and scope exactly once.
    */
@@ -506,8 +506,7 @@ export class TestSessions implements ISessions {
   }
 
   /**
-   * Compiler-face fallout of widening `ISessions`. Records the call; fixture
-   * callers still drive history windows themselves.
+   * Record an explicit-render open. Fixture benches still drive history windows.
    * @param sessionId - listed or staged Session identity.
    */
   openForRender(sessionId: SessionId): void {

@@ -301,6 +301,38 @@ describe('provisional identity lifecycle', () => {
     expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
   })
 
+  it('replays an ordinary create upsert while dropping a provisional upsert for a Host-published id', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    const release = b.svc.stageProvisional(draft)
+    const binding = b.svc.binding(sid('draft'))
+    b.api.onCreate = () => Promise.resolve(ok({ sessionId: sid('born') }))
+    const born = await b.svc.create({ cwd: '/w', sessionId: sid('born') })
+    gate.resolve(ok({
+      items: [
+        { sessionId: sid('parent'), updatedAt: 1, running: false, blank: false },
+        {
+          sessionId: sid('draft'), updatedAt: 9, running: false, blank: false,
+          parentSessionId: sid('parent'), origin: 'subagent', cwd: '/host/draft',
+        },
+      ],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(born).toBe('born')
+    expect(b.svc.list.getSnapshot().byId[sid('born')]).toMatchObject({ id: 'born', cwd: '/w', blank: true })
+    expect(b.svc.binding(sid('draft'))).toBe(binding)
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      blank: false, cwd: '/host/draft', displayTitle: 'draft',
+    })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ cwd: '/host/draft' })
+  })
+
   it('keeps Host summary and binding when stage races a gated refresh that publishes the same id', async () => {
     const b = bench()
     await feedList(b, [{ id: 'parent' }])

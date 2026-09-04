@@ -120,4 +120,25 @@ export interface ISessions {
    * @returns binding, or undefined for a session neither listed nor already scoped.
    */
   binding(id: SessionId): SessionBinding | undefined
+  /**
+   * Stage a caller-supplied renderer-only Session identity until Host publication.
+   * Does not change `list.current`. The same identity and binding survive a matching
+   * Host `session-added` publication; a later disposer must not remove that published row.
+   * @param descriptor - preallocated identity, parent lineage, and display title.
+   * @returns disposer that removes the unpublished row and its scope exactly once; no-op after publication or a prior release.
+   * @throws when the identity is already staged or already listed.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void
+  /**
+   * Open one explicitly rendered Session without changing `list.current`.
+   * A provisional identity performs no Host history request. A published
+   * Session opens its history window and refreshes its subagent catalog.
+   * @param sessionId - listed, addressed, or staged Session identity.
+   */
+  openForRender(sessionId: SessionId): void
 }

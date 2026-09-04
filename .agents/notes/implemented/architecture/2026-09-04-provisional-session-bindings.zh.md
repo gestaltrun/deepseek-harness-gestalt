@@ -1,0 +1,33 @@
+# Agent Note: Controller 持有的临时 Session binding
+
+Status: implemented
+
+[English](2026-09-04-provisional-session-bindings.md) | 中文
+
+## 问题
+
+显式 Session 挂载必须在 Host Session 存在之前渲染调用方提供的身份，并在 Host 发布后保持同一身份，同时不改变外壳选中项。上游 `ClientSessions.binding(id)` 只解析已列出或当前选中的 id，`followCurrent()` 又把历史打开耦合到 `list.current`。临时的 client-runtime 实现把暂存、发布、冷打开与功能准入路由放在一起，因此 renderer 或产品插件否则会再造一份 Session list 投影。
+
+## 决策
+
+`@deepseek-ai/dsh-api-session-controller` 在 `ctx.sessions` 上拥有 Client 临时身份生命周期。`stageProvisional()` 插入一条调用方提供的空白 subagent 行，铸造普通 `SessionBinding`，且不改变 `list.current`。对仍在暂存或已列出的同一身份重复暂存会失败并报错；没有共享的第二持有者。Host list 刷新会保留未发布的临时行。身份仍为临时时，`openForRender(id)` 跳过 Host 历史请求；Host `session-added` 发布后则打开该 Session 的历史并刷新其 subagent catalog，同样不选中它。发布会删除临时标记，并原地升级同一 list 行与 binding。返回的 disposer 会恰好一次移除未发布行及其 Agent scope，并在发布或先前释放后变为 no-op。
+
+renderer 只消费 `UiSession.adapter.resolve(sessionId)`。功能自有的准入、model、command 与 skill 路由仍在此生命周期之外。[显式 Session slot 挂载](2026-08-23-explicit-session-slot-mounts.zh.md) 拥有挂载树；[Client Session 所有权](2026-08-20-client-session-conversation-ownership.zh.md) 拥有普通 binding 与 scope fiber。
+
+## 考虑过的替代方案
+
+**把暂存留在 `dsh-client-runtime`。** 拒绝，因为 Client Session list、scope 与 binding 已在 Session Controller 中；第二套 store 会重造发布与 prune 竞态。
+
+**渲染前选中显式 Session。** 拒绝，因为次级挂载不得替换外壳选中的 Session、工作区或 workbench 状态。
+
+**为重复暂存共享一个静默持有者。** 拒绝，因为两个功能暂存同一身份会隐藏冲突；失败并报错才能标出冲突 id。
+
+**为临时身份打开 Host 历史。** 拒绝，因为发布前不存在 Host Session 或日志；历史请求会失败，或造出 disposer 无法持有的空持久窗口。
+
+## 后果
+
+Side Chat 与其他显式挂载可以暂存预分配 id、解析普通 Session-scoped source，并在 Host 发布后保持该 binding，而无需第二套 Session store。准入适配器、首条 prompt 的 Host 创建以及 renderer slot 挂载仍留在各自所属的 package。插件卸载仍会随其余 Client Sessions 服务一起丢弃残留的临时 scope。
+
+## 验证
+
+聚焦的 ClientSessions 测试固定不改变选中项的暂存、跳过 Host 历史、list 刷新存续、进行中刷新竞态、发布时身份稳定、恰好一次释放与发布后 no-op、重复暂存失败、已发布冷 `openForRender()`，以及 HMR/插件卸载。

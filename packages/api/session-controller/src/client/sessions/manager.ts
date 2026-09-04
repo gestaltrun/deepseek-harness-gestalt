@@ -112,6 +112,8 @@ export class SessionManager {
    *  same store so history-baseline seeding and frames converge on one row set. */
   private readonly projectionStores = new Map<SessionId, ProjectionValueStore>()
   private summaries: SessionSummary[] = []
+  /** Renderer-only rows retained across list refreshes until Host publication. */
+  private readonly provisionalSummaries = new Map<SessionId, TitledSessionSummary>()
   private listState: 'idle' | 'loading' | 'error' = 'idle'
   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
   private listPhase: SessionListPhase = 'pending'
@@ -257,6 +259,7 @@ export class SessionManager {
     this.catalogDebounce.clear()
     this.catalogStale.clear()
     this.openCatalogs.clear()
+    this.provisionalSummaries.clear()
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
     for (const session of sessions) void this.startSessionDisposal(session)
@@ -333,6 +336,52 @@ export class SessionManager {
       },
       projections: this.projectionStore(sessionId),
     })
+  }
+
+  /**
+   * Project a feature-owned draft identity without creating a Host Session.
+   * @param descriptor - provisional identity and its parent lineage.
+   * @throws when the identity is already staged or already listed.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): void {
+    if (this.provisionalSummaries.has(descriptor.sessionId)
+      || this.summaries.some(summary => summary.sessionId === descriptor.sessionId)) {
+      throw new Error(`sessions.stageProvisional: duplicate provisional identity ${descriptor.sessionId}`)
+    }
+    const summary: TitledSessionSummary = {
+      sessionId: descriptor.sessionId,
+      parentSessionId: descriptor.parentSessionId,
+      origin: descriptor.origin,
+      title: descriptor.title,
+      updatedAt: Date.now(),
+      running: false,
+      blank: true,
+    }
+    this.provisionalSummaries.set(descriptor.sessionId, summary)
+    this.recordMutation({ kind: 'upsert', summary })
+  }
+
+  /**
+   * Remove a renderer-only identity; published Host Sessions are untouched.
+   * @param sessionId - provisional identity to remove.
+   */
+  dropProvisional(sessionId: SessionId): void {
+    if (!this.provisionalSummaries.delete(sessionId)) return
+    this.recordMutation({ kind: 'remove', sessionId })
+  }
+
+  /**
+   * Whether explicit rendering must avoid a Host history request for this identity.
+   * @param sessionId - possible provisional identity.
+   * @returns true while the identity has no published Host Session.
+   */
+  isProvisional(sessionId: SessionId): boolean {
+    return this.provisionalSummaries.has(sessionId)
   }
 
   /** Resident per-session projection store (create-on-demand; outlives instantiation). */
@@ -462,9 +511,17 @@ export class SessionManager {
       try {
         const result = await this.remote.session.list({})
         if (result.ok) {
-          const baseline: SessionSummary[] = this.listPhase === 'pending'
+          for (const summary of result.value.items) {
+            this.provisionalSummaries.delete(summary.sessionId)
+          }
+          const hostBaseline: SessionSummary[] = this.listPhase === 'pending'
             ? [...result.value.items]
             : mergeOrderedBaseline(established, result.value.items, summary => summary.sessionId)
+          const provisional = [...this.provisionalSummaries.values()]
+          const baseline: SessionSummary[] = [
+            ...provisional,
+            ...hostBaseline.filter(summary => !this.provisionalSummaries.has(summary.sessionId)),
+          ]
           // Seed first observations from the pull-time baseline BEFORE replaying
           // in-flight mutations, then reconcile the reminders after EVERY
           // replayed mutation: an edge that happens entirely between mutations
@@ -707,6 +764,7 @@ export class SessionManager {
    * @param summary - current Host summary for the added Session.
    */
   handleSessionAdded(summary: SessionSummary): void {
+    this.provisionalSummaries.delete(summary.sessionId)
     this.mergeSummary(summary)
     this.sessions.get(summary.sessionId)?.handleBlank(summary.blank)
     const projections = summary.projections

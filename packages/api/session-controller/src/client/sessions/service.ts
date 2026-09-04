@@ -13,6 +13,9 @@
  * state can widen to a multi-pane list later). A session leaving the list
  * tears its scope down immediately unless it is the staged one, whose scope
  * survives frozen (read-only view) until the stage moves on.
+ * `stageProvisional()` lists a caller-supplied identity without moving
+ * `current`; `openForRender()` opens a published Session's history without
+ * selecting it. The package README owns the consumer contract.
  */
 import type { Context, Fiber } from '@deepseek-ai/cordis'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
@@ -59,6 +62,8 @@ export interface SessionSummary {
   updatedAt: number
   /** Current host-computed projection values retained by the object layer. */
   projectionValues?: Readonly<Partial<SessionProjectionMap>>
+  /** Renderer-only identity that has not published a Host Session yet. */
+  provisional?: true
 }
 
 /**
@@ -511,6 +516,37 @@ export class ClientSessions implements ISessions {
   }
 
   /**
+   * Stage a caller-supplied renderer-only Session identity until Host publication.
+   * @param descriptor - preallocated identity, parent lineage, and display title.
+   * @returns disposer that removes the unpublished row and its scope exactly once.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void {
+    this.manager.stageProvisional(descriptor)
+    this.projectList()
+    return () => {
+      this.manager.dropProvisional(descriptor.sessionId)
+      this.projectList()
+    }
+  }
+
+  /**
+   * Open one explicitly rendered Session without changing `list.current`.
+   * @param sessionId - listed, addressed, or staged Session identity.
+   */
+  openForRender(sessionId: SessionId): void {
+    if (this.manager.isProvisional(sessionId)) return
+    const record = this.resolve(sessionId)
+    if (record === undefined) return
+    void record.session.open()
+    void this.manager.refreshSubagents(sessionId)
+  }
+
+  /**
    * Move the stage to the list's current session: sweep teardowns deferred
    * behind the previous occupant and pull the new occupant's history window.
    * Staging IS the open signal — the window opens ⟺ the session is on stage
@@ -596,6 +632,7 @@ export class ClientSessions implements ISessions {
         ...(entry.cwd !== undefined ? { cwd: entry.cwd } : {}),
         ...(entry.parentSessionId !== undefined ? { parentId: entry.parentSessionId } : {}),
         ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+        ...(this.manager.isProvisional(entry.sessionId) ? { provisional: true } : {}),
       }
     }
     if (current !== undefined && currentAddress !== undefined) {

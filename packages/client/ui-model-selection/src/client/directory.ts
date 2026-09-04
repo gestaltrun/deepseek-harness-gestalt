@@ -135,7 +135,7 @@ export class ModelDirectory {
 
   private requireRoute(): SessionModelRoute {
     if (this.route === undefined) {
-      throw new Error('model selection is unavailable for addressed subagent sessions')
+      throw new Error('model selection is unavailable for this session')
     }
     return this.route
   }

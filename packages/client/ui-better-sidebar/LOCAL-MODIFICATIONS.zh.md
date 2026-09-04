@@ -9,7 +9,7 @@
 5. **`tsdown.config.ts` / `src/client/chunk-loader.ts`** — 客户端 factory id 使用工作区包名；Host/Client 构建面拆开 Node 库与浏览器分块；省略插件注册表用的 `client-registry.js` 通道；分块与客户端 externals 请求 `@deepseek-ai/cordis`。Node 库构建通过 `tsconfig.dts.json`（`noCheck` 与 `noResolve`）只把快照源码声明写入 `lib/types`，这样无需加入客户端聚合，也不会把依赖声明写到依赖源码旁边。
 6. **`src/bundle-route.ts`** — `LIB_DIR` 固定为包内 `lib/`，而不是 `dirname(import.meta.url)`。源码启动（`tsx`）否则会去读 `src/client-terminal.js`，终端 / 编辑器 / mermaid 分块会 404。
 7. **`src/client/BrowserView.tsx`** — 当 `ctx.get('workbenchBrowser')` 已发布时，标签页渲染官方 chrome。沙箱 iframe 仍是独立安装快照时的回退。
-8. **`src/client/service.ts`** — `setPanelOpen(open)` 展开或收起右侧工作台。官方预览与首个 Agent 标签页使用它；仅类型的 `openTab` 不会展开。
+8. **`src/client/service.ts`** — `setPanelOpen(open)` 展开或收起右侧工作台。官方预览与首个 Agent 标签页使用它；仅类型的 `openTab` 不会展开。`createTab` 会收到 `openTab` seed，因此描述符可以复用显式 id、title 或 meta，而不是每次铸造新身份。
 9. **`src/client/TabBar.tsx` / `src/client/sidebar.module.css`** — 存在 `window.dshDesktop.chromeOverlayShow` 时，`+` 菜单在 Desktop 原生 overlay 视图里打开，而不是页内 `Menu`。Desktop 顶部 Workbench 与 36px Window Chrome 对齐，并且只用 `+` 后可伸缩的未占用空间拖动窗口；标签拖动期间，该空间会临时恢复为投放目标。底部 Workbench 与纯浏览器 `dsh web` 都不渲染窗口拖拽空间，Web 继续使用页内菜单、上游标签上下文菜单和 34px 标签栏。
 10. **`src/client/Sidebar.tsx` / `src/client/state.ts` / `src/client/sidebar.module.css`** — 面板缩放保留会话滚动条的 gutter 和滚动能力，并在松手前把 thumb 设为透明，避免 Chromium 在滚动容器改变大小时闪出 overlay scrollbar。新 Session 面板从已启用的标签类型卡片开始，不再自动打开 Files 首页；布局清理只删除严格匹配的旧自动记录，保留用户创建的编辑器和文件标签。
 11. **`src/client/index.tsx`** — Desktop overlay 文档（`data-dsh-desktop-overlay` / `?dsh-desktop-overlay=1`）不把快照 `Sidebar` 挂到 `document.body`。overlay 设置仍走 Host chrome 的设置席位。
@@ -26,3 +26,4 @@
 
 22. **`src/client/sidebar.module.css`** — 右侧与底部工作台面板只使用 `contain: style`。`contain: layout` 会把 Desktop 上绝对定位的面板顶出视口，标签条落到屏外，官方页面因而盖住侧栏标签列表。
 23. **`src/client/service.ts`** — 带 path 或 URL 的 `openTab` seed 若活动 pane 在底部树，会在 mint 之前落到右侧工作台。纯类型的 `+` 点击仍跟随菜单所在 pane。
+24. **`src/client/state.ts`** — 关闭右侧工作台最后一个停靠标签会收起该面板；关闭底部工作台最后一个停靠标签会收起底部面板。`closeTab` 之后剩下的浮动窗口不会让空的停靠树保持打开；把最后一个停靠标签拖成浮动窗口不会收起面板。

@@ -1,7 +1,7 @@
 /** ui-subagent browser half: catalog actions and read-only composer routing. */
 import { Context } from '@deepseek-ai/cordis'
 import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   SlotRegistry, type ConversationSnapshot, type SessionId, type SessionListState,
   type SessionSummary, type SubagentAddress,
@@ -41,6 +41,9 @@ function sessionsWith(sessions: SessionSummary[]) {
     actionCalls,
     openSubagent: (address: SubagentAddress) => {
       actionCalls.push({ method: 'openSubagent', args: [address] })
+    },
+    open: (sessionId: SessionId) => {
+      actionCalls.push({ method: 'open', args: [sessionId] })
     },
     refreshSubagents: (parentSessionId: SessionId) => {
       actionCalls.push({ method: 'refreshSubagents', args: [parentSessionId] })
@@ -140,5 +143,40 @@ describe('apply', () => {
     // A RUNNING parent-offline continuable yields the default composer, whose
     // disabled input still carries the primary Stop; stopped, it takes back over.
     expect(select(owner({ address, parentAvailable: false }, true))).toBeNull()
+  })
+
+  it('opens a Side Chat catalog row as a sidebar tab without selecting the child', async () => {
+    const side = sid('side-thread')
+    const { ctx, face } = await fullBench([
+      summary({ id: sid('parent'), displayTitle: 'parent', running: true }),
+      summary({
+        id: side, parentId: sid('parent'), origin: 'subagent',
+        displayTitle: 'Side: 123', running: false,
+      }),
+    ])
+    const openTab = vi.fn()
+    const setPanelOpen = vi.fn()
+    ctx.provide('betterSidebar', {
+      isTabEnabled: () => true,
+      setPanelOpen,
+      openTab,
+    })
+    const catalogEntry = ctx.slots.entries('conversation.session.header.lineage')
+      .find(entry => entry.component === SubagentHeaderLineage)!
+    const actions = (catalogEntry.inject as unknown as (id: SessionId) => SubagentCatalogInjected)(sid('parent'))
+    const address: SubagentAddress = {
+      parentSessionId: sid('parent'),
+      childSessionId: side,
+      mode: 'continuable',
+    }
+    actions.openChild(address)
+    expect(face.actionCalls).toEqual([{ method: 'open', args: [sid('parent')] }])
+    expect(setPanelOpen).toHaveBeenCalledWith(true)
+    expect(openTab).toHaveBeenCalledWith({
+      type: 'sidechat',
+      id: 'sidechat:side-thread',
+      title: '123',
+      meta: { threadId: side },
+    }, { sessionId: sid('parent') })
   })
 })

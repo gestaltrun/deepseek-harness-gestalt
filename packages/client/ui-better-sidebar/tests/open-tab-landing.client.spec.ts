@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { createBetterSidebarService } from '../src/client/service.ts'
 import {
-  allLeaves, firstLeaf, makeDefaultState, SidebarStore, type SidebarState,
+  allLeaves, closeTab, firstLeaf, makeDefaultState, SidebarStore, type SidebarState,
 } from '../src/client/state.ts'
 
 function hasTab(state: SidebarState, tree: 'splits' | 'bottomSplits', id: string): boolean {
@@ -66,5 +66,60 @@ describe('openTab landing pane', () => {
     expect(hasTab(state, 'bottomSplits', 'terminal:1')).toBe(true)
     expect(hasTab(state, 'splits', 'terminal:1')).toBe(false)
     expect(state.activePane).toBe(bottomId)
+  })
+})
+
+describe('closeTab collapses an empty workbench', () => {
+  it('closes the right panel after its last docked tab is closed', () => {
+    const state = makeDefaultState()
+    if (state.splits.kind !== 'leaf') throw new Error('expected one default pane')
+    const paneId = state.splits.id
+    const withTab = {
+      ...state,
+      splits: { ...state.splits, tabs: [{ id: 'editor:a', type: 'editor', title: 'a', path: '/a' }], active: 'editor:a' },
+    }
+    const closed = closeTab(withTab, paneId, 'editor:a')
+    expect(allLeaves(closed.splits).flatMap(leaf => leaf.tabs)).toEqual([])
+    expect(closed.panelOpen).toBe(false)
+    expect(closed.bottomOpen).toBe(false)
+  })
+
+  it('closes the bottom panel after its last docked tab is closed', () => {
+    const state = makeDefaultState()
+    if (state.bottomSplits.kind !== 'leaf') throw new Error('expected one default pane')
+    const paneId = state.bottomSplits.id
+    const withTab = {
+      ...state,
+      bottomOpen: true,
+      bottomSplits: {
+        ...state.bottomSplits,
+        tabs: [{ id: 'terminal:1', type: 'terminal', title: 'Terminal' }],
+        active: 'terminal:1',
+      },
+    }
+    const closed = closeTab(withTab, paneId, 'terminal:1')
+    expect(allLeaves(closed.bottomSplits).flatMap(leaf => leaf.tabs)).toEqual([])
+    expect(closed.bottomOpen).toBe(false)
+    expect(closed.panelOpen).toBe(true)
+  })
+
+  it('keeps the right panel open when another docked tab remains', () => {
+    const state = makeDefaultState()
+    if (state.splits.kind !== 'leaf') throw new Error('expected one default pane')
+    const paneId = state.splits.id
+    const withTabs = {
+      ...state,
+      splits: {
+        ...state.splits,
+        tabs: [
+          { id: 'editor:a', type: 'editor', title: 'a', path: '/a' },
+          { id: 'editor:b', type: 'editor', title: 'b', path: '/b' },
+        ],
+        active: 'editor:a',
+      },
+    }
+    const closed = closeTab(withTabs, paneId, 'editor:a')
+    expect(closed.panelOpen).toBe(true)
+    expect(allLeaves(closed.splits).flatMap(leaf => leaf.tabs).map(tab => tab.id)).toEqual(['editor:b'])
   })
 })

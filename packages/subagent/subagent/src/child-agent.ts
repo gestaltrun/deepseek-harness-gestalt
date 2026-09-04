@@ -11,7 +11,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { liveModelSelection, type Agent, type AgentOptions, type CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { foldRequestHeader, type Session, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
 import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 // Type-only: make `ctx.get('sandboxPolicy')` / `ctx.get('approval')` resolve
 // to the policy services when composed — delegation consumes both
@@ -73,6 +73,39 @@ export function inheritParentAgentRoute(parent: Agent): Pick<AgentOptions, 'prov
     ...provider !== undefined ? { provider } : {},
     ...model !== undefined ? { model } : {},
     ...maxTokens !== undefined ? { maxTokens } : {},
+  }
+}
+
+/**
+ * Fold request headers that belong to the child itself. A fork seed replays
+ * the parent's log, so the latest header before `subagent/descriptor` is the
+ * parent's route, not a child selection.
+ * @param events - the child session events in log order.
+ * @returns the latest owned header, or `undefined` when the child has none.
+ */
+export function foldChildRequestHeader(events: readonly SessionEvent[]): ReturnType<typeof foldRequestHeader> {
+  const descriptorIndex = events.findIndex(event => event.type === 'subagent/descriptor')
+  const owned = descriptorIndex < 0 ? events : events.slice(descriptorIndex + 1)
+  return foldRequestHeader(owned)
+}
+
+/**
+ * Resolve the model route a cold-resumed continuable child should run: a later
+ * owned `request/header` wins over the creation-time descriptor.
+ * @param events - the persisted child session events.
+ * @param descriptor - the child's creation-time provider and model, when set.
+ * @returns provider and model for `ctx.agents.resume()`.
+ */
+export function resumeChildAgentOptions(
+  events: readonly SessionEvent[],
+  descriptor: { readonly agentProvider?: string; readonly agentModel?: string },
+): Pick<AgentOptions, 'provider' | 'model'> {
+  const header = foldChildRequestHeader(events)
+  const provider = header?.config.provider ?? descriptor.agentProvider
+  const model = header?.config.model ?? descriptor.agentModel
+  return {
+    ...provider !== undefined ? { provider } : {},
+    ...model !== undefined ? { model } : {},
   }
 }
 

@@ -204,7 +204,7 @@ describe('ModelSelect reasoning effort', () => {
     expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
   })
 
-  it('renders no Agent-bound control for an addressed subagent session', () => {
+  it('renders no control when the Session has no model route', () => {
     const load = vi.fn()
     render(<ModelSelect
       locked={false}

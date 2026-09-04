@@ -36,7 +36,7 @@ The production browser roster is assembled from `apps/cli/config/base.cordis.yml
 
 ## Consequences
 
-Any Host-backed Web conversation, including a blank session, can switch among dynamically discovered provider groups and adapter-owned reasoning levels without displaying duplicated `provider/model` labels. The consumed selection survives resume and reconnect; catalog names remain presentation-only, while selection and persistence use provider/model/effort ids. A provider catalog or exact-metadata outage degrades only that group. Provider/model changes can reduce provider-side cache reuse, but the selector adds no prompt content and does not disturb the in-flight step. A model without reasoning metadata has no Effort row.
+Any Host-backed Web conversation, including a blank session and a live session-backed subagent, can switch among dynamically discovered provider groups and adapter-owned reasoning levels without displaying duplicated `provider/model` labels. The consumed selection survives resume and reconnect; catalog names remain presentation-only, while selection and persistence use provider/model/effort ids. A provider catalog or exact-metadata outage degrades only that group. Provider/model changes can reduce provider-side cache reuse, but the selector adds no prompt content and does not disturb the in-flight step. A model without reasoning metadata has no Effort row.
 
 ## Testing
 

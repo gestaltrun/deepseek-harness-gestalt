@@ -115,6 +115,18 @@ describe('SideChatView', () => {
       ...created!.tab,
       meta: { threadId: 'nested-child', rootThreadId: 'session-draft-id' },
     })).toBe('session-draft-id')
+
+    const restored = descriptor.createTab?.({} as never, {
+      type: 'sidechat',
+      id: 'sidechat:side-thread',
+      title: '123',
+      meta: { threadId: 'side-thread' },
+    })
+    expect(restored?.tab).toMatchObject({
+      id: 'sidechat:side-thread',
+      title: '123',
+      meta: { threadId: 'side-thread' },
+    })
   })
 
   it('releases the root Side Chat handle after descendant navigation', async () => {

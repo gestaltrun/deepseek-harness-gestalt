@@ -18,10 +18,10 @@ import { createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-a
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
-import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+import type { EpochHeader, JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
-import { SubagentError } from '@deepseek-ai/dsh-subagent'
+import { foldChildRequestHeader, foldSubagentDescriptor, SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai/dsh-subagent'
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
@@ -318,8 +318,10 @@ async function buildModelCatalog(ctx: Context): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
+  const llm = ctx.get('llm')
+  if (llm === undefined) return { groups: [], failures: [] }
   const officialOccupied = officialDeepSeekUserOccupied(ctx)
-  const catalog = await Promise.all(ctx.llm.listProviders()
+  const catalog = await Promise.all(llm.listProviders()
     .filter(provider => provider.id !== OFFICIAL_DEEPSEEK_PROVIDER || officialOccupied !== false)
     .map(async (provider) => {
       try {
@@ -1232,6 +1234,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if (picked !== undefined) return picked
         // Incrementally folded by the session, so a per-step read costs
         // O(new events) rather than a rescan.
+        if (hasApiRemoteSubagentOwner(ctx, agent.session, agent)) {
+          return childLogModelSelection(agent.session.events)
+        }
         const logged = agent.session.requestHeader()?.config
         if (logged === undefined) return defaults.defaultModelSelection()
         return {
@@ -1329,18 +1334,164 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     inspectApiRemoteSession(ctx, sessionId)
   // Cold resume composes the preset the session recorded, for the same reason
   // `session.create` does: its history was produced under that composition.
-  // Every generic entry point — prompt, models, commands — arrives here, so
-  // leaving it out meant a session opened after a restart ran on host tools
-  // and the deployment persona. Resolved from the LOG, not the header: a
-  // session that switched while blank ran its turns under the newer
-  // composition, and the header is written once at creation. Reading the
-  // header here would silently undo the switch on the next restart and
-  // restore that history under the old tool set.
+  // Generic Agent-bound entry points that must not resume a subagent — prompt,
+  // cancel, commands — arrive here, so leaving it out meant a session opened
+  // after a restart ran on host tools and the deployment persona. Resolved
+  // from the LOG, not the header: a session that switched while blank ran its
+  // turns under the newer composition, and the header is written once at
+  // creation. Reading the header here would silently undo the switch on the
+  // next restart and restore that history under the old tool set.
   const agentFor = createApiRemoteAgentResolver(ctx, {
     agentOptions,
     setup: async ({ meta, events }) =>
       (await composeAgent(resolveSessionPreset({ header: meta, events }))).setup,
   })
+
+  /** Fold a ModelSelection from a request-header config, or undefined. */
+  const selectionFromHeader = (
+    header: EpochHeader | undefined,
+  ): ModelSelection | undefined => {
+    if (header === undefined) return undefined
+    return {
+      provider: header.config.provider,
+      model: header.config.model,
+      ...header.config.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: header.config.reasoningEffort },
+    }
+  }
+
+  /**
+   * Read the model a session-backed child should advertise without acquiring
+   * an Agent: a later owned `request/header` wins over the creation descriptor,
+   * then the Host default.
+   */
+  const childLogModelSelection = (
+    events: readonly SessionEvent[],
+  ): ModelSelection => {
+    const fromHeader = selectionFromHeader(foldChildRequestHeader(events))
+    if (fromHeader !== undefined) return fromHeader
+    const descriptor = foldSubagentDescriptor(events)
+    if (descriptor?.mode === 'continuable'
+      && descriptor.agentProvider !== undefined
+      && descriptor.agentModel !== undefined) {
+      return { provider: descriptor.agentProvider, model: descriptor.agentModel }
+    }
+    return defaults.defaultModelSelection()
+  }
+
+  /**
+   * Persist a child model switch as a `request/header` snapshot without
+   * publishing an Agent. An attached Session appends in place; a detached
+   * identity writes through persistence.
+   */
+  const persistChildModelSelection = async (
+    sessionId: SessionId,
+    selected: ModelSelection,
+  ): Promise<void> => {
+    const header = {
+      config: {
+        provider: selected.provider,
+        model: selected.model,
+        ...selected.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: selected.reasoningEffort },
+      },
+    }
+    const attached = ctx.sessions.get(sessionId)
+    if (attached !== undefined) {
+      const reason = foldChildRequestHeader(attached.events) === undefined ? 'initial' : 'change'
+      attached.append('request/header', { header, reason })
+      await ctx.sessions.flush(attached)
+      return
+    }
+    const persistence = ctx.get('sessionPersistence')
+    if (persistence === undefined) {
+      throw new Error('session persistence is not configured (load a dsh-session-persistence backend)')
+    }
+    const inspected = await inspectServable(sessionId)
+    const last = inspected.events.at(-1)
+    const reason = foldChildRequestHeader(inspected.events) === undefined ? 'initial' : 'change'
+    await persistence.append(sessionId, [{
+      type: 'request/header',
+      seq: last === undefined ? 0 : last.seq + 1,
+      time: Date.now(),
+      data: { header, reason },
+    }])
+  }
+
+  /** Serve `session.models` from a live Agent or a child log. */
+  const serveModels = async (
+    request: Parameters<ApiProxy['sessions']['models']>[0],
+  ): Promise<ReturnType<ApiProxy['sessions']['models']>> => {
+    const { sessionId } = request.payload
+    const live = ctx.agents.get(sessionId)
+    if (live !== undefined) {
+      const current = selectionFor(live).current
+      const { groups, failures } = await buildModelCatalog(ctx)
+      return ok(request, { current: { ...current }, routable: routeServed(current.provider), groups, failures })
+    }
+    const attached = ctx.sessions.get(sessionId)
+    if (attached !== undefined && hasSubagentOwner(attached, undefined)) {
+      const current = childLogModelSelection(attached.events)
+      const { groups, failures } = await buildModelCatalog(ctx)
+      return ok(request, { current: { ...current }, routable: routeServed(current.provider), groups, failures })
+    }
+    const found = await agentFor(sessionId)
+    if ('error' in found) {
+      if (found.error.code === 'agent-busy') {
+        try {
+          const inspected = await inspectServable(sessionId)
+          const current = childLogModelSelection(inspected.events)
+          const { groups, failures } = await buildModelCatalog(ctx)
+          return ok(request, {
+            current: { ...current },
+            routable: routeServed(current.provider),
+            groups,
+            failures,
+          })
+        } catch (error: unknown) {
+          if (error instanceof SessionNotFound) {
+            return err(request, { code: 'session-not-found', message: error.message, details: { sessionId } })
+          }
+          return err(request, {
+            code: 'internal',
+            message: `models unavailable for session "${sessionId}": ${String(error)}`,
+            details: {},
+          })
+        }
+      }
+      return err(request, found.error)
+    }
+    const current = selectionFor(found.agent).current
+    const { groups, failures } = await buildModelCatalog(ctx)
+    return ok(request, { current: { ...current }, routable: routeServed(current.provider), groups, failures })
+  }
+
+  /** Apply a resolved model selection to a live Agent or persist it on a child log. */
+  const applyModelSelection = async (
+    sessionId: SessionId,
+    selected: ModelSelection,
+  ): Promise<void> => {
+    const live = ctx.agents.get(sessionId)
+    if (live !== undefined) {
+      if (hasSubagentOwner(live.session, live)) await persistChildModelSelection(sessionId, selected)
+      selectionFor(live).current = selected
+      return
+    }
+    const attached = ctx.sessions.get(sessionId)
+    if (attached !== undefined && hasSubagentOwner(attached, undefined)) {
+      await persistChildModelSelection(sessionId, selected)
+      return
+    }
+    const found = await agentFor(sessionId)
+    if ('error' in found) {
+      if (found.error.code !== 'agent-busy') throw found.error
+      await persistChildModelSelection(sessionId, selected)
+      return
+    }
+    selectionFor(found.agent).current = selected
+  }
 
   /** Send one transient frame to every connected mux consumer. */
   function broadcast(payload: MuxFrame): void {
@@ -2760,13 +2911,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async models(request) {
-        const { sessionId } = request.payload
-        const found = await agentFor(sessionId)
-        if ('error' in found) return err(request, found.error)
-        const current = selectionFor(found.agent).current
-        const { groups, failures } = await buildModelCatalog(ctx)
-        const routable = routeServed(current.provider)
-        return ok(request, { current: { ...current }, routable, groups, failures })
+        return serveModels(request)
       },
 
       async toolEligibility(request) {
@@ -2781,41 +2926,60 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async selectModel(request) {
         const { sessionId, provider, model, reasoningEffort } = request.payload
-        const found = await agentFor(sessionId)
-        if ('error' in found) return err(request, found.error)
-        return serializeImageAdmission(found.agent, async () => {
-          try {
-            const resolved = await ctx.llm.resolveCallConfig({
-              provider,
-              model,
-              ...reasoningEffort === undefined
-                ? {}
-                : { reasoningEffort: ReasoningEffortId(reasoningEffort) },
-            })
-            const selected: ModelSelection = {
-              provider: resolved.provider,
-              model: resolved.model,
-              ...resolved.reasoningEffort === undefined
-                ? {}
-                : { reasoningEffort: resolved.reasoningEffort },
-            }
-            selectionFor(found.agent).current = selected
-            try {
-              await defaults.saveDefaultModelSelection?.(selected)
-            } catch (error: unknown) {
-              ctx.logger.warn(
-                `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
-              )
-            }
-            return ok(request, { selected: { ...selected } })
-          } catch (error: unknown) {
-            return err(request, {
-              code: 'model-unavailable',
-              message: error instanceof Error ? error.message : String(error),
-              details: { provider, model },
+        try {
+          const resolved = await ctx.llm.resolveCallConfig({
+            provider,
+            model,
+            ...reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: ReasoningEffortId(reasoningEffort) },
+          })
+          const selected: ModelSelection = {
+            provider: resolved.provider,
+            model: resolved.model,
+            ...resolved.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: resolved.reasoningEffort },
+          }
+          const live = ctx.agents.get(sessionId)
+          if (live !== undefined) {
+            return serializeImageAdmission(live, async () => {
+              await applyModelSelection(sessionId, selected)
+              try {
+                await defaults.saveDefaultModelSelection?.(selected)
+              } catch (error: unknown) {
+                ctx.logger.warn(
+                  `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
+                )
+              }
+              return ok(request, { selected: { ...selected } })
             })
           }
-        })
+          await applyModelSelection(sessionId, selected)
+          try {
+            await defaults.saveDefaultModelSelection?.(selected)
+          } catch (error: unknown) {
+            ctx.logger.warn(
+              `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
+            )
+          }
+          return ok(request, { selected: { ...selected } })
+        } catch (error: unknown) {
+          if (error instanceof SessionNotFound) {
+            return err(request, { code: 'session-not-found', message: error.message, details: { sessionId } })
+          }
+          if (typeof error === 'object' && error !== null && 'code' in error) {
+            const rpc = error as RpcError
+            if (rpc.code === 'agent-busy' || rpc.code === 'session-not-found' || rpc.code === 'internal') {
+              return err(request, rpc)
+            }
+          }
+          return err(request, {
+            code: 'model-unavailable',
+            message: error instanceof Error ? error.message : String(error),
+            details: { provider, model },
+          })
+        }
       },
 
       async rename(request) {
@@ -3107,9 +3271,6 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }))
         }
         const agent = ctx.agents.get(sessionId)
-        if (agent !== undefined && hasSubagentOwner(agent.session, agent)) {
-          return Promise.resolve(err(request, subagentOwnershipError(sessionId)))
-        }
         if (agent === undefined) {
           return Promise.resolve(err(request, {
             code: 'queue-item-not-found',

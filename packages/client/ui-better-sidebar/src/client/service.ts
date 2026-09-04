@@ -14,7 +14,8 @@
  *   and per-id (`tab => tab.id` for diff tabs whose id is change-derived).
  *   `single: true` is sugar for `dedupeKey: () => id`.
  * - `createTab` lets a descriptor own tab instantiation (the terminal
- *   builtin uses it to mint `terminal:<n>` ids and bump `nextTerminal`).
+ *   builtin uses it to mint `terminal:<n>` ids and bump `nextTerminal`;
+ *   the optional seed is the `openTab` request).
  * - `matchFileViewer` walks descriptors in priority order (desc, stable):
  *   per descriptor it tries `detect` first (when `head` bytes are given),
  *   then `exts`; `exts: []` is a catch-all that matches any path.
@@ -190,10 +191,15 @@ export interface TabDescriptor {
   /**
    * Custom tab creation (minting the `SidebarTab` and any state patches).
    * Return `null` to refuse creation. The terminal builtin uses this to
-   * mint `terminal:<n>` ids and bump `nextTerminal`.
-   * When omitted, a default `{ id, type, title }` tab is created.
+   * mint `terminal:<n>` ids and bump `nextTerminal`. The optional seed is
+   * the `openTab` request so a descriptor can reuse an explicit id, title,
+   * or meta instead of minting a fresh identity. When omitted, a default
+   * `{ id, type, title }` tab is created.
    */
-  createTab?: (state: SidebarState) => { tab: SidebarTab; patch?: Partial<SidebarState> } | null
+  createTab?: (
+    state: SidebarState,
+    seed?: OpenTabSeed,
+  ) => { tab: SidebarTab; patch?: Partial<SidebarState> } | null
   /**
    * External-link target claim (v0.13.0+): when a GUI external-link click
    * is taken over (the `browserInterceptLinks` master AND the URL's
@@ -369,8 +375,8 @@ export interface BetterSidebarService {
   /**
    * Open a tab (used by external tabs and the + menu). `title` overrides
    * the descriptor's title when given (the editor tab shows the file name);
-   * when the descriptor provides `createTab` it mints the tab itself and
-   * `title`/`path`/`id` are ignored. `url` lands the tab with its `path`
+   * when the descriptor provides `createTab` it mints the tab from the live
+   * state and this seed. `url` lands the tab with its `path`
    * pre-set to the URL (the browser tab's navigation seed; the caller
    * usually pairs it with a hostname `title`). A disabled tab type is a
    * no-op.
@@ -658,7 +664,7 @@ export function createBetterSidebarService(
       let tab: SidebarTab
       let next: SidebarState
       if (descriptor.createTab !== undefined) {
-        const result = descriptor.createTab(landing)
+        const result = descriptor.createTab(landing, seed)
         if (result === null) return state
         tab = result.tab
         next = applyDedupe(landing, result.tab, descriptor)

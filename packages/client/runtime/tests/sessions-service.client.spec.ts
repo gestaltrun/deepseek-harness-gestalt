@@ -498,6 +498,29 @@ describe('catalog-addressed navigation', () => {
       parentSessionId: sid('root'), childSessionId: sid('child'), mode: 'continuable',
     })
   })
+
+  it('keeps a model route for an addressed continuable child', async () => {
+    const b = bench()
+    b.api.onSubagentList = () => Promise.resolve(ok({
+      entries: [{
+        kind: 'child', id: sid('child'), mode: 'continuable', label: 'Child',
+        activity: 'inactive', hasChildren: false,
+      }] as never[],
+      parentAvailable: true,
+    }))
+    await feedList(b, [{ id: 'root' }])
+    await b.svc.refreshSubagents(sid('root'))
+    b.svc.openSubagent({
+      parentSessionId: sid('root'), childSessionId: sid('child'), mode: 'continuable',
+    })
+
+    expect(b.svc.subagentAddress(sid('child'))).toEqual({
+      parentSessionId: sid('root'), childSessionId: sid('child'), mode: 'continuable',
+    })
+    expect(b.svc.modelRoute(sid('child'))).toBeDefined()
+    expect(b.svc.commandCatalogSessionId(sid('child'))).toBeUndefined()
+    expect(b.svc.skillCatalogSessionId(sid('child'))).toBeUndefined()
+  })
 })
 
 describe('create', () => {

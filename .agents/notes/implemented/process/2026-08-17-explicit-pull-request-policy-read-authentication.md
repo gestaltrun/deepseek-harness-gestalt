@@ -38,7 +38,7 @@ Issue-management tests execute the real `policy.mjs pr` and `policy.mjs lifecycl
 
 **Retry `404` without authentication.** Rejected because the same response can identify a private repository, missing permission, wrong repository, or nonexistent resource. Authentication fallback would turn configuration failures into ambiguous behavior.
 
-**Keep review activity as the personal tracker activation signal.** Rejected because review counts do not validate metadata, and reading them adds an authorization dependency without strengthening policy results.
+**Keep review activity as the Gestalt organization tracker activation signal.** Rejected because review counts do not validate metadata, and reading them adds an authorization dependency without strengthening policy results.
 
 ## Consequences
 

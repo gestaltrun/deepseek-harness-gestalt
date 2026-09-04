@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-17-explicit-pull-request-policy-read-authentication.md
-2026-08-17-explicit-pull-request-policy-read-authentication.md: e9af5b8913f0e8c63e7202a1b855031299f4e4da
+2026-08-17-explicit-pull-request-policy-read-authentication.md: 95eb765088e19bba06d484158b359f7a1c8f1529
 2026-08-17-explicit-pull-request-policy-read-authentication.zh.md: 8be5765f4f92afa1cad7e0cb78b2455723407790

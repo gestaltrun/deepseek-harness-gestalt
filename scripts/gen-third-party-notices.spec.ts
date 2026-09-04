@@ -10,6 +10,7 @@ import {
   isPermissive,
   type Manifest,
   manifestPatterns,
+  normalizeRepo,
   parsePyprojectRequirements,
   parseVendoredRows,
   render,
@@ -76,6 +77,14 @@ describe('tierExternalDeps', () => {
 
     expect(tierExternalDeps(manifests, names).get('shared')).toBe(true)
     expect(tierExternalDeps(manifests, names).has('@deepseek-ai/dsh-cli')).toBe(false)
+  })
+})
+
+describe('normalizeRepo', () => {
+  it('converts SCP-style git+ssh GitHub metadata to a browsable URL', () => {
+    expect(normalizeRepo('git+ssh://git@github.com:react-icons/react-icons.git')).toBe(
+      'https://github.com/react-icons/react-icons',
+    )
   })
 })
 

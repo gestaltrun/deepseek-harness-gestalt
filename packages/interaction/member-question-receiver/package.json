@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-member-question-receiver",
   "description": "Host-owned durable receiver for authenticated member questions and receiving-session admission",
-  "version": "0.1.1-rc.2",
+  "version": "0.1.2-rc.1",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",

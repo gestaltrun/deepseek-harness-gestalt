@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { load as loadYaml } from 'js-yaml'
 import { hasTypertRemoteNavigation, isForbiddenPublicationFile } from './publication-payload.ts'
 import { collectProjectReferenceFaceViolations } from './project-reference-faces.ts'
 
@@ -53,7 +54,7 @@ const experimentalPackageDirectory = /^packages\/experimental\/[^/]+$/
 /** npm namespace reserved for private experimental packages. */
 const experimentalPackageNamePrefix = '@deepseek-ai/dsh-experimental-'
 /** Directories whose packages this repository publishes: one release member each. */
-const releaseMemberDirectory = /^(?:packages\/(?!experimental\/)[^/]+\/[^/]+|apps\/[^/]+|vendor\/[^/]+)$/
+const releaseMemberDirectory = /^(?:packages\/(?!experimental\/)[^/]+\/[^/]+|apps\/(?:cli|web)|vendor\/[^/]+)$/
 const localArtifactDirs = new Set(['node_modules'])
 const appPackageFiles: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh': ['lib/*.js'],
@@ -149,7 +150,28 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-client-ui-primitives': ['lib/**/*.css'],
   '@deepseek-ai/dsh-client-web': ['lib/**/*.css'],
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
+  '@deepseek-ai/dsh-noise-channel': [
+    'pkg/dsh_noise_channel.d.ts',
+    'pkg/dsh_noise_channel.js',
+    'pkg/dsh_noise_channel_bg.wasm',
+    'pkg/dsh_noise_channel_bg.wasm.d.ts',
+    'THIRD_PARTY_NOTICES.txt',
+  ],
+  '@deepseek-ai/dsh-remote-access': ['lib/relay-provider.js'],
+  '@deepseek-ai/dsh-remote-access-client': ['lib/desktop-relay-lifecycle.js', 'lib/node-relay-socket.js'],
+  '@deepseek-ai/dsh-remote-access-http': ['lib/relay.js'],
+  '@deepseek-ai/dsh-remote-attachments': ['lib/http.js'],
+  '@deepseek-ai/dsh-client-ui-desktop': ['lib/protocol.js'],
+  '@deepseek-ai/dsh-browser-runtime-deterministic': ['lib/runtime-state-*.js'],
+  '@deepseek-ai/dsh-browser-runtime-electron': ['lib/runtime-state-*.js', 'lib/testing.js', 'lib/host-seam.js'],
+  '@deepseek-ai/dsh-browser-runtime-tandem': ['lib/runtime-state-*.js', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM.md'],
+  '@deepseek-ai/dsh-client-ui-better-sidebar': [
+    'lib/client-terminal.js',
+    'lib/client-editor.js',
+    'lib/client-mermaid.js',
+  ],
   // The CPython side ships as source .py files, published as-is rather than built.
+  '@deepseek-ai/dsh-code-runtime-python': ['py/**/*.py'],
   '@deepseek-ai/dsh-experimental-code-runtime-python': ['py/**/*.py'],
   // The shipped preset compositions travel inside the roster package.
   '@deepseek-ai/dsh-agent-presets': ['presets'],
@@ -327,7 +349,7 @@ export function checkWorkspaceManifest({ dir, manifest }: WorkspaceManifest): st
     }
   }
 
-  if (dir.startsWith('apps/') && manifest.name?.startsWith('@deepseek-ai/')) {
+  if (releaseMemberDirectory.test(dir) && dir.startsWith('apps/') && manifest.name?.startsWith('@deepseek-ai/')) {
     const expectedFiles = appPackageFiles[manifest.name]
     if (expectedFiles === undefined) {
       errors.push(`${label}: app package has no publication files policy`)
@@ -420,6 +442,17 @@ function checkHierarchyShape(): string[] {
   return errors
 }
 
+interface WorkspacePolicy {
+  readonly allowBuilds?: Readonly<Record<string, unknown>>
+}
+
+/** Require every pnpm lifecycle-script decision to be an explicit boolean. */
+export function checkPnpmBuildPolicy(policy: WorkspacePolicy): string[] {
+  return Object.entries(policy.allowBuilds ?? {})
+    .filter(([, decision]) => typeof decision !== 'boolean')
+    .map(([name, decision]) => `pnpm-workspace.yaml: allowBuilds.${name} must be true or false, got ${JSON.stringify(decision)}`)
+}
+
 function checkRepositoryVersion(): string[] {
   // The root carries the dsh release family's version, so a prerelease such as
   // 0.0.1-rc.1 is a valid state between `release:dsh` and its publication.
@@ -487,6 +520,7 @@ export function main(): void {
     { dir: 'python/sdk-runtime', manifest: readJson(join(root, 'python/sdk-runtime/package.json')) },
   ]
   const errors = [
+    ...checkPnpmBuildPolicy(loadYaml(readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')) as WorkspacePolicy),
     ...checkRepositoryVersion(),
     ...manifests.flatMap(checkWorkspaceManifest),
     ...checkWorkspaceProtocol(manifests),

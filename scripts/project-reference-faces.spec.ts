@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { collectProjectReferenceFaceViolations } from './project-reference-faces.ts'
+import {
+  collectGestaltCompilerFaceViolations,
+  collectProjectReferenceFaceViolations,
+  collectWebHostTestFaceViolations,
+} from './project-reference-faces.ts'
 
 const roots: string[] = []
 
@@ -12,6 +16,28 @@ afterEach(() => {
 
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+function webHostTestFixture(options: {
+  readonly source?: string
+  readonly webExclude?: readonly string[]
+  readonly hostInclude?: readonly string[]
+} = {}): string {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
+  roots.push(root)
+  mkdirSync(join(root, 'apps/web/tests'), { recursive: true })
+  writeFileSync(
+    join(root, 'apps/web/tests/example.e2e.ts'),
+    options.source ?? "import { launchWebScaffold } from './scaffold.ts'\nvoid launchWebScaffold\n",
+  )
+  writeFileSync(join(root, 'apps/web/tests/scaffold.ts'), 'export const launchWebScaffold = 1\n')
+  writeJson(join(root, 'apps/web/tsconfig.json'), {
+    exclude: options.webExclude ?? ['tests/example.e2e.ts'],
+  })
+  writeJson(join(root, 'tsconfig.host.json'), {
+    include: options.hostInclude ?? ['apps/web/tests/example.e2e.ts'],
+  })
+  return root
 }
 
 function workspaceFixture(options: {
@@ -24,6 +50,10 @@ function workspaceFixture(options: {
   const split = join(root, 'packages/api/split')
   mkdirSync(shared, { recursive: true })
   mkdirSync(split, { recursive: true })
+  mkdirSync(join(root, 'apps/web/tests'), { recursive: true })
+  writeFileSync(join(root, 'apps/web/tests/example.e2e.ts'), "import './scaffold.ts'\n")
+  writeFileSync(join(root, 'apps/web/tests/scaffold.ts'), 'export {}\n')
+  writeJson(join(root, 'apps/web/tsconfig.json'), { exclude: ['tests/example.e2e.ts'] })
   writeJson(join(root, 'tsconfig.base.json'), {})
   writeJson(join(root, 'tsconfig.base.client.json'), { extends: './tsconfig.base.json' })
   writeJson(join(shared, 'package.json'), { name: '@deepseek-ai/dsh-shared' })
@@ -39,6 +69,7 @@ function workspaceFixture(options: {
   writeJson(join(split, 'tsconfig.host.json'), { references: [{ path: '../../core/shared' }] })
   writeJson(join(split, 'tsconfig.client.json'), { references: [{ path: '../../core/shared' }] })
   writeJson(join(root, 'tsconfig.host.json'), {
+    include: ['apps/web/tests/example.e2e.ts'],
     references: options.host.map(path => ({ path })),
   })
   writeJson(join(root, 'tsconfig.client.json'), {
@@ -48,6 +79,106 @@ function workspaceFixture(options: {
 }
 
 describe('Project Reference compiler faces', () => {
+  it('accepts the production compiler-face configuration', () => {
+    expect(collectProjectReferenceFaceViolations(join(import.meta.dirname, '..'))).toEqual([])
+  })
+
+  it('discovers a static direct scaffold import', () => {
+    const root = webHostTestFixture({
+      source: "import scaffold, { type WebScaffold } from './scaffold.ts'\nvoid scaffold\nvoid (0 as unknown as WebScaffold)\n",
+    })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([])
+  })
+
+  it('rejects a missing Web compiler config', () => {
+    const root = webHostTestFixture()
+    rmSync(join(root, 'apps/web/tsconfig.json'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: required Web Host-test compiler-face config is missing',
+    ])
+  })
+
+  it('rejects a missing Host compiler config', () => {
+    const root = webHostTestFixture()
+    rmSync(join(root, 'tsconfig.host.json'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'tsconfig.host.json: required Web Host-test compiler-face config is missing',
+    ])
+  })
+
+  it('reports both missing compiler configs in repo-relative order', () => {
+    const root = webHostTestFixture()
+    rmSync(join(root, 'apps/web/tsconfig.json'))
+    rmSync(join(root, 'tsconfig.host.json'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: required Web Host-test compiler-face config is missing',
+      'tsconfig.host.json: required Web Host-test compiler-face config is missing',
+    ])
+  })
+
+  it('rejects a scaffold consumer missing from the Web exclusion', () => {
+    const root = webHostTestFixture({ webExclude: [] })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: apps/web/tests/example.e2e.ts statically imports "./scaffold.ts" and must be listed exactly as "tests/example.e2e.ts" in exclude',
+    ])
+  })
+
+  it('rejects a scaffold consumer missing from the Host include', () => {
+    const root = webHostTestFixture({ hostInclude: [] })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'tsconfig.host.json: apps/web/tests/example.e2e.ts statically imports "./scaffold.ts" and must be listed exactly in include',
+    ])
+  })
+
+  it('rejects stale exact Web test entries but ignores helpers and globs', () => {
+    const root = webHostTestFixture({
+      webExclude: [
+        'tests/example.e2e.ts',
+        'tests/missing.e2e.ts',
+        'tests/support.ts',
+        'tests/*.snapshot.ts',
+      ],
+      hostInclude: [
+        'apps/web/tests/example.e2e.ts',
+        'apps/web/tests/missing.snapshot.ts',
+        'apps/web/tests/support.ts',
+        'apps/web/tests/**/*.ts',
+      ],
+    })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: stale exact Web test entry "tests/missing.e2e.ts" is not a file',
+      'tsconfig.host.json: stale exact Web test entry "apps/web/tests/missing.snapshot.ts" is not a file',
+    ])
+  })
+
+  it('rejects a directory at an exact Web test path without reading it', () => {
+    const root = webHostTestFixture({
+      webExclude: ['tests/example.e2e.ts', 'tests/directory.e2e.ts'],
+      hostInclude: ['apps/web/tests/example.e2e.ts', 'apps/web/tests/directory.e2e.ts'],
+    })
+    mkdirSync(join(root, 'apps/web/tests/directory.e2e.ts'))
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tsconfig.json: stale exact Web test entry "tests/directory.e2e.ts" is not a file',
+      'tsconfig.host.json: stale exact Web test entry "apps/web/tests/directory.e2e.ts" is not a file',
+    ])
+  })
+
+  it('rejects an empty scaffold discovery corpus', () => {
+    const root = webHostTestFixture({ source: "const path = './scaffold.ts'\nvoid path\n" })
+
+    expect(collectWebHostTestFaceViolations(root)).toEqual([
+      'apps/web/tests: no static direct ./scaffold.ts imports discovered; Web Host-test compiler-face validation requires a non-empty corpus',
+    ])
+  })
+
   it('allows neutral projects in either graph and matching split leaves', () => {
     const root = workspaceFixture({
       host: ['./packages/core/shared', './packages/api/split/tsconfig.host.json'],
@@ -55,6 +186,39 @@ describe('Project Reference compiler faces', () => {
     })
 
     expect(collectProjectReferenceFaceViolations(root)).toEqual([])
+  })
+
+  it('rejects a retained Gestalt project omitted from its compiler face', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
+    roots.push(root)
+    mkdirSync(join(root, 'apps/desktop'), { recursive: true })
+    writeJson(join(root, 'apps/desktop/tsconfig.json'), { extends: '../../tsconfig.base.json' })
+    writeJson(join(root, 'tsconfig.base.json'), {})
+    writeJson(join(root, 'tsconfig.base.client.json'), {})
+    writeJson(join(root, 'tsconfig.host.json'), { references: [] })
+    writeJson(join(root, 'tsconfig.client.json'), { references: [] })
+
+    expect(collectGestaltCompilerFaceViolations(root, {
+      host: ['apps/desktop'],
+      client: [],
+    })).toEqual([
+      'apps/desktop/tsconfig.json: retained Gestalt project is omitted from the root Host aggregate',
+    ])
+  })
+
+  it('rejects apps/platform when both the aggregate and inventory omit it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
+    roots.push(root)
+    mkdirSync(join(root, 'apps/platform'), { recursive: true })
+    writeJson(join(root, 'apps/platform/tsconfig.json'), { extends: '../../tsconfig.base.json' })
+    writeJson(join(root, 'tsconfig.base.json'), {})
+    writeJson(join(root, 'tsconfig.base.client.json'), {})
+    writeJson(join(root, 'tsconfig.host.json'), { references: [] })
+    writeJson(join(root, 'tsconfig.client.json'), { references: [] })
+
+    expect(collectGestaltCompilerFaceViolations(root, { host: [], client: [] })).toEqual([
+      'apps/platform/tsconfig.json: retained Gestalt Host project is omitted from GESTALT_COMPILER_FACES',
+    ])
   })
 
   it('rejects the opposite leaf and the solution root of a split project', () => {

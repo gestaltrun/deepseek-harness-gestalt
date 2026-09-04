@@ -8,6 +8,7 @@
   "files": [
     "src/client/Dialog.tsx",
     "src/client/HeaderAction.tsx",
+    "src/client/ToolbarAction.tsx",
     "src/client/controller.ts",
     "src/client/index.ts",
     "src/client/locales.ts",

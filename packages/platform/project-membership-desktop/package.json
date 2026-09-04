@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-project-membership-desktop",
   "description": "Web Host provider for Desktop-owned authenticated Project Membership reads",
-  "version": "0.1.1-rc.2",
+  "version": "0.1.2-rc.1",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",

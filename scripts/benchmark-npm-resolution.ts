@@ -37,6 +37,7 @@ const PUBLISHED_FIELDS = [
 interface PackageManifest {
   readonly name?: unknown
   readonly version?: unknown
+  readonly private?: unknown
   readonly dependencies?: Record<string, string>
   readonly optionalDependencies?: Record<string, string>
   readonly peerDependencies?: Record<string, string>
@@ -186,7 +187,7 @@ function copyPublishedManifest(
   source: PackageManifest,
   workspaceVersions: ReadonlyMap<string, string>,
 ): RegistryVersion | undefined {
-  if (typeof source.name !== 'string' || typeof source.version !== 'string') return undefined
+  if (source.private === true || typeof source.name !== 'string' || typeof source.version !== 'string') return undefined
   const output: Record<string, unknown> = { name: source.name, version: source.version }
   for (const field of PUBLISHED_FIELDS) {
     const value = source[field]

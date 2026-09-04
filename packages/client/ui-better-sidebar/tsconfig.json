@@ -25,7 +25,7 @@
       "path": "../locale"
     },
     {
-      "path": "../connection"
+      "path": "../connection/tsconfig.client.json"
     },
     {
       "path": "../modules"

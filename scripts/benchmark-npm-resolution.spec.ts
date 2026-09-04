@@ -78,6 +78,11 @@ describe('npm resolution benchmark', () => {
       name: '@deepseek-ai/dsh-child',
       version: '0.1.0',
     })
+    writeJson(root, 'apps/desktop/package.json', {
+      name: '@deepseek-ai/dsh-desktop',
+      version: '0.2.0',
+      private: true,
+    })
 
     const index = buildRegistryIndex(root)
 
@@ -87,6 +92,7 @@ describe('npm resolution benchmark', () => {
       version: '0.1.0',
       dependencies: { '@deepseek-ai/dsh-child': '^0.1.0', external: '^2.0.0' },
     })
+    expect(index.has('@deepseek-ai/dsh-desktop')).toBe(false)
   })
 
   it('runs npm against the local registry without requesting an archive', async () => {

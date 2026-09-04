@@ -22,6 +22,9 @@
   // this client-registered project must not also hold them (one program
   // cannot see both sides of the cordis Context merges).
   "exclude": [
+    "tests/annotation-persistence.e2e.ts",
+    "tests/annotation-images.e2e.ts",
+    "tests/web-acceptance.acceptance.ts",
     "tests/scaffold.ts",
     "tests/scaffold-hermetic.e2e.ts",
     "tests/startup-rpc-budget.e2e.ts",
@@ -57,7 +60,6 @@
     "tests/stats-paged-history.e2e.ts",
     "tests/sidebar-scrollbar.e2e.ts",
     "tests/rail-search-expand.e2e.ts",
-    "tests/conversation-column-overflow.e2e.ts",
     "tests/ptc-round.e2e.ts",
     "tests/composer-draft-scroll.e2e.ts",
     "tests/cordis-tool-round.e2e.ts",
@@ -105,7 +107,14 @@
     "tests/composer-tab-geometry.e2e.ts",
     "tests/complex-history.perf.ts",
     "tests/pwsh-terminal.e2e.ts",
-    "tests/workflow-run.e2e.ts"
+    "tests/workflow-run.e2e.ts",
+    "tests/desktop-chrome.e2e.ts",
+    "tests/desktop-schedule.snapshot.ts",
+    "tests/schedule-board.e2e.ts",
+    "tests/text-annotation.e2e.ts",
+    "tests/sidechat-round.e2e.ts",
+    "tests/member-question-receiving.e2e.ts",
+    "tests/member-question-receiving.snapshot.ts"
   ],
   "references": [
     {

@@ -149,13 +149,67 @@ describe('package dependency scope', () => {
       '@deepseek-ai/dsh-util-values',
     ])
     expect(PACKAGE_DEPENDENCY_POLICY.safeHostDependencyExports['@deepseek-ai/dsh-deque']).toEqual(['Deque'])
+    expect(PACKAGE_DEPENDENCY_POLICY.safeHostDependencyExports['@deepseek-ai/dsh-settings']).toEqual([
+      'settingsNamespace',
+    ])
+    expect(PACKAGE_DEPENDENCY_POLICY.safeHostDependencyExports['@deepseek-ai/dsh-tools']).toEqual(['defineTool'])
     expect(PACKAGE_DEPENDENCY_POLICY.safeHostDependencyExports['@deepseek-ai/schemastery']).toEqual(['default'])
     expect(PACKAGE_DEPENDENCY_POLICY.safeHostDependencyExports['@deepseek-ai/dsh-session/types']).toBeUndefined()
     expect(PACKAGE_DEPENDENCY_POLICY.safeHostDependencyExports['@deepseek-ai/dsh-typert-protocol']).toBeUndefined()
+    expect(PACKAGE_DEPENDENCY_POLICY.peerRequiredHostExports['@deepseek-ai/dsh-agent']).toEqual([
+      'installModelSelection',
+    ])
     expect(PACKAGE_DEPENDENCY_POLICY.peerRequiredHostExports['@deepseek-ai/dsh-scope']).toEqual([
       'carrierKeyOf', 'scopeOf', 'scopeTarget',
     ])
+    expect(PACKAGE_DEPENDENCY_POLICY.peerRequiredHostExports['@deepseek-ai/dsh-settings']).toEqual([
+      'SettingsConflictError',
+    ])
     expect(PACKAGE_DEPENDENCY_POLICY.peerRequiredHostExports['@deepseek-ai/dsh-typert-protocol']).toBeUndefined()
+  })
+
+  it('classifies settings namespace construction as safe and conflict identity as peer-required', () => {
+    const sourcePath = 'packages/client/ui-better-sidebar/src/index.ts'
+    const settings = '@deepseek-ai/dsh-settings'
+    const subject: PackageDependencyFacts = {
+      ...facts({ name: '@deepseek-ai/dsh-client-ui-better-sidebar' }),
+      workspaceNames: new Set([CORDIS, settings]),
+      hostRuntimeSourceUses: new Map([[settings, [sourcePath]]]),
+      hostRuntimeExportUses: [
+        {
+          packageName: settings,
+          specifier: settings,
+          exportName: 'SettingsConflictError',
+          sourcePath,
+          line: 42,
+          column: 10,
+          sourceLine: `import { SettingsConflictError, settingsNamespace } from '${settings}'`,
+        },
+        {
+          packageName: settings,
+          specifier: settings,
+          exportName: 'settingsNamespace',
+          sourcePath,
+          line: 42,
+          column: 33,
+          sourceLine: `import { SettingsConflictError, settingsNamespace } from '${settings}'`,
+        },
+      ],
+      peerRequiredHostDependencies: new Set([settings]),
+    }
+
+    expect(collectHostDependencyExportPolicyViolations(
+      [subject],
+      subject.workspaceNames,
+      {
+        safeHostDependencyExports: {
+          [settings]: ['settingsNamespace'],
+        },
+        peerRequiredHostExports: {
+          [settings]: ['SettingsConflictError'],
+        },
+      },
+    )).toEqual([])
   })
 
   it('discovers the Client directory, dsh.client declarations, and configured Host packages', () => {

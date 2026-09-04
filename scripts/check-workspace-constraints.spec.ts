@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   checkExperimentalDependencyIsolation,
   checkExperimentalManifest,
+  checkPnpmBuildPolicy,
   expectedDshPackageFiles,
   type WorkspaceManifest,
 } from './check-workspace-constraints.ts'
@@ -72,6 +73,15 @@ describe('experimental workspace constraints', () => {
 
     expect(checkExperimentalDependencyIsolation(manifests)).toEqual([
       '@deepseek-ai/dsh-python-runtime: dependencies.@deepseek-ai/dsh-experimental-prototype must not reference an experimental package',
+    ])
+  })
+})
+
+describe('pnpm build-script policy', () => {
+  it('requires explicit boolean decisions', () => {
+    expect(checkPnpmBuildPolicy({ allowBuilds: { electron: true, coreJs: false } })).toEqual([])
+    expect(checkPnpmBuildPolicy({ allowBuilds: { electron: 'set this to true or false' } })).toEqual([
+      'pnpm-workspace.yaml: allowBuilds.electron must be true or false, got "set this to true or false"',
     ])
   })
 })

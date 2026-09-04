@@ -14,7 +14,7 @@ tool-eligibility:
 
 All configured lists are positive additions. The effective set is the sorted union of the preset, matching Workspace, and matching Session lists. If none exists, the Session remains unrestricted for compatibility. Any declaration activates allow-only eligibility; an empty effective union allows no end tool. Settings updates apply to live Agents without restart.
 
-The resolver owns one mutable registry contribution for each live Agent. A settings refresh commits every affected Agent contribution before observer notification, then attempts both relationship publication and registry change notification for every affected Agent. Observer failures propagate together after that complete fan-out. Resolver unload, HMR, or Agent disposal removes the exact contribution. The registry uses the resulting view for model schemas, lookup, and dispatch, so an ineligible or stale call resolves as an unknown tool before its body runs. The exact schemas sent to a model already live in the durable `request/header` event; replay can therefore reconstruct the model-visible eligibility without consulting current settings.
+The resolver owns one mutable registry contribution for each live Agent. Every refresh commits all affected contributions before fan-out, then attempts both relationship publication and registry change notification for every affected Agent. Ordinary live Settings updates propagate one aggregated observer failure after the complete fan-out. Settings provider detach or HMR commits the composition fallback and attempts the same complete fan-out, but logs the `AggregateError` so provider unload completes. Resolver unload or Agent disposal removes the exact contribution. The registry uses the resulting view for model schemas, lookup, and dispatch, so an ineligible or stale call resolves as an unknown tool before its body runs. The exact schemas sent to a model already live in the durable `request/header` event; replay can therefore reconstruct the model-visible eligibility without consulting current settings.
 
 `session.toolEligibility` reads the authoritative `ctx.tools` allowance and schema catalog directly. The settings schema contains `workspaces` and `sessions` only; the internal deny-capable `ctx.tools.restrict()` API is not projected into user configuration.
 
@@ -24,11 +24,11 @@ The resolver owns one mutable registry contribution for each live Agent. A setti
 
 #### What the model sees
 
-The model receives only the exact positive union of preset, matching Workspace, and matching Session [tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tools). Code Mode's reserved `run_code` transport remains presentation infrastructure; eligibility filters the end tools projected through its generated SDK.
+The model receives only the exact positive union of preset, matching Workspace, and matching Session [tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tools). PTC mode's reserved `run_code` transport remains presentation infrastructure; eligibility filters the end tools projected through its generated SDK.
 
 #### Token effect
 
-The service adds no prompt text. It removes every ineligible end-tool schema and its repeated per-request token cost; Code Mode likewise omits those bindings from the generated SDK.
+The service adds no prompt text. It removes every ineligible end-tool schema and its repeated per-request token cost; PTC mode likewise omits those bindings from the generated SDK.
 
 #### KV Cache effect
 

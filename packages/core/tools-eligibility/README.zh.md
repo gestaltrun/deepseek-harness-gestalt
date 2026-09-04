@@ -14,7 +14,7 @@ tool-eligibility:
 
 所有配置列表都只做正向添加。最终集合是 preset、匹配 Workspace 与匹配 Session 三份列表的排序并集。三者都不存在时，为兼容既有组装，该 Session 保持不受限。任一声明都会启用 allow-only 资格；最终并集为空时不允许任何末端工具。settings 更新会直接作用于实时 Agent，无需重启。
 
-解析器为每个实时 Agent 持有一条可变注册表贡献。settings 刷新会先提交每个受影响 Agent 的贡献，再发出任何观察者通知；随后为每个受影响 Agent 尝试关系 publication 与注册表变化通知，并在完整扇出后一起传播观察者错误。解析器卸载、HMR 或 Agent 销毁都会移除对应贡献。注册表让模型 schema、查询和分发共用解析后的视图，因此不合格或过期调用会在工具主体运行前被解析为未知工具。发送给模型的精确 schema 已记录在持久 `request/header` 事件中；回放无需读取当前 settings 即可重建模型可见资格。
+解析器为每个实时 Agent 持有一条可变注册表贡献。每次刷新都会先提交所有受影响贡献，再开始扇出，并为每个受影响 Agent 尝试关系 publication 与注册表变化通知。普通实时 Settings 更新会在完整扇出后传播一个聚合后的观察者错误。Settings provider 分离或 HMR 会提交 composition 回退值并尝试同样的完整扇出，但把 `AggregateError` 记录到日志，使 provider 卸载得以完成。解析器卸载或 Agent 销毁会移除对应贡献。注册表让模型 schema、查询和分发共用解析后的视图，因此不合格或过期调用会在工具主体运行前被解析为未知工具。发送给模型的精确 schema 已记录在持久 `request/header` 事件中；回放无需读取当前 settings 即可重建模型可见资格。
 
 `session.toolEligibility` 直接读取权威 `ctx.tools` 许可与 schema 目录。settings schema 只包含 `workspaces` 和 `sessions`；内部支持 deny 的 `ctx.tools.restrict()` API 不会投影到用户配置。
 
@@ -24,11 +24,11 @@ tool-eligibility:
 
 #### 模型看到什么
 
-模型只接收 preset、匹配 Workspace 与匹配 Session [工具 schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tools) 的精确正向并集。Code Mode 保留的 `run_code` 传输仍是呈现基础设施；资格会过滤其生成 SDK 投影的末端工具。
+模型只接收 preset、匹配 Workspace 与匹配 Session [工具 schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tools) 的精确正向并集。PTC 模式 保留的 `run_code` 传输仍是呈现基础设施；资格会过滤其生成 SDK 投影的末端工具。
 
 #### Token 影响
 
-该服务不添加 prompt 文本。它会移除每个不具资格的末端工具 schema 及其每次请求重复的 token 成本；Code Mode 也会从生成 SDK 中省略这些 binding。
+该服务不添加 prompt 文本。它会移除每个不具资格的末端工具 schema 及其每次请求重复的 token 成本；PTC 模式 也会从生成 SDK 中省略这些 binding。
 
 #### KV Cache 影响
 

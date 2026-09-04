@@ -429,7 +429,7 @@ describe('Web session model selection', () => {
         version: 2, mode: 'continuable', provider: 'spawn', label: 'child',
         agentProvider: 'deepseek-official', agentModel: 'deepseek-chat',
       },
-    } as SessionEvent]
+    }]
     const append = vi.fn(async (_id: SessionId, batch: readonly SessionEvent[]) => {
       events.push(...batch)
     })

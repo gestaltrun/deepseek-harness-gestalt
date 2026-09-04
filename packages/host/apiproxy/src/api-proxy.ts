@@ -1486,7 +1486,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     }
     const found = await agentFor(sessionId)
     if ('error' in found) {
-      if (found.error.code !== 'agent-busy') throw found.error
+      if (found.error.code !== 'agent-busy') {
+        throw Object.assign(new Error(found.error.message), found.error)
+      }
       await persistChildModelSelection(sessionId, selected)
       return
     }
@@ -2943,7 +2945,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           }
           const live = ctx.agents.get(sessionId)
           if (live !== undefined) {
-            return serializeImageAdmission(live, async () => {
+            return await serializeImageAdmission(live, async () => {
               await applyModelSelection(sessionId, selected)
               try {
                 await defaults.saveDefaultModelSelection?.(selected)

@@ -31,7 +31,15 @@ const sid = (id: string) => id as SessionId
 function sessionsWith(sessions: SessionSummary[]) {
   const byId: Record<string, SessionSummary> = {}
   for (const s of sessions) byId[s.id] = s
-  const snapshot = { ids: sessions.map(s => s.id), byId, current: undefined } as unknown as SessionListState
+  const snapshot: SessionListState = {
+    ids: sessions.map(s => s.id),
+    byId,
+    current: undefined,
+    phase: 'ready',
+    subagentsByParent: {},
+    jobsBySession: {},
+    currentAddress: undefined,
+  }
   const actionCalls: { method: string; args: unknown[] }[] = []
   return {
     list: {

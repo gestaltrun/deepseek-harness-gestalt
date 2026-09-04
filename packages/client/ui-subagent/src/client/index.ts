@@ -64,7 +64,7 @@ export function apply(ctx: ClientContext): void {
   const openCatalogChild = (address: SubagentAddress): void => {
     const list = sessions.list.getSnapshot()
     const summary = list.byId[address.childSessionId]
-    const catalogLabel = list.subagentsByParent?.[address.parentSessionId]?.entries
+    const catalogLabel = list.subagentsByParent[address.parentSessionId]?.entries
       .find(entry => entry.kind === 'child' && entry.id === address.childSessionId)
     const label = summary?.displayTitle
       ?? (catalogLabel?.kind === 'child' ? catalogLabel.label : undefined)

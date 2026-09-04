@@ -315,22 +315,24 @@ describe('BrowserPageChrome', () => {
     await waitFor(() => { expect(screen.getByDisplayValue('https://alpha.test/path')).toBeTruthy() })
     const back = screen.getByRole('button', { name: '后退' })
     const forward = screen.getByRole('button', { name: '前进' })
-    expect((back as HTMLButtonElement).disabled).toBe(true)
-    expect((forward as HTMLButtonElement).disabled).toBe(true)
+    expect(back).toHaveProperty('disabled', true)
+    expect(forward).toHaveProperty('disabled', true)
 
     const beta = page({ revision: 5, url: 'https://beta.test/', title: 'Beta' })
     input.observe = vi.fn().mockResolvedValue(beta)
     input.refresh = vi.fn().mockResolvedValue(beta)
     rerender(<BrowserPageChrome {...input} listedRevision={5} />)
     await waitFor(() => { expect(screen.getByDisplayValue('https://beta.test/')).toBeTruthy() })
-    await waitFor(() => { expect((screen.getByRole('button', { name: '后退' }) as HTMLButtonElement).disabled).toBe(false) })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '后退' })).toHaveProperty('disabled', false)
+    })
 
     fireEvent.click(screen.getByRole('button', { name: '后退' }))
     await waitFor(() => {
       expect(input.refresh).toHaveBeenCalledWith(TARGET, 5, 'https://alpha.test/path')
     })
     await waitFor(() => {
-      expect((screen.getByRole('button', { name: '前进' }) as HTMLButtonElement).disabled).toBe(false)
+      expect(screen.getByRole('button', { name: '前进' })).toHaveProperty('disabled', false)
     })
 
     fireEvent.click(screen.getByRole('button', { name: '前进' }))
@@ -338,7 +340,7 @@ describe('BrowserPageChrome', () => {
       expect(input.refresh).toHaveBeenCalledWith(TARGET, 5, 'https://beta.test/')
     })
     await waitFor(() => {
-      expect((screen.getByRole('button', { name: '前进' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByRole('button', { name: '前进' })).toHaveProperty('disabled', true)
     })
   })
 
@@ -360,7 +362,7 @@ describe('BrowserPageChrome', () => {
     })
     render(<BrowserPageChrome {...props({ page: blank })} listedRevision={0} />)
     await waitFor(() => { expect(screen.getByDisplayValue('about:blank')).toBeTruthy() })
-    expect((screen.getByRole('button', { name: '在默认浏览器打开' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: '在默认浏览器打开' })).toHaveProperty('disabled', true)
   })
 
   it('does not navigate from the address bar before observe settles', () => {

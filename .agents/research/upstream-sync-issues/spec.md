@@ -43,12 +43,13 @@ Deliver one reviewed baseline that preserves Gestalt product behavior on the ups
 ## Delivery graph
 
 1. Foundation: repair workspace/package metadata, project references, Zod/projection interfaces, and dependency installation.
-2. Runtime engines: restore Gestalt tool eligibility/deferred discovery and combine deployment-preauthorized subagent routes with upstream authorization.
-3. Interaction and durable records: fuse Member Questions into the waterfall and upgrade Agent Teams v1 records.
-4. Remote migration: port Gestalt ApiProxy behavior to controllers/remotes and delete ApiProxy.
-5. Client/product migration: port Gestalt-only clients, restore explicit Session mounts and canonical Side Chat, switch Desktop persistence, and delete client-runtime.
-6. Better Sidebar refresh and mechanical convergence: refresh to 0.18.0, regenerate catalogs/lockfile, move or rerecord snapshots, and reconcile root documentation/instructions.
-7. Final acceptance: run repository checks and a real Electron matrix.
+2. Explicit Session binding prerequisite: restore controller-owned provisional publication, cold rendering, and stable binding identity without changing shell selection.
+3. Runtime engines: restore Gestalt tool eligibility/deferred discovery and combine deployment-preauthorized subagent routes with upstream authorization.
+4. Interaction and durable records: fuse Member Questions into the waterfall and upgrade Agent Teams v1 records.
+5. Remote migration: port Gestalt ApiProxy behavior to controllers/remotes and delete ApiProxy.
+6. Client/product migration: port Gestalt-only clients, restore explicit Session mounts and canonical Side Chat, switch Desktop persistence, and delete client-runtime.
+7. Better Sidebar refresh and mechanical convergence: refresh to 0.18.0, regenerate catalogs/lockfile, move or rerecord snapshots, and reconcile root documentation/instructions.
+8. Final acceptance: run repository checks and a real Electron matrix.
 
 ## Acceptance criteria
 

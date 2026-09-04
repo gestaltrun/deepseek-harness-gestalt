@@ -300,6 +300,37 @@ describe('provisional identity lifecycle', () => {
     expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
   })
 
+  it('keeps Host summary and binding when stage races a gated refresh that publishes the same id', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    const release = b.svc.stageProvisional(draft)
+    const binding = b.svc.binding(sid('draft'))
+    gate.resolve(ok({
+      items: [
+        { sessionId: sid('parent'), updatedAt: 1, running: false, blank: false },
+        {
+          sessionId: sid('draft'), updatedAt: 9, running: false, blank: false,
+          parentSessionId: sid('parent'), origin: 'subagent', cwd: '/host/draft',
+        },
+      ],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(b.svc.binding(sid('draft'))).toBe(binding)
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      id: 'draft', blank: false, cwd: '/host/draft', parentId: 'parent', origin: 'subagent',
+      displayTitle: 'draft',
+    })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ cwd: '/host/draft', blank: false })
+    b.svc.openForRender(sid('draft'))
+    await vi.waitFor(() => { expect(b.api.followStarts).toEqual([sid('draft')]) })
+  })
+
   it('does not replay a pre-publication release over a Host baseline that publishes the same id', async () => {
     const b = bench()
     await feedList(b, [{ id: 'parent' }])
@@ -312,18 +343,21 @@ describe('provisional identity lifecycle', () => {
       items: [
         { sessionId: sid('parent'), updatedAt: 1, running: false, blank: false },
         {
-          sessionId: sid('draft'), updatedAt: 2, running: false, blank: false,
-          parentSessionId: sid('parent'), origin: 'subagent',
+          sessionId: sid('draft'), updatedAt: 9, running: false, blank: false,
+          parentSessionId: sid('parent'), origin: 'subagent', cwd: '/host/draft',
         },
       ],
     }) as never)
     await refresh
     await Promise.resolve()
     expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
-      id: 'draft', blank: false,
+      id: 'draft', blank: false, cwd: '/host/draft', parentId: 'parent', origin: 'subagent',
+      displayTitle: 'draft',
     })
     expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
     expect(b.svc.binding(sid('draft'))).toBeDefined()
+    b.svc.openForRender(sid('draft'))
+    await vi.waitFor(() => { expect(b.api.followStarts).toEqual([sid('draft')]) })
   })
 
   it('does not let an in-flight Host baseline resurrect a still-unpublished released identity', async () => {

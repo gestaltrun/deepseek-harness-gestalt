@@ -444,11 +444,10 @@ export class TestSessions implements ISessions {
   }
 
   /**
-   * Compiler-face fallout of widening `ISessions`. Fixture benches do not own
-   * Host publication; they only insert a list row so `satisfies ISessions` and
-   * renderer-adjacent fakes compile. Production lifecycle stays on ClientSessions.
+   * Insert a renderer-only identity with the ordinary binding/scope contract.
+   * Fixture benches do not talk to a Host; `updateSummary` publishes the row.
    * @param descriptor - preallocated identity, parent lineage, and display title.
-   * @returns disposer that removes the unpublished row exactly once.
+   * @returns disposer that removes the unpublished row and scope exactly once.
    */
   stageProvisional(descriptor: {
     sessionId: SessionId
@@ -472,6 +471,19 @@ export class TestSessions implements ISessions {
       updatedAt: Date.now(),
       provisional: true,
     }
+    const snapshot = createSnapshotStore<SessionFixtureSnapshot>({
+      ...sessionSnapshot(id),
+      blank: true,
+    })
+    const session = new FixtureSession(id, snapshot, {})
+    this.records.set(id, {
+      summary,
+      snapshot,
+      session,
+      scope: undefined,
+      scopeFiber: undefined,
+      binding: undefined,
+    })
     this.list.update((draft) => {
       draft.ids = [id, ...draft.ids.filter(existing => existing !== id)]
       draft.byId[id] = summary
@@ -482,11 +494,14 @@ export class TestSessions implements ISessions {
       released = true
       const current = this.list.getSnapshot().byId[id]
       if (current?.provisional !== true) return
+      const record = this.records.get(id)
+      this.records.delete(id)
       this.list.update((draft) => {
         draft.ids = draft.ids.filter(existing => existing !== id)
         const { [id]: _dead, ...rest } = draft.byId
         draft.byId = rest
       })
+      if (record?.scopeFiber !== undefined) void record.scopeFiber.dispose()
     }
   }
 

@@ -176,13 +176,13 @@ test('routes policy requests to the repository from the workflow event', () => {
   )
 })
 
-test('rejects lifecycle when the configured Project owner differs from the event repository', () => {
-  assert.throws(
-    () => validateLifecycleDeployment({ GITHUB_REPOSITORY: 'gestaltrun/deepseek-harness-gestalt' }),
-    /deepseek-harness != gestaltrun/,
-  )
+test('accepts this tracker owner and rejects a different lifecycle Project owner', () => {
   assert.doesNotThrow(() =>
-    validateLifecycleDeployment({ GITHUB_REPOSITORY: 'deepseek-harness/deepseek-harness' }),
+    validateLifecycleDeployment({ GITHUB_REPOSITORY: 'gestaltrun/deepseek-harness-gestalt' }),
+  )
+  assert.throws(
+    () => validateLifecycleDeployment({ GITHUB_REPOSITORY: 'deepseek-harness/deepseek-harness' }),
+    /gestaltrun != deepseek-harness/,
   )
 })
 

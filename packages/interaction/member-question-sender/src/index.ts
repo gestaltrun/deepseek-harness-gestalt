@@ -388,12 +388,10 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         )),
       ))
     }, 'member-question-sender: publish pending withdrawals')
-    if (ctx.get('userQuestions') !== undefined) {
-      ctx.root.on('user-questions/request', (request, next) => {
-        if (request.memberRoute === undefined) return next()
-        return this.answerMemberQuestion(request, request.memberRoute)
-      }, { prepend: true })
-    }
+    ctx.on('user-questions/request', (request, next) => {
+      if (request.memberRoute === undefined) return next()
+      return this.answerMemberQuestion(request, request.memberRoute)
+    }, { global: true, prepend: true })
   }
 
   /** Claim one member-routed user-question request and preserve sender outcomes unchanged. */

@@ -10,6 +10,12 @@ import type {
   ProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
 
+/** Member-question origin with its Platform account identity retained. */
+export type AskUserQuestionMemberOrigin = Omit<CompanionMemberQuestionOrigin, 'askerAccountId'> & {
+  /** Branded Platform account reference of the asking member. */
+  readonly askerAccountId: PlatformAccountId
+}
+
 /** One selectable answer offered to the user. */
 export interface AskUserQuestionOption {
   /** User-facing label. */
@@ -129,9 +135,7 @@ export interface AskUserQuestionMemberRoute {
   /** Optional reference bytes aligned by index and path with `references`. */
   readonly documents?: readonly { readonly path: string; readonly bytes: Uint8Array }[]
   /** Authenticated public identity rendered with the Decision Brief. */
-  readonly origin: Omit<CompanionMemberQuestionOrigin, 'askerAccountId'> & {
-    readonly askerAccountId: PlatformAccountId
-  }
+  readonly origin: AskUserQuestionMemberOrigin
   /** Protocol-native Session identity that owns the routed ask. */
   readonly originSessionId: CompanionSessionId
 }

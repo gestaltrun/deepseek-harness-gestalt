@@ -14,11 +14,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import {
-  parseCompanionSessionId,
-  type CompanionMemberQuestionOrigin,
-  type ProjectId,
-} from '@deepseek-ai/dsh-remote-protocol'
+import { parseCompanionSessionId, type ProjectId } from '@deepseek-ai/dsh-remote-protocol'
+import type { AskUserQuestionMemberOrigin } from '@deepseek-ai/dsh-user-questions'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-user-questions'
@@ -68,9 +65,7 @@ export interface MemberQuestionRoute {
   /** Cloud Project whose current roster contains the addressee. */
   readonly projectId: ProjectId
   /** Authenticated Decision Brief origin from the same roster read. */
-  readonly origin: Omit<CompanionMemberQuestionOrigin, 'askerAccountId'> & {
-    readonly askerAccountId: PlatformAccountId
-  }
+  readonly origin: AskUserQuestionMemberOrigin
   /** Durable Account id matched from the live roster, never the model-supplied login. */
   readonly toProjectMember: PlatformAccountId
 }

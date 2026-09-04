@@ -173,6 +173,48 @@ describe('member-question sender', () => {
     expect(remoteAnswerer).not.toHaveBeenCalled()
   })
 
+  it('removes the global answerer when the Sender fiber is disposed', async () => {
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    const delivery = new MemoryMemberQuestionDelivery()
+    const fallback = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['fallback'] }] }))
+    ctx.on('user-questions/request', fallback)
+    const fiber = await ctx.plugin(Sender, { delivery })
+
+    await fiber.dispose()
+
+    await expect(ctx.userQuestions.ask({
+      questions: [{ id: 'q-1', question: 'Which rollback window?' }],
+      memberRoute: memberRoute(),
+    })).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['fallback'] }] })
+    expect(fallback).toHaveBeenCalledOnce()
+    expect(delivery.delivered).toEqual([])
+  })
+
+  it('answers after UserQuestionService mounts when Sender registered first', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    await ctx.plugin(UserQuestionService)
+    const fallback = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['fallback'] }] }))
+    ctx.on('user-questions/request', fallback)
+
+    const answer = ctx.userQuestions.ask({
+      questions: [{ id: 'q-1', question: 'Which rollback window?' }],
+      memberRoute: memberRoute(),
+    })
+    await Promise.resolve()
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      answeredSettlement([{ id: 'q-1', selected: ['24 hours'] }]),
+    )
+
+    await expect(answer).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['24 hours'] }] })
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
   it('preserves the sender stable error through the user-questions waterfall', async () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)

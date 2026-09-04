@@ -254,6 +254,7 @@ function bridge(): DesktopBridge {
     accountGetSnapshot: vi.fn().mockResolvedValue({ status: 'unavailable', privacyAccepted: false }),
     accountAcceptPrivacy: vi.fn(),
     accountBeginLogin: vi.fn(),
+    accountCancelLogin: vi.fn(),
     accountSignOut: vi.fn(),
     onAccountSnapshot: () => () => {},
     pairingGetSnapshot: vi.fn(),

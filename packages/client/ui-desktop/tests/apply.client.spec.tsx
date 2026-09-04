@@ -85,6 +85,7 @@ describe('ui-desktop apply', () => {
       accountGetSnapshot: vi.fn().mockResolvedValue({ status: 'unavailable', privacyAccepted: false }),
       accountAcceptPrivacy: vi.fn(),
       accountBeginLogin: vi.fn(),
+      accountCancelLogin: vi.fn(),
       accountSignOut: vi.fn(),
       onAccountSnapshot: vi.fn(() => () => {}),
       pairingGetSnapshot: vi.fn().mockResolvedValue({ status: 'unavailable', enabled: false, pairings: [] }),

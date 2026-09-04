@@ -157,7 +157,22 @@ describe('AccountControl', () => {
       cleanup()
       renderControl({ status, privacyAccepted: true })
       expect(screen.getByText('Finish GitHub sign-in in your system browser')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel sign-in' }))
+      expect(desktop.accountCancelLogin).toHaveBeenCalledTimes(
+        status === 'polling' ? 1 : 2,
+      )
     }
+
+    cleanup()
+    renderControl({ status: 'idle', privacyAccepted: true })
+    expect(screen.queryByRole('button', { name: 'Cancel sign-in' })).toBeNull()
+
+    cleanup()
+    renderControl({
+      status: 'signed-in', privacyAccepted: true,
+      account: { id: 'account-1', githubId: 1, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat' },
+    })
+    expect(screen.queryByRole('button', { name: 'Cancel sign-in' })).toBeNull()
 
     cleanup()
     renderControl({ status: 'failed', privacyAccepted: true, error: 'login failed' })
@@ -202,6 +217,7 @@ function bridge(snapshot: DesktopAccountSnapshot): DesktopBridge {
     accountGetSnapshot: vi.fn().mockResolvedValue(snapshot),
     accountAcceptPrivacy: vi.fn().mockResolvedValue({ ...snapshot, privacyAccepted: true }),
     accountBeginLogin: vi.fn().mockResolvedValue({ status: 'polling', privacyAccepted: true }),
+    accountCancelLogin: vi.fn().mockResolvedValue({ status: 'idle', privacyAccepted: true }),
     accountSignOut: vi.fn().mockResolvedValue({ status: 'idle', privacyAccepted: true }),
     onAccountSnapshot: () => () => {},
     pairingGetSnapshot: vi.fn(),

@@ -28,6 +28,7 @@ function bridge(platform: NodeJS.Platform): DesktopBridge {
     accountGetSnapshot: vi.fn().mockResolvedValue({ status: 'unavailable', privacyAccepted: false }),
     accountAcceptPrivacy: vi.fn(),
     accountBeginLogin: vi.fn(),
+    accountCancelLogin: vi.fn(),
     accountSignOut: vi.fn(),
     onAccountSnapshot: () => () => {},
     pairingGetSnapshot: vi.fn(), pairingSetEnabled: vi.fn(), pairingCreateChallenge: vi.fn(),

@@ -29,6 +29,7 @@ const DIALOG_EN_EXPECTED = join(SNAPSHOT_DIR, 'dialog-en.expected.md')
 // The Desktop composition's overlay-document surface: the same page the Host
 // overlay view paints above official pages.
 const DESKTOP_SETTINGS_EXPECTED = join(SNAPSHOT_DIR, 'desktop-settings.expected.md')
+const DESKTOP_ACCOUNT_WAITING_EXPECTED = join(SNAPSHOT_DIR, 'desktop-account-waiting.expected.md')
 const SUB2API_ERROR_EXPECTED = join(SNAPSHOT_DIR, 'sub2api-error.expected.md')
 const PHONE_DEVICES_EXPECTED = join(SNAPSHOT_DIR, 'phone-devices.expected.md')
 const PLUGIN_ROW_SELECTOR = '[data-plugin-entry$="ui-settings"]'
@@ -598,6 +599,13 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
       const state = { kind: 'settings', requestId: 'overlay-e2e', sectionId: 'general' }
       const results: unknown[] = []
       const stateListeners = new Set<(value: unknown) => void>()
+      // The shared fixture stays unavailable; this overlay paints the waiting panel.
+      const authorizing = { status: 'authorizing', privacyAccepted: true }
+      bridge.accountGetSnapshot = async () => authorizing
+      bridge.onAccountSnapshot = (listener: (value: unknown) => void) => {
+        listener(authorizing)
+        return () => {}
+      }
       bridge.chromeOverlayGetState = async () => state
       bridge.chromeOverlayResult = (result: unknown) => { results.push(result) }
       bridge.onChromeOverlayState = (listener: (value: unknown) => void) => {
@@ -643,6 +651,15 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
     expect(await dialog.getByRole('button', { name: '通用设置' }).getAttribute('aria-current')).toBe('true')
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(DESKTOP_SETTINGS_EXPECTED, snapshot, MODE)
+    await dialog.getByRole('button', { name: '手机配对' }).click()
+    const waiting = dialog.locator('[data-desktop-account-control="authorizing"]')
+    await expect.poll(() => waiting.count(), { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => waiting.getByRole('button', { name: '取消登录' }).count()).toBe(1)
+    await compareOrRefreshGolden(
+      DESKTOP_ACCOUNT_WAITING_EXPECTED,
+      await captureStableAria(page, '[data-desktop-account-control="authorizing"]', scaffold.workspaceCwd),
+      MODE,
+    )
     // The Sub2API offer card is a render-only projection of the fixture
     // bridge's missing snapshot: the offer copy plus the enable affordance,
     // with the data-directory and uninstall semantics spelled out.
@@ -675,6 +692,7 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
+      'desktop-account-waiting.expected.md',
       'desktop-settings.expected.md', 'dialog-en.expected.md', 'dialog.expected.md',
       'phone-devices.expected.md', 'plugins.expected.md', 'sub2api-error.expected.md',
     ])

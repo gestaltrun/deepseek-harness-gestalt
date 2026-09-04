@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "554-desktop-cancel-github-login",
+  "summary": {
+    "en": "Allow cancelling Desktop GitHub login while authorizing or polling.",
+    "zh": "Desktop GitHub 登录在授权或轮询期间可以取消。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": []
+}

@@ -128,4 +128,37 @@ describe('packaged Desktop main bundle', () => {
       },
     })
   })
+
+  it('writes Sub2API sources for the packaged os/arch and omits them otherwise', () => {
+    const fixture = join(desktop, 'tests', 'fixtures', 'operated-platform.json')
+    const artifact = join(desktop, 'out', 'sub2api-sources.json')
+    execFileSync(process.execPath, [
+      join(desktop, 'scripts', 'build-main.mjs'),
+      '--',
+      '--platform', 'darwin',
+      '--arch', 'arm64',
+    ], {
+      cwd: desktop,
+      env: { ...process.env, DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: fixture },
+      stdio: 'pipe',
+    })
+    expect(JSON.parse(readFileSync(artifact, 'utf8'))).toEqual({
+      bundleUrl: 'https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/dsh-sub2api-sidecar-0.1.25.tgz',
+      bundleSha256SumsUrl:
+        'https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/bundle-sha256sums.txt',
+      runtimePackUrl:
+        'https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/runtime-pack-0.1.183-dsh.445.13-darwin-arm64.tar.gz',
+      runtimePackSha256SumsUrl:
+        'https://github.com/gestaltrun/dsh-sub2api-sidecar/releases/download/v0.1.25/runtime-pack-sha256sums.txt',
+    })
+
+    execFileSync(process.execPath, [
+      join(desktop, 'scripts', 'build-main.mjs'),
+      fixture,
+      '--',
+      '--platform', 'win32',
+      '--arch', 'x64',
+    ], { cwd: desktop, stdio: 'pipe' })
+    expect(existsSync(artifact)).toBe(false)
+  })
 })

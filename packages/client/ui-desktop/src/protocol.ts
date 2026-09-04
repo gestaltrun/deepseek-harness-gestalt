@@ -33,6 +33,8 @@ export const ACCOUNT_GET_SNAPSHOT = 'account:getSnapshot'
 export const ACCOUNT_ACCEPT_PRIVACY = 'account:acceptPrivacy'
 /** IPC / preload channel starting GitHub authorization in the system browser. */
 export const ACCOUNT_BEGIN_LOGIN = 'account:beginLogin'
+/** IPC / preload channel cancelling an in-flight GitHub authorization. */
+export const ACCOUNT_CANCEL_LOGIN = 'account:cancelLogin'
 /** IPC / preload channel revoking the current installation Account Session. */
 export const ACCOUNT_SIGN_OUT = 'account:signOut'
 /** IPC event pushed for every current-installation Account transition. */
@@ -294,6 +296,11 @@ export interface DesktopBridge {
   readonly accountAcceptPrivacy: () => Promise<DesktopAccountSnapshot>
   /** Start GitHub authorization in the operating system browser. */
   readonly accountBeginLogin: () => Promise<DesktopAccountSnapshot>
+  /**
+   * Cancel GitHub authorization while the Host is authorizing or polling.
+   * Idle, signed-in, signing-out, failed, and unavailable snapshots are unchanged.
+   */
+  readonly accountCancelLogin: () => Promise<DesktopAccountSnapshot>
   /** Revoke only this installation's Account Session. */
   readonly accountSignOut: () => Promise<DesktopAccountSnapshot>
   /** Subscribe to current-installation Account transitions. */

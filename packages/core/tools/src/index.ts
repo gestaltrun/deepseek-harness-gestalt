@@ -7,6 +7,9 @@
 import { isProxy } from 'node:util/types'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import Ajv from 'ajv'
+import Ajv2020 from 'ajv/dist/2020.js'
+import MiniSearch from 'minisearch'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
@@ -58,6 +61,8 @@ export const TOOL_SEARCH_NAME = 'tool_search'
 const DRAFT_7_SCHEMA_ID = 'http://json-schema.org/draft-07/schema#'
 const DRAFT_2020_SCHEMA_ID = 'https://json-schema.org/draft/2020-12/schema'
 const RESTORED_DISCOVERY_CALL_ID = brandString<ToolCallId>('tool-search-restored')
+const DRAFT_7_SCHEMA_VALIDATOR = new Ajv({ strict: false, allErrors: true })
+const DRAFT_2020_SCHEMA_VALIDATOR = new Ajv2020({ strict: false, allErrors: true })
 
 interface ResolvedToolSearchConfig {
   readonly defaultLimit: number
@@ -84,43 +89,40 @@ function resolveToolSearchArguments(value: unknown, config: ResolvedToolSearchCo
   return { query, limit: typeof limit === 'number' ? limit : config.defaultLimit }
 }
 
-const JSON_SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'])
-
-/** Validate a complete deferred parameter schema without restricting it to the Harness output subset. */
+/** Validate a complete deferred parameter schema using its declared dialect. */
 function assertDeferredParameterSchema(value: unknown, subject: string): asserts value is Record<string, unknown> {
   if (!isPlainJsonRecord(value) || value.type !== 'object') {
     throw new Error(`${subject}.parameters must be an object-rooted JSON schema`)
   }
   const dialect = value.$schema
-  const supportedDialect = dialect === undefined
-    || dialect === DRAFT_7_SCHEMA_ID
-    || dialect === 'http://json-schema.org/draft-07/schema'
+  let validator: Ajv | Ajv2020
+  let schema = value
+  if (dialect === undefined || dialect === DRAFT_7_SCHEMA_ID) {
+    validator = DRAFT_7_SCHEMA_VALIDATOR
+  } else if (dialect === 'http://json-schema.org/draft-07/schema'
     || dialect === 'https://json-schema.org/draft-07/schema'
-    || dialect === 'https://json-schema.org/draft-07/schema#'
-    || dialect === DRAFT_2020_SCHEMA_ID
-    || dialect === `${DRAFT_2020_SCHEMA_ID}#`
-  if (!supportedDialect) {
+    || dialect === 'https://json-schema.org/draft-07/schema#') {
+    validator = DRAFT_7_SCHEMA_VALIDATOR
+    schema = { ...schema, $schema: DRAFT_7_SCHEMA_ID }
+  } else if (dialect === DRAFT_2020_SCHEMA_ID) {
+    validator = DRAFT_2020_SCHEMA_VALIDATOR
+  } else if (dialect === `${DRAFT_2020_SCHEMA_ID}#`) {
+    validator = DRAFT_2020_SCHEMA_VALIDATOR
+    schema = { ...schema, $schema: DRAFT_2020_SCHEMA_ID }
+  } else {
     throw new Error(`${subject}.parameters uses unsupported JSON schema dialect ${JSON.stringify(dialect)}`)
   }
-  const pending: unknown[] = [value]
-  const seen = new Set<object>()
-  while (pending.length > 0) {
-    const current = pending.pop()
-    if (current === null || typeof current !== 'object') continue
-    if (seen.has(current)) throw new Error(`${subject}.parameters must be a valid JSON schema: cyclic value`)
-    seen.add(current)
-    if (Array.isArray(current)) {
-      for (const item of current) pending.push(item)
-      continue
-    }
-    if (!isPlainJsonRecord(current)) throw new Error(`${subject}.parameters must be a valid JSON schema`)
-    if (Object.hasOwn(current, 'type')) {
-      const type = current.type
-      if (typeof type !== 'string' || !JSON_SCHEMA_TYPES.has(type)) {
-        throw new Error(`${subject}.parameters must be a valid JSON schema: type must be equal to one of the allowed values`)
-      }
-    }
-    for (const nested of Object.values(current)) pending.push(nested)
+  let valid: boolean | Promise<unknown>
+  try {
+    valid = validator.validateSchema(schema)
+  } catch (error: unknown) {
+    throw new Error(`${subject}.parameters must be a valid JSON schema`, { cause: error })
+  }
+  if (typeof valid !== 'boolean') {
+    throw new Error(`${subject}.parameters must not require asynchronous schema validation`)
+  }
+  if (!valid) {
+    throw new Error(`${subject}.parameters must be a valid JSON schema: ${validator.errorsText()}`)
   }
 }
 
@@ -356,7 +358,11 @@ export interface ToolOutputDefinition {
 
 /** A registered tool: its schema plus the execution function. */
 export interface ToolDefinition extends ToolSchema {
-  /** Omit this schema from initial requests and expose it through `tool_search`. */
+  /**
+   * Omit this schema from the initial model request and expose it through
+   * `tool_search`. The definition remains registered and executable; current
+   * scope eligibility still governs both discovery and dispatch.
+   */
   readonly deferLoading?: boolean
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
@@ -789,7 +795,7 @@ function errorInfo(error: unknown): ToolErrorInfo | undefined {
 }
 
 /** How the registry presents its tools to the model (see {@link Config.mode}). */
-export type ToolPresentationMode = 'native' | 'ptc' | 'code' | 'both'
+export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 
 /** Plugin config: how the registered tools are presented to the model. */
 export interface Config {
@@ -980,7 +986,7 @@ export class ToolRuntime extends Service {
   static inject = ['systemPrompt']
 
   static Config: z<Config> = z.object({
-    mode: z.union(['native', 'ptc', 'code', 'both'] as const).default('native'),
+    mode: z.union(['native', 'ptc', 'both'] as const).default('native'),
     maxParallelSubCalls: z.natural().min(1).default(10),
     toolSearch: z.union([
       z.const(false),
@@ -1172,25 +1178,30 @@ export class ToolRuntime extends Service {
       },
       execute: (args, exec) => {
         const { query, limit } = resolveToolSearchArguments(args, config)
-        const words = query.toLocaleLowerCase().trim().split(/\s+/u)
         const definitions = [...this.view(exec.agent).visible.values()]
           .filter(definition => definition.deferLoading === true)
-        const ranked = definitions.map((definition, index) => {
-          const name = definition.name.toLocaleLowerCase()
-          const description = definition.description.toLocaleLowerCase()
-          let score = 0
-          for (const word of words) {
-            if (name.includes(word)) score += 2
-            if (description.includes(word)) score += 1
-          }
-          return { definition, index, score }
-        }).filter(candidate => candidate.score >= words.length)
-          .sort((left, right) => right.score - left.score || left.index - right.index)
-          .slice(0, limit)
-        const schemas = ranked.map(({ definition }) => parseDeferredToolSchema(
-          this.schemaOf(definition, true),
-          `tool_search result schema for "${definition.name}"`,
-        ))
+        const byName = new Map(definitions.map(definition => [definition.name, definition]))
+        const search = new MiniSearch<{ id: string; name: string; description: string }>({
+          fields: ['name', 'description'],
+          idField: 'id',
+        })
+        search.addAll(definitions.map(definition => ({
+          id: definition.name,
+          name: definition.name,
+          description: definition.description,
+        })))
+        const schemas = search.search(query, {
+          boost: { name: 2 },
+          combineWith: 'AND',
+          prefix: true,
+        }).slice(0, limit).flatMap((result) => {
+          const definition = byName.get(String(result.id))
+          if (definition === undefined) throw new Error(`tool_search returned unknown indexed tool "${String(result.id)}"`)
+          return [parseDeferredToolSchema(
+            this.schemaOf(definition, true),
+            `tool_search result schema for "${definition.name}"`,
+          )]
+        })
         assertDeferredResultWithinBudget(exec.callId, renderedDeferredSchemas(schemas), schemas, config)
         this.loadedTools.set(exec, schemas)
         return Promise.resolve(schemas)
@@ -1263,7 +1274,7 @@ export class ToolRuntime extends Service {
     const schemas = [...view.visible.values()]
       .filter(definition => definition.deferLoading !== true)
       .map(definition => this.schemaOf(definition, false))
-    if (mode === 'ptc' || mode === 'code') {
+    if (mode === 'ptc') {
       return {
         schemas: schemas.filter(schema => schema.name === RUN_CODE_NAME),
         knownNames: [RUN_CODE_NAME],
@@ -1358,7 +1369,7 @@ export class ToolRuntime extends Service {
       && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`)
     }
-    // Reserved unconditionally: any agent may select a code mode for itself,
+    // Reserved unconditionally: any agent may select PTC mode for itself,
     // so a name free to take under the deployment default would become a
     // collision the moment a preset mounted.
     if (name === RUN_CODE_NAME) {
@@ -1587,13 +1598,6 @@ export class ToolRuntime extends Service {
     return view.eligibility !== undefined && view.knownNames.has(name) && !view.eligibility.has(name)
   }
 
-  /** Whether a deferred definition lacks durable discovery for the calling Agent. */
-  private discoveryDenies(view: ToolView, name: string, agent: Agent | undefined): boolean {
-    const definition = view.visible.get(name)
-    if (definition?.deferLoading !== true) return false
-    return !this.loadedSchemas(agent, view).some(schema => schema.name === name)
-  }
-
   /**
    * Look up a tool as one scope sees it (scoped
    * shadows global; a restricted-away global reads as absent). Presenters pass
@@ -1809,7 +1813,6 @@ export class ToolRuntime extends Service {
     const initialView = this.view(agent)
     const visible = initialView.visible.get(name)
     const eligibilityDenied = this.eligibilityDenies(initialView, name)
-    const discoveryDenied = parent === undefined && this.discoveryDenies(initialView, name, agent)
     const collapsed = visible !== undefined && this.collapses(name, agent, parent !== undefined)
     const concludingExecutions = this.concludingExecutions
     const base = {
@@ -1852,7 +1855,7 @@ export class ToolRuntime extends Service {
         callerSignal: signal,
         bodyInvoked: false,
       })
-      if (eligibilityDenied || discoveryDenied || collapsed) {
+      if (eligibilityDenied || collapsed) {
         // The collapse denies the call before the policy pipeline, but a
         // pre-dispatch abort still keeps the established cancellation
         // contract: `prepare`'s caller-cancellation check is skipped for
@@ -1861,7 +1864,7 @@ export class ToolRuntime extends Service {
         if (signal.aborted) {
           return { kind: 'final-result', exec: execution, result: toolAbortedBeforeDispatchResult() }
         }
-        if (eligibilityDenied || discoveryDenied) {
+        if (eligibilityDenied) {
           this.contentFinalizers.delete(execution)
           return { kind: 'final-result', exec: execution, result: toolErrorResult(new ToolNotFoundError(name)) }
         }
@@ -2005,8 +2008,7 @@ export class ToolRuntime extends Service {
   private async dispatchScheduledExecution(exec: ToolRunContext): Promise<ScheduledToolDispatch> {
     try {
       const view = this.view(exec.agent)
-      if (this.eligibilityDenies(view, exec.name)
-        || (exec.parent === undefined && this.discoveryDenies(view, exec.name, exec.agent))) {
+      if (this.eligibilityDenies(view, exec.name)) {
         this.contentFinalizers.delete(exec)
         return { kind: 'final-result', result: toolErrorResult(new ToolNotFoundError(exec.name)) }
       }

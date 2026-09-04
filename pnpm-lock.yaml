@@ -5409,6 +5409,12 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
+      minisearch:
+        specifier: ^7.2.0
+        version: 7.2.0
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

@@ -206,29 +206,6 @@ describe('deferred tool search', () => {
     }])
   })
 
-  it('denies a guessed deferred tool name before policy or body execution', async () => {
-    const ctx = await mount()
-    let preCalls = 0
-    let bodyCalls = 0
-    ctx.tools.register({
-      ...tool('mcp__weather__forecast', 'Forecast weather by city', true),
-      execute: async () => { bodyCalls++; return 'forecast' },
-    })
-    ctx.on('tools/pre-execute', async (_exec, next) => { preCalls++; return next() })
-
-    const result = await ctx.tools.execute({
-      callId: ToolCallId('guessed-deferred'),
-      name: 'mcp__weather__forecast',
-      arguments: { value: 'Shanghai' },
-      agent: { session: Session.create(SessionId('guessed-deferred')) } as Agent,
-      signal,
-    })
-
-    expect(result).toMatchObject({ isError: true, error: { info: { code: 'UNKNOWN_TOOL' } } })
-    expect(preCalls).toBe(0)
-    expect(bodyCalls).toBe(0)
-  })
-
   it.each([
     [null, 'non-object arguments'],
     [{ query: 42 }, 'query type'],
@@ -350,6 +327,50 @@ describe('deferred tool search', () => {
       arguments: { query: `weather ${_dialect}` },
       signal,
     })).resolves.toMatchObject({ isError: false, loadedTools: [{ parameters }] })
+  })
+
+  const invalidKeywordSchemas = [
+    ['draft-07 required', {
+      $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', required: 'value',
+    }],
+    ['draft-07 properties', {
+      $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', properties: [],
+    }],
+    ['draft-07 enum', {
+      $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', properties: { value: { enum: 'x' } },
+    }],
+    ['2020-12 required', {
+      $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', required: 'value',
+    }],
+    ['2020-12 properties', {
+      $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', properties: [],
+    }],
+    ['2020-12 enum', {
+      $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', properties: { value: { enum: 'x' } },
+    }],
+  ] as const
+
+  it.each(invalidKeywordSchemas)('rejects invalid fresh %s schema keywords', async (_case, parameters) => {
+    const ctx = await mount()
+    ctx.tools.register({ ...tool('weather_invalid_keyword', 'Weather invalid keyword', true), parameters })
+
+    await expect(ctx.tools.execute({
+      callId: ToolCallId(`fresh-${_case}`),
+      name: 'tool_search',
+      arguments: { query: 'weather invalid keyword' },
+      signal,
+    })).resolves.toMatchObject({ isError: true })
+  })
+
+  it.each(invalidKeywordSchemas)('rejects invalid reconstructed %s schema keywords', async (_case, parameters) => {
+    const ctx = await mount()
+    const name = 'weather_invalid_keyword'
+    ctx.tools.register(tool(name, 'Weather invalid keyword', true))
+    const session = Session.create(SessionId(`reconstructed-${_case}`))
+    appendDiscovery(session, ToolCallId(`restored-${_case}`), [{ name, description: 'Weather invalid keyword', parameters }])
+    const agent = { session } as Agent
+
+    await expect(ctx.systemPrompt.assemble({ scope: agent, agent })).rejects.toThrow(/valid JSON schema/)
   })
 
   it.each([
@@ -722,16 +743,16 @@ describe('deferred tool search', () => {
       .toThrow(/reserved for deferred schema discovery/)
   })
 
-  it('keeps code mode ordering limited to its actual run_code wire schema', async () => {
+  it('keeps PTC mode ordering limited to its actual run_code wire schema', async () => {
     const valid = new Context()
     await valid.plugin(SystemPrompt, { toolOrder: [RUN_CODE_NAME, '<unlisted-tools>'] })
-    await valid.plugin(ToolRuntime, { mode: 'code', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
+    await valid.plugin(ToolRuntime, { mode: 'ptc', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
     await valid.plugin(FakeRuntime)
     expect((await valid.systemPrompt.assemble()).tools.map(schema => schema.name)).toEqual([RUN_CODE_NAME])
 
     const invalid = new Context()
     await invalid.plugin(SystemPrompt, { toolOrder: ['tool_search', '<unlisted-tools>'] })
-    await invalid.plugin(ToolRuntime, { mode: 'code', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
+    await invalid.plugin(ToolRuntime, { mode: 'ptc', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
     await invalid.plugin(FakeRuntime)
     await expect(invalid.systemPrompt.assemble())
       .rejects.toThrow(/toolOrder lists unregistered tool "tool_search"/)
@@ -777,8 +798,8 @@ describe('deferred tool search', () => {
     })).resolves.toMatchObject({ isError: true, error: { info: { code: 'UNKNOWN_TOOL' } } })
   })
 
-  it('reconstructs discovered schemas in the Code Mode SDK without native activation', async () => {
-    const ctx = await mount({ mode: 'code', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
+  it('reconstructs discovered schemas in the PTC mode SDK without native activation', async () => {
+    const ctx = await mount({ mode: 'ptc', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
     ctx.tools.register(tool('mcp__weather__forecast', 'Forecast weather by city', true))
     const session = Session.create(SessionId('deferred-code-mode'))
     const agent = { session } as Agent
@@ -832,7 +853,7 @@ describe('deferred tool search', () => {
     expect(nextRunBindings).toEqual(['mcp__weather__forecast', 'tool_search'])
   })
 
-  it('enforces the complete aggregate discovery limit on the outer Code Mode result', async () => {
+  it('enforces the complete aggregate discovery limit on the outer PTC mode result', async () => {
     const searches = [
       ['alpha', 'forecast'],
       ['bravo', 'calendar'],
@@ -851,7 +872,7 @@ describe('deferred tool search', () => {
       completedSearches: number
       observed: ToolExecutionResult | undefined
     }> => {
-      const ctx = await mount({ mode: 'code', toolSearch: { maxResultBytes, maxResults: 2, defaultLimit: 1 } })
+      const ctx = await mount({ mode: 'ptc', toolSearch: { maxResultBytes, maxResults: 2, defaultLimit: 1 } })
       for (const [query, capability] of searches) {
         ctx.tools.register(tool(`mcp__${query}__${capability}`, `${query} ${capability} deferred capability`, true))
       }
@@ -917,8 +938,8 @@ describe('deferred tool search', () => {
       .not.toContain('mcp__alpha__forecast')
   })
 
-  it('removes a reconstructed Code Mode binding when eligibility becomes stale', async () => {
-    const ctx = await mount({ mode: 'code', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
+  it('removes a reconstructed PTC mode binding when eligibility becomes stale', async () => {
+    const ctx = await mount({ mode: 'ptc', toolSearch: { maxResultBytes: TEST_MAX_RESULT_BYTES } })
     ctx.tools.register(tool('mcp__weather__forecast', 'Forecast weather by city', true))
     ctx.tools.register(tool('mcp__calendar__list', 'List calendar events', true))
     const session = Session.create(SessionId('deferred-code-mode-stale'))

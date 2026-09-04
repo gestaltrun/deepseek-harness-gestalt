@@ -14,7 +14,7 @@ Status: implemented
 
 agent loop 会把匹配 schema 存到持久 `tool-result` 块。每次提示词组装都会把这些恢复结果当作文件输入，并从 `Session.deriveMessages()` 读取。它会在检查 record 前拒绝 Proxy 候选项，只安全提取每个候选项自有、可枚举的字符串 `name`，丢弃不存在于当前合资格 deferred 视图的名称，并在不读取嵌套 schema 数据的情况下对其余原始候选项去重。进入规范序列化前，保留候选项必须是不含 accessor 的 lossless JSON；该检查会在不调用 trap 或 getter 的情况下拒绝嵌套 Proxy 与 accessor。随后，组装把原始合资格集合序列化为一个规范重建发现块，应用当前字节预算，再在投影前完整校验每个保留的 `ToolSchema`。无效或超限的当前 schema 会使组装失败，而不会抵达模型；格式错误、使用不支持 dialect 或体积巨大的过期项无法污染组装或消耗发现预算。因此下一次请求携带搜索实际返回的精确 schema；工具移除或更窄的 allow-only 贡献会阻止旧历史恢复或分发它。`request/header` 继续记录完整的已组装请求工具，使回放只有一份权威请求快照。
 
-`schemas()` 表示初始模型请求，会省略 deferred 定义。`catalogSchemas()` 表示 Host 与检查接口使用的当前完整合资格末端工具目录。MCP 实例通过 `deferLoading` 按服务器选择加入；发现期间，其完整实时世代始终保持注册；如果 `toolSearch` 已禁用，客户端会在连接前拒绝该配置。Code Mode 会把嵌套 `tool_search` 子分发得到的 schema 带到外层 `run_code` 结果。同一个由 package 持有的预算函数会度量每次直接搜索、最终合并后的外层结果，以及重建出的合资格集合。聚合超限会在通知或记录日志前成为外层规范失败，并且不能保留部分 `loadedTools`。
+`schemas()` 表示初始模型请求，会省略 deferred 定义。`catalogSchemas()` 表示 Host 与检查接口使用的当前完整合资格末端工具目录。MCP 实例通过 `deferLoading` 按服务器选择加入；发现期间，其完整实时世代始终保持注册；如果 `toolSearch` 已禁用，客户端会在连接前拒绝该配置。PTC 模式会把嵌套 `tool_search` 子分发得到的 schema 带到外层 `run_code` 结果。同一个由 package 持有的预算函数会度量每次直接搜索、最终合并后的外层结果，以及重建出的合资格集合。聚合超限会在通知或记录日志前成为外层规范失败，并且不能保留部分 `loadedTools`。
 
 发现元数据只描述最终提交给模型可见的成功结果。post-execute 或 around-execute 替换、阻止、错误，以及定义自有的内容替换，都会清除该执行的候选 `loadedTools`；策略结果不能保留来自更早主体结果、且其值或内容已被替换的 schema。
 
@@ -22,7 +22,7 @@ provider-neutral 适配器收到普通 `tool_search` 调用、其 JSON schema �
 
 ## 验证
 
-注册表测试证明模型输入与恢复文件校验、draft-07 与 JSON Schema 2020-12 兼容性、直接结果／Code Mode 组合结果／重建结果上的配置数量与字节上限、初始省略、合资格目录保留、精确 schema 结果、最终结果元数据、持久的下一次请求与恢复重建、Code Mode binding 执行、不同模式下的提示词排序、保留名称冲突拒绝，以及 allow-only 资格变化后先过滤再计算恢复结果预算。MCP 生命周期测试证明按服务器延迟加载和发现配置错误会明确失败。pi-ai 测试证明 provider-neutral 元数据转换与原生 OpenAI Responses 请求载荷。无密钥 headless 快照把确定性回放与 MCP 覆盖应用到随仓交付的 headless profile，发现并调用官方 MCP 服务器的 deferred `echo` 工具，持久化规范 JSONL，释放 Loader 树，再重新加载同一 Session 并验证重建后的请求 header。一项负向组合检查会移除随仓交付的 `toolSearch` patch，并要求同一场景失败。
+注册表测试证明模型输入与恢复文件校验、draft-07 与 JSON Schema 2020-12 兼容性、直接结果／PTC 模式组合结果／重建结果上的配置数量与字节上限、初始省略、合资格目录保留、精确 schema 结果、最终结果元数据、持久的下一次请求与恢复重建、PTC 模式 binding 执行、不同模式下的提示词排序、保留名称冲突拒绝，以及 allow-only 资格变化后先过滤再计算恢复结果预算。MCP 生命周期测试证明按服务器延迟加载和发现配置错误会明确失败。pi-ai 测试证明 provider-neutral 元数据转换与原生 OpenAI Responses 请求载荷。无密钥 headless 快照把确定性回放与 MCP 覆盖应用到随仓交付的 headless profile，发现并调用官方 MCP 服务器的 deferred `echo` 工具，持久化规范 JSONL，释放 Loader 树，再重新加载同一 Session 并验证重建后的请求 header。一项负向组合检查会移除随仓交付的 `toolSearch` patch，并要求同一场景失败。
 
 ## 曾考虑的替代方案
 

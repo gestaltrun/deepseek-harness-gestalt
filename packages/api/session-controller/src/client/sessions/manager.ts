@@ -522,6 +522,11 @@ export class SessionManager {
             ...provisional,
             ...hostBaseline.filter(summary => !this.provisionalSummaries.has(summary.sessionId)),
           ]
+          const publishedIds = new Set(result.value.items.map(summary => summary.sessionId))
+          // A provisional remove recorded before this response must not delete a
+          // Host row that published the same id; Host items are the publication.
+          const replay = mutations.filter(mutation =>
+            mutation.kind !== 'remove' || !publishedIds.has(mutation.sessionId))
           // Seed first observations from the pull-time baseline BEFORE replaying
           // in-flight mutations, then reconcile the reminders after EVERY
           // replayed mutation: an edge that happens entirely between mutations
@@ -531,7 +536,7 @@ export class SessionManager {
             if (!this.prevRunning.has(s.sessionId)) this.prevRunning.set(s.sessionId, s.running)
           }
           let summaries = baseline
-          for (const mutation of mutations) {
+          for (const mutation of replay) {
             summaries = applyMutation(summaries, mutation)
             this.summaries = summaries
             this.syncCompletedNotifications()

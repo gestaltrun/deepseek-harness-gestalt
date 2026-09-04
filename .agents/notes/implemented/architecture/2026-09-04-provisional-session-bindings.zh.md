@@ -10,7 +10,9 @@ Status: implemented
 
 ## 决策
 
-`@deepseek-ai/dsh-api-session-controller` 在 `ctx.sessions` 上拥有 Client 临时身份生命周期。`binding(id)` 保持渲染安全的查找：它可为合格 id 铸造本地 scope，但绝不会打开 Host 历史或刷新 catalog。`stageProvisional()` 用一条调用方提供的空白 subagent 行扩展 controller 持有的 list 资格，铸造普通 `SessionBinding`，且不改变 `list.current`。对仍在暂存或已列出的同一身份重复暂存会失败并报错；没有共享的第二持有者。Host list 刷新会保留未发布的临时行。`openForRender(id)` 是显式渲染的 Host I/O：身份仍为临时时跳过历史请求；Host `session-added` 发布后则打开该 Session 的历史并刷新其 subagent catalog，同样不选中它。发布会删除临时标记，并复用同一 manager Session、scope 与 binding。返回的 disposer 会恰好一次移除未发布行及其 Agent scope，并在发布或先前释放后变为 no-op。
+`@deepseek-ai/dsh-api-session-controller` 在 `ctx.sessions` 上拥有 Client 临时身份生命周期。`binding(id)` 保持渲染安全的查找：它可为合格 id 铸造本地 scope，但绝不会打开 Host 历史或刷新 catalog。`stageProvisional()` 用一条调用方提供的空白 subagent 行扩展 controller 持有的 list 资格，铸造普通 `SessionBinding`，且不改变 `list.current`。对仍在暂存或已列出的同一身份重复暂存会失败并报错；没有共享的第二持有者。Host list 刷新会保留未发布的临时行；当 Host baseline 已列出该 id 时，会原地发布并保持同一 binding。`openForRender(id)` 是显式渲染的 Host I/O：身份仍为临时时跳过历史请求；Host 发布后则打开该 Session 的历史并刷新其 subagent catalog，同样不选中它。未知身份是 no-op，与先前显式渲染打开一致。发布会删除临时标记，并复用同一 manager Session、scope 与 binding。返回的 disposer 会恰好一次移除未发布行及其 Agent scope，包括首次成功 Host list baseline 之前，并在发布或先前释放后变为 no-op。进行中的 list 拉取所记录的临时 remove 不会删除随后由 Host 发布的同一 id 行。
+
+拓宽公开 `ISessions` 还会更新 test-support 的 `TestSessions` double 和一个 `satisfies ISessions` 的 UI conversation fake，以保持 compiler face 闭合。这些文件不拥有生产暂存或 Host 发布。
 
 renderer 只消费 `UiSession.adapter.resolve(sessionId)`。功能自有的准入、model、command 与 skill 路由仍在此生命周期之外。[显式 Session slot 挂载](2026-08-23-explicit-session-slot-mounts.zh.md) 拥有挂载树；[Client Session 所有权](2026-08-20-client-session-conversation-ownership.zh.md) 拥有普通 binding 与 scope fiber。
 
@@ -30,4 +32,4 @@ Side Chat 与其他显式挂载可以暂存预分配 id、解析普通 Session-s
 
 ## 验证
 
-聚焦的 ClientSessions 测试固定不改变选中项的暂存、`binding()` 不发起 Host I/O、跳过 Host 历史、list 刷新存续、进行中刷新竞态、发布时身份稳定、恰好一次释放与发布后 no-op、重复暂存失败、已发布冷 `openForRender()`，以及 HMR/插件卸载。
+聚焦的 ClientSessions 测试固定不改变选中项的暂存、`binding()` 不发起 Host I/O、跳过 Host 历史、list 刷新存续、Host list 发布身份、进行中刷新竞态（含过期临时 remove 对发布 baseline）、pending 阶段释放、未知 `openForRender()` no-op、发布时身份稳定、恰好一次释放与发布后 no-op、重复暂存失败、已发布冷 `openForRender()`，以及 HMR/插件卸载。

@@ -444,7 +444,9 @@ export class TestSessions implements ISessions {
   }
 
   /**
-   * Insert a renderer-only fixture row without selecting it.
+   * Compiler-face fallout of widening `ISessions`. Fixture benches do not own
+   * Host publication; they only insert a list row so `satisfies ISessions` and
+   * renderer-adjacent fakes compile. Production lifecycle stays on ClientSessions.
    * @param descriptor - preallocated identity, parent lineage, and display title.
    * @returns disposer that removes the unpublished row exactly once.
    */
@@ -489,7 +491,8 @@ export class TestSessions implements ISessions {
   }
 
   /**
-   * Record an explicit render open; fixture callers still drive history windows.
+   * Compiler-face fallout of widening `ISessions`. Records the call; fixture
+   * callers still drive history windows themselves.
    * @param sessionId - listed or staged Session identity.
    */
   openForRender(sessionId: SessionId): void {

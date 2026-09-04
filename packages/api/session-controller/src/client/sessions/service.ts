@@ -533,13 +533,15 @@ export class ClientSessions implements ISessions {
     return () => {
       this.manager.dropProvisional(descriptor.sessionId)
       this.projectList()
+      this.dropReleasedProvisional(descriptor.sessionId)
     }
   }
 
   /**
    * Open one explicitly rendered Session without changing `list.current`.
    * Published identities request Host history and refresh the subagent catalog;
-   * provisional identities do neither.
+   * provisional identities do neither. An unknown identity is a no-op: former
+   * `openForRender()` skipped missing resolves rather than failing loud.
    * @param sessionId - listed, addressed, or staged Session identity.
    */
   openForRender(sessionId: SessionId): void {
@@ -686,6 +688,21 @@ export class ClientSessions implements ISessions {
     }
     this.list.set({ ids, byId, current, phase, subagentsByParent, jobsBySession, currentAddress })
     this.pruneScopes()
+  }
+
+  /**
+   * Finish an unpublished provisional release even while the Host list is still
+   * pending. Ordinary prune defers Host-addressed scopes until the first
+   * baseline; a Client-owned draft must not survive its disposer.
+   */
+  private dropReleasedProvisional(id: SessionId): void {
+    if (this.eligible(id)) return
+    const record = this.scopes.get(id)
+    if (record === undefined) return
+    this.scopes.delete(id)
+    this.deferredRemovals.delete(id)
+    if (this.watched === id) this.watched = undefined
+    this.startScopeDrop(id, record)
   }
 
   /** Tear down scope + instance for no-longer-eligible sessions off stage; the staged one defers until the stage moves. */

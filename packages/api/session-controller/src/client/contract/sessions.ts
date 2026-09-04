@@ -139,6 +139,7 @@ export interface ISessions {
    * Open one explicitly rendered Session without changing `list.current`.
    * A provisional identity performs no Host history request. A published
    * Session opens its history window and refreshes its subagent catalog.
+   * An unknown identity is a no-op (same as the former explicit-render open).
    * @param sessionId - listed, addressed, or staged Session identity.
    */
   openForRender(sessionId: SessionId): void

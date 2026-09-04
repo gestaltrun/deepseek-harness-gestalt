@@ -93,6 +93,7 @@ function fakeSessions(ctx: Context): { sessions: ISessions; binding: SessionBind
     scopeOf: candidate => candidate === binding.ctx ? SESSION_ID : undefined,
     sessionOf: candidate => candidate === binding.ctx ? binding.session : undefined,
     binding: id => id === SESSION_ID ? binding : undefined,
+    // ISessions compiler-face stubs: this fake never stages or opens Sessions.
     stageProvisional: () => () => {},
     openForRender: () => {},
   } satisfies ISessions

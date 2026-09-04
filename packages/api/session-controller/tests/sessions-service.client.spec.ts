@@ -277,6 +277,7 @@ describe('provisional identity lifecycle', () => {
     expect(b.svc.list.getSnapshot().phase).toBe('pending')
     release()
     expect(b.svc.list.getSnapshot().byId[sid('draft')]).toBeUndefined()
+    expect(b.svc.binding(sid('draft'))).toBeUndefined()
     expect(b.svc.scope(sid('draft'))).toBeUndefined()
     expect(b.svc.sessionOf(scoped as never) === undefined).toBe(true)
     await feedList(b, [{ id: 'parent' }])

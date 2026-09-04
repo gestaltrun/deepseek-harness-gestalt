@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   collectGestaltCompilerFaceViolations,
   collectProjectReferenceFaceViolations,
-  GESTALT_COMPILER_FACES,
 } from './project-reference-faces.ts'
 
 const roots: string[] = []
@@ -65,16 +64,32 @@ describe('Project Reference compiler faces', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
     roots.push(root)
     mkdirSync(join(root, 'apps/desktop'), { recursive: true })
-    writeJson(join(root, 'apps/desktop/tsconfig.json'), {})
-    writeJson(join(root, 'tsconfig.host.json'), {
-      references: GESTALT_COMPILER_FACES.host.slice(1).map(path => ({ path: `./${path}` })),
-    })
-    writeJson(join(root, 'tsconfig.client.json'), {
-      references: GESTALT_COMPILER_FACES.client.map(path => ({ path: `./${path}` })),
-    })
+    writeJson(join(root, 'apps/desktop/tsconfig.json'), { extends: '../../tsconfig.base.json' })
+    writeJson(join(root, 'tsconfig.base.json'), {})
+    writeJson(join(root, 'tsconfig.base.client.json'), {})
+    writeJson(join(root, 'tsconfig.host.json'), { references: [] })
+    writeJson(join(root, 'tsconfig.client.json'), { references: [] })
 
-    expect(collectGestaltCompilerFaceViolations(root)).toEqual([
+    expect(collectGestaltCompilerFaceViolations(root, {
+      host: ['apps/desktop'],
+      client: [],
+    })).toEqual([
       'apps/desktop/tsconfig.json: retained Gestalt project is omitted from the root Host aggregate',
+    ])
+  })
+
+  it('rejects apps/platform when both the aggregate and inventory omit it', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
+    roots.push(root)
+    mkdirSync(join(root, 'apps/platform'), { recursive: true })
+    writeJson(join(root, 'apps/platform/tsconfig.json'), { extends: '../../tsconfig.base.json' })
+    writeJson(join(root, 'tsconfig.base.json'), {})
+    writeJson(join(root, 'tsconfig.base.client.json'), {})
+    writeJson(join(root, 'tsconfig.host.json'), { references: [] })
+    writeJson(join(root, 'tsconfig.client.json'), { references: [] })
+
+    expect(collectGestaltCompilerFaceViolations(root, { host: [], client: [] })).toEqual([
+      'apps/platform/tsconfig.json: retained Gestalt Host project is omitted from GESTALT_COMPILER_FACES',
     ])
   })
 

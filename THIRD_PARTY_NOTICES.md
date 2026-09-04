@@ -131,7 +131,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`picomatch`](https://github.com/micromatch/picomatch) | MIT |
 | [`react`](https://github.com/facebook/react) | MIT |
 | [`react-dom`](https://github.com/facebook/react) | MIT |
-| [`react-icons`](https://github.com:react-icons/react-icons) | MIT |
+| [`react-icons`](https://github.com/react-icons/react-icons) | MIT |
 | [`readable-stream`](https://github.com/nodejs/readable-stream) | MIT |
 | [`redis`](https://github.com/redis/node-redis) | MIT |
 | [`resolve.exports`](https://github.com/lukeed/resolve.exports) | MIT |

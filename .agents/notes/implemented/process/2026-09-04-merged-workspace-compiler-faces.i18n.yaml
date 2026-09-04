@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-04-merged-workspace-compiler-faces.md
-2026-09-04-merged-workspace-compiler-faces.md: 70a0e232e87f778ec438c29399261c079ce69590
-2026-09-04-merged-workspace-compiler-faces.zh.md: 0a399429f9662a35078f64c36ed7261052acd1e9
+2026-09-04-merged-workspace-compiler-faces.md: 5b8967fc4466917a0816844ffc56ee8c86517006
+2026-09-04-merged-workspace-compiler-faces.zh.md: f1e6d145afdb15093d50261b75bd56db30cc987d

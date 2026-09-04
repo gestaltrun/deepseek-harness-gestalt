@@ -355,9 +355,10 @@ function collectClaudeDistribution(manifests: Map<string, Manifest>): ClaudeDist
 }
 
 /** Normalize a manifest repository/homepage value to a browsable https URL. */
-function normalizeRepo(raw: string | undefined): string | undefined {
+export function normalizeRepo(raw: string | undefined): string | undefined {
   if (raw === undefined || raw === '') return undefined
   let url = raw
+    .replace(/^git\+ssh:\/\/git@([^/:]+):/, 'https://$1/')
     .replace(/^git\+ssh:\/\/git@/, 'https://')
     .replace(/^git\+/, '')
     .replace(/^git:\/\//, 'https://')

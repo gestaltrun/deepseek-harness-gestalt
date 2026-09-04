@@ -12,7 +12,7 @@ A mechanical upstream merge can retain valid package manifests while omitting th
 
 The lockfile is generated from the complete pnpm workspace and contains every one of the 306 workspace projects discovered by pnpm. Clean installations select only host-executable binary payloads; cross-platform packaging remains responsible for overriding `supportedArchitectures` in an isolated tree.
 
-Every retained Gestalt Host or Client project has an explicit root aggregate reference. `GESTALT_COMPILER_FACES` records the retained downstream projects whose compiler membership the upstream aggregate cannot derive, and the workspace constraints command rejects an omitted entry. Split projects still require the matching leaf config; the Better Sidebar Client project therefore references `client/connection/tsconfig.client.json` rather than its solution root.
+Every retained Gestalt Host or Client project has an explicit root aggregate reference. Repository-owned discovery patterns classify retained downstream compiler projects independently from `GESTALT_COMPILER_FACES`; workspace constraints reject a project missing from either the explicit inventory or its matching aggregate. Split projects still require the matching leaf config; the Better Sidebar Client project therefore references `client/connection/tsconfig.client.json` rather than its solution root.
 
 Retained release-package manifests use the merged repository version and preserve package-specific publication files. Desktop, Mobile, and Platform applications remain private product assemblies rather than npm release-family members.
 
@@ -28,4 +28,4 @@ Retained release-package manifests use the merged repository version and preserv
 
 A frozen clean install relinks Zod and all workspace dependencies from the generated lockfile. Direct Host and Client aggregate programs report no `TS6307` missing-source diagnostic caused by absent compiler faces; their remaining failures belong to later API and migration work.
 
-The explicit Gestalt compiler-face inventory is a maintenance obligation. Adding or removing a retained downstream project updates its aggregate and the inventory together, and the focused regression test proves that omission fails.
+The explicit Gestalt compiler-face inventory and independent discovery classification are maintenance obligations. Adding or removing a retained downstream project updates its discovery pattern, aggregate, and inventory together; the focused regression test removes a project from both declared lists and still observes the omission.

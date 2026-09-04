@@ -9,6 +9,7 @@ export type ProjectFace = 'host' | 'client'
 export const GESTALT_COMPILER_FACES: Readonly<Record<ProjectFace, readonly string[]>> = {
   host: [
     'apps/desktop',
+    'apps/platform',
     'packages/browser/browser-runtime',
     'packages/browser/browser-runtime-deterministic',
     'packages/browser/browser-runtime-electron',
@@ -58,6 +59,16 @@ const WORKSPACE_MANIFESTS = [
   'packages/*/*/package.json',
   'apps/*/package.json',
   'vendor/*/package.json',
+] as const
+
+const GESTALT_PROJECT_PATTERNS = [
+  'apps/{desktop,mobile,platform}/tsconfig.json',
+  'packages/browser/*/tsconfig.json',
+  'packages/client/{runtime,ui-better-sidebar,ui-browser,ui-desktop,ui-member-questions,ui-workbench}/tsconfig.json',
+  'packages/core/{agent-tool-eligibility,tools-eligibility}/tsconfig.json',
+  'packages/host/apiproxy/tsconfig.json',
+  'packages/interaction/{member-question-receiver,member-question-sender,tool-project-members}/tsconfig.json',
+  'packages/platform/*/tsconfig.json',
 ] as const
 
 /**
@@ -111,21 +122,47 @@ export function collectProjectReferenceFaceViolations(root: string): string[] {
  * @param root - Repository root containing the compiler aggregates.
  * @returns Repo-relative diagnostics for every missing Gestalt compiler face.
  */
-export function collectGestaltCompilerFaceViolations(root: string): string[] {
+export function collectGestaltCompilerFaceViolations(
+  root: string,
+  inventory: Readonly<Record<ProjectFace, readonly string[]>> = GESTALT_COMPILER_FACES,
+): string[] {
   const violations: string[] = []
+  const discovered = discoverGestaltCompilerFaces(root)
   for (const face of ['host', 'client'] as const) {
     const aggregate = resolve(root, `tsconfig.${face}.json`)
     const references = new Set(projectReferences(projectConfig(root, aggregate))
       .map(reference => referenceConfigPath(aggregate, reference)))
-    for (const directory of GESTALT_COMPILER_FACES[face]) {
+    const declared = new Set(inventory[face])
+    for (const directory of discovered[face]) {
+      if (!declared.has(directory)) {
+        violations.push(`${directory}/tsconfig.json: retained Gestalt ${faceLabel(face)} project is omitted from GESTALT_COMPILER_FACES`)
+      }
+    }
+    for (const directory of declared) {
       const expected = resolve(root, directory, 'tsconfig.json')
       if (!existsSync(expected)) continue
+      if (!discovered[face].has(directory)) {
+        violations.push(`${directory}/tsconfig.json: GESTALT_COMPILER_FACES classifies a project not discovered as ${faceLabel(face)}`)
+      }
       if (!references.has(expected)) {
         violations.push(`${directory}/tsconfig.json: retained Gestalt project is omitted from the root ${faceLabel(face)} aggregate`)
       }
     }
   }
   return violations.sort()
+}
+
+function discoverGestaltCompilerFaces(root: string): Record<ProjectFace, Set<string>> {
+  const discovered: Record<ProjectFace, Set<string>> = { host: new Set(), client: new Set() }
+  for (const config of globSync(GESTALT_PROJECT_PATTERNS, { cwd: root })) {
+    const configPath = resolve(root, config)
+    const face = projectFace(root, configPath, projectConfig(root, configPath))
+    if (face === undefined) {
+      throw new Error(`${repoPath(root, configPath)}: retained Gestalt project has no Host/Client face`)
+    }
+    discovered[face].add(repoPath(root, dirname(configPath)))
+  }
+  return discovered
 }
 
 function splitProjectRoots(root: string): string[] {

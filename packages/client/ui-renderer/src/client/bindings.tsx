@@ -141,3 +141,24 @@ export function ScopeProvider({
   const binding = observableHook(adapter.current)(value => value)
   return <ScopeBindingContext.Provider value={binding}>{children}</ScopeBindingContext.Provider>
 }
+
+/** Resolve and bind one explicit scope identity without changing the current selection. */
+export function ExplicitScopeProvider({
+  scope,
+  scopeKey,
+  children,
+}: {
+  scope: 'session' | 'session-maybe'
+  scopeKey: string
+  children: ReactNode
+}) {
+  const host = useHost()
+  observableHook(host.scopeRevision)(value => value)
+  const adapter = host.scope(scope)
+  if (adapter === undefined) throw new SlotAssemblyError(`scope '${scope}' rendered without an installed adapter`)
+  const binding = adapter.resolve(scopeKey)
+  if (binding === undefined) {
+    throw new SlotAssemblyError(`scope '${scope}' could not resolve identity '${scopeKey}'`)
+  }
+  return <ScopeBindingContext.Provider value={binding}>{children}</ScopeBindingContext.Provider>
+}

@@ -8,6 +8,7 @@
  * presenter, which projects ctx.theme snapshots onto document.body.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
@@ -101,8 +102,13 @@ export interface SidebarOwnerProps {
   width: number
 }
 
-/** Conversation owner share: business state and actions belong to the registrant. */
-export interface ConvOwnerProps {}
+/** Conversation owner share for alternate Session presentation and navigation. */
+export interface ConvOwnerProps {
+  /** Compact presentation used by an independently mounted Side Chat. */
+  renderMode?: 'sidechat'
+  /** Retarget the owning Session surface without changing shell selection. */
+  openSession?: (sessionId: SessionId) => void
+}
 
 /** Details owner share: empty — sessionId arrives as a framework-standard prop. */
 export interface DetailsOwnerProps {}

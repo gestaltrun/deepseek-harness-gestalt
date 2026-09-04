@@ -359,6 +359,33 @@ export class SlotRegistry extends Service {
   }
 
   /**
+   * Render one declared Session-scoped slot against an explicit Session id.
+   * @param key - non-root Session or Session-maybe slot key.
+   * @param sessionId - identity resolved by the installed Session adapter.
+   * @param owner - owner share for this slot occurrence.
+   * @returns the rendered Session-scoped tree.
+   */
+  renderSessionSlot(
+    key: string,
+    sessionId: string,
+    owner: object,
+  ): ReturnType<SlotRenderer['renderSession']> {
+    if ((key as string) === 'root') throw new Error("explicit Session rendering cannot target 'root'")
+    const spec = this._core.specDynamic(key)
+    if (spec === undefined) throw new Error(`explicit Session slot '${key}' is not declared`)
+    if (spec.scope === 'root') throw new Error(`explicit Session slot '${key}' has root scope`)
+    if (this._renderer === undefined) {
+      throw new Error(`slot renderer not installed — cannot render explicit Session slot '${key}'`)
+    }
+    const adapter = this._scopes.get('session')
+    if (adapter === undefined) throw new Error(`explicit Session slot '${key}' requires an installed 'session' scope adapter`)
+    if (adapter.resolve(sessionId) === undefined) {
+      throw new Error(`explicit Session slot '${key}' could not resolve Session '${sessionId}'`)
+    }
+    return this._renderer.renderSession(this.hostFace(), key, sessionId, owner)
+  }
+
+  /**
    * Snapshot entries for a key (render-erased view; stable reference between mutations).
    * @param key - SlotMap key.
    * @returns registered entries.

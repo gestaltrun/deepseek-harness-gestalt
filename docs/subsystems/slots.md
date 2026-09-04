@@ -12,7 +12,7 @@ This page documents slot ownership, component inputs, extension APIs, and the sh
 
 Declaring a child has three effects: it makes the child key live, authorizes that parent entry's `renderSlot` or `renderSlotChain` call, and records the runtime dispatch specification. One live entry owns each declaration. Registering into an undeclared slot or declaring a child already owned elsewhere fails during plugin activation.
 
-`root` is the only built-in declaration and the only key rendered through the Cordis service itself. `ui-renderer` calls `ctx.slots.renderSlot('root', {})`; every descendant is rendered through the `renderSlot` or `renderSlotChain` prop of the entry that declared it.
+`root` is the only built-in declaration and the shell's ordinary context-level entry. `ui-renderer` calls `ctx.slots.renderSlot('root', {})`; every descendant normally renders through the `renderSlot` or `renderSlotChain` prop of the entry that declared it. A feature shell may instead call `ctx.uiRenderer.mountSession()` for one declared non-root Session slot, which resolves an explicit Session id and mounts an independent React root without changing shell selection.
 
 Registrations and declarations follow Cordis effect lifetimes. Disposing an entry removes its contribution and recursively collapses the child slots it declared. A feature that contributes into another package's slot therefore uses `ctx.slots.inject(key, callback)`: the callback runs for each declaration lifetime, its effects are removed when the owner collapses, and it runs again if the owner is mounted again.
 

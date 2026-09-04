@@ -55,7 +55,7 @@ register 调用可以用 `store: defineStore(...)` 声明 store 席位：`init` 
 
 ### 渲染器约定
 
-`renderer.ts` 携带安装约定（`SlotRenderer`、`SlotRendererHost`）以及 `StaleAuthorizationError`/`SlotOwnershipError`；ui-renderer 同时持有实现及其插件生命周期安装。引擎产物与渲染器宿主约定携带裸快照 source（`getSnapshot`/`subscribe`），绝不携带 React 钩子——钩子绑定属于渲染机制。
+`renderer.ts` 携带安装约定（`SlotRenderer`、`SlotRendererHost`）以及 `StaleAuthorizationError`/`SlotOwnershipError`；ui-renderer 同时持有实现及其插件生命周期安装。`SlotRenderer` 分别提供 root 与显式 Session 渲染入口，而 host 以裸快照 source（`getSnapshot`/`subscribe`）提供当前及按身份解析的 scope binding，绝不携带 React 钩子。
 
 </details>
 

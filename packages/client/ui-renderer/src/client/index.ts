@@ -7,6 +7,7 @@ import { createElement, useLayoutEffect, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot, hydrateRoot, type Root } from 'react-dom/client'
 import type { Context } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 import { SlotRegistry } from './registry.ts'
@@ -28,6 +29,15 @@ export interface UiRendererService {
    * @returns Disposer that unmounts the React root.
    */
   mount: (container: HTMLElement) => () => void
+  /**
+   * Mount one declared Session-scoped slot without changing shell selection.
+   * @param container - independent React mount point.
+   * @param slotKey - declared non-root Session or Session-maybe slot.
+   * @param sessionId - Session identity resolved by the installed adapter.
+   * @param ownerProps - owner props for the slot occurrence.
+   * @returns idempotent disposer that unmounts the independent React root.
+   */
+  mountSession: (container: HTMLElement, slotKey: string, sessionId: SessionId, ownerProps: object) => () => void
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -91,7 +101,27 @@ export function apply(ctx: Context): void {
   ctx.reflect.provide('uiRenderer', {
     mount: (container: HTMLElement): (() => void) => {
       const root = mountApp(container, buildRenderApp({ ctx }))
-      return () => { root.unmount() }
+      let disposed = false
+      return () => {
+        if (disposed) return
+        disposed = true
+        root.unmount()
+      }
+    },
+    mountSession: (
+      container: HTMLElement,
+      slotKey: string,
+      sessionId: SessionId,
+      ownerProps: object,
+    ): (() => void) => {
+      const root = createRoot(container)
+      flushSync(() => { root.render(slots.renderSessionSlot(slotKey, sessionId, ownerProps)) })
+      let disposed = false
+      return () => {
+        if (disposed) return
+        disposed = true
+        root.unmount()
+      }
     },
   })
 }

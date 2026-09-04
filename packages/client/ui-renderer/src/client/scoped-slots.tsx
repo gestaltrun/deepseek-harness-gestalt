@@ -11,7 +11,7 @@ import {
   type StoredEntry, type Translate,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  HostContext, RootStandardProvider, ScopeProvider, SlotAssemblyError,
+  ExplicitScopeProvider, HostContext, RootStandardProvider, ScopeProvider, SlotAssemblyError,
   keyedObservableHook, maybeObservableHook, observableHook, useHost, useRootBinding,
   useScopeBinding,
 } from './bindings.tsx'
@@ -938,7 +938,7 @@ function RootOutlet({ ownerProps }: { ownerProps: object }) {
  */
 export function createSlotRenderer(): SlotRenderer {
   return {
-    renderRoot(host, ownerProps) {
+    renderRoot(host: SlotRendererHost, ownerProps: object) {
       return (
         <HostContext.Provider value={host}>
           <RootStandardProvider>
@@ -949,19 +949,19 @@ export function createSlotRenderer(): SlotRenderer {
         </HostContext.Provider>
       )
     },
-    renderSession(host, slotKey, sessionId, ownerProps) {
+    renderSession(
+      host: SlotRendererHost,
+      slotKey: string,
+      sessionId: string,
+      ownerProps: object,
+    ) {
       return (
         <HostContext.Provider value={host}>
-          <SessionProvider sessionId={sessionId}>
-            {() => (
-              <SlotErrorBoundary
-                slotKey={slotKey}
-                onEntryError={(error) => { console.error(`explicit Session slot '${slotKey}' crashed:`, error) }}
-              >
-                <SlotOutlet slotKey={slotKey} ownerProps={ownerProps} />
-              </SlotErrorBoundary>
-            )}
-          </SessionProvider>
+          <RootStandardProvider>
+            <ExplicitScopeProvider scope="session-maybe" scopeKey={sessionId}>
+              <SlotOutlet slotKey={slotKey} ownerProps={ownerProps} />
+            </ExplicitScopeProvider>
+          </RootStandardProvider>
         </HostContext.Provider>
       )
     },

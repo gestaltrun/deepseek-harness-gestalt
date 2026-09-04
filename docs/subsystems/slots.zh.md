@@ -12,7 +12,7 @@ Slots 是 Web Client 的类型化 React 组合系统。[`dsh-client-ui-slots`](.
 
 声明一个 child 会同时产生三种效果：令该 child key 生效、授权 parent entry 调用 `renderSlot` 或 `renderSlotChain`，以及记录运行时 dispatch 规格。每个声明只能有一个存活 owner。向未声明 slot 注册，或重复声明其他 entry 已拥有的 child，都会在插件激活时失败。
 
-`root` 是唯一内建声明，也是唯一由 Cordis service 自身渲染的 key。`ui-renderer` 调用 `ctx.slots.renderSlot('root', {})`；其余每个后代都通过声明它的 entry 所收到的 `renderSlot` 或 `renderSlotChain` prop 渲染。
+`root` 是唯一内建声明，也是外壳的普通上下文级入口。`ui-renderer` 调用 `ctx.slots.renderSlot('root', {})`；其余每个后代通常通过声明它的 entry 所收到的 `renderSlot` 或 `renderSlotChain` prop 渲染。功能外壳也可为一个已声明的非 root Session slot 调用 `ctx.uiRenderer.mountSession()`，解析显式 Session id 并挂载独立 React 根，同时不改变外壳选中项。
 
 注册和声明遵循 Cordis effect 生命周期。销毁一个 entry 会移除其贡献，并递归折叠它声明的 child slots。因此，向其他包的 slot 贡献功能时使用 `ctx.slots.inject(key, callback)`：callback 会在每段声明生命周期内运行，owner 折叠时其 effect 随之移除，owner 再次挂载时则重新运行。
 

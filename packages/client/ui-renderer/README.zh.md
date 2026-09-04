@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 挂载做什么
 
-`mount(container)` 会安装 slot 渲染器、在存在时 hydrate 现有启动 DOM、在下一次绘制前把组装后的应用渲染进容器，并返回一个卸载 React 根的 disposer。渲染器执行全程序唯一一次上下文级 `renderSlot('root')` 调用；注册的根占用方拥有产品布局与文档元数据。
+`mount(container)` 会在存在时 hydrate 现有启动 DOM、在下一次绘制前把组装后的应用渲染进容器，并返回幂等的 React 根卸载 disposer。`mountSession(container, slotKey, sessionId, ownerProps)` 会为一个已声明的非 root Session 或 Session-maybe slot 创建独立 React 根，通过已安装的 Session adapter 解析显式身份，并且绝不改变外壳选中项。目标为 root、未声明、root scope、无法解析，或缺少 adapter/renderer 时会失败。
 
 ### 对业务插件
 
@@ -43,7 +43,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节——点击展开</summary>
 
-本包实现一条边界：对象层（runtime，无 React）拥有业务状态；这里是 ctx 到 React 集成唯一发生的位置——slot 渲染器、`SessionProvider` 与 `useSyncExternalStore` 适配器。
+本包实现一条边界：无 React 的对象层拥有业务状态；这里是 ctx 到 React 集成唯一发生的位置——slot outlet、当前与显式 Session scope provider，以及 `useSyncExternalStore` 适配器。
 
 ### 激活与挂载
 

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sequence": 11,
+  "intentIds": [
+    "226-sidebar-browser"
+  ],
+  "summaries": [
+    {
+      "en": "Open official browser links in the Desktop workbench, keep subagent model and permission controls usable, and restore Side Chat opens plus queued-message actions.",
+      "zh": "Desktop 工作台内打开官方浏览器链接，修复子代理模型与权限控件，并恢复 Side Chat 打开与排队消息操作。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": true,
+      "previousVersion": "0.1.14",
+      "version": "0.1.15",
+      "tag": "gestalt-v0.1.15",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Open official browser links in the Desktop workbench, keep subagent model and permission controls usable, and restore Side Chat opens plus queued-message actions.",
+          "zh": "Desktop 工作台内打开官方浏览器链接，修复子代理模型与权限控件，并恢复 Side Chat 打开与排队消息操作。"
+        }
+      ]
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.3"
+    }
+  }
+}

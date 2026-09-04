@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { parseConfigFileTextToJson } from 'typescript'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   collectGestaltCompilerFaceViolations,
@@ -15,6 +16,12 @@ afterEach(() => {
 
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
+function readConfig(path: string): { readonly include?: readonly string[]; readonly exclude?: readonly string[] } {
+  const result = parseConfigFileTextToJson(path, readFileSync(path, 'utf8'))
+  if (result.error) throw new Error(`Cannot parse ${path}`)
+  return result.config as { readonly include?: readonly string[]; readonly exclude?: readonly string[] }
 }
 
 function workspaceFixture(options: {
@@ -51,6 +58,21 @@ function workspaceFixture(options: {
 }
 
 describe('Project Reference compiler faces', () => {
+  it('assigns Web Host tests to the Host aggregate only', () => {
+    const repositoryRoot = join(import.meta.dirname, '..')
+    const web = readConfig(join(repositoryRoot, 'apps/web/tsconfig.json'))
+    const host = readConfig(join(repositoryRoot, 'tsconfig.host.json'))
+
+    expect(web.exclude).toEqual(expect.arrayContaining([
+      'tests/annotation-images.e2e.ts',
+      'tests/web-acceptance.acceptance.ts',
+    ]))
+    expect(host.include).toEqual(expect.arrayContaining([
+      'apps/web/tests/annotation-images.e2e.ts',
+      'apps/web/tests/web-acceptance.acceptance.ts',
+    ]))
+  })
+
   it('allows neutral projects in either graph and matching split leaves', () => {
     const root = workspaceFixture({
       host: ['./packages/core/shared', './packages/api/split/tsconfig.host.json'],

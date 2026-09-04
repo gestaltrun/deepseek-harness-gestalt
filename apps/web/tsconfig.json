@@ -22,6 +22,8 @@
   // this client-registered project must not also hold them (one program
   // cannot see both sides of the cordis Context merges).
   "exclude": [
+    "tests/annotation-images.e2e.ts",
+    "tests/web-acceptance.acceptance.ts",
     "tests/scaffold.ts",
     "tests/scaffold-hermetic.e2e.ts",
     "tests/startup-rpc-budget.e2e.ts",

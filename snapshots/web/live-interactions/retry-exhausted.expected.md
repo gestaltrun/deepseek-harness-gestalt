@@ -3,6 +3,9 @@
     - button "Reply with a one-sentence description" [disabled]
   - img
   - text: Standard mode
+  - button "Session log":
+    - text: Session log
+    - img
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
@@ -17,21 +20,6 @@
   - img
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
-<<<<<<<< HEAD:apps/web/tests/snapshots/live-interactions/cancel.expected.md
-- paragraph: partial
-- text: Stopped
-- button "Copy":
-  - img
-- button "Good response":
-  - img
-- button "Bad response":
-  - img
-- button "Branch into a new conversation":
-  - img
-- text: {{clock}} Ran for {{duration}} TTFT {{duration}}
-- textbox "Message the agent"
-- button "Commands and skills":
-========
 - group:
   - status: Retried model request (2/2) · {{duration}}
 - status:
@@ -39,11 +27,10 @@
   - code: SERVER
 - textbox "Message or run a task... / commands, @ files or sessions"
 - button "Commands":
->>>>>>>> upstream/master:snapshots/web/live-interactions/retry-exhausted.expected.md
   - img
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash":
   - text: DeepSeek-V4-Flash
   - img
 - button "Send message" [disabled]
-- text: 1 turns · 1 steps LLM {{duration}} TTFT avg {{duration}}
+- text: 1 turns · 1 steps

@@ -1,5 +1,5 @@
 {
-  "extends": "../../../tsconfig.base.json",
+  "extends": "../../../tsconfig.base.client.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib/types"
@@ -10,15 +10,6 @@
   "references": [
     {
       "path": "../../../vendor/cordis"
-<<<<<<<< HEAD:packages/context/file-reference/tsconfig.json
-    },
-    {
-      "path": "../../core/agent"
-    },
-    {
-      "path": "../../runtime-diagnostics/invariants"
-========
->>>>>>>> upstream/master:packages/client/store/tsconfig.json
     }
   ]
 }

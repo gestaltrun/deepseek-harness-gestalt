@@ -36,6 +36,8 @@ const LEGACY_LABELS = new Set([
   'web-search',
 ])
 const TERMINAL_STATUSES = new Set(['Done', 'No action'])
+const PULL_REQUEST_READ_AUTHENTICATIONS = new Set(['anonymous', 'token'])
+const PULL_REQUEST_POLICY_ACTIVATIONS = new Set(['non-draft', 'review-activity'])
 const ACTIVE_STATUS_ORDER = config.statuses.filter((status) => !TERMINAL_STATUSES.has(status))
 const IMPLEMENTATION_PULL_REQUEST_ACTIONS = new Set([
   'opened',
@@ -52,8 +54,20 @@ for (const status of ['In progress', 'In review']) {
 if (typeof config.lifecycleActor !== 'string' || !config.lifecycleActor) {
   throw new Error('config.lifecycleActor 未设置')
 }
-if (typeof config.priorityField !== 'string' || !config.priorityField) {
-  throw new Error('config.priorityField 未设置')
+if (typeof config.projectOrganization !== 'string' || !config.projectOrganization) {
+  throw new Error('config.projectOrganization 未设置')
+}
+if (
+  config.priorityField !== null &&
+  (typeof config.priorityField !== 'string' || !config.priorityField.trim())
+) {
+  throw new Error('config.priorityField 必须为非空字符串或 null')
+}
+if (!PULL_REQUEST_READ_AUTHENTICATIONS.has(config.pullRequestReadAuthentication)) {
+  throw new Error('config.pullRequestReadAuthentication 必须为 anonymous 或 token')
+}
+if (!PULL_REQUEST_POLICY_ACTIVATIONS.has(config.pullRequestPolicyActivation)) {
+  throw new Error('config.pullRequestPolicyActivation 必须为 non-draft 或 review-activity')
 }
 if (typeof config.startDateField !== 'string' || !config.startDateField) {
   throw new Error('config.startDateField 未设置')
@@ -62,6 +76,32 @@ if (typeof config.projectTimeZone !== 'string' || !config.projectTimeZone) {
   throw new Error('config.projectTimeZone 未设置')
 }
 Intl.DateTimeFormat('en-US', { timeZone: config.projectTimeZone })
+
+/**
+ * Resolve the repository that emitted the workflow event.
+ * @param {Record<string, string|undefined>} environment Workflow environment.
+ * @returns {{owner: string, name: string, fullName: string}} Repository coordinates.
+ */
+export function repositoryCoordinates(environment = process.env) {
+  const value = environment.GITHUB_REPOSITORY
+  const match = value?.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/)
+  if (!match) throw new Error('GITHUB_REPOSITORY 必须为 owner/name')
+  const [, owner, name] = match
+  return { owner, name, fullName: `${owner}/${name}` }
+}
+
+function repositoryApiPath(path) {
+  return `/repos/${repositoryCoordinates().fullName}${path}`
+}
+
+function validateLifecycleDeployment(environment = process.env) {
+  const { owner } = repositoryCoordinates(environment)
+  if (config.projectOrganization !== owner) {
+    throw new Error(
+      `config.projectOrganization 必须与 GITHUB_REPOSITORY owner 一致：${config.projectOrganization} != ${owner}`,
+    )
+  }
+}
 
 /**
  * Return Markdown outside balanced details elements.
@@ -174,9 +214,10 @@ export function requiresPullRequestPolicy({
   authorType,
   reviewRequestCount,
   reviewCount,
-}) {
+}, activation = config.pullRequestPolicyActivation) {
   const automated = authorType === 'Bot' || authorType === 'App'
-  return !isDraft && !automated && (reviewRequestCount > 0 || reviewCount > 0)
+  if (isDraft || automated) return false
+  return activation === 'non-draft' || reviewRequestCount > 0 || reviewCount > 0
 }
 
 /**
@@ -422,24 +463,32 @@ function projectToken() {
   return process.env.PROJECT_TOKEN || token()
 }
 
-async function api(path, options = {}) {
+async function api(
+  path,
+  { allow404 = false, authentication = 'token', headers = {}, ...options } = {},
+) {
+  const authorization = authentication === 'token' ? { Authorization: `Bearer ${token()}` } : {}
   const response = await fetch(`${process.env.GITHUB_API_URL ?? 'https://api.github.com'}${path}`, {
     ...options,
     headers: {
       Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token()}`,
+      ...authorization,
       'X-GitHub-Api-Version': API_VERSION,
       'User-Agent': 'dsh-issue-policy',
-      ...options.headers,
+      ...headers,
     },
   })
-  if (options.allow404 && response.status === 404) return null
+  if (allow404 && response.status === 404) return null
   if (!response.ok) {
     const body = await response.text()
     throw new Error(`${options.method ?? 'GET'} ${path}: ${response.status} ${body}`)
   }
   if (response.status === 204) return null
   return response.json()
+}
+
+function pullRequestReadApi(path, options = {}) {
+  return api(path, { ...options, authentication: config.pullRequestReadAuthentication })
 }
 
 async function graphql(query, variables) {
@@ -461,10 +510,12 @@ async function graphql(query, variables) {
  * @param {string|null|undefined} status Optional known Project status.
  * @returns {Promise<object|null>} Issue snapshot, or null when the number identifies a pull request.
  */
-export async function issueSnapshot(number, status = undefined) {
-  const issue = await api(`/repos/${config.organization}/${config.repository}/issues/${number}`)
+export async function issueSnapshot(number, status = undefined, read = api) {
+  const issue = await read(repositoryApiPath(`/issues/${number}`))
   if (issue.pull_request) return null
-  const context = await projectContext(number)
+  const context = config.priorityField !== null || status === undefined
+    ? await projectContext(number)
+    : null
   return {
     number,
     nodeId: issue.node_id,
@@ -473,21 +524,24 @@ export async function issueSnapshot(number, status = undefined) {
     assignees: issue.assignees.map((assignee) => assignee.login),
     labels: issue.labels.map((label) => label.name),
     type: issue.type?.name ?? null,
-    priority: context.item?.priorityValue?.name ?? null,
-    status: status === undefined ? (context.item?.fieldValueByName?.name ?? null) : status,
+    priority: config.priorityField === null ? null : (context?.item?.priorityValue?.name ?? null),
+    status: status === undefined ? (context?.item?.fieldValueByName?.name ?? null) : status,
     state: issue.state,
     stateReason: issue.state_reason ?? null,
   }
 }
 
 async function projectContext(number, includeStatusActor = false, includeStartDate = false) {
+  const repository = repositoryCoordinates()
   const data = await graphql(
     `query(
       $organization: String!
+      $repositoryOwner: String!
       $repository: String!
       $number: Int!
       $project: Int!
       $includeStatusActor: Boolean!
+      $includePriority: Boolean!
       $includeStartDate: Boolean!
       $priorityField: String!
       $startDateField: String!
@@ -515,7 +569,7 @@ async function projectContext(number, includeStatusActor = false, includeStartDa
           }
         }
       }
-      repository(owner: $organization, name: $repository) {
+      repository(owner: $repositoryOwner, name: $repository) {
         issue(number: $number) {
           id
           timelineItems(last: 100, itemTypes: [PROJECT_V2_ITEM_STATUS_CHANGED_EVENT])
@@ -535,7 +589,7 @@ async function projectContext(number, includeStatusActor = false, includeStartDa
               fieldValueByName(name: "Status") {
                 ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
               }
-              priorityValue: fieldValueByName(name: $priorityField) {
+              priorityValue: fieldValueByName(name: $priorityField) @include(if: $includePriority) {
                 ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
               }
               startDateValue: fieldValueByName(name: $startDateField)
@@ -548,13 +602,15 @@ async function projectContext(number, includeStatusActor = false, includeStartDa
       }
     }`,
     {
-      organization: config.organization,
-      repository: config.repository,
+      organization: config.projectOrganization,
+      repositoryOwner: repository.owner,
+      repository: repository.name,
       number,
       project: config.projectNumber,
       includeStatusActor,
+      includePriority: config.priorityField !== null,
       includeStartDate,
-      priorityField: config.priorityField,
+      priorityField: config.priorityField ?? '',
       startDateField: config.startDateField,
     },
   )
@@ -564,12 +620,16 @@ async function projectContext(number, includeStatusActor = false, includeStartDa
   if (!issue) throw new Error(`#${number} 不存在`)
   const statusField = project.fields.nodes.find((field) => field?.name === 'Status')
   if (!statusField) throw new Error('Project 缺少 Status 字段')
-  const priorityField = project.fields.nodes.find((field) => field?.name === config.priorityField)
-  if (!priorityField) throw new Error(`Project 缺少 ${config.priorityField} 字段`)
-  if (priorityField.dataType !== 'SINGLE_SELECT') {
+  const priorityField = config.priorityField === null
+    ? null
+    : project.fields.nodes.find((field) => field?.name === config.priorityField)
+  if (config.priorityField !== null && !priorityField) {
+    throw new Error(`Project 缺少 ${config.priorityField} 字段`)
+  }
+  if (priorityField && priorityField.dataType !== 'SINGLE_SELECT') {
     throw new Error(`Project ${config.priorityField} 字段必须为 Single Select`)
   }
-  if (priorityField.isIssueField) {
+  if (priorityField?.isIssueField) {
     throw new Error(`Project ${config.priorityField} 字段必须为 Project custom field`)
   }
   const startDateField = includeStartDate
@@ -688,15 +748,13 @@ async function setStatus(number, status) {
 }
 
 async function upsertAudit(number, errors) {
-  const comments = await api(
-    `/repos/${config.organization}/${config.repository}/issues/${number}/comments?per_page=100`,
-  )
+  const comments = await api(repositoryApiPath(`/issues/${number}/comments?per_page=100`))
   const existing = comments.find(
     (comment) => comment.user?.type === 'Bot' && comment.body?.includes(AUDIT_MARKER),
   )
   if (errors.length === 0) {
     if (existing) {
-      await api(`/repos/${config.organization}/${config.repository}/issues/comments/${existing.id}`, {
+      await api(repositoryApiPath(`/issues/comments/${existing.id}`), {
         method: 'DELETE',
       })
     }
@@ -705,13 +763,13 @@ async function upsertAudit(number, errors) {
   const body = `${AUDIT_MARKER}\n⚠️ Issue policy 未通过：\n\n${errors.map((error) => `- ${error}`).join('\n')}`
   if (existing) {
     if (existing.body === body) return
-    await api(`/repos/${config.organization}/${config.repository}/issues/comments/${existing.id}`, {
+    await api(repositoryApiPath(`/issues/comments/${existing.id}`), {
       method: 'PATCH',
       body: JSON.stringify({ body }),
       headers: { 'Content-Type': 'application/json' },
     })
   } else {
-    await api(`/repos/${config.organization}/${config.repository}/issues/${number}/comments`, {
+    await api(repositoryApiPath(`/issues/${number}/comments`), {
       method: 'POST',
       body: JSON.stringify({ body }),
       headers: { 'Content-Type': 'application/json' },
@@ -727,14 +785,14 @@ async function auditIssue(number, extraErrors = [], status = undefined) {
   return errors
 }
 
-async function resolvingReferencesSnapshot(number, pull) {
+async function resolvingReferencesSnapshot(number, pull, read = api) {
   const references = parseReferences({
     body: pull.body ?? '',
-    repository: `${config.organization}/${config.repository}`,
+    repository: repositoryCoordinates().fullName,
   })
   const issues = new Map()
   for (const issueNumber of references.all) {
-    const issue = await issueSnapshot(issueNumber, null)
+    const issue = await issueSnapshot(issueNumber, null, read)
     if (issue) issues.set(issueNumber, issue)
   }
   return {
@@ -745,24 +803,35 @@ async function resolvingReferencesSnapshot(number, pull) {
 }
 
 async function pullRequestSnapshot(number) {
-  const [pull, reviewRequests, reviews] = await Promise.all([
-    api(`/repos/${config.organization}/${config.repository}/pulls/${number}`),
-    api(`/repos/${config.organization}/${config.repository}/pulls/${number}/requested_reviewers`),
-    api(`/repos/${config.organization}/${config.repository}/pulls/${number}/reviews?per_page=100`),
-  ])
-  const resolving = await resolvingReferencesSnapshot(number, pull)
-  return {
-    ...resolving,
+  const pull = await pullRequestReadApi(repositoryApiPath(`/pulls/${number}`))
+  const snapshot = {
+    number,
     isDraft: pull.draft,
     authorType: pull.user?.type ?? 'User',
-    reviewRequestCount: reviewRequests.users.length + reviewRequests.teams.length,
-    reviewCount: reviews.length,
+    reviewRequestCount: 0,
+    reviewCount: 0,
     labels: pull.labels.map((label) => label.name),
+    references: { all: [], resolving: [], related: [] },
+    issues: new Map(),
   }
+  if (snapshot.isDraft || snapshot.authorType === 'Bot' || snapshot.authorType === 'App') {
+    return snapshot
+  }
+  if (config.pullRequestPolicyActivation === 'review-activity') {
+    const [reviewRequests, reviews] = await Promise.all([
+      pullRequestReadApi(repositoryApiPath(`/pulls/${number}/requested_reviewers`)),
+      pullRequestReadApi(repositoryApiPath(`/pulls/${number}/reviews?per_page=100`)),
+    ])
+    snapshot.reviewRequestCount = reviewRequests.users.length + reviewRequests.teams.length
+    snapshot.reviewCount = reviews.length
+  }
+  if (!requiresPullRequestPolicy(snapshot)) return snapshot
+  const resolving = await resolvingReferencesSnapshot(number, pull, pullRequestReadApi)
+  return { ...snapshot, ...resolving }
 }
 
 async function lifecyclePullRequestSnapshot(number) {
-  const pull = await api(`/repos/${config.organization}/${config.repository}/pulls/${number}`)
+  const pull = await api(repositoryApiPath(`/pulls/${number}`))
   return {
     ...(await resolvingReferencesSnapshot(number, pull)),
     createdAt: pull.created_at,
@@ -833,7 +902,8 @@ async function main(argv) {
   const [command] = argv
   if (command === 'pr') await runPullRequestCheck(readEvent())
   else if (command === 'lifecycle') await runLifecycle(process.env.GITHUB_EVENT_NAME, readEvent())
-  else throw new Error('用法：policy.mjs pr|lifecycle')
+  else if (command === 'deployment') validateLifecycleDeployment()
+  else throw new Error('用法：policy.mjs pr|lifecycle|deployment')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

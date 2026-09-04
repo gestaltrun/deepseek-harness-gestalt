@@ -656,13 +656,12 @@ describe('Issue lifecycle workflow', () => {
     const lifecycleJob = workflowJob(lifecycle, 'lifecycle')
     if (!Array.isArray(lifecycleJob.steps)) throw new TypeError('Issue lifecycle job must define steps')
 
-    // The job has no job-level `if`, so it is listed on every pull_request /
-    // pull_request_review event and reports success instead of a gray skip. The
-    // write-capable steps are gated at step level so approved/commented reviews
-    // never mint a Project/Issue App token nor touch the board.
+    // The deployment option skips the complete lifecycle job before token creation.
+    // Within an enabled deployment, review-state gates prevent approved/commented
+    // reviews from minting a Project/Issue App token or touching the board.
     expect(lifecycle.on).toHaveProperty('pull_request')
     expect(lifecycle.on).toHaveProperty('pull_request_review')
-    expect(lifecycleJob.if).toBeUndefined()
+    expect(lifecycleJob.if).toBe("${{ vars.DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED == 'true' }}")
     // Keep the subscription-type gates: issue-lifecycle does not re-subscribe
     // ready_for_review (issue-policy owns that) and only reacts to submitted
     // review events.
@@ -674,9 +673,18 @@ describe('Issue lifecycle workflow', () => {
     expect(lifecycleReview.types).toEqual(['submitted'])
     const gated = "${{ github.event_name != 'pull_request_review' || github.event.review.state == 'changes_requested' }}"
     const steps = lifecycleJob.steps.filter(isRecord)
+    const ownerStep = steps.find(s => s.name === 'Validate project owner')
     const tokenStep = steps.find(s => s.name === 'Create project token')
     const handleStep = steps.find(s => s.name === 'Handle repository event')
-    expect(tokenStep).toMatchObject({ if: gated })
+    expect(steps.indexOf(ownerStep)).toBeLessThan(steps.indexOf(tokenStep))
+    expect(ownerStep).toMatchObject({ run: 'node .github/issue-management/policy.mjs deployment' })
+    expect(tokenStep).toMatchObject({
+      if: gated,
+      with: {
+        owner: '${{ github.repository_owner }}',
+        repositories: '${{ github.event.repository.name }}',
+      },
+    })
     expect(handleStep).toMatchObject({ if: gated })
 
     // issue-policy owns PR validation; it is read-only and a real gate.
@@ -684,36 +692,21 @@ describe('Issue lifecycle workflow', () => {
     expect(policyPullRequest.types).toContain('ready_for_review')
   })
 
-  it('uses a read-only Project token only for human pull request policy metadata', () => {
+  it('uses the repository workflow token without creating a cross-repository App token', () => {
     const policy = loadWorkflow('.github/workflows/issue-policy.yml')
     const policyJob = workflowJob(policy, 'policy')
     if (!Array.isArray(policyJob.steps)) throw new TypeError('Issue policy job must define steps')
     const steps = policyJob.steps.filter(isRecord)
-    const tokenStep = steps.find(step => step.name === 'Create Project read token')
+    const tokenStep = steps.find(step => step.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1')
     const validateStep = steps.find(step => step.name === 'Validate pull request')
-    const humanPullRequest =
-      "${{ github.event.pull_request.user.type != 'Bot' && github.event.pull_request.user.type != 'App' }}"
 
-    expect(tokenStep).toMatchObject({
-      id: 'app-token',
-      if: humanPullRequest,
-      uses: 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1',
-      with: {
-        'client-id': '${{ vars.DSH_ISSUE_APP_CLIENT_ID }}',
-        'private-key': '${{ secrets.DSH_ISSUE_APP_PRIVATE_KEY }}',
-        owner: 'deepseek-harness',
-        repositories: 'deepseek-harness',
-        'permission-issues': 'read',
-        'permission-organization-projects': 'read',
-      },
-    })
+    expect(tokenStep).toBeUndefined()
     expect(validateStep).toMatchObject({
-      if: humanPullRequest,
       env: {
         GITHUB_TOKEN: '${{ github.token }}',
-        PROJECT_TOKEN: '${{ steps.app-token.outputs.token }}',
       },
     })
+    expect(validateStep?.env).not.toHaveProperty('PROJECT_TOKEN')
   })
 })
 

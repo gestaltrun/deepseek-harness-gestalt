@@ -12,7 +12,7 @@ GitHub App installation authority and user ProjectV2 authority are distinct. Tre
 
 ## Decision
 
-Repository policy derives the repository owner and name from the workflow-provided `GITHUB_REPOSITORY`. The Project configuration retains only `projectOrganization`, `projectNumber`, and `projectTitle` because those values identify the optional organization Project rather than the event repository.
+Repository policy derives the repository owner and name from the workflow-provided `GITHUB_REPOSITORY`. Pull-request policy uses the repository `GITHUB_TOKEN`, activates for every non-Draft human pull request, and disables Priority synchronization for this personal-account tracker. The Project configuration retains only `projectOrganization`, `projectNumber`, and `projectTitle` as deployment identity; Project-local field names remain optional lifecycle configuration rather than repository coordinates.
 
 Organization Project lifecycle projection runs only when the repository variable `DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED` is exactly `true`. The whole lifecycle job skips before GitHub App token creation when the option is disabled. An enabled deployment requires `projectOrganization` to equal the event repository owner; the workflow checks this after trusted policy checkout and before token creation, while the lifecycle entry checks it again before any API request. The deployment then creates a repository-scoped installation token from the configured App credentials and uses the same owner's organization permission for ProjectV2 operations.
 

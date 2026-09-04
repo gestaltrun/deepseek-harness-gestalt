@@ -2,16 +2,16 @@
 
 [English](issue-tracker.md) | 中文
 
-DeepSeek Gestalt 产品规格和 ticket 存放在 `BeiKeJieDeLiuLangMao/deepseek-harness-gestalt` 的 GitHub Issues 中。所有操作都使用 `gh` CLI（命令行界面）并指定 `--repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt`。`deepseek-ai/deepseek-harness` 上游仓库不承载 Gestalt 产品 tracker。
+DeepSeek Gestalt 产品规格和 ticket 存放在 `gestaltrun/deepseek-harness-gestalt` 的 GitHub Issues 中。所有操作都使用 `gh` CLI（命令行界面）并指定 `--repo gestaltrun/deepseek-harness-gestalt`。`deepseek-ai/deepseek-harness` 上游仓库不承载 Gestalt 产品 tracker。
 
 ## 操作
 
-- 创建：`gh issue create --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --title "..." --body "..."`
-- 读取：`gh issue view <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --comments`
-- 列出：`gh issue list --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --state open`
-- 评论：`gh issue comment <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --body "..."`
-- 添加或移除标签：使用 `gh issue edit <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt`
-- 关闭：`gh issue close <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --comment "..."`
+- 创建：`gh issue create --repo gestaltrun/deepseek-harness-gestalt --title "..." --body "..."`
+- 读取：`gh issue view <number> --repo gestaltrun/deepseek-harness-gestalt --comments`
+- 列出：`gh issue list --repo gestaltrun/deepseek-harness-gestalt --state open`
+- 评论：`gh issue comment <number> --repo gestaltrun/deepseek-harness-gestalt --body "..."`
+- 添加或移除标签：使用 `gh issue edit <number> --repo gestaltrun/deepseek-harness-gestalt`
+- 关闭：`gh issue close <number> --repo gestaltrun/deepseek-harness-gestalt --comment "..."`
 
 GitHub Issues 和 PR（Pull Request）共享同一编号空间。遇到含义不明的编号时，先用 `gh pr view` 解析，失败后再用 `gh issue view`。
 

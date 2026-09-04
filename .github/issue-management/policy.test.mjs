@@ -9,6 +9,7 @@ import {
   nextResolvingIssueStatus,
   parseReferences,
   projectDate,
+  repositoryCoordinates,
   retainIssueReferences,
   resolvingIssueStatusCommand,
   requiresPullRequestPolicy,
@@ -89,9 +90,13 @@ const projectGraphqlData = ({
 
 const mockGraphql = (t, resolve) => {
   const requests = []
+  const previousRepository = process.env.GITHUB_REPOSITORY
   const previousToken = process.env.GH_TOKEN
+  process.env.GITHUB_REPOSITORY = 'deepseek-harness/deepseek-harness'
   process.env.GH_TOKEN = 'test-token'
   t.after(() => {
+    if (previousRepository === undefined) delete process.env.GITHUB_REPOSITORY
+    else process.env.GITHUB_REPOSITORY = previousRepository
     if (previousToken === undefined) delete process.env.GH_TOKEN
     else process.env.GH_TOKEN = previousToken
   })
@@ -153,6 +158,21 @@ const reviewedPull = (labels) => ({
   labels,
   references: { all: [2], resolving: [], related: [2] },
   issues: new Map([[2, { priority: null }]]),
+})
+
+test('routes policy requests to the repository from the workflow event', () => {
+  assert.deepEqual(
+    repositoryCoordinates({ GITHUB_REPOSITORY: 'gestaltrun/deepseek-harness-gestalt' }),
+    {
+      owner: 'gestaltrun',
+      name: 'deepseek-harness-gestalt',
+      fullName: 'gestaltrun/deepseek-harness-gestalt',
+    },
+  )
+  assert.throws(
+    () => repositoryCoordinates({ GITHUB_REPOSITORY: 'deepseek-harness-gestalt' }),
+    /GITHUB_REPOSITORY 必须为 owner\/name/,
+  )
 })
 
 test('counts only text outside details', () => {
@@ -290,14 +310,18 @@ test('initializes every referenced Issue only for a PR opened event', async () =
   assert.equal(writes.length, 3)
 })
 
-test('reads Priority and Status from Project custom fields', async (t) => {
+test('reads repository Issue and Project Status with separate tokens', async (t) => {
+  const previousRepository = process.env.GITHUB_REPOSITORY
   const previousGhToken = process.env.GH_TOKEN
   const previousGithubToken = process.env.GITHUB_TOKEN
   const previousProjectToken = process.env.PROJECT_TOKEN
   delete process.env.GH_TOKEN
+  process.env.GITHUB_REPOSITORY = 'gestaltrun/deepseek-harness-gestalt'
   process.env.GITHUB_TOKEN = 'repository-token'
   process.env.PROJECT_TOKEN = 'project-token'
   t.after(() => {
+    if (previousRepository === undefined) delete process.env.GITHUB_REPOSITORY
+    else process.env.GITHUB_REPOSITORY = previousRepository
     if (previousGhToken === undefined) delete process.env.GH_TOKEN
     else process.env.GH_TOKEN = previousGhToken
     if (previousGithubToken === undefined) delete process.env.GITHUB_TOKEN
@@ -328,10 +352,10 @@ test('reads Priority and Status from Project custom fields', async (t) => {
 
   const issue = await issueSnapshot(42)
 
-  assert.equal(issue.priority, 'P1')
+  assert.equal(issue.priority, null)
   assert.equal(issue.status, 'Inbox')
   assert.deepEqual(urls, [
-    'https://api.github.com/repos/deepseek-harness/deepseek-harness/issues/42',
+    'https://api.github.com/repos/gestaltrun/deepseek-harness-gestalt/issues/42',
     'https://api.github.com/graphql',
   ])
 })
@@ -348,7 +372,8 @@ test('writes an empty Project Start Date with the configured field', async (t) =
   assert.match(requests[0].query, /isIssueField/)
   assert.doesNotMatch(requests[0].query, /issueField\s*\{/)
   assert.match(requests[0].query, /priorityValue: fieldValueByName/)
-  assert.equal(requests[0].variables.priorityField, 'Priority')
+  assert.equal(requests[0].variables.priorityField, '')
+  assert.equal(requests[0].variables.includePriority, false)
   assert.match(requests[0].query, /ProjectV2ItemFieldDateValue/)
   assert.match(requests[1].query, /updateProjectV2ItemFieldValue/)
   assert.match(requests[1].query, /value: \{date: \$date\}/)
@@ -404,22 +429,12 @@ test('rejects a missing, non-Date, or Issue-level Start Date field', async (t) =
   assert.equal(requests.length, 3)
 })
 
-test('rejects a missing, non-select, or Issue-level Priority field', async (t) => {
-  let response = projectGraphqlData({ priorityField: false })
-  const requests = mockGraphql(t, () => response)
+test('does not require a Project Priority field when PR Priority integration is disabled', async (t) => {
+  const requests = mockGraphql(t, () => projectGraphqlData({ priorityField: false }))
 
-  await assert.rejects(initializeIssueStartDate(42, '2026-08-28'), /Project 缺少 Priority 字段/)
-  response = projectGraphqlData({ priorityType: 'TEXT' })
-  await assert.rejects(
-    initializeIssueStartDate(42, '2026-08-28'),
-    /Priority 字段必须为 Single Select/,
-  )
-  response = projectGraphqlData({ priorityIsIssueField: true })
-  await assert.rejects(
-    initializeIssueStartDate(42, '2026-08-28'),
-    /Priority 字段必须为 Project custom field/,
-  )
-  assert.equal(requests.length, 3)
+  await initializeIssueStartDate(42, '2026-08-28')
+
+  assert.equal(requests[0].variables.includePriority, false)
 })
 
 test('does not treat pull request references as Issue associations', () => {
@@ -474,7 +489,7 @@ test('enforces highest resolving Priority without Type or area synchronization',
   )
 })
 
-test('requires policy only after a human PR enters review', () => {
+test('non-draft activation applies policy before review activity', () => {
   assert.equal(
     requiresPullRequestPolicy({
       isDraft: false,
@@ -491,7 +506,7 @@ test('requires policy only after a human PR enters review', () => {
       reviewRequestCount: 0,
       reviewCount: 0,
     }),
-    false,
+    true,
   )
 })
 

@@ -2,16 +2,16 @@
 
 English | [中文](issue-tracker.zh.md)
 
-DeepSeek Gestalt product specs and tickets live in GitHub Issues on `BeiKeJieDeLiuLangMao/deepseek-harness-gestalt`. Use the `gh` CLI with `--repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt` for every operation. The `deepseek-ai/deepseek-harness` upstream repository is not the Gestalt product tracker.
+DeepSeek Gestalt product specs and tickets live in GitHub Issues on `gestaltrun/deepseek-harness-gestalt`. Use the `gh` CLI with `--repo gestaltrun/deepseek-harness-gestalt` for every operation. The `deepseek-ai/deepseek-harness` upstream repository is not the Gestalt product tracker.
 
 ## Operations
 
-- Create: `gh issue create --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --title "..." --body "..."`
-- Read: `gh issue view <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --comments`
-- List: `gh issue list --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --state open`
-- Comment: `gh issue comment <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --body "..."`
-- Apply or remove labels: use `gh issue edit <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt`
-- Close: `gh issue close <number> --repo BeiKeJieDeLiuLangMao/deepseek-harness-gestalt --comment "..."`
+- Create: `gh issue create --repo gestaltrun/deepseek-harness-gestalt --title "..." --body "..."`
+- Read: `gh issue view <number> --repo gestaltrun/deepseek-harness-gestalt --comments`
+- List: `gh issue list --repo gestaltrun/deepseek-harness-gestalt --state open`
+- Comment: `gh issue comment <number> --repo gestaltrun/deepseek-harness-gestalt --body "..."`
+- Apply or remove labels: use `gh issue edit <number> --repo gestaltrun/deepseek-harness-gestalt`
+- Close: `gh issue close <number> --repo gestaltrun/deepseek-harness-gestalt --comment "..."`
 
 GitHub shares one number space across issues and pull requests. Resolve an ambiguous number with `gh pr view` and fall back to `gh issue view`.
 

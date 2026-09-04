@@ -12,7 +12,7 @@ GitHub App installation 权限与用户 ProjectV2 权限彼此独立。把仓库
 
 ## 决策
 
-仓库策略从工作流提供的 `GITHUB_REPOSITORY` 派生仓库 owner 和名称。Project 配置仅保留 `projectOrganization`、`projectNumber` 和 `projectTitle`，因为这些值标识可选组织 Project，而非事件所属仓库。
+仓库策略从工作流提供的 `GITHUB_REPOSITORY` 派生仓库 owner 和名称。PR 策略使用仓库 `GITHUB_TOKEN`，对每个非 Draft 的人工 PR 生效，并为此个人账号 tracker 禁用 Priority 同步。Project 配置仅把 `projectOrganization`、`projectNumber` 和 `projectTitle` 作为部署标识；Project-local 字段名仍是可选生命周期配置，而不是仓库坐标。
 
 仅当仓库变量 `DSH_ISSUE_PROJECT_LIFECYCLE_ENABLED` 严格等于 `true` 时，组织 Project 生命周期投影才会运行。禁用此选项时，整个生命周期 job 会在创建 GitHub App token 前跳过。启用该选项的部署要求 `projectOrganization` 与事件仓库 owner 一致；工作流会在 checkout 可信策略之后、创建 token 之前检查此约束，生命周期入口则会在任何 API 请求前再次检查。随后，部署会用已配置的 App 凭证创建仓库范围的 installation token，并使用同一 owner 的组织权限执行 ProjectV2 操作。
 

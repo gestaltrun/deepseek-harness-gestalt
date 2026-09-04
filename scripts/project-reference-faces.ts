@@ -4,7 +4,50 @@ import { existsSync, globSync } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 
-type ProjectFace = 'host' | 'client'
+export type ProjectFace = 'host' | 'client'
+
+export const GESTALT_COMPILER_FACES: Readonly<Record<ProjectFace, readonly string[]>> = {
+  host: [
+    'apps/desktop',
+    'packages/browser/browser-runtime',
+    'packages/browser/browser-runtime-deterministic',
+    'packages/browser/browser-runtime-electron',
+    'packages/browser/browser-runtime-tandem',
+    'packages/browser/browser-workspace',
+    'packages/browser/tool-browser',
+    'packages/core/agent-tool-eligibility',
+    'packages/core/tools-eligibility',
+    'packages/host/apiproxy',
+    'packages/interaction/member-question-receiver',
+    'packages/interaction/member-question-sender',
+    'packages/interaction/tool-project-members',
+    'packages/platform/noise-channel',
+    'packages/platform/platform-account',
+    'packages/platform/platform-account-core',
+    'packages/platform/platform-account-http',
+    'packages/platform/project-membership',
+    'packages/platform/project-membership-core',
+    'packages/platform/project-membership-desktop',
+    'packages/platform/project-membership-http',
+    'packages/platform/remote-access',
+    'packages/platform/remote-access-http',
+    'packages/platform/remote-access-redis',
+    'packages/platform/remote-attachments',
+    'packages/platform/remote-protocol',
+  ],
+  client: [
+    'apps/mobile',
+    'packages/client/runtime',
+    'packages/client/ui-better-sidebar',
+    'packages/client/ui-browser',
+    'packages/client/ui-desktop',
+    'packages/client/ui-member-questions',
+    'packages/client/ui-workbench',
+    'packages/platform/platform-account-client',
+    'packages/platform/project-membership-client',
+    'packages/platform/remote-access-client',
+  ],
+}
 
 interface ProjectReferenceConfig {
   readonly extends?: unknown
@@ -29,7 +72,7 @@ const WORKSPACE_MANIFESTS = [
  */
 export function collectProjectReferenceFaceViolations(root: string): string[] {
   const splitRoots = splitProjectRoots(root)
-  const violations: string[] = []
+  const violations = collectGestaltCompilerFaceViolations(root)
   const pending = [resolve(root, 'tsconfig.host.json'), resolve(root, 'tsconfig.client.json')]
   const visited = new Set<string>()
   for (let configPath = pending.pop(); configPath !== undefined; configPath = pending.pop()) {
@@ -59,6 +102,29 @@ export function collectProjectReferenceFaceViolations(root: string): string[] {
     }
   }
 
+  return violations.sort()
+}
+
+/**
+ * Find retained Gestalt projects omitted from their required root aggregate.
+ *
+ * @param root - Repository root containing the compiler aggregates.
+ * @returns Repo-relative diagnostics for every missing Gestalt compiler face.
+ */
+export function collectGestaltCompilerFaceViolations(root: string): string[] {
+  const violations: string[] = []
+  for (const face of ['host', 'client'] as const) {
+    const aggregate = resolve(root, `tsconfig.${face}.json`)
+    const references = new Set(projectReferences(projectConfig(root, aggregate))
+      .map(reference => referenceConfigPath(aggregate, reference)))
+    for (const directory of GESTALT_COMPILER_FACES[face]) {
+      const expected = resolve(root, directory, 'tsconfig.json')
+      if (!existsSync(expected)) continue
+      if (!references.has(expected)) {
+        violations.push(`${directory}/tsconfig.json: retained Gestalt project is omitted from the root ${faceLabel(face)} aggregate`)
+      }
+    }
+  }
   return violations.sort()
 }
 

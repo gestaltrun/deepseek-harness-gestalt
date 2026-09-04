@@ -1,0 +1,31 @@
+# Agent Note: Merged workspace compiler-face completeness
+
+Status: implemented
+
+English | [中文](2026-09-04-merged-workspace-compiler-faces.zh.md)
+
+## Problem
+
+A mechanical upstream merge can retain valid package manifests while omitting their lockfile importers or root TypeScript Project References. The resulting installation may preserve stale links, and direct aggregate programs then report missing-source diagnostics that obscure the API migration errors owned by later tickets.
+
+## Decision
+
+The lockfile is generated from the complete pnpm workspace and contains every one of the 306 workspace projects discovered by pnpm. Clean installations select only host-executable binary payloads; cross-platform packaging remains responsible for overriding `supportedArchitectures` in an isolated tree.
+
+Every retained Gestalt Host or Client project has an explicit root aggregate reference. `GESTALT_COMPILER_FACES` records the retained downstream projects whose compiler membership the upstream aggregate cannot derive, and the workspace constraints command rejects an omitted entry. Split projects still require the matching leaf config; the Better Sidebar Client project therefore references `client/connection/tsconfig.client.json` rather than its solution root.
+
+Retained release-package manifests use the merged repository version and preserve package-specific publication files. Desktop, Mobile, and Platform applications remain private product assemblies rather than npm release-family members.
+
+## Alternatives considered
+
+**Use aggregate-wide source includes.** This would bypass package compiler ownership, mix unrelated source roots, and hide missing Project References instead of repairing them.
+
+**Infer every compiler face from directory names or manifest exports.** Runtime entry points do not determine TypeScript environment: retained Platform client packages live outside `packages/client`, while some packages expose browser subpaths without belonging to the Client aggregate. The explicit downstream inventory keeps exceptional membership reviewable.
+
+**Download every platform binary in a normal checkout.** This increases installation size and makes clean setup depend on binaries that cannot execute on the current host. Packaging lanes already own cross-platform materialization.
+
+## Consequences
+
+A frozen clean install relinks Zod and all workspace dependencies from the generated lockfile. Direct Host and Client aggregate programs report no `TS6307` missing-source diagnostic caused by absent compiler faces; their remaining failures belong to later API and migration work.
+
+The explicit Gestalt compiler-face inventory is a maintenance obligation. Adding or removing a retained downstream project updates its aggregate and the inventory together, and the focused regression test proves that omission fails.

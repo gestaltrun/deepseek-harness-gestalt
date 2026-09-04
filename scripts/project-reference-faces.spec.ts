@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { collectProjectReferenceFaceViolations } from './project-reference-faces.ts'
+import {
+  collectGestaltCompilerFaceViolations,
+  collectProjectReferenceFaceViolations,
+  GESTALT_COMPILER_FACES,
+} from './project-reference-faces.ts'
 
 const roots: string[] = []
 
@@ -55,6 +59,23 @@ describe('Project Reference compiler faces', () => {
     })
 
     expect(collectProjectReferenceFaceViolations(root)).toEqual([])
+  })
+
+  it('rejects a retained Gestalt project omitted from its compiler face', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-project-reference-faces-'))
+    roots.push(root)
+    mkdirSync(join(root, 'apps/desktop'), { recursive: true })
+    writeJson(join(root, 'apps/desktop/tsconfig.json'), {})
+    writeJson(join(root, 'tsconfig.host.json'), {
+      references: GESTALT_COMPILER_FACES.host.slice(1).map(path => ({ path: `./${path}` })),
+    })
+    writeJson(join(root, 'tsconfig.client.json'), {
+      references: GESTALT_COMPILER_FACES.client.map(path => ({ path: `./${path}` })),
+    })
+
+    expect(collectGestaltCompilerFaceViolations(root)).toEqual([
+      'apps/desktop/tsconfig.json: retained Gestalt project is omitted from the root Host aggregate',
+    ])
   })
 
   it('rejects the opposite leaf and the solution root of a split project', () => {

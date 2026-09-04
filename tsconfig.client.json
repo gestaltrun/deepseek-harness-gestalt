@@ -42,6 +42,16 @@
     // smoke policy). webserver has zero workspace deps and no cordis merge,
     // so it cannot drag host-side Context augmentation into this program.
     { "path": "./packages/host/webserver" },
+    { "path": "./packages/client/runtime" },
+    { "path": "./packages/client/ui-better-sidebar" },
+    { "path": "./packages/client/ui-browser" },
+    { "path": "./packages/client/ui-desktop" },
+    { "path": "./packages/client/ui-member-questions" },
+    { "path": "./packages/client/ui-workbench" },
+    { "path": "./packages/platform/platform-account-client" },
+    { "path": "./packages/platform/project-membership-client" },
+    { "path": "./packages/platform/remote-access-client" },
+    { "path": "./apps/mobile" },
     // Compaction seam: ui-chat type-imports the canonical checkpoint contract
     // from the cordis-free dsh-compaction/checkpoint leaf. Composite rootDir
     // rules make that path depend on this project reference.

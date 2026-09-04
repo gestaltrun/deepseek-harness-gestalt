@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-project-membership-client",
   "description": "Browser client for Project Membership cloud-project creation, roster, presence heartbeat and close, invitations, and member administration over the /v1/projects routes",
-  "version": "0.1.1-rc.2",
+  "version": "0.1.2-rc.1",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",

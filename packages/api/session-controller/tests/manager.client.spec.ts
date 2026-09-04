@@ -518,6 +518,16 @@ describe('subagent catalogs', () => {
     expect(manager.getListSnapshot().subagentsByParent[S1]?.state).toBe('loading')
   })
 
+  it('rejects a synchronous catalog throw while the manager is live', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = () => {
+      throw new Error('catalog exploded now')
+    }
+    const manager = new SessionManager(fakeRemote(api))
+    await expect(manager.refreshSubagents(S1)).rejects.toThrow('catalog exploded now')
+    expect(manager.getListSnapshot().subagentsByParent[S1]?.state).toBe('loading')
+  })
+
   it('coalesces overlapping catalog reads without scheduling a trailing pull', async () => {
     const api = new FakeApiClient()
     const root = 'fk-root' as SessionId
@@ -609,6 +619,7 @@ describe('subagent catalogs', () => {
     const mid = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
     api.onSubagentList = () => mid.promise
     const midRefresh = manager.refreshSubagents(root)
+    await Promise.resolve()
     manager.handleSessionRemoved(root)
     const trailing = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
     api.onSubagentList = () => trailing.promise

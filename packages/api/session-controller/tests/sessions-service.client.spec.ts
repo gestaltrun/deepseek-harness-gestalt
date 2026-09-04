@@ -414,6 +414,7 @@ describe('provisional identity lifecycle', () => {
     const b = bench()
     await feedList(b, [{ id: 'parent' }])
     b.svc.open(sid('parent'))
+    await Promise.resolve()
     const current = b.svc.list.getSnapshot().current
     expect(() => { b.svc.openForRender(sid('ghost')) }).not.toThrow()
     expect(b.svc.list.getSnapshot().current).toBe(current)

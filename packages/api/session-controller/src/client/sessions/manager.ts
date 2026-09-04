@@ -434,32 +434,41 @@ export class SessionManager {
     })
     this.notifier.markDirty()
     const inflight: CatalogInflight = {
-      promise: Promise.resolve(),
-      controller,
-      generation,
-      expandableRows,
-      activityRows,
-      parentAvailableOverride: undefined,
-    }
-    const operation = (async () => {
-      try {
-        const result = await this.remote.subagents.list(parentSessionId, controller.signal)
-        if (!this.catalogCurrent(parentSessionId, inflight)) return
-        if (result.ok) {
-          const parentAvailable = inflight.parentAvailableOverride
-            ?? result.value.parentAvailable
-          this.catalogs.set(parentSessionId, {
-            ...result.value,
-            entries: this.withCatalogMutations(result.value.entries, expandableRows, activityRows),
-            parentAvailable,
-            state: 'ready',
-            error: null,
-          })
-          for (const [childId, address] of this.addresses) {
-            if (address.parentSessionId !== parentSessionId) continue
-            this.sessions.get(childId)?.handleSubagentParentAvailable(parentAvailable)
+      promise: Promise.resolve().then(async () => {
+        try {
+          const result = await this.remote.subagents.list(parentSessionId, controller.signal)
+          if (!this.catalogCurrent(parentSessionId, inflight)) return
+          if (result.ok) {
+            const parentAvailable = inflight.parentAvailableOverride
+              ?? result.value.parentAvailable
+            this.catalogs.set(parentSessionId, {
+              ...result.value,
+              entries: this.withCatalogMutations(result.value.entries, expandableRows, activityRows),
+              parentAvailable,
+              state: 'ready',
+              error: null,
+            })
+            for (const [childId, address] of this.addresses) {
+              if (address.parentSessionId !== parentSessionId) continue
+              this.sessions.get(childId)?.handleSubagentParentAvailable(parentAvailable)
+            }
+          } else {
+            this.catalogs.set(parentSessionId, {
+              entries: this.withCatalogMutations(
+                previous?.entries ?? [], expandableRows, activityRows,
+              ),
+              ...catalogAvailability(
+                inflight.parentAvailableOverride ?? previous?.parentAvailable,
+              ),
+              state: 'error',
+              error: result.error,
+            })
           }
-        } else {
+        } catch (error: unknown) {
+          if (!this.catalogCurrent(parentSessionId, inflight)
+            || this.disposed
+            || controller.signal.aborted) return
+          if (!isRemoteFailure(error)) throw error
           this.catalogs.set(parentSessionId, {
             entries: this.withCatalogMutations(
               previous?.entries ?? [], expandableRows, activityRows,
@@ -468,40 +477,29 @@ export class SessionManager {
               inflight.parentAvailableOverride ?? previous?.parentAvailable,
             ),
             state: 'error',
-            error: result.error,
+            error,
           })
+        } finally {
+          const current = this.catalogCurrent(parentSessionId, inflight)
+          if (this.catalogInflight.get(parentSessionId) === inflight) {
+            this.catalogInflight.delete(parentSessionId)
+          }
+          if (!current) return
+          // Re-arm the trailing pull before the dirty notify: the response the
+          // caller observed predates the stale-marking change, so the follow-up
+          // refresh is the only carrier of that change.
+          if (this.catalogStale.delete(parentSessionId)) void this.refreshSubagents(parentSessionId)
+          this.notifier.markDirty()
         }
-      } catch (error: unknown) {
-        if (!this.catalogCurrent(parentSessionId, inflight)
-          || this.disposed
-          || controller.signal.aborted) return
-        if (!isRemoteFailure(error)) throw error
-        this.catalogs.set(parentSessionId, {
-          entries: this.withCatalogMutations(
-            previous?.entries ?? [], expandableRows, activityRows,
-          ),
-          ...catalogAvailability(
-            inflight.parentAvailableOverride ?? previous?.parentAvailable,
-          ),
-          state: 'error',
-          error,
-        })
-      } finally {
-        const current = this.catalogCurrent(parentSessionId, inflight)
-        if (this.catalogInflight.get(parentSessionId) === inflight) {
-          this.catalogInflight.delete(parentSessionId)
-        }
-        if (!current) return
-        // Re-arm the trailing pull before the dirty notify: the response the
-        // caller observed predates the stale-marking change, so the follow-up
-        // refresh is the only carrier of that change.
-        if (this.catalogStale.delete(parentSessionId)) void this.refreshSubagents(parentSessionId)
-        this.notifier.markDirty()
-      }
-    })()
-    inflight.promise = operation
+      }),
+      controller,
+      generation,
+      expandableRows,
+      activityRows,
+      parentAvailableOverride: undefined,
+    }
     this.catalogInflight.set(parentSessionId, inflight)
-    return operation
+    return inflight.promise
   }
 
   /** True while this catalog request is still the live owner and the manager is not disposed. */

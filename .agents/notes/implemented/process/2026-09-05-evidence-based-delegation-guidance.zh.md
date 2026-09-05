@@ -18,7 +18,9 @@ Status: implemented
 
 当目标技能只能由用户启动时，其他技能把共享流程作为普通参考读取。通用工作流服从仓库术语、决策记录、源码布局、hook owner 与按变更行为选择测试的政策。代码审查区分仅提交与进行中两种模式，使 staged、unstaged 和 untracked 工作都保持可见。YAML 保持标准 plain scalar 语义：未引用的 ` #` 会开始注释。因此，带井号的技能描述使用引号或 block scalar，聚焦 metadata 回归证明最终解析后的 catalog description 保留完整触发词；parser 不会保留错误编写的 plain scalar 文本。
 
-条件式客户端脚手架流程位于由客户端常驻规则指向的 cookbook，`apps/web/AGENTS.md` 提供缺失的发现入口。根指令链接路由 owner，为子 agent 描述与 todo 内容定义用户可见语言优先级且不改变标识符或内部 prompt，并按格式 owner 是否声明兼容来表述不稳定格式政策，而不是按仓库标签是否存在。GitHub runner 细节服从当前 workflow 表达式。
+条件式客户端脚手架流程位于由客户端常驻规则指向的 cookbook，`apps/web/AGENTS.md` 提供缺失的发现入口。cookbook 保留注册失败事实：三个注册面各自缺失时在不同的后续阶段失败；profile 裸行名只能经修复后的 `$DSH_HOME/profiles/node_modules` 回退目录解析，没有任何应用或 bundle manifest 声明的包会 import 失败。根指令链接路由 owner，为子 agent 描述与 todo 内容定义用户可见语言优先级且不改变标识符或内部 prompt，并按格式 owner 是否声明兼容来表述不稳定格式政策，而不是按仓库标签是否存在。tag 创建与 GitHub Release 保持在每次发布需显式批准的约束内。GitHub runner 细节服从当前 workflow 表达式。
+
+会话复盘规则位于 [`docs/agents/session-retro.zh.md`](../../../../docs/agents/session-retro.zh.md) 这一普通共享参考。`retro` skill 保持为用户启动的入口，交付工作流链接该共享标准，协调者因此可以请求每个 writer 对自己会话复盘，而不必通过自动调用要求 user-only skill。候选只覆盖运行它的会话，不读取其他会话日志，任何内容落地前都到达用户显式的 keep-or-drop 门。每个变更文件恰好以一个换行符结尾；聚焦检查按字节复核，因为暂存 diff 空白检查抓不到全新文件缺失的末尾换行。
 
 ## Alternatives considered
 

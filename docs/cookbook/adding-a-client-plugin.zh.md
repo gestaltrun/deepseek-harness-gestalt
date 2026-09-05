@@ -7,7 +7,7 @@
 ## 添加插件包
 
 1. 创建 `packages/client/<name>`，包含 `package.json`、`tsconfig.json`、`tsdown.config.ts`、`src/index.ts`、`src/invariant.ts` 和 `README.md`。浏览器插件还提供 `src/client/`、声明的 `./client` export，以及使用 CSS Modules 时的 `src/css-modules.d.ts`。包名使用 `@deepseek-ai/dsh-client-<name>`，README 包含 Model Experience 部分。
-2. 在 `tsconfig.client.json` 注册包，在 `packages/bundle/web-app/cordis.patch.yml` 添加 `dsh.client` 行，并在 `packages/bundle/web-app/package.json` 声明依赖。三个位置分别管理编译、Loader 和安装关系。
+2. 在 `tsconfig.client.json` 注册包，在 `packages/bundle/web-app/cordis.patch.yml` 添加 `dsh.client` 行，并在 `packages/bundle/web-app/package.json` 声明依赖。三项缺一不可：每个缺失面会在不同的后续阶段失败——`tsconfig.client.json` 的 `references` 项在编译时失败，patch 行在 Loader 组合时失败，依赖在 profile 启动时失败；此时裸行名只能经修复后的扁平 `$DSH_HOME/profiles/node_modules` 回退目录解析，该目录镜像应用与各 bundle 声明的依赖，没有任何 manifest 声明的包会 import 失败。
 3. 设置 `platform: 'web'`。只有 stage-one 预取基础设施使用 `immediately: true`。`dsh.client.inject` 是信息性包边；Cordis service injection 控制激活，非 baseline 的 `external` 请求控制同步模块物化。
 4. 向其他包的 slot 贡献内容时，使用 `ctx.slots.inject(name, () => ctx.slots.register(...))`。它等待声明，并在重新声明过程中管理清理。只为贡献实际读取的 service 保留 Cordis service 边。
 5. 按常驻依赖与模块图规则决定 npm sections、`dsh.client.external` 请求、浏览器和 Node externality，以及 `files` 覆盖。

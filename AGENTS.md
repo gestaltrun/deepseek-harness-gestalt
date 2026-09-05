@@ -4,7 +4,7 @@ DeepSeek Harness uses vendored Cordis: **everything is a plugin**. See [architec
 
 ## Agent skills
 
-Use the [tracker](docs/agents/issue-tracker.md), [labels](docs/agents/triage-labels.md), [contexts](CONTEXT-MAP.md), and [domain rules](docs/agents/domain.md); Agent Notes own decisions. Subagent descriptions/todos use user language, else runtime/UI locale, runtime language, then conversation language—not shell `LANG`; identifiers, paths, commands, and internal prompts stay unchanged. Before delegating, apply [routing/context reuse](docs/agents/delegation-routing.md). [Orchestrate delivery](.agents/skills/orchestrate-dsh-delivery/SKILL.md); releases require approval.
+Use the [tracker](docs/agents/issue-tracker.md), [labels](docs/agents/triage-labels.md), [contexts](CONTEXT-MAP.md), and [domain rules](docs/agents/domain.md); Agent Notes own decisions. Subagent descriptions/todos use user language, else runtime/UI locale, runtime language, then conversation language—not shell `LANG`; identifiers, paths, commands, and internal prompts stay unchanged. Apply [routing/context reuse](docs/agents/delegation-routing.md) before delegating. [Orchestrate delivery](.agents/skills/orchestrate-dsh-delivery/SKILL.md); tags/releases need approval.
 
 ## Unstable-format stance
 

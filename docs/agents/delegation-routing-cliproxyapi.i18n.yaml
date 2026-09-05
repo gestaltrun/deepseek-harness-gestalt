@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/agents/delegation-routing-cliproxyapi.md
-delegation-routing-cliproxyapi.md: ef07aad5f9f3cf2e6e097bd1cc0445b2b2c27811
-delegation-routing-cliproxyapi.zh.md: 96beb4a0c12b825d1cd7f8a90bd96cde00c30060
+delegation-routing-cliproxyapi.md: f45a3ea7698ca27207d04e2ffd0c8661ca262d4d
+delegation-routing-cliproxyapi.zh.md: 5c564dc38d0e0b503a22b8102f5f610732b6336e

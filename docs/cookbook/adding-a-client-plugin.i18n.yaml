@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/cookbook/adding-a-client-plugin.md
-adding-a-client-plugin.md: 59b0375d260953529c4b6f92a3a9c3d7a6243915
-adding-a-client-plugin.zh.md: f38922eef61f6ea923ac59dc09389af3f1d27c6e
+adding-a-client-plugin.md: 13f8d4c1534714afd6a4598c092147a2d375ec59
+adding-a-client-plugin.zh.md: b1ea47be435237e3687e31f45612f9d4c5b02d89

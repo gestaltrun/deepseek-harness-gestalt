@@ -3,10 +3,11 @@ import {
   createFixtureCleanupOwner,
   FixtureCleanupError,
   type FixtureCleanupIssue,
+  type FixtureCleanupLane,
   type FixtureCleanupContinuation,
   type FixtureCleanupReport,
-  type HostLateFailureDiagnostics,
-  type HostStopDeadline,
+  type FixtureCleanupDiagnostics,
+  type FixtureCleanupDeadline,
   type OwnedFixtureLease,
 } from './helpers/fixture-cleanup-owner.ts'
 
@@ -30,11 +31,17 @@ function lease(beginCleanup: OwnedFixtureLease['beginCleanup']): OwnedFixtureLea
   return { beginCleanup: vi.fn(beginCleanup) }
 }
 
-function deadline(settle: HostStopDeadline['settle'] = async (stop) => {
-  await stop
-  return 'settled'
-}): HostStopDeadline {
-  return { settle: vi.fn(settle) }
+function deadline(hostSettle?: (stop: Promise<void>) => Promise<'settled' | 'expired'>): FixtureCleanupDeadline {
+  const settle: FixtureCleanupDeadline['settle'] = async <T>(
+    lane: FixtureCleanupLane,
+    operation: Promise<T>,
+  ) => {
+    if (lane === 'fixture-begin') return { status: 'settled', value: await operation }
+    if (hostSettle === undefined) return { status: 'settled', value: await operation }
+    const status = await hostSettle(operation as Promise<void>)
+    return status === 'expired' ? { status: 'expired' } : { status: 'settled', value: await operation }
+  }
+  return { settle }
 }
 
 async function cleanupError(promise: Promise<FixtureCleanupReport>): Promise<FixtureCleanupError> {
@@ -59,6 +66,69 @@ describe('fixture cleanup owner', () => {
     expect(host.stop).toHaveBeenCalledOnce()
   })
 
+  it('bounds a hanging begin while Host starts and observes late continuation rejection', async () => {
+    const begin = controlled<FixtureCleanupContinuation>()
+    const lateRejected = vi.fn()
+    const settle: FixtureCleanupDeadline['settle'] = async <T>(
+      lane: FixtureCleanupLane,
+      operation: Promise<T>,
+    ) => lane === 'fixture-begin' ? { status: 'expired' } : { status: 'settled', value: await operation }
+    const adapter: FixtureCleanupDeadline = { settle }
+    const owner = createFixtureCleanupOwner(adapter, {
+      hostStopRejected() {},
+      fixtureContinuationRejected: lateRejected,
+    })
+    const host = { stop: vi.fn() }
+    owner.registerFixture(lease(() => begin.promise))
+    owner.registerHost(host)
+
+    const cleanup = owner.cleanup()
+    expect(owner.cleanup()).toBe(cleanup)
+    const error = await cleanupError(cleanup)
+    expect(host.stop).toHaveBeenCalledOnce()
+    expect(error.entries).toEqual([
+      { kind: 'fixture', issue: { phase: 'graceful', code: 'graceful-failed', message: 'fixture cleanup begin expired' } },
+    ])
+
+    begin.resolve({ settled: Promise.reject(new Error('late continuation failed')) })
+    await expect.poll(() => lateRejected.mock.calls.length).toBe(1)
+    expect(lateRejected).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'late continuation failed' }))
+  })
+
+  it('reports one late non-quiescent continuation after begin abandonment', async () => {
+    const begin = controlled<FixtureCleanupContinuation>()
+    const fixtureLateReport = vi.fn()
+    const adapter: FixtureCleanupDeadline = {
+      settle: async <T>(lane: FixtureCleanupLane, operation: Promise<T>) => lane === 'fixture-begin'
+        ? { status: 'expired' }
+        : { status: 'settled', value: await operation },
+    }
+    const owner = createFixtureCleanupOwner(adapter, { hostStopRejected() {}, fixtureLateReport })
+    owner.registerFixture(lease(() => begin.promise))
+    await cleanupError(owner.cleanup())
+    const lateReport: FixtureCleanupReport = {
+      quiescent: false,
+      forced: true,
+      issues: [{ phase: 'final', code: 'final-failed', message: 'late issue' }],
+    }
+
+    begin.resolve({ settled: Promise.resolve(lateReport) })
+    await expect.poll(() => fixtureLateReport.mock.calls.length).toBe(1)
+
+    expect(fixtureLateReport).toHaveBeenCalledExactlyOnceWith(lateReport)
+  })
+
+  it('keeps prompt non-quiescence primary without a late report diagnostic', async () => {
+    const fixtureLateReport = vi.fn()
+    const owner = createFixtureCleanupOwner(deadline(), { hostStopRejected() {}, fixtureLateReport })
+    const report: FixtureCleanupReport = { quiescent: false, forced: false, issues: [] }
+    owner.registerFixture(lease(async () => ({ settled: Promise.resolve(report) })))
+
+    await cleanupError(owner.cleanup())
+
+    expect(fixtureLateReport).not.toHaveBeenCalled()
+  })
+
   it('invokes Host and aggregates when begin rejects', async () => {
     const owner = createFixtureCleanupOwner(deadline())
     const host = { stop: vi.fn(() => { throw new Error('host failed') }) }
@@ -77,10 +147,7 @@ describe('fixture cleanup owner', () => {
   it('settles Host and fixture continuation independently', async () => {
     const continuationSettlement = controlled<FixtureCleanupReport>()
     const hostStop = controlled<undefined>()
-    const deadlineAdapter = deadline(async (stop) => {
-      await stop
-      return 'settled'
-    })
+    const deadlineAdapter = deadline(async (stop) => { await stop; return 'settled' })
     const owner = createFixtureCleanupOwner(deadlineAdapter)
     owner.registerFixture(lease(async () => ({ settled: continuationSettlement.promise })))
     owner.registerHost({ stop: () => hostStop.promise })
@@ -111,10 +178,88 @@ describe('fixture cleanup owner', () => {
     expect(error.report).toEqual(SUCCESS)
   })
 
+  it('observes an already-rejected Host stop when deadline immediately expires', async () => {
+    const hostFailure = new Error('already rejected')
+    const hostStopRejected = vi.fn()
+    const owner = createFixtureCleanupOwner(
+      deadline(async () => 'expired'),
+      { hostStopRejected },
+    )
+    owner.registerFixture(lease(async () => ({ settled: Promise.resolve(SUCCESS) })))
+    owner.registerHost({ stop: () => Promise.reject(hostFailure) })
+
+    const error = await cleanupError(owner.cleanup())
+    await expect.poll(() => hostStopRejected.mock.calls.length).toBe(1)
+
+    expect(error.entries).toEqual([
+      { kind: 'host', code: 'host-stop-expired', message: 'Host stop did not settle before its deadline' },
+    ])
+    expect(hostStopRejected).toHaveBeenCalledExactlyOnceWith(hostFailure)
+  })
+
+  it('classifies the exact prompt Host rejection as primary without late diagnostics', async () => {
+    const hostFailure = new Error('prompt Host failure')
+    const hostStopRejected = vi.fn()
+    const owner = createFixtureCleanupOwner(
+      deadline(async (stop) => { await stop; return 'settled' }),
+      { hostStopRejected },
+    )
+    owner.registerFixture(lease(async () => ({ settled: Promise.resolve(SUCCESS) })))
+    owner.registerHost({ stop: () => Promise.reject(hostFailure) })
+
+    const error = await cleanupError(owner.cleanup())
+
+    expect(error.entries).toEqual([
+      { kind: 'host', code: 'host-stop-failed', message: 'prompt Host failure' },
+    ])
+    expect(hostStopRejected).not.toHaveBeenCalled()
+  })
+
+  it('observes a later Host rejection after a distinct deadline failure', async () => {
+    const hostStop = controlled<undefined>()
+    const hostStopRejected = vi.fn()
+    const owner = createFixtureCleanupOwner(
+      deadline(async () => { throw new Error('deadline failed') }),
+      { hostStopRejected },
+    )
+    owner.registerFixture(lease(async () => ({ settled: Promise.resolve(SUCCESS) })))
+    owner.registerHost({ stop: () => hostStop.promise })
+
+    const error = await cleanupError(owner.cleanup())
+    hostStop.reject(new Error('host failed'))
+    await expect.poll(() => hostStopRejected.mock.calls.length).toBe(1)
+
+    expect(error.entries).toEqual([
+      { kind: 'host', code: 'host-stop-failed', message: 'deadline failed' },
+    ])
+    expect(hostStopRejected).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: 'host failed' }))
+  })
+
+  it('observes a cached Host rejection after a distinct wrapped deadline failure', async () => {
+    const hostFailure = new Error('host failed')
+    const hostStopRejected = vi.fn()
+    const owner = createFixtureCleanupOwner(
+      deadline(async (stop) => {
+        await stop.catch(() => undefined)
+        throw new Error('wrapped deadline failed')
+      }),
+      { hostStopRejected },
+    )
+    owner.registerFixture(lease(async () => ({ settled: Promise.resolve(SUCCESS) })))
+    owner.registerHost({ stop: () => Promise.reject(hostFailure) })
+
+    const error = await cleanupError(owner.cleanup())
+
+    expect(error.entries).toEqual([
+      { kind: 'host', code: 'host-stop-failed', message: 'wrapped deadline failed' },
+    ])
+    expect(hostStopRejected).toHaveBeenCalledExactlyOnceWith(hostFailure)
+  })
+
   it('observes one late Host rejection after expiry', async () => {
     const hostStop = controlled<undefined>()
     const hostStopRejected = vi.fn()
-    const diagnostics: HostLateFailureDiagnostics = { hostStopRejected }
+    const diagnostics: FixtureCleanupDiagnostics = { hostStopRejected }
     const owner = createFixtureCleanupOwner(deadline(async () => 'expired'), diagnostics)
     owner.registerFixture(lease(async () => ({ settled: Promise.resolve(SUCCESS) })))
     owner.registerHost({ stop: () => hostStop.promise })
@@ -130,7 +275,7 @@ describe('fixture cleanup owner', () => {
   it('contains a throwing late Host diagnostic without changing cleanup settlement', async () => {
     const hostStop = controlled<undefined>()
     const hostStopRejected = vi.fn(() => { throw new Error('diagnostic failed') })
-    const diagnostics: HostLateFailureDiagnostics = { hostStopRejected }
+    const diagnostics: FixtureCleanupDiagnostics = { hostStopRejected }
     const owner = createFixtureCleanupOwner(deadline(async () => 'expired'), diagnostics)
     owner.registerFixture(lease(async () => ({ settled: Promise.resolve(SUCCESS) })))
     owner.registerHost({ stop: () => hostStop.promise })

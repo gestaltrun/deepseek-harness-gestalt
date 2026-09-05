@@ -37,22 +37,40 @@ export interface HostCleanupParticipant {
   stop(): void | Promise<void>
 }
 
-/** Converts Host stop settlement into a bounded settled-or-expired result. */
-export interface HostStopDeadline {
-  /** Bounds one prompt-return Host stop promise without using ambient timers. */
-  settle(stop: Promise<void>): Promise<'settled' | 'expired'>
+/** Cleanup lane whose foreign settlement requires a mechanism-neutral bound. */
+export type FixtureCleanupLane = 'fixture-begin' | 'host-stop'
+
+/** Converts fixture-begin and Host-stop settlement into bounded results. */
+export interface FixtureCleanupDeadline {
+  /** @param lane Owned cleanup lane. @param operation Foreign settlement. @returns Settlement or expiry. */
+  settle<T>(
+    lane: FixtureCleanupLane,
+    operation: Promise<T>,
+  ): Promise<{ readonly status: 'settled'; readonly value: T } | { readonly status: 'expired' }>
 }
 
-/** Receives an exact-once diagnostic for a Host rejection after deadline expiry. */
-export interface HostLateFailureDiagnostics {
+/** Receives exact-once diagnostics for failures after bounded ownership transfer. */
+export interface FixtureCleanupDiagnostics {
   /** Observes one Host rejection that arrives after its cleanup deadline expired. */
   hostStopRejected(error: unknown): void
+  /** Observes one fixture-begin rejection after its deadline ownership was abandoned. */
+  fixtureBeginRejected?(error: unknown): void
+  /** Observes one fixture continuation rejection after begin ownership was abandoned. */
+  fixtureContinuationRejected?(error: unknown): void
+  /** Observes one non-quiescent fixture report after begin ownership was abandoned. */
+  fixtureLateReport?(report: FixtureCleanupReport): void
 }
 
 /** Registers cleanup owners before exposing one memoized terminal cleanup result. */
 export interface FixtureCleanupOwner {
+  /** @param lease Exact fixture cleanup owner. @throws Synchronously on duplicate or late registration. */
   registerFixture(lease: OwnedFixtureLease): void
+  /** @param host Exact Host cleanup participant. @throws Synchronously on duplicate or late registration. */
   registerHost(host: HostCleanupParticipant): void
+  /**
+   * @returns Exact memoized Promise that rejects for missing fixture registration, cleanup failure,
+   * or non-quiescence.
+   */
   cleanup(): Promise<FixtureCleanupReport>
 }
 
@@ -66,6 +84,7 @@ export class FixtureCleanupError extends AggregateError {
   readonly entries: readonly FixtureCleanupErrorEntry[]
   readonly report: FixtureCleanupReport
 
+  /** @param entries Policy-ordered failures. @param report Final fixture cleanup report. */
   constructor(entries: readonly FixtureCleanupErrorEntry[], report: FixtureCleanupReport) {
     super(entries.map(entry => new Error(entryMessage(entry))), 'fixture cleanup did not reach verified quiescence')
     this.name = 'FixtureCleanupError'
@@ -85,16 +104,16 @@ const PHASE_ORDER: Readonly<Record<FixtureCleanupPhase, number>> = {
  * Creates the policy owner for one fixture lease and an optional Host participant.
  *
  * Cleanup mechanisms remain private to the lease Adapter. The owner publishes cleanup before
- * foreign calls, awaits the graceful begin barrier before stopping Host, then independently settles
- * bounded Host stop and the lease's mechanism-neutral verified-quiescence report.
+ * foreign calls, bounds the graceful begin barrier, then starts bounded Host stop after that barrier's
+ * settlement, expiry, or failure. A prompt continuation remains the terminal quiescence owner.
  *
- * @param deadline Adapter that bounds Host stop settlement.
- * @param diagnostics Sink for an exact-once rejection observed after Host deadline expiry.
+ * @param deadline Adapter that bounds fixture-begin and Host-stop settlement.
+ * @param diagnostics Sink for exact-once failures observed after bounded ownership transfer.
  * @returns An owner that rejects duplicate or late registration and memoizes cleanup.
  */
 export function createFixtureCleanupOwner(
-  deadline: HostStopDeadline,
-  diagnostics: HostLateFailureDiagnostics = { hostStopRejected() {} },
+  deadline: FixtureCleanupDeadline,
+  diagnostics: FixtureCleanupDiagnostics = { hostStopRejected() {} },
 ): FixtureCleanupOwner {
   let lease: OwnedFixtureLease | undefined
   let host: HostCleanupParticipant | undefined
@@ -130,19 +149,25 @@ export function createFixtureCleanupOwner(
 async function runCleanup(
   lease: OwnedFixtureLease,
   host: HostCleanupParticipant | undefined,
-  deadline: HostStopDeadline,
-  diagnostics: HostLateFailureDiagnostics,
+  deadline: FixtureCleanupDeadline,
+  diagnostics: FixtureCleanupDiagnostics,
 ): Promise<FixtureCleanupReport> {
+  const begin = startFixtureBegin(lease)
   let continuation: FixtureCleanupContinuation | undefined
   let gracefulIssue: FixtureCleanupIssue | undefined
   try {
-    continuation = await lease.beginCleanup()
-  } catch (error) {
-    gracefulIssue = {
-      phase: 'graceful',
-      code: 'graceful-failed',
-      message: errorMessage(error),
+    const result = await deadline.settle('fixture-begin', begin)
+    switch (result.status) {
+      case 'expired':
+        observeAbandonedFixtureBegin(begin, diagnostics)
+        gracefulIssue = { phase: 'graceful', code: 'graceful-failed', message: 'fixture cleanup begin expired' }
+        break
+      case 'settled': continuation = result.value; break
+      default: return assertNever(result)
     }
+  } catch (error) {
+    observeAbandonedFixtureBegin(begin, diagnostics, error)
+    gracefulIssue = { phase: 'graceful', code: 'graceful-failed', message: errorMessage(error) }
   }
 
   const hostLane = settleHost(host, deadline, diagnostics)
@@ -163,10 +188,62 @@ async function runCleanup(
   return report
 }
 
+function startFixtureBegin(lease: OwnedFixtureLease): Promise<FixtureCleanupContinuation> {
+  try {
+    return Promise.resolve(lease.beginCleanup())
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)))
+  }
+}
+
+function observeAbandonedFixtureBegin(
+  begin: Promise<FixtureCleanupContinuation>,
+  diagnostics: FixtureCleanupDiagnostics,
+  surfacedError?: unknown,
+): void {
+  void begin.then(
+    (continuation) => {
+      void continuation.settled.then(
+        (report) => {
+          if (!report.quiescent || report.issues.length > 0) observeFixtureLateReport(diagnostics, report)
+        },
+        (error: unknown) => { observeFixtureContinuationFailure(diagnostics, error) },
+      )
+    },
+    (error: unknown) => {
+      if (!Object.is(error, surfacedError)) observeFixtureBeginFailure(diagnostics, error)
+    },
+  )
+}
+
+function observeFixtureBeginFailure(diagnostics: FixtureCleanupDiagnostics, error: unknown): void {
+  try {
+    diagnostics.fixtureBeginRejected?.(error)
+  } catch {
+    // The begin rejection is already observed; only its diagnostic callback failed.
+  }
+}
+
+function observeFixtureContinuationFailure(diagnostics: FixtureCleanupDiagnostics, error: unknown): void {
+  try {
+    diagnostics.fixtureContinuationRejected?.(error)
+  } catch {
+    // The continuation rejection is already observed; only its diagnostic callback failed.
+  }
+}
+
+function observeFixtureLateReport(diagnostics: FixtureCleanupDiagnostics, report: FixtureCleanupReport): void {
+  try {
+    diagnostics.fixtureLateReport?.(report)
+  } catch {
+    // The late report is already observed; only its diagnostic callback failed.
+  }
+}
+
 async function settleHost(
   host: HostCleanupParticipant | undefined,
-  deadline: HostStopDeadline,
-  diagnostics: HostLateFailureDiagnostics,
+  deadline: FixtureCleanupDeadline,
+  diagnostics: FixtureCleanupDiagnostics,
 ): Promise<FixtureCleanupErrorEntry | undefined> {
   if (host === undefined) return undefined
   let stop: Promise<void>
@@ -175,26 +252,56 @@ async function settleHost(
   } catch (error) {
     return { kind: 'host', code: 'host-stop-failed', message: errorMessage(error) }
   }
-  let expired = false
+  let state: 'owned' | 'abandoned' | 'surfaced' = 'owned'
+  let hasPendingRejection = false
+  let pendingRejection: unknown
   let lateFailureObserved = false
-  void stop.catch((error: unknown) => {
-    if (!expired || lateFailureObserved) return
-    lateFailureObserved = true
-    try {
-      diagnostics.hostStopRejected(error)
-    } catch {
-      // Swallow only a diagnostic callback failure; Host rejection ownership is already satisfied.
+  const observedStop = stop.catch((error: unknown) => {
+    hasPendingRejection = true
+    pendingRejection = error
+    if (state === 'abandoned' && !lateFailureObserved) {
+      lateFailureObserved = true
+      observeLateHostFailure(diagnostics, error)
     }
+    throw error
+  })
+  void observedStop.catch(() => {
+    // The first observer owns rejection state; this continuation prevents an unhandled branch.
   })
   try {
-    const outcome = await deadline.settle(stop)
-    if (outcome === 'expired') {
-      expired = true
-      return { kind: 'host', code: 'host-stop-expired', message: 'Host stop did not settle before its deadline' }
+    const outcome = await deadline.settle('host-stop', observedStop)
+    switch (outcome.status) {
+      case 'expired':
+        state = 'abandoned'
+        if (hasPendingRejection && !lateFailureObserved) {
+          lateFailureObserved = true
+          observeLateHostFailure(diagnostics, pendingRejection)
+        }
+        return { kind: 'host', code: 'host-stop-expired', message: 'Host stop did not settle before its deadline' }
+      case 'settled':
+        state = 'surfaced'
+        return undefined
+      default: return assertNever(outcome)
     }
-    return undefined
   } catch (error) {
+    if (hasPendingRejection && Object.is(error, pendingRejection)) {
+      state = 'surfaced'
+      return { kind: 'host', code: 'host-stop-failed', message: errorMessage(error) }
+    }
+    state = 'abandoned'
+    if (hasPendingRejection && !lateFailureObserved) {
+      lateFailureObserved = true
+      observeLateHostFailure(diagnostics, pendingRejection)
+    }
     return { kind: 'host', code: 'host-stop-failed', message: errorMessage(error) }
+  }
+}
+
+function observeLateHostFailure(diagnostics: FixtureCleanupDiagnostics, error: unknown): void {
+  try {
+    diagnostics.hostStopRejected(error)
+  } catch {
+    // Swallow only a diagnostic callback failure; Host rejection ownership is already satisfied.
   }
 }
 
@@ -234,7 +341,15 @@ function orderedIssues(issues: readonly FixtureCleanupIssue[]): FixtureCleanupIs
 }
 
 function entryMessage(entry: FixtureCleanupErrorEntry): string {
-  return entry.kind === 'host' ? entry.message : entry.issue.message
+  switch (entry.kind) {
+    case 'host': return entry.message
+    case 'fixture': return entry.issue.message
+    default: return assertNever(entry)
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unexpected cleanup entry: ${String(value)}`)
 }
 
 function errorMessage(error: unknown): string {

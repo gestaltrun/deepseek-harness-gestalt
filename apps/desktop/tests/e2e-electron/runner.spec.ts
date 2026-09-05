@@ -102,8 +102,10 @@ describe('Desktop Electron runner ownership', () => {
       scripts?: Record<string, string>
     }
 
+    expect(desktopManifest.scripts?.['typecheck:fake-policy'])
+      .toBe('tsc -p tests/tsconfig.fake-policy.json')
     expect(desktopManifest.scripts?.['typecheck:e2e-electron'])
-      .toBe('tsc -p tests/e2e-electron/tsconfig.json')
+      .toBe('pnpm run typecheck:fake-policy && tsc -p tests/e2e-electron/tsconfig.json')
     expect(rootManifest.scripts?.['typecheck:contracts-ready'])
       .toContain('pnpm --filter @deepseek-ai/dsh-desktop run typecheck:e2e-electron')
   })

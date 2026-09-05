@@ -18,7 +18,7 @@ Status: implemented
 
 降级场景用不可解析的 mobilecli 路径启动同一 Desktop 组合，要求 Host 保持存活并显示安装指引。三个场景都要求 URL 宣布、入口 HTTP 200、Session Surface 已渲染，并且稳定等待后 Desktop smoke 日志中没有错误。
 
-运行器在启动前强制重建所有被消费的 Host、client、web 与 Electron main 产物。Electron e2e TypeScript 源码使用专用 Desktop compiler face，所属 package 与仓库 typecheck 命令都会执行该编译面。运行器对 Electron Service 的 release metadata 请求设置上限，使 metadata host 不可用时能进入该 service 捆绑的版本映射回退。它移除环境中的凭证与 Platform Relay 变量，提供 keyless 回环模型端点，并且只把验收产物写入 gitignored 的 `.artifacts/e2e-electron/`。每条已启动命令都持有独立进程树，POSIX 以 detached 方式启动。暂存的 mobilecli launcher 是 POSIX fixture，因此该通道在 Windows 上快速失败；Windows 资产选择与可执行文件命名由独立 package 测试负责。中断或日志写入失败会终止整棵进程树并等待完全停稳。命令只有在 stdio 关闭且串行日志 writer 刷新完成后，才允许检查构建结果或审计日志。每个成功场景都会记录归属的 Electron 与 Host PID，并在适用时记录 fake PID；缺失证据会让清理失败。teardown 会强制终止残留进程，分别结算进程、临时根目录与端口义务，把所有结果写入 `cleanup.json`，并聚合报告错误。Electron main/renderer 错误行与 Desktop smoke 错误会让通道失败，并写入 `log-audit.json`。
+运行器在启动前强制重建所有被消费的 Host、client、web 与 Electron main 产物。Electron e2e TypeScript 源码使用专用 Desktop compiler face，所属 package 与仓库 typecheck 命令都会执行该编译面。运行器对 Electron Service 的 release metadata 请求设置上限，使 metadata host 不可用时能进入该 service 捆绑的版本映射回退。它移除环境中的凭证与 Platform Relay 变量，提供 keyless 回环模型端点，并且只把验收产物写入 gitignored 的 `.artifacts/e2e-electron/`。当前通道会创建可见 BrowserWindow；在依据 Issue #572 落地显式启用的源码专用隐藏 profile 与严格所有权集成前，禁止把它作为自动化证据；从隐藏 renderer 捕获的截图仍是有效证据。POSIX 命令以 detached 方式启动，但当前 detached group 处理只是 best-effort fixture 清理，不是严格所有权或强隔离；[有界 Host 世代 fixture 所有权策略](2026-09-05-bounded-host-generation-fixture-ownership.zh.md)只定义 fake 基础，不会提升本通道的保证。暂存的 mobilecli launcher 是 POSIX fixture，因此该通道在 Windows 上快速失败；Windows 资产选择与可执行文件命名由独立 package 测试负责。命令只有在 stdio 关闭且串行日志 writer 刷新完成后，才允许检查构建结果或审计日志。运行器会记录适用的 Electron、Host 与 fake 标识，把清理结果写入 `cleanup.json`，并聚合报告清理错误。Electron main/renderer 错误行与 Desktop smoke 错误会让通道失败，并写入 `log-audit.json`。
 
 `DSH_PHONE_SERVER_PORT` 是 Desktop overlay 中可随部署调整的 mobilecli 服务端口设置。默认值仍为 `12000`；端到端运行器传入临时值，避免并行开发服务破坏证据。
 
@@ -32,4 +32,4 @@ Status: implemented
 
 ## 结果
 
-该通道无需密钥，但仍是完整的本地 Electron 验收检查，不替代单元测试。证据分别标明 Host 启动、传输字节、解码画面可见性、输入转发与清理。仓库 Electron runtime 冒烟通过不能替代本通道；本通道通过也不授权产品发布或合入 `master`。
+该通道无需密钥，但仍是可见的本地 Electron 集成检查；它不是 Issue #572 所要求的隐藏自动化验收证据，也不替代单元测试。证据分别标明 Host 启动、传输字节、解码画面可见性、输入转发与 best-effort 清理。仓库 Electron runtime 冒烟通过不能替代本通道；本通道通过也不授权产品发布或合入 `master`。

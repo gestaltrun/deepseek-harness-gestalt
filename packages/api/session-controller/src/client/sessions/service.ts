@@ -220,6 +220,10 @@ export class ClientSessions implements ISessions {
   private readonly deferredRemovals = new Set<SessionId>()
   /** True after the root sessions effect starts teardown; lifecycle writers must not rematerialize. */
   private disposed = false
+  /** Fused into search; aborted at the start of root disposal. */
+  private readonly commandAbort = new AbortController()
+  /** In-flight public async commands root disposal awaits before the final list projection. */
+  private readonly commandOps = new Set<Promise<unknown>>()
 
   /**
    * @param ctx - client root context (scope fibers mount under it).
@@ -258,6 +262,7 @@ export class ClientSessions implements ISessions {
     })
     rootCtx.effect(() => async () => {
       this.disposed = true
+      this.commandAbort.abort()
       disposeStageFollower()
       disposeManagerProjection()
       const scopes = [...this.scopes]
@@ -267,6 +272,7 @@ export class ClientSessions implements ISessions {
       for (const [id, record] of scopes) this.startScopeDrop(id, record)
       await this.manager.dispose()
       this.projectList()
+      await Promise.allSettled(this.commandOps)
       await this.drainScopeDrops()
     }, 'session-controller.client.sessions')
     rootCtx.reflect.provide('sessions', this, undefined)
@@ -315,8 +321,10 @@ export class ClientSessions implements ISessions {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
-    this.assertActive('refreshSubagents')
-    return this.manager.refreshSubagents(parentSessionId)
+    return this.trackCommand('refreshSubagents', async () => {
+      await this.manager.refreshSubagents(parentSessionId)
+      this.assertActive('refreshSubagents')
+    })
   }
 
   /**
@@ -336,8 +344,10 @@ export class ClientSessions implements ISessions {
    * @returns completion of the current or newly started baseline pull.
    */
   refresh(): Promise<void> {
-    this.assertActive('refresh')
-    return this.manager.refreshList()
+    return this.trackCommand('refresh', async () => {
+      await this.manager.refreshList()
+      this.assertActive('refresh')
+    })
   }
 
   /**
@@ -351,8 +361,14 @@ export class ClientSessions implements ISessions {
     query: string,
     signal: AbortSignal,
   ): Promise<RemoteResult<{ items: SessionSearchResultItem[]; hasMore: boolean }>> {
-    this.assertActive('search')
-    return this.manager.search(query, signal)
+    return this.trackCommand('search', async () => {
+      const result = await this.manager.search(
+        query,
+        AbortSignal.any([signal, this.commandAbort.signal]),
+      )
+      this.assertActive('search')
+      return result
+    })
   }
 
   /**
@@ -419,12 +435,14 @@ export class ClientSessions implements ISessions {
    * @returns the new session id.
    * @throws {SessionCreateError} with the requested id.
    */
-  async create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
-    this.assertActive('create')
-    const result = await this.manager.create(opts)
-    if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
-    this.projectList()
-    return result.value.sessionId
+  create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
+    return this.trackCommand('create', async () => {
+      const result = await this.manager.create(opts)
+      this.assertActive('create')
+      if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
+      this.projectList()
+      return result.value.sessionId
+    })
   }
 
   /**
@@ -442,32 +460,35 @@ export class ClientSessions implements ISessions {
    * @throws {SessionForkError} with the source id.
    * @throws {Error} when a requested child-title rename fails after creation.
    */
-  async fork(opts: {
+  fork(opts: {
     sessionId: SessionId
     atSeq?: number
     increaseTitle?: boolean
   }): Promise<SessionId> {
-    this.assertActive('fork')
     const sourceTitle = opts.increaseTitle
       ? this.list.getSnapshot().byId[opts.sessionId]?.title
       : undefined
-    const result = await this.manager.fork({
-      sessionId: opts.sessionId,
-      // Flooring lands inside the anchor's own turn (every turn opens with a
-      // turn/start), so the host's first-turn/end-at-or-after cut still ends
-      // on that turn — never clipped back to the previous one.
-      ...(opts.atSeq === undefined ? {} : { atSeq: SessionSeq(Math.floor(opts.atSeq)) }),
+    return this.trackCommand('fork', async () => {
+      const result = await this.manager.fork({
+        sessionId: opts.sessionId,
+        // Flooring lands inside the anchor's own turn (every turn opens with a
+        // turn/start), so the host's first-turn/end-at-or-after cut still ends
+        // on that turn — never clipped back to the previous one.
+        ...(opts.atSeq === undefined ? {} : { atSeq: SessionSeq(Math.floor(opts.atSeq)) }),
+      })
+      this.assertActive('fork')
+      if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
+      this.projectList()
+      const childId = result.value.sessionId
+      if (sourceTitle !== undefined) {
+        const child = this.binding(childId)?.session
+        if (child === undefined) throw new Error(`fork child "${childId}" is not locally addressable`)
+        const renamed = await child.rename(increasedForkTitle(sourceTitle))
+        this.assertActive('fork')
+        if (!renamed.ok) throw new Error(`fork child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
+      }
+      return childId
     })
-    if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
-    this.projectList()
-    const childId = result.value.sessionId
-    if (sourceTitle !== undefined) {
-      const child = this.binding(childId)?.session
-      if (child === undefined) throw new Error(`fork child "${childId}" is not locally addressable`)
-      const renamed = await child.rename(increasedForkTitle(sourceTitle))
-      if (!renamed.ok) throw new Error(`fork child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
-    }
-    return childId
   }
 
   /**
@@ -571,20 +592,50 @@ export class ClientSessions implements ISessions {
   }
 
   /**
+   * Reject command methods after the root sessions effect starts teardown.
+   * @param operation - public method name for the stable diagnostic.
+   */
+  private assertActive(operation: string): void {
+    if (this.disposed) throw this.disposedError(operation)
+  }
+
+  /**
+   * Register one public async command so root disposal can await it.
+   * @param operation - public method name for the stable diagnostic.
+   * @param run - command body; must re-assert activity after every await.
+   * @returns the tracked command promise.
+   */
+  private trackCommand<T>(operation: string, run: () => Promise<T>): Promise<T> {
+    const op = (async () => {
+      this.assertActive(operation)
+      try {
+        return await run()
+      } catch (error: unknown) {
+        if (this.disposed) throw this.disposedError(operation)
+        throw error
+      }
+    })()
+    this.commandOps.add(op)
+    void Promise.allSettled([op]).then(() => { this.commandOps.delete(op) })
+    return op
+  }
+
+  /**
+   * Stable diagnostic for a command that raced or followed ClientSessions disposal.
+   * @param operation - public method name.
+   * @returns the error thrown to the command caller.
+   */
+  private disposedError(operation: string): Error {
+    return new Error(`sessions.${operation}: ClientSessions is disposed`)
+  }
+
+  /**
    * Move the stage to the list's current session: sweep teardowns deferred
    * behind the previous occupant and pull the new occupant's history window.
    * Staging IS the open signal — the window opens ⟺ the session is on stage
    * — and open() is idempotent (an in-flight or completed open no-ops; a
    * failed one retries the next time current is touched).
    */
-  /**
-   * Reject command methods after the root sessions effect starts teardown.
-   * @param operation - public method name for the stable diagnostic.
-   */
-  private assertActive(operation: string): void {
-    if (this.disposed) throw new Error(`sessions.${operation}: ClientSessions is disposed`)
-  }
-
   private followCurrent(): void {
     if (this.disposed) return
     const snapshot = this.list.getSnapshot()

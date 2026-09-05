@@ -20,7 +20,8 @@ export type { AgentContext } from '../scope.ts'
 /**
  * The sessions-service face injected as `ctx.sessions`.
  * Command methods throw `sessions.<op>: ClientSessions is disposed` after
- * root disposal. Observational lookups stay undefined; `openForRender` no-ops.
+ * root disposal, including in-flight `search`/`create`/`fork`. Observational
+ * lookups stay undefined; `openForRender` no-ops.
  */
 export interface ISessions {
   /** The useSessions standard feed (list rows + current selection; read face — writes stay inside the domain). */

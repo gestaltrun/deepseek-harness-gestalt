@@ -121,7 +121,7 @@ export class FakeApiClient {
 
   // Programmable slots (defaults answer OK-empty); reassign per case.
   onList: (payload: unknown) => Promise<RemoteResult<{ items: never[] }>> = () => Promise.resolve(ok({ items: [] }))
-  onSearch: (payload: unknown) => Promise<RemoteResult<{ items: SessionSearchItem[]; hasMore: boolean }>> =
+  onSearch: (payload: unknown, signal?: AbortSignal) => Promise<RemoteResult<{ items: SessionSearchItem[]; hasMore: boolean }>> =
     () => Promise.resolve(ok({ items: [], hasMore: false }))
   onCreate: (payload: unknown) => Promise<RemoteResult<{ sessionId: SessionId }>> = () => Promise.resolve(ok({ sessionId: 'fk-new' as SessionId }))
   onSelectModel: (payload: SessionSelectModelRequest) => Promise<RemoteResult<SessionSelectModelValue>> =
@@ -214,7 +214,7 @@ export class FakeApiClient {
         }),
         search: (payload, signal) => {
           this.lastSearchSignal = signal
-          return this.record('session.search', payload, this.onSearch(payload))
+          return this.record('session.search', payload, this.onSearch(payload, signal))
         },
         create: payload => this.record('session.create', payload, this.onCreate(payload)),
         selectModel: payload => this.record(

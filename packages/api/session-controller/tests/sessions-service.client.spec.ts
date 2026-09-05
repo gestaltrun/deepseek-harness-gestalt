@@ -478,11 +478,11 @@ describe('provisional identity lifecycle', () => {
     expect(() => { b.svc.clear() }).toThrow('sessions.clear: ClientSessions is disposed')
     expect(() => { b.svc.setSubagentCatalogOpen(sid('parent'), true) })
       .toThrow('sessions.setSubagentCatalogOpen: ClientSessions is disposed')
-    expect(() => { void b.svc.refresh() }).toThrow('sessions.refresh: ClientSessions is disposed')
-    expect(() => { void b.svc.refreshSubagents(sid('parent')) })
-      .toThrow('sessions.refreshSubagents: ClientSessions is disposed')
-    expect(() => { void b.svc.search('needle', new AbortController().signal) })
-      .toThrow('sessions.search: ClientSessions is disposed')
+    await expect(b.svc.refresh()).rejects.toThrow('sessions.refresh: ClientSessions is disposed')
+    await expect(b.svc.refreshSubagents(sid('parent')))
+      .rejects.toThrow('sessions.refreshSubagents: ClientSessions is disposed')
+    await expect(b.svc.search('needle', new AbortController().signal))
+      .rejects.toThrow('sessions.search: ClientSessions is disposed')
     await expect(b.svc.create({ cwd: '/w' }))
       .rejects.toThrow('sessions.create: ClientSessions is disposed')
     await expect(b.svc.fork({ sessionId: sid('parent') }))
@@ -501,6 +501,95 @@ describe('provisional identity lifecycle', () => {
     expect(b.api.callsOf('session.follow')).toHaveLength(followCalls)
     expect(b.api.callsOf('subagents.list')).toHaveLength(catalogCalls)
     expect(b.api.followStarts).toEqual([])
+  })
+
+  it('rejects an in-flight create after disposal without listing or binding the child', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onCreate']>>>()
+    b.api.onCreate = () => gate.promise
+    const created = b.svc.create({ cwd: '/w' })
+    await Promise.resolve()
+    expect(b.api.callsOf('session.create')).toEqual([{ cwd: '/w' }])
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    gate.resolve(ok({ sessionId: sid('born') }))
+    await expect(created).rejects.toThrow('sessions.create: ClientSessions is disposed')
+    const notifyCount = notified.mock.calls.length
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.svc.binding(sid('born'))).toBeUndefined()
+    expect(b.svc.scope(sid('born'))).toBeUndefined()
+    expect(b.svc.list.getSnapshot().byId[sid('born')]).toBeUndefined()
+    expect(notified.mock.calls.length).toBe(notifyCount)
+    expect(b.api.callsOf('session.rename')).toEqual([])
+  })
+
+  it('rejects an in-flight titled fork after disposal without rename or a child binding', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    b.svc.handleControlFrame({
+      type: 'projection', sessionId: sid('source'), key: 'title', value: 'Roadmap', seq: 2,
+    })
+    await feedList(b, [{ id: 'source', cwd: '/work' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onFork']>>>()
+    b.api.onFork = () => gate.promise
+    const forked = b.svc.fork({ sessionId: sid('source'), increaseTitle: true })
+    await Promise.resolve()
+    expect(b.api.callsOf('session.fork')).toEqual([{ sessionId: 'source' }])
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    gate.resolve(ok({ sessionId: sid('child') }))
+    await expect(forked).rejects.toThrow('sessions.fork: ClientSessions is disposed')
+    const notifyCount = notified.mock.calls.length
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.svc.binding(sid('child'))).toBeUndefined()
+    expect(b.svc.scope(sid('child'))).toBeUndefined()
+    expect(b.svc.list.getSnapshot().byId[sid('child')]).toBeUndefined()
+    expect(b.api.callsOf('session.rename')).toEqual([])
+    expect(notified.mock.calls.length).toBe(notifyCount)
+  })
+
+  it('aborts in-flight search on disposal without a Host response', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onSearch']>>>()
+    b.api.onSearch = (_payload, signal) => new Promise((resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+      }, { once: true })
+      void gate.promise.then(resolve, reject)
+    })
+    const searching = b.svc.search('needle', new AbortController().signal)
+    await Promise.resolve()
+    expect(b.api.callsOf('session.search')).toEqual([{ query: 'needle' }])
+    expect(b.api.lastSearchSignal?.aborted).toBe(false)
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    expect(settled).not.toHaveBeenCalled()
+    await expect(searching).rejects.toThrow('sessions.search: ClientSessions is disposed')
+    const notifyCount = notified.mock.calls.length
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.api.lastSearchSignal?.aborted).toBe(true)
+    expect(notified.mock.calls.length).toBe(notifyCount)
+    expect(b.api.callsOf('session.search')).toHaveLength(1)
   })
 
   it('drops a provisional scope when the Client Sessions plugin unloads', async () => {
@@ -534,7 +623,8 @@ describe('search', () => {
         hasMore: false,
       },
     })
-    expect(b.api.lastSearchSignal).toBe(signal)
+    expect(b.api.lastSearchSignal).not.toBe(signal)
+    expect(b.api.lastSearchSignal?.aborted).toBe(false)
     expect(b.svc.list.getSnapshot()).toBe(before)
   })
 })

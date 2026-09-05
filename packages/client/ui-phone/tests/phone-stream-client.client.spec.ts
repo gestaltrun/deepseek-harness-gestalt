@@ -4,6 +4,7 @@
  * WebSocket wiring — against stubbed browser globals.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { phoneCaptureIdOf } from '../src/client/phone-capture-id.ts'
 import {
   createHttpPhoneGateway, encodePhoneIoFrame, installPhoneAgent, mintPhoneSession, openPhoneIoSocket,
   parsePhoneIoReply, PHONE_AGENT_PATH, PHONE_SESSION_PATH, PhoneStreamHttpError, readPhoneAgentStatus,
@@ -30,7 +31,7 @@ describe('io frame codec', () => {
     const tap = {
       method: 'tap', x: 99, y: 660,
       source: { kind: 'capture', captureWidth: 2_868, captureHeight: 1_320,
-        captureId: 'mjpeg-a', captureFormat: 'mjpeg' },
+        captureId: phoneCaptureIdOf('mjpeg-a'), captureFormat: 'mjpeg' },
     } satisfies PhoneClientIoRequest
     expect(JSON.parse(encodePhoneIoFrame(5, 'emulator-5554', tap))).toEqual({
       jsonrpc: '2.0', id: 5, method: 'tap',
@@ -40,7 +41,7 @@ describe('io frame codec', () => {
     const swipe = {
       method: 'swipe', x1: 99, y1: 660, x2: 100, y2: 200,
       source: { kind: 'capture', captureWidth: 2_868, captureHeight: 1_320,
-        captureId: 'h264-a', captureFormat: 'h264', captureRotation: 90 },
+        captureId: phoneCaptureIdOf('h264-a'), captureFormat: 'h264', captureRotation: 90 },
     } satisfies PhoneClientIoRequest
     expect(JSON.parse(encodePhoneIoFrame(6, 'emulator-5554', swipe))).toEqual({
       jsonrpc: '2.0', id: 6, method: 'swipe',

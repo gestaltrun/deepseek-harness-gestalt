@@ -188,6 +188,9 @@ jobs:
       version: ${{ needs.plan.outputs.platform_version }}
       deploy: ${{ inputs.platform_deployment_run_id == '' }}
       recover: false
+      bootstrap: false
+      bootstrap_eip_addresses: ''
+      publish_release: true
       publish_only: ${{ inputs.platform_deployment_run_id != '' }}
       deployment_run_id: ${{ inputs.platform_deployment_run_id }}
       attachment_storage: ${{ inputs.platform_attachment_storage }}

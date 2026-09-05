@@ -119,27 +119,30 @@ function spawnCli(env: NodeJS.Dict<string>) {
 
 function runPublicReadinessHarness(
   result: 'success' | 'one-backend' | 'redirect' | 'unreachable' | 'wrong-storage',
+  bootstrapEips = '',
 ) {
   const harness = [
     'set -eEuo pipefail',
     'instance_ids=(i-first123 i-second456)',
     'READINESS_COUNTER=$(mktemp)',
     'node() {',
-    '  if [ "$READINESS_RESULT" = unreachable ] || [ "$READINESS_RESULT" = redirect ]; then return 22; fi',
+    '  endpoint="${@: -1}"',
+    '  [ "$READINESS_RESULT" != unreachable ] && [ "$READINESS_RESULT" != redirect ] || return 22',
+    '  if [ -n "$BOOTSTRAP_EIPS" ]; then printf \'ENDPOINT:%s\\n\' "$endpoint" >&2; fi',
     '  count=$(cat "$READINESS_COUNTER")',
     '  count=$((count + 1))',
     '  printf \'%s\' "$count" > "$READINESS_COUNTER"',
     '  if [ "$READINESS_RESULT" = wrong-storage ]; then',
-    '    printf \'{"attachmentStorage":"postgres","instanceId":"relay-1"}\'',
+    '    printf \'{"ok":true,"attachmentStorage":"postgres","instanceId":"relay-1"}\'',
     '  elif [ "$READINESS_RESULT" = one-backend ] || [ "$count" = 1 ]; then',
-    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-1"}\'',
+    '    printf \'{"ok":true,"attachmentStorage":"oss","instanceId":"relay-1"}\'',
     '  else',
-    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-2"}\'',
+    '    printf \'{"ok":true,"attachmentStorage":"oss","instanceId":"relay-2"}\'',
     '  fi',
     '}',
     'sleep() { :; }',
     publicReadinessSource,
-    'platform_public_readiness 2',
+    'platform_public_readiness 2 "$BOOTSTRAP_EIPS"',
     'printf \'CLEANUP\\n\'',
   ].join('\n')
   return spawnSync('bash', ['-c', harness], {
@@ -149,6 +152,7 @@ function runPublicReadinessHarness(
       PLATFORM_ORIGIN: 'https://platform.example.test',
       PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
       READINESS_RESULT: result,
+      BOOTSTRAP_EIPS: bootstrapEips,
     },
   })
 }
@@ -231,6 +235,7 @@ function runCloudAssistantHarness(result: 'success' | 'failure') {
 function runRecoveryHarness(
   phase: 'rollbackable' | 'commit-pending' | 'committed',
   failure: 'none' | 'second-rollback' | 'state-write' | 'target-mismatch' = 'none',
+  mode: 'rolling' | 'bootstrap' = 'rolling',
 ) {
   const harness = [
     'set -u',
@@ -240,7 +245,11 @@ function runRecoveryHarness(
     'trap \'cat "$LOG"\' EXIT',
     'aliyun() {',
     '  if [ "$1 $2" = "oss cat" ]; then',
-    '    printf \'{"version":1,"phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
+    '    if [ "$RECOVERY_MODE" = bootstrap ]; then',
+    '      printf \'{"version":2,"mode":"bootstrap","phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
+    '    else',
+    '      printf \'{"version":1,"phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
+    '    fi',
     '    printf \'%1000000s\' \'\'',
     '  elif [ "$1 $2" = "oss cp" ]; then',
     '    printf \'STATE:committed\\n\' >> "$LOG"',
@@ -253,6 +262,8 @@ function runRecoveryHarness(
     '  case "$1" in',
     '    -er)',
     '      case "$2" in',
+    '        *".version"*) if [ "$RECOVERY_MODE" = bootstrap ]; then printf \'2\\n\'; else printf \'1\\n\'; fi ;;',
+    '        *".mode"*) printf \'%s\\n\' "$RECOVERY_MODE" ;;',
     '        *".phase"*) printf \'%s\\n\' "$RECOVERY_PHASE" ;;',
     '        *".objectRoot"*) printf \'deploy-artifacts/platform/123-1\\n\' ;;',
     '        *".instanceIds"*) printf \'i-first123\\ni-second456\\n\' ;;',
@@ -291,6 +302,7 @@ function runRecoveryHarness(
       RECOVERY_SCRIPT: bashPath(recoveryScript),
       RECOVERY_PHASE: phase,
       RECOVERY_FAILURE: failure,
+      RECOVERY_MODE: mode,
       PLATFORM_ALIYUN_REGION: 'cn-hangzhou',
       PLATFORM_ECS_INSTANCE_IDS: failure === 'target-mismatch'
         ? 'i-newfirst,i-newsecond'
@@ -430,6 +442,7 @@ function runCollectorPrepareHarness(
       DSH_DEPLOY_ENV_SHA256: 'environment-sha',
       DSH_DEPLOY_ENV_KEY: 'environment-key',
       DSH_DEPLOY_IMAGE: 'platform-image:fixture',
+      DSH_DEPLOY_CANDIDATE: 'a'.repeat(40),
       DSH_DEPLOY_STORAGE: 'postgres',
       DSH_RELAY_INSTANCE_ID: 'relay-1',
     },
@@ -804,9 +817,18 @@ describe('Platform release workflows', () => {
     expect(applySource).toContain('SCRIPT_SHA256')
     expect(applySource).toContain('rollback_platform')
     expect(applySource).toContain('rolling replacement keeps the other private ECS instance serving')
+    expect(applySource).toContain('[ "$action" = bootstrap-rollback ]')
+    expect(String(steps(validate).find(step => typeof step.run === 'string' && step.run.includes('bootstrap requires exactly two'))?.run))
+      .toContain('bootstrap requires OSS attachment storage')
     expect(publicReadinessSource).toContain('public readiness through the production HTTPS origin')
     expect(publicReadinessSource).toContain('${PLATFORM_ORIGIN}/readyz')
+    expect(publicReadinessSource).toContain('servername: url.hostname')
+    expect(publicReadinessSource).toContain('host: url.host')
+    expect(publicReadinessSource).toContain('checkServerIdentity: tls.checkServerIdentity')
+    expect(publicReadinessSource).not.toContain('rejectUnauthorized: false')
+    expect(publicReadinessSource).not.toContain('-k')
     expect(publicReadinessSource).toContain('AbortSignal.timeout(5_000)')
+    expect(publicReadinessSource).toContain('timeout: 5_000')
     expect(publicReadinessSource).toContain("redirect: 'error'")
     expect(publicReadinessSource).not.toContain('curl ')
     expect(publicReadinessSource).toContain('expected_instances+=("relay-${expected_index}")')
@@ -823,6 +845,9 @@ describe('Platform release workflows', () => {
     expect(hostDeploySource).toContain('-v dsh-platform-membership:/var/lib/dsh/projects')
     expect(hostDeploySource).toContain('dist/oss-lifecycle-cli.mjs')
     expect(hostDeploySource).toContain('dsh-platform-candidate')
+    expect(hostDeploySource).toContain('verify-bootstrap-bare)')
+    expect(hostDeploySource).toContain('bootstrap-replace)')
+    expect(hostDeploySource).toContain('bootstrap-rollback)')
     expect(hostDeploySource).toContain('wait_for_storage 18080')
     expect(hostDeploySource).toContain('docker inspect dsh-platform-rollback')
     expect(hostDeploySource).toContain('docker stop --time 60 dsh-platform')
@@ -840,7 +865,7 @@ describe('Platform release workflows', () => {
     const targetCheck = steps(validate).find(step => typeof step.run === 'string'
       && step.run.includes('ListServerGroupServers'))
     expect(String(targetCheck?.run)).toContain('.TotalCount == 2 and (.Servers | length) == 2')
-    expect(String(targetCheck?.run)).toContain('.Status == "Available" and .Port == 80')
+    expect(String(targetCheck?.run)).toContain('.Port == 80 and ($bootstrap or .Status == "Available")')
     const recoverWorkflowSource = String(steps(recover).find(step => typeof step.run === 'string'
       && step.run.includes('platform-recover.sh'))?.run)
     expect(recoverWorkflowSource.trim()).toBe('bash apps/platform/scripts/platform-recover.sh')
@@ -864,8 +889,9 @@ describe('Platform release workflows', () => {
     expect(String(targetCheck?.run)).toContain('aliyun alb GetListenerAttribute --region "$PLATFORM_ALIYUN_REGION"')
     expect(String(targetCheck?.run)).toContain('.ListenerProtocol == "HTTPS"')
     expect(String(targetCheck?.run)).toContain('.IdleTimeout * 1000 >= $heartbeatTimeoutMs')
-    expect(hostDeploySource.indexOf('wait_for_ready 80 || rollback_failed=1'))
-      .toBeLessThan(hostDeploySource.indexOf('exit "$rollback_failed"'))
+    const rollingRollbackSource = hostDeploySource.slice(hostDeploySource.indexOf('  rollback)'))
+    expect(rollingRollbackSource.indexOf('wait_for_ready 80 || rollback_failed=1'))
+      .toBeLessThan(rollingRollbackSource.indexOf('exit "$rollback_failed"'))
     expect(applySource.indexOf('platform_public_readiness 30'))
       .toBeLessThan(applySource.indexOf('write_deploy_state commit-pending'))
     expect(applySource.indexOf('write_deploy_state commit-pending'))
@@ -918,6 +944,19 @@ describe('Platform release workflows', () => {
     const succeeded = runPublicReadinessHarness('success')
     expect(succeeded.status).toBe(0)
     expect(succeeded.stdout).toContain('public readiness through the production HTTPS origin')
+    expect(succeeded.stdout).toContain('CLEANUP')
+  })
+
+  it('requires exactly two bootstrap EIPs and probes each address directly', () => {
+    for (const invalid of ['203.0.113.10', '203.0.113.10,203.0.113.11,203.0.113.12', '203.0.113.10,203.0.113.10']) {
+      const result = runPublicReadinessHarness('success', invalid)
+      expect(result.status, invalid).toBe(1)
+      expect(result.stdout).not.toContain('CLEANUP')
+    }
+    const succeeded = runPublicReadinessHarness('success', '203.0.113.10,203.0.113.11')
+    expect(succeeded.status, `${succeeded.stdout}\n${succeeded.stderr}`).toBe(0)
+    expect(succeeded.stderr).toContain('ENDPOINT:203.0.113.10')
+    expect(succeeded.stderr).toContain('ENDPOINT:203.0.113.11')
     expect(succeeded.stdout).toContain('CLEANUP')
   })
 
@@ -996,6 +1035,24 @@ describe('Platform release workflows', () => {
     expect(committedRun.stdout).not.toContain('STATE:committed')
   })
 
+  it('dispatches bootstrap recovery by its explicit durable mode', () => {
+    const rollbackable = runRecoveryHarness('rollbackable', 'none', 'bootstrap')
+    expect(rollbackable.status).toBe(0)
+    expect(rollbackable.stdout).toContain('RUN:bootstrap-rollback:i-first123:2100')
+    expect(rollbackable.stdout).toContain('RUN:bootstrap-rollback:i-second456:2100')
+    expect(rollbackable.stdout).not.toContain('RUN:rollback:')
+
+    const committed = runRecoveryHarness('committed', 'none', 'bootstrap')
+    expect(committed.status).toBe(0)
+    expect(committed.stdout).toContain('RUN:complete-bootstrap:i-first123:2100')
+    expect(committed.stdout).toContain('RUN:complete-bootstrap:i-second456:2100')
+
+    const ambiguous = runRecoveryHarness('commit-pending', 'none', 'bootstrap')
+    expect(ambiguous.status).toBe(1)
+    expect(ambiguous.stderr).toContain('bootstrap recovery state is ambiguous')
+    expect(ambiguous.stdout).not.toContain('RUN:')
+  })
+
   it('keeps durable state after partial instance or state-write failure', () => {
     const partial = runRecoveryHarness('rollbackable', 'second-rollback')
     expect(partial.status).toBe(1)
@@ -1023,7 +1080,7 @@ describe('Platform release workflows', () => {
     expect(runCommittedCleanupHarness('ps-fails').status).toBe(1)
   })
 
-  it('keeps rollback state when Docker container enumeration fails', () => {
+  it('keeps rollback state when Docker container enumeration fails', { timeout: 15_000 }, () => {
     expect(runRollbackProbeHarness('none').status).toBe(0)
     expect(runRollbackProbeHarness('first').status).toBe(1)
     expect(runRollbackProbeHarness('second').status).toBe(1)

@@ -42,6 +42,23 @@ ensure_container_absent() {
 }
 
 case "$action" in
+  verify-bootstrap-bare)
+    container_names=
+    if command -v docker >/dev/null 2>&1; then
+      docker info >/dev/null
+      container_names=$(docker ps -a --format '{{.Names}}')
+    fi
+    for container_name in dsh-platform dsh-platform-candidate dsh-platform-rollback; do
+      if grep -Fxq "$container_name" <<< "$container_names"; then
+        echo "platform: bootstrap target is not bare: $container_name exists" >&2
+        exit 1
+      fi
+    done
+    if [ -e "$candidate_env" ]; then
+      echo 'platform: bootstrap target is not bare: candidate environment exists' >&2
+      exit 1
+    fi
+    ;;
   prepare)
     : "${DSH_DEPLOY_IMAGE_URL:?}" "${DSH_DEPLOY_IMAGE_SHA256:?}" "${DSH_DEPLOY_ENV_URL:?}"
     : "${DSH_DEPLOY_ENV_SHA256:?}" "${DSH_DEPLOY_ENV_KEY:?}" "${DSH_DEPLOY_IMAGE:?}"
@@ -115,6 +132,41 @@ case "$action" in
       -p 80:8080 --env-file "$candidate_env" "$DSH_DEPLOY_IMAGE"
     wait_for_storage 80 "$DSH_DEPLOY_STORAGE"
     ;;
+  bootstrap-replace)
+    : "${DSH_DEPLOY_IMAGE:?}" "${DSH_DEPLOY_CANDIDATE:?}" "${DSH_DEPLOY_STORAGE:?}"
+    ! docker inspect dsh-platform >/dev/null 2>&1
+    ! docker inspect dsh-platform-rollback >/dev/null 2>&1
+    docker rm -f dsh-platform-candidate >/dev/null
+    docker run -d --name dsh-platform --restart unless-stopped \
+      --label dsh.platform.bootstrap-candidate="$DSH_DEPLOY_CANDIDATE" \
+      --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
+      -v dsh-platform-membership:/var/lib/dsh/projects \
+      -p 80:8080 --env-file "$candidate_env" "$DSH_DEPLOY_IMAGE"
+    wait_for_storage 80 "$DSH_DEPLOY_STORAGE"
+    ;;
+  bootstrap-rollback)
+    set +e
+    rollback_failed=0
+    : "${DSH_DEPLOY_CANDIDATE:?}"
+    if ! command -v docker >/dev/null 2>&1; then
+      unlink "$candidate_env" 2>/dev/null || true
+      test ! -e "$candidate_env"
+      exit $?
+    fi
+    docker info >/dev/null || exit 1
+    bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}' 2>/dev/null || true)
+    if [ "$bootstrap_owned" = "$DSH_DEPLOY_CANDIDATE" ]; then
+      docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
+      ensure_container_absent dsh-platform || rollback_failed=1
+    elif docker inspect dsh-platform >/dev/null 2>&1; then
+      docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
+      rollback_failed=1
+    fi
+    ensure_container_absent dsh-platform-candidate || rollback_failed=1
+    unlink "$candidate_env" 2>/dev/null || true
+    test ! -e "$candidate_env" || rollback_failed=1
+    exit "$rollback_failed"
+    ;;
   rollback)
     set +e
     rollback_failed=0
@@ -149,6 +201,13 @@ case "$action" in
   complete-commit)
     ensure_container_absent dsh-platform-rollback
     ensure_container_absent dsh-platform-candidate
+    unlink "$candidate_env" 2>/dev/null || true
+    test ! -e "$candidate_env"
+    ;;
+  complete-bootstrap)
+    ensure_container_absent dsh-platform-candidate
+    ! docker inspect dsh-platform-rollback >/dev/null 2>&1
+    wait_for_ready 80
     unlink "$candidate_env" 2>/dev/null || true
     test ! -e "$candidate_env"
     ;;

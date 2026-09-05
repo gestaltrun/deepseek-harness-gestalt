@@ -41,8 +41,13 @@ describe('product release workflows', () => {
     expect(input(deploy, 'workflow_call', 'image_identity')).toMatchObject({ required: true, type: 'string' })
     expect(input(deploy, 'workflow_call', 'image_candidate_sha')).toMatchObject({ required: true, type: 'string' })
     expect(input(deploy, 'workflow_call', 'recover')).toMatchObject({ required: true, type: 'boolean' })
+    expect(input(deploy, 'workflow_call', 'bootstrap')).toMatchObject({ required: true, type: 'boolean' })
+    expect(input(deploy, 'workflow_call', 'bootstrap_eip_addresses')).toMatchObject({ required: false, type: 'string' })
+    expect(input(deploy, 'workflow_call', 'publish_release')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(deploy, 'workflow_call', 'publish_only')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(deploy, 'workflow_call', 'deployment_run_id')).toMatchObject({ required: false, type: 'string' })
+    expect(input(deploy, 'workflow_dispatch', 'bootstrap')).toMatchObject({ required: true, type: 'boolean', default: false })
+    expect(input(deploy, 'workflow_dispatch', 'publish_release')).toMatchObject({ required: true, type: 'boolean', default: false })
     for (const source of [desktopSource, text('.github/workflows/mobile-release.yml'), text('.github/workflows/platform-image.yml'), text('.github/workflows/platform-deploy.yml')]) {
       expect(source).toContain('git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master')
       expect(source).toContain('trustedWorkflowHeadCommits')
@@ -96,8 +101,10 @@ describe('product release workflows', () => {
     expect(deploySource).toContain('tag="platform-v${PLATFORM_VERSION}"')
     expect(deploySource).toContain('gh release create "$tag"')
     expect(deploySource).toContain('PLATFORM_IMAGE_IDENTITY: ${{ inputs.image_identity }}')
+    expect(deploySource).toContain('inputs.publish_release')
     expect(deploySource).toContain('inputs.publish_only')
     expect(deploySource).toContain('inputs.deployment_run_id')
+    expect(deploySource).toContain('if: ${{ inputs.publish_release')
     expect(deploySource).toContain('platform-deployment-candidate-')
     expect(imageSource).toContain('actions/runs/$PLATFORM_IMAGE_RUN_ID/jobs')
     expect(imageSource).toContain('actions/runs/$PLATFORM_IMAGE_RUN_ID/artifacts')
@@ -162,6 +169,11 @@ describe('product release workflows', () => {
     expect(job(coordinator, 'mobile').uses).toBe('./.github/workflows/mobile-release.yml')
     expect(job(coordinator, 'platform-image').uses).toBe('./.github/workflows/platform-image.yml')
     expect(job(coordinator, 'platform-deploy').uses).toBe('./.github/workflows/platform-deploy.yml')
+    expect(record(job(coordinator, 'platform-deploy').with, 'platform deploy inputs')).toMatchObject({
+      bootstrap: false,
+      bootstrap_eip_addresses: '',
+      publish_release: true,
+    })
     expect(JSON.stringify(job(coordinator, 'manifest'))).toContain('product-release-manifest')
     expect(job(coordinator, 'manifest').if).toBe('${{ always() }}')
     expect(coordinatorSource).toContain('actions/runs/$GITHUB_RUN_ID')

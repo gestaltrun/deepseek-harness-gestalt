@@ -32,6 +32,19 @@ on:
         description: Resolve an interrupted deployment from its durable phase.
         required: true
         type: boolean
+      bootstrap:
+        description: Install on exactly two verified bare hosts without a predecessor.
+        required: true
+        type: boolean
+      bootstrap_eip_addresses:
+        description: Exactly two comma-separated EIP addresses used only for pre-DNS bootstrap readiness.
+        required: false
+        type: string
+        default: ''
+      publish_release:
+        description: Publish the candidate-bound Platform GitHub Release after deployment.
+        required: true
+        type: boolean
       publish_only:
         description: Publish the Platform Release for a previously successful deployment.
         required: true
@@ -87,6 +100,20 @@ on:
         default: false
       recover:
         description: Resolve an interrupted deployment from its durable phase
+        required: true
+        type: boolean
+        default: false
+      bootstrap:
+        description: Install on exactly two verified bare hosts without a predecessor
+        required: true
+        type: boolean
+        default: false
+      bootstrap_eip_addresses:
+        description: Exactly two comma-separated EIP addresses for pre-DNS bootstrap readiness
+        required: false
+        type: string
+      publish_release:
+        description: Publish the Platform GitHub Release after deployment
         required: true
         type: boolean
         default: false
@@ -209,6 +236,9 @@ jobs:
         env:
           DEPLOY: ${{ inputs.deploy }}
           RECOVER: ${{ inputs.recover }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          BOOTSTRAP_EIP_ADDRESSES: ${{ inputs.bootstrap_eip_addresses }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
           PUBLISH_ONLY: ${{ inputs.publish_only }}
           DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}
         run: |
@@ -226,6 +256,32 @@ jobs:
           fi
           if [[ "$PUBLISH_ONLY" != true && -n "$DEPLOYMENT_RUN_ID" ]]; then
             echo 'platform: deployment_run_id requires publish-only mode' >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH_ONLY" == true && "$PUBLISH_RELEASE" != true ]]; then
+            echo 'platform: publish-only requires publish_release' >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH_RELEASE" == true && "$DEPLOY" != true && "$PUBLISH_ONLY" != true ]]; then
+            echo 'platform: publish_release requires deploy or publish-only' >&2
+            exit 1
+          fi
+          if [[ "$BOOTSTRAP" == true ]]; then
+            if [[ "$DEPLOY" != true || "$PUBLISH_ONLY" == true || "$RECOVER" == true ]]; then
+              echo 'platform: bootstrap requires deploy without recovery or publish-only' >&2
+              exit 1
+            fi
+            if [[ "${{ inputs.attachment_storage }}" != oss ]]; then
+              echo 'platform: bootstrap requires OSS attachment storage' >&2
+              exit 1
+            fi
+            IFS=',' read -r -a bootstrap_eips <<< "$BOOTSTRAP_EIP_ADDRESSES"
+            if [[ "${#bootstrap_eips[@]}" != 2 || -z "${bootstrap_eips[0]}" || -z "${bootstrap_eips[1]}" || "${bootstrap_eips[0]}" == "${bootstrap_eips[1]}" ]]; then
+              echo 'platform: bootstrap requires exactly two distinct EIP addresses' >&2
+              exit 1
+            fi
+          elif [[ -n "$BOOTSTRAP_EIP_ADDRESSES" ]]; then
+            echo 'platform: bootstrap EIP addresses require bootstrap mode' >&2
             exit 1
           fi
 
@@ -273,6 +329,7 @@ jobs:
           PLATFORM_ALB_SERVER_GROUP_ID: ${{ vars.PLATFORM_ALB_SERVER_GROUP_ID }}
           PLATFORM_ALB_LISTENER_ID: ${{ vars.PLATFORM_ALB_LISTENER_ID }}
           PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS: '45000'
+          PLATFORM_BOOTSTRAP: ${{ inputs.bootstrap }}
         run: |
           set -euo pipefail
           IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
@@ -284,8 +341,8 @@ jobs:
             <<< "$response" >/dev/null
           server_group=$(aliyun alb ListServerGroupServers --region "$PLATFORM_ALIYUN_REGION" \
             --ServerGroupId "$PLATFORM_ALB_SERVER_GROUP_ID")
-          jq -e --arg first "${instance_ids[0]// /}" --arg second "${instance_ids[1]// /}" \
-            '.TotalCount == 2 and (.Servers | length) == 2 and ([.Servers[] | select(.Status == "Available" and .Port == 80) | .ServerId] | sort == ([$first, $second] | sort))' \
+          jq -e --arg first "${instance_ids[0]// /}" --arg second "${instance_ids[1]// /}" --argjson bootstrap "$PLATFORM_BOOTSTRAP" \
+            '.TotalCount == 2 and (.Servers | length) == 2 and ([.Servers[] | select(.Port == 80 and ($bootstrap or .Status == "Available")) | .ServerId] | sort == ([$first, $second] | sort))' \
             <<< "$server_group" >/dev/null
           listener=$(aliyun alb GetListenerAttribute --region "$PLATFORM_ALIYUN_REGION" \
             --ListenerId "$PLATFORM_ALB_LISTENER_ID")
@@ -447,6 +504,8 @@ jobs:
           PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: ${{ vars.PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT }}
           PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_DEPLOY_OSS_OBJECT_PREFIX }}
           PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
+          PLATFORM_BOOTSTRAP: ${{ inputs.bootstrap }}
+          PLATFORM_BOOTSTRAP_EIP_ADDRESSES: ${{ inputs.bootstrap_eip_addresses }}
         run: |
           set -eEuo pipefail
           source apps/platform/scripts/platform-cloud-assistant.sh
@@ -497,8 +556,12 @@ jobs:
           echo "::add-mask::$script_url"
           write_deploy_state() {
             instance_ids_json=$(printf '%s\n' "${instance_ids[@]}" | jq -R . | jq -s .)
-            jq -nc --arg phase "$1" --arg objectRoot "$object_root" --argjson instanceIds "$instance_ids_json" \
-              '{version:1, phase:$phase, objectRoot:$objectRoot, instanceIds:$instanceIds}' > "$state_file"
+            mode=rolling
+            if [ "$PLATFORM_BOOTSTRAP" = true ]; then mode=bootstrap; fi
+            jq -nc --arg phase "$1" --arg mode "$mode" --arg objectRoot "$object_root" \
+              --arg candidate "${{ inputs.candidate_sha }}" --arg image "${{ inputs.image_identity }}" \
+              --arg plan "${{ inputs.plan_path }}" --argjson instanceIds "$instance_ids_json" \
+              '{version:2, mode:$mode, phase:$phase, objectRoot:$objectRoot, candidateCommit:$candidate, imageIdentity:$image, planPath:$plan, instanceIds:$instanceIds}' > "$state_file"
             aliyun oss cp "$state_file" "$state_object" \
               --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
           }
@@ -527,6 +590,7 @@ jobs:
               printf 'export DSH_DEPLOY_ENV_SHA256=%q\n' "$ENV_SHA256"
               printf 'export DSH_DEPLOY_ENV_KEY=%q\n' "$DEPLOY_ENV_KEY"
               printf 'export DSH_DEPLOY_IMAGE=%q\n' "$IMAGE"
+              printf 'export DSH_DEPLOY_CANDIDATE=%q\n' "${{ inputs.candidate_sha }}"
               printf 'export DSH_DEPLOY_STORAGE=%q\n' "$PLATFORM_REMOTE_ATTACHMENT_STORAGE"
               printf 'export DSH_RELAY_INSTANCE_ID=%q\n' "$relay_instance"
               # shellcheck disable=SC2016
@@ -534,7 +598,7 @@ jobs:
             } > "$wrapper"
             if [ "$action" = prepare ]; then
               platform_cloud_run "$instance_id" "$wrapper" 1800
-            elif [ "$action" = rollback ]; then
+            elif [ "$action" = rollback ] || [ "$action" = bootstrap-rollback ]; then
               platform_cloud_run "$instance_id" "$wrapper" 2100
             else
               platform_cloud_run "$instance_id" "$wrapper" 300
@@ -543,9 +607,10 @@ jobs:
 
           rollback_platform() (
             set +e
-            local rollback_failed=0 index
+            local rollback_failed=0 index rollback_action=rollback
+            if [ "$PLATFORM_BOOTSTRAP" = true ]; then rollback_action=bootstrap-rollback; fi
             for index in "${!instance_ids[@]}"; do
-              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" rollback || rollback_failed=1
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" "$rollback_action" || rollback_failed=1
             done
             exit "$rollback_failed"
           )
@@ -573,37 +638,56 @@ jobs:
           trap 'on_deploy_interrupt 130' INT
           trap 'on_deploy_interrupt 143' TERM
 
+          if [ "$PLATFORM_BOOTSTRAP" = true ]; then
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" verify-bootstrap-bare
+            done
+          fi
           for index in "${!instance_ids[@]}"; do
             remote_action "${instance_ids[$index]}" "relay-$((index + 1))" prepare
           done
-          for index in "${!instance_ids[@]}"; do
-            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" verify-predecessor
-          done
-          for index in "${!instance_ids[@]}"; do
-            echo "rolling replacement keeps the other private ECS instance serving: ${instance_ids[$index]}"
-            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" replace
-          done
+          if [ "$PLATFORM_BOOTSTRAP" = true ]; then
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" bootstrap-replace
+            done
+            platform_public_readiness 30 "$PLATFORM_BOOTSTRAP_EIP_ADDRESSES"
+            write_deploy_state committed
+            trap - ERR INT TERM
+            finalize_failed=0
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" complete-bootstrap || finalize_failed=1
+            done
+            test "$finalize_failed" = 0
+          else
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" verify-predecessor
+            done
+            for index in "${!instance_ids[@]}"; do
+              echo "rolling replacement keeps the other private ECS instance serving: ${instance_ids[$index]}"
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" replace
+            done
 
-          platform_public_readiness 30
-          write_deploy_state commit-pending
-          trap - ERR INT TERM
+            platform_public_readiness 30
+            write_deploy_state commit-pending
+            trap - ERR INT TERM
 
-          rollback_cleanup_failed=0
-          for index in "${!instance_ids[@]}"; do
-            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" cleanup-rollback \
-              || rollback_cleanup_failed=1
-          done
-          if [ "$rollback_cleanup_failed" != 0 ]; then
-            exit 1
+            rollback_cleanup_failed=0
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" cleanup-rollback \
+                || rollback_cleanup_failed=1
+            done
+            if [ "$rollback_cleanup_failed" != 0 ]; then
+              exit 1
+            fi
+
+            remote_action "${instance_ids[0]}" relay-1 cutover
+            write_deploy_state committed
+            finalize_failed=0
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" finalize || finalize_failed=1
+            done
+            test "$finalize_failed" = 0
           fi
-
-          remote_action "${instance_ids[0]}" relay-1 cutover
-          write_deploy_state committed
-          finalize_failed=0
-          for index in "${!instance_ids[@]}"; do
-            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" finalize || finalize_failed=1
-          done
-          test "$finalize_failed" = 0
           state_resolved=1
 
       - name: Record production deployment evidence
@@ -687,7 +771,7 @@ jobs:
   publish:
     name: Platform GitHub Release
     needs: [validate, deploy, deployment-provenance]
-    if: ${{ always() && needs.validate.result == 'success' && ((inputs.deploy && needs.deploy.result == 'success') || (inputs.publish_only && needs.deployment-provenance.result == 'success')) }}
+    if: ${{ inputs.publish_release && always() && needs.validate.result == 'success' && ((inputs.deploy && needs.deploy.result == 'success') || (inputs.publish_only && needs.deployment-provenance.result == 'success')) }}
     runs-on: ubuntu-24.04
     environment: production
     permissions:

@@ -14,7 +14,7 @@ Status: proposed
 
 ## 提案
 
-通过下述分阶段序列，将运营 Platform 切换到 `https://www.beikejiedeliulangmao.top` 并支持裸域（`beikejiedeliulangmao.top`）。用户已批准替换两条旧 DNS A 记录（`120.77.49.2`）以及正式的 Desktop/Mobile 重新发布，但本说明与其 PR 不执行任何变更：以下全部步骤是由另行授权的发布执行的持久计划。
+通过下述分阶段序列，将运营 Platform 切换到 `https://www.beikejiedeliulangmao.top` 并支持裸域（`beikejiedeliulangmao.top`）。用户已批准替换两条旧 DNS A 记录（`120.77.49.2`）以及正式的 Desktop/Mobile 重新发布，但本说明与其 PR 不执行任何变更：以下全部步骤是由另行授权的发布执行的持久计划。撰写本说明时，尚无任何实时部署授权被下放；每个部署、DNS、证书、控制台与发布步骤在执行时都需要新的显式批准。
 
 切换后的规范权威：
 
@@ -23,6 +23,7 @@ Status: proposed
 - GitHub OAuth App（client id `Ov23lip9LTmnFuFpFeeV`）的回调 URL 重新注册到新回调路径。该 App 区别于仓库的自动化 GitHub Apps，不被替换。
 - 完全不变的是：`PLATFORM_POSTGRES_DATABASE`（数据库身份）、`PLATFORM_IDENTITY_NAMESPACE`、`PLATFORM_TOKEN_SIGNING_KEY`、`PLATFORM_POLLING_SIGNING_KEY`、两台 ECS 实例、ALB 服务器组及其余全部生产名称。账号、安装、配对与持久状态得以保留，因为为其提供键的身份未变。
 - 区域上的三条 TXT 记录及其他所有 DNS 记录逐字保留；仅替换两条旧 A 记录（裸域与 www 的 `120.77.49.2`），并记录变更前的值用于回滚。
+- gestaltrun.com 证书保持挂载，旧主机名在旧客户端过渡证据关闭之前持续服务；origin 切换不会退役旧主机名，为其提供服务的身份命名空间保持不变。
 - 品牌名称、README、历史发布说明及引用 gestaltrun.com 的文档不改名。官网 SEO canonical 默认保持 `https://www.gestaltrun.com/`，等待显式决策，因为 `apps/platform/public/index.html` 及其发现元数据同时服务于两个主机名，过早切换 canonical 会在新域名积累权重之前丢弃已索引的 origin。
 
 裸域行为：裸域主机名获得有效证书与 DNS 可达性，使裸域 HTTPS 不失败，但规范权威是 www origin。裸域是重定向到 www，还是直接提供产品，在 Stage 1 验证中观察现有 ALB 的监听器与证书行为后决定；OAuth POST 回调与 Relay WSS 永远不指向裸域。
@@ -33,17 +34,17 @@ Stage 0 —— 冻结并记录（不改生产）。记录当前裸域/www A 值�
 
 Stage 1 —— 证书与 DNS（阿里云控制台，经授权操作者）。签发一张同时覆盖 `beikejiedeliulangmao.top` 与 `www.beikejiedeliulangmao.top` 的 HTTPS 证书（在现有 DNS 上完成 DCV），将其与当前 gestaltrun.com 证书一并挂到现有 ALB HTTPS 监听器（多证书监听器，而非替换），然后在新区域上仅替换两条旧 A 记录，使裸域与 www 解析到现有 ALB 前端地址。在记录中保留 TXT 记录与 TTL 值。验证：两个名称的权威与公共 DNS 解析、普通客户端对两个名称的 TLS 握手与主机名校验，以及本阶段期间 gestaltrun.com 服务不中断（旧证书仍挂载）。
 
-Stage 2 —— Platform origin 切换（仅 GitHub Environment `production`；暂不部署）。更新 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK` 变量；重新注册 OAuth App 回调。运行 platform-deploy 的 validate 作业（源码 CLI `production-env-cli.ts` 在任何 ECS apply 之前拒绝不匹配的 origin/回调）。在继续之前，对照仍在运行的旧部署验证新 www origin 上的 `/readyz`。本阶段可通过恢复两个 Environment 变量与 OAuth App 回调 URL 回滚。
+Stage 2 —— Platform origin 切换（仅 GitHub Environment `production`；暂不部署）。更新 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK` 变量；重新注册 OAuth App 回调。运行 platform-deploy 的 validate 作业（源码 CLI `production-env-cli.ts` 在任何 ECS apply 之前拒绝不匹配的 origin/回调）。在继续之前，对照仍在运行的旧部署验证新 www origin 上的 `/readyz`。本阶段可通过恢复两个 Environment 变量与 OAuth App 回调 URL 回滚。该切换本身只改变新部署与新客户端校验的对象：它本身不会使旧 ALB 主机名停止服务，也不会自行迁移旧客户端流量。已安装客户端与 OAuth 流程在切换后是否仍能在旧主机名上完成，取决于旧客户端回调过渡证据（Stage 5）与 GitHub 回调注册行为，而非 Environment 变量。
 
-Stage 3 —— Platform 部署（受保护工作流，显式批准）。以候选 SHA 派发 platform-deploy，保留工作流已拥有的 ECS 双实例滚动替换、回滚记录与附件存储切换。验证新 origin 上的账号登录、旧客户端行为（仍指向 gestaltrun.com 的已安装客户端在其自行更新前保持可用），以及新 origin 上的 Relay WSS。
+Stage 3 —— Platform 部署（受保护工作流，显式批准）。以候选 SHA 派发 platform-deploy，保留工作流已拥有的 ECS 双实例滚动替换、回滚记录与附件存储切换。验证新 origin 上的账号登录与新 origin 上的 Relay WSS。旧客户端行为在 Stage 5 验证，不在此处假设：仍指向 gestaltrun.com 的已安装客户端会继续到达双证书监听器，但其登录是否完成是 Stage 5 的证据问题，不是 Stage 3 的断言。
 
 Stage 4 —— 客户端重发布（从一个经评审候选发布正式 Desktop 与 Mobile）。在 `master` 上通过新的 Product Release Plan 提升 Desktop 与 Mobile 版本；新 origin 在该候选上固化进 Desktop 运营配置与两个 Mobile 构建。Desktop 经 desktop-release 发布（签名、公证、`--latest`）。Mobile 需要一次绑定候选的 Mobile Companion Acceptance 运行，将签名 APK 发布为持久的 GitHub 预发布，并且只有当请求过 `upload_testflight` 且存在已校验的构建号时才把 TestFlight 报告为已发布；仅 GitHub 预发布不构成正式 Mobile 发布。任何 Mobile 发布之前，从物理 Android 路径（WebView，而非仅桌面浏览器）验证新域名的 TLS/就绪，因为 #480 的故障正发生在那里。
 
-Stage 5 —— 物理验收与稳定。手机侧：有效 TLS、全新 GitHub 登录准备、同账号认证、WSS 附件、显式链接配对、Remote Online、手机侧发起的 ping/pong —— 保留用户设备与 Desktop 实例，并通过 `gif-assets` 发布脱敏证据。Desktop 侧：从已安装的旧 origin 构建更新到新版本并确认重发布渠道。各阶段回滚：Stage 1 恢复旧 A 值并摘除新证书；Stage 2 恢复两个 Environment 变量与 OAuth App 回调；Stage 3 使用工作流自身的回滚记录；Stage 4 不下架旧版本 —— 旧安装包仍是有效的下载目标，回滚方式是重指 origin 变量并从上一候选重新发布。
+Stage 5 —— 物理验收与旧客户端过渡证据。手机侧：有效 TLS、全新 GitHub 登录准备、同账号认证、WSS 附件、显式链接配对、Remote Online、手机侧发起的 ping/pong —— 保留用户设备与 Desktop 实例，并通过 `gif-assets` 发布脱敏证据。Desktop 侧：从已安装的旧 origin 构建更新到新版本并确认重发布渠道。旧客户端回调过渡在此处证明，先于任何旧证书退役：在监听进程校验新 origin 的同时，一台安装了旧 origin 的 Desktop 或 Mobile 构建在双证书监听器上完成其 GitHub OAuth 流程与 Relay 附件；否则该发现被记录为过渡缺口，阻止 Stage 4 声称一次不破坏性的重发布。gestaltrun.com 证书保持挂载、其命名空间不变，直至该证据关闭；只有显式的后续决策才会摘除它。各阶段回滚：Stage 1 恢复旧 A 值并摘除新证书；Stage 2 恢复两个 Environment 变量与 OAuth App 回调；Stage 3 使用工作流自身的回滚记录；Stage 4 不下架旧版本 —— 旧安装包仍是有效的下载目标，回滚方式是重指 origin 变量并从上一候选重新发布。
 
 ## 与进行中发布列车的排序
 
-PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `automation/product-release`）。本规范不修改该 PR。无碰撞规则：本切换的 Product Release Plan（Stage 4）仅在计划 0012 合并或被显式处置后才在 `master` 上创建，因为两个开放计划会争夺 `product-releases/` 的 `nextSequence` 与发布意图账本，且 Desktop 重发布应构建在 0.1.16 的更新器修复之上而非先于它。Platform-deploy 派发（Stage 3）不与仅 Desktop 的计划冲突；若 0012 已提升 Desktop，Stage 3 可在 Stage 4 的计划合并之前或之后运行，但 mobile 验收运行（Stage 4）必须绑定到确切的新域名候选 SHA。
+PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `automation/product-release`），已只读核验其 head 为 `3ac00a04805a3415b68a8d4e69d5c45af816c4f3`（OPEN，Draft）。本规范不修改该 PR，且本分支的规划对照其状态协调，不依赖其 head 移动。无碰撞规则：本切换的 Product Release Plan（Stage 4）仅在计划 0012 合并或被显式处置后才在 `master` 上创建，因为两个开放计划会争夺 `product-releases/` 的 `nextSequence` 与发布意图账本，且 Desktop 重发布应构建在 0.1.16 的更新器修复之上而非先于它。Platform-deploy 派发（Stage 3）不与仅 Desktop 的计划冲突；若 0012 已提升 Desktop，Stage 3 可在 Stage 4 的计划合并之前或之后运行，但 mobile 验收运行（Stage 4）必须绑定到确切的新域名候选 SHA。
 
 ## 备选方案
 
@@ -51,7 +52,7 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 
 **不移动 `PLATFORM_ORIGIN`，仅代理或重定向新域名。** 否决：OAuth 回调与 Relay WSS 必须终止在客户端与监听进程实际校验的 origin 上；无差别重定向 OAuth POST 或 WSS 会同时破坏两者，且议题明确禁止。
 
-**替换而非追加第二张 ALB 证书。** 在 Stage 1 否决：多证书挂载让 gestaltrun.com 在灰度期间持续服务，回滚计划依赖这一点；旧证书仅在 Stage 5 稳定后摘除。
+**替换而非追加第二张 ALB 证书。** 否决：多证书挂载让 gestaltrun.com 在灰度期间以及旧客户端回调过渡证据未决期间持续服务，回滚计划与旧客户端群体都依赖这一点；旧证书仅在 Stage 5 证据关闭后由显式的后续决策摘除。
 
 **把 `PLATFORM_ORIGIN` 指向裸域。** 否决：www 主机名是签发的规范权威；裸域支持的存在是为了让裸域 HTTPS 不失败，而不是第二个权威。两个 origin 会让 CORS 与回调面翻倍且无收益。
 
@@ -66,13 +67,14 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 - Environment `production` 的 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK`、运营 Desktop 配置及 Mobile 构建变量全部指向 `https://www.beikejiedeliulangmao.top` 且回调路径固定；WSS 与 `/pair` 链接由该 origin 推导；OAuth App `Ov23lip9LTmnFuFpFeeV` 的回调与之匹配。
 - 新的正式 Desktop 与 Mobile 版本从一个经评审候选发布：Desktop 附签名/公证安装包与 `--latest` GitHub Release；Mobile 附签名 APK 预发布、绑定候选的验收运行，且 TestFlight 仅在存在已校验构建号时报告为已发布 —— 绝不仅凭预发布声称。各单元分别校验发布清单、签名产物、更新渠道与固化权威。
 - 正式 Mobile 发布前，物理 Android 验收在新域名通过：TLS、GitHub 登录准备、同账号认证、WSS、显式链接配对、Remote Online、手机侧发起的 ping/pong；保留用户设备与 Desktop 实例；通过 `gif-assets` 发布脱敏证据。
-- 旧客户端过渡与回滚得到演示：一台安装了旧 origin Desktop 的设备更新到重发布渠道；每一阶段的回滚路径连同确切的变更前值一并记录。
+- 旧客户端过渡与回滚得到演示而非假设：一台安装了旧 origin Desktop 的设备更新到重发布渠道；在监听进程校验新 origin 的同时，一台安装了旧 origin 的客户端在双证书监听器上完成 GitHub OAuth 与 Relay 附件；每一阶段的回滚路径连同确切的变更前值一并记录。gestaltrun.com 证书保持挂载、其命名空间不变，直至该证据关闭。
 - 除非用户显式决定，官网 SEO canonical 保持 `https://www.gestaltrun.com/`；品牌名称与历史文档不变。
 - 本次变更不关闭 #480 与 #415；#480 的 ALB/TLS 诊断对照新证书与其自身证据重新验证，#415 仅凭其自身发布证据关闭。
 
 ## 风险
 
 - 600 秒的 DNS TTL 限定但不消除传播重叠：两个名称可能在 OAuth App 回调只接受一个 origin 的窗口内同时解析。阶段顺序（先证书与 DNS，后 Environment 切换）使每个区间都可服务。
+- origin 切换本身不会让旧主机名停止服务，其本身也不保证旧客户端持续完成 OAuth：GitHub 的回调注册决定 OAuth 流程接受哪些重定向 URL，因此即使旧主机名仍在服务，已安装客户端群体也可能在其自身更新落地之前失去登录完成能力。Stage 5 度量这一过渡而非预设它，双证书旧 origin 与保留的命名空间保持到位直至度量完成。
 - 物理 Android WebView 路径（#480）可能因不同于旧诊断的原因在新证书上失败；Stage 4 以该路径为发布闸门，因此风险是重发布受阻，而非已发布构建损坏。
 - 两个主机名提供同一产品页会分割 SEO 权重；默认 canonical 保住已索引 origin，代价是新域名积累权重更慢。
 - 保留身份意味着保留影响面：一次失败的 Stage 3 部署触及与旧域名相同的生产实例与持久状态。工作流既有的回滚记录与双实例替换持有这一点；此处不新增机制。

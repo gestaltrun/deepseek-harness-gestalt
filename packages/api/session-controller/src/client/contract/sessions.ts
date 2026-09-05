@@ -20,9 +20,8 @@ export type { AgentContext } from '../scope.ts'
 /**
  * The sessions-service face injected as `ctx.sessions`.
  * Command methods throw `sessions.<op>: ClientSessions is disposed` after
- * root disposal, including in-flight `search`/`create`/`fork`/`refresh`/
- * `refreshSubagents`. Observational lookups stay undefined; `openForRender`
- * no-ops.
+ * root disposal; in-flight `search`/`create`/`fork` reject with the same error.
+ * Observational lookups stay undefined; `openForRender` no-ops.
  */
 export interface ISessions {
   /** The useSessions standard feed (list rows + current selection; read face — writes stay inside the domain). */
@@ -69,8 +68,7 @@ export interface ISessions {
    * Refresh one direct-child catalog.
    * @param parentSessionId - catalog owner.
    * @returns completion of the current or newly started refresh.
-   * @throws `sessions.refreshSubagents: ClientSessions is disposed` after
-   *   root disposal, including when the refresh was already in flight.
+   * @throws `sessions.refreshSubagents: ClientSessions is disposed` when called after root disposal.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void>
 
@@ -79,8 +77,7 @@ export interface ISessions {
   /**
    * Refresh the Host-authoritative Session list.
    * @returns completion of the current or newly started Session-list refresh.
-   * @throws `sessions.refresh: ClientSessions is disposed` after root
-   *   disposal, including when the refresh was already in flight.
+   * @throws `sessions.refresh: ClientSessions is disposed` when called after root disposal.
    */
   refresh(): Promise<void>
   /**

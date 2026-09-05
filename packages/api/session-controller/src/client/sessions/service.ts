@@ -321,10 +321,8 @@ export class ClientSessions implements ISessions {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
-    return this.trackCommand('refreshSubagents', async () => {
-      await this.manager.refreshSubagents(parentSessionId)
-      this.assertActive('refreshSubagents')
-    })
+    this.assertActive('refreshSubagents')
+    return this.manager.refreshSubagents(parentSessionId)
   }
 
   /**
@@ -344,10 +342,8 @@ export class ClientSessions implements ISessions {
    * @returns completion of the current or newly started baseline pull.
    */
   refresh(): Promise<void> {
-    return this.trackCommand('refresh', async () => {
-      await this.manager.refreshList()
-      this.assertActive('refresh')
-    })
+    this.assertActive('refresh')
+    return this.manager.refreshList()
   }
 
   /**

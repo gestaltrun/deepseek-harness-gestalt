@@ -20,7 +20,7 @@ function executable(path: string, source: string): void {
   chmodSync(path, 0o700)
 }
 
-function runRenewal(mode: 'validate' | 'renew', options: { failCommit?: boolean; unexpectedDns?: boolean; fingerprintMismatch?: boolean } = {}) {
+function runRenewal(mode: 'validate' | 'renew', options: { deleteDnsFails?: boolean; failCommit?: boolean; fingerprintMismatch?: boolean; issuedTransaction?: boolean; unexpectedDns?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'certificate-renewal-'))
   const bin = join(root, 'bin')
   const log = join(root, 'operations.log')
@@ -31,6 +31,7 @@ function runRenewal(mode: 'validate' | 'renew', options: { failCommit?: boolean;
   executable(join(bin, 'openssl'), `#!/bin/bash\ncase "$1 $2" in
 "s_client -connect") echo CERT;;
 "x509 -outform") cat;;
+"x509 -noout") echo SHA256\ Fingerprint=NEWFP; cat >/dev/null;;
 "x509 -in")
  case "$*" in *-enddate*) echo notAfter=Dec\ 4\ 16:29:23\ 2026\ GMT;; *-fingerprint*) [[ "$MOCK_FINGERPRINT_MISMATCH" == 1 && "$*" == *current/www.example.test-192.0.2.2.pem* ]] && echo SHA256\ Fingerprint=OTHER || echo SHA256\ Fingerprint=NEWFP;; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\n    DNS:example.test, DNS:www.example.test\n';; *-checkend*) exit 0;; esac;;
 "pkey -in") echo PUB;;
@@ -57,11 +58,14 @@ else /usr/bin/tar "$@"; fi
 echo "aliyun $*" >> "$MOCK_LOG"
 case "$1 $2" in
 "oss cp")
- if [[ "$3" == oss://* && "$4" != oss://* ]]; then echo StatusCode=404 >&2; exit 1; fi
+ if [[ "$3" == oss://* && "$4" != oss://* ]]; then
+   if [[ "$3" == *transaction.json && "$MOCK_ISSUED_TRANSACTION" == 1 ]]; then printf '{"version":1,"phase":"issued","priorCertificateId":"prior-cn-hangzhou","currentCertificateId":"new-cert-cn-hangzhou","fingerprint":"NEWFP","cleanupRecordIds":[]}' > "$4"; exit 0; fi
+   echo StatusCode=404 >&2; exit 1
+ fi
  if [[ "$4" == *transaction.json && "$MOCK_FAIL_COMMIT" == 1 ]] && grep -q committed "$3" 2>/dev/null; then exit 9; fi;;
-"alb GetListenerAttribute") echo '{"Certificates":[{"CertificateId":"prior-cn-hangzhou"}]}' ;;
+"alb GetListenerAttribute") if [[ "$MOCK_ISSUED_TRANSACTION" == 1 ]]; then echo '{"Certificates":[{"CertificateId":"prior-cn-hangzhou"}]}'; else echo '{"Certificates":[{"CertificateId":"prior-cn-hangzhou"}]}'; fi ;;
 "alidns AddDomainRecord") echo '{"RecordId":"record-1"}' ;;
-"alidns DeleteDomainRecord") exit 0 ;;
+"alidns DeleteDomainRecord") [[ "$MOCK_DELETE_DNS_FAILS" == 1 ]] && exit 8 || exit 0 ;;
 "cas UploadUserCertificate") echo '{"CertId":"new-cert"}' ;;
 "alb UpdateListenerAttribute") exit 0 ;;
 esac
@@ -73,6 +77,8 @@ esac
       MOCK_NOW: mode === 'renew' ? '2000' : '1000',
       MOCK_FAIL_COMMIT: options.failCommit ? '1' : '0', MOCK_UNEXPECTED_DNS: options.unexpectedDns ? '1' : '0',
       MOCK_FINGERPRINT_MISMATCH: options.fingerprintMismatch ? '1' : '0',
+      MOCK_ISSUED_TRANSACTION: options.issuedTransaction ? '1' : '0',
+      MOCK_DELETE_DNS_FAILS: options.deleteDnsFails ? '1' : '0',
       PLATFORM_ALIYUN_REGION: 'cn-hangzhou', PLATFORM_CERT_DOMAIN: 'example.test',
       PLATFORM_CERT_WWW_DOMAIN: 'www.example.test', PLATFORM_CERT_ALB_EIPS: '192.0.2.1,192.0.2.2',
       PLATFORM_CERT_ALB_LISTENER_ID: 'lsn-test123', PLATFORM_CERT_OSS_BUCKET: 'private-bucket',
@@ -115,6 +121,30 @@ describe('Platform certificate renewal automation', () => {
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('different certificates')
   })
+
+  it('reports an issued transaction without mutation in validate mode', () => {
+    const result = runRenewal('validate', { issuedTransaction: true })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('pending issued transaction')
+    expect(result.operations).not.toContain('AddDomainRecord')
+    expect(result.operations).not.toContain('UpdateListenerAttribute')
+  })
+
+  it('reconciles an issued transaction without reissuing a certificate', () => {
+    const result = runRenewal('renew', { issuedTransaction: true })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain('reconciled issued certificate')
+    expect(result.operations).not.toContain('AddDomainRecord')
+    expect(result.operations).not.toContain('UploadUserCertificate')
+    expect(result.operations).toContain('UpdateListenerAttribute')
+  }, 15_000)
+
+  it('persists failed DNS cleanup evidence to the transaction object', () => {
+    const result = runRenewal('renew', { deleteDnsFails: true })
+    expect(result.status).not.toBe(0)
+    expect(result.stderr).toContain('durable transaction evidence')
+    expect(result.operations).toContain('transaction.json')
+  }, 15_000)
 
   it('refuses a DNS challenge outside the two exact allowed names', () => {
     const result = runRenewal('renew', { unexpectedDns: true })

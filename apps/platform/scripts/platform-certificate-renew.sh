@@ -71,7 +71,11 @@ restore_listener() {
 }
 on_exit() {
   local status="$1"
-  if ! cleanup_dns; then echo 'platform certificate: challenge cleanup incomplete; record ids retained in runner evidence' >&2; status=1; fi
+  if ! cleanup_dns; then
+    if [ -n "${metadata_uri:-}" ]; then persist_cleanup_evidence || true; fi
+    echo 'platform certificate: challenge cleanup incomplete; record ids retained in durable transaction evidence' >&2
+    status=1
+  fi
   if [ "$status" != 0 ] && ! restore_listener; then echo 'platform certificate: failed to restore prior listener certificate' >&2; status=1; fi
   cleanup_files
   exit "$status"
@@ -86,19 +90,73 @@ tar -xzf "$archive" --strip-components=1 -C "$workdir/acme-source"
 chmod 700 "$workdir/acme-source/acme.sh"
 state_uri="oss://${PLATFORM_CERT_OSS_BUCKET}/${PLATFORM_CERT_STATE_OBJECT}"
 metadata_uri="${state_uri}.transaction.json"
-set +e
-aliyun oss cp "$state_uri" "$state_archive" --region "$PLATFORM_ALIYUN_REGION" \
-  --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --force >/dev/null 2>"$workdir/state-read.err"
-state_status=$?
-set -e
-if [ "$state_status" = 0 ]; then
+transaction_file="$workdir/transaction.json"
+read_oss_object() {
+  local uri="$1" destination="$2" error_file="$3"
+  set +e
+  aliyun oss cp "$uri" "$destination" --region "$PLATFORM_ALIYUN_REGION" \
+    --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --force >/dev/null 2>"$error_file"
+  local status=$?
+  set -e
+  if [ "$status" != 0 ] && ! grep -Fq 'StatusCode=404' "$error_file"; then return "$status"; fi
+  return "$status"
+}
+persist_cleanup_evidence() {
+  local ids
+  ids=$(jq -Rsc 'split("\n") | map(select(length > 0))' < "$record_ids")
+  write_transaction cleanup-pending "${prior_listener_cert:-}" "" "" "$ids"
+}
+write_transaction() {
+  local phase="$1" prior="$2" current="$3" fingerprint="$4" cleanup_ids="${5:-[]}"
+  jq -nc --arg phase "$phase" --arg prior "$prior" --arg current "$current" --arg fingerprint "$fingerprint" \
+    --argjson cleanupRecordIds "$cleanup_ids" \
+    '{version:1,phase:$phase,priorCertificateId:$prior,currentCertificateId:$current,fingerprint:$fingerprint,cleanupRecordIds:$cleanupRecordIds}' \
+    > "$transaction_file"
+  aliyun oss cp "$transaction_file" "$metadata_uri" --region "$PLATFORM_ALIYUN_REGION" \
+    --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --meta 'x-oss-server-side-encryption:AES256' --force >/dev/null
+}
+if read_oss_object "$state_uri" "$state_archive" "$workdir/state-read.err"; then
   tar -xzf "$state_archive" -C "$acme_home"
 elif ! grep -Fq 'StatusCode=404' "$workdir/state-read.err"; then
   fail 'failed to read ACME state'
 fi
+transaction_phase=
+if read_oss_object "$metadata_uri" "$transaction_file" "$workdir/transaction-read.err"; then
+  transaction_phase=$(jq -er 'select(.version == 1) | .phase' "$transaction_file")
+elif ! grep -Fq 'StatusCode=404' "$workdir/transaction-read.err"; then
+  fail 'failed to read renewal transaction'
+fi
 
 listener=$(aliyun alb GetListenerAttribute --RegionId "$PLATFORM_ALIYUN_REGION" --ListenerId "$PLATFORM_CERT_ALB_LISTENER_ID")
 prior_listener_cert=$(printf '%s' "$listener" | jq -er '.Certificates | select(length == 1) | .[0].CertificateId')
+if [ "$transaction_phase" = issued ]; then
+  issued_prior=$(jq -er '.priorCertificateId' "$transaction_file")
+  issued_current=$(jq -er '.currentCertificateId' "$transaction_file")
+  issued_fingerprint=$(jq -er '.fingerprint' "$transaction_file")
+  cleanup_ids=$(jq -c '.cleanupRecordIds // []' "$transaction_file")
+  if [ "$mode" = validate ]; then
+    echo "platform certificate: pending issued transaction requires renewal reconciliation"
+    exit 0
+  fi
+  prior_listener_cert="$issued_prior"
+  if [ "$(printf '%s' "$listener" | jq -er '.Certificates[0].CertificateId')" != "$issued_current" ]; then
+    aliyun alb UpdateListenerAttribute --RegionId "$PLATFORM_ALIYUN_REGION" --ListenerId "$PLATFORM_CERT_ALB_LISTENER_ID" \
+      --Certificates.1.CertificateId "$issued_current" --force >/dev/null
+    listener_changed=1
+  fi
+  for host in "$PLATFORM_CERT_DOMAIN" "$PLATFORM_CERT_WWW_DOMAIN"; do
+    for ip in "${alb_eips[@]}"; do
+      curl --proto '=https' --tlsv1.2 -sS --resolve "$host:443:$ip" "https://$host/healthz" -o /dev/null
+      served=$(echo | openssl s_client -connect "$ip:443" -servername "$host" 2>/dev/null \
+        | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2-)
+      [ "$served" = "$issued_fingerprint" ] || fail 'issued certificate reconciliation did not reach every name and EIP'
+    done
+  done
+  write_transaction committed "$issued_prior" "$issued_current" "$issued_fingerprint" "$cleanup_ids"
+  listener_changed=0
+  echo "platform certificate: reconciled issued certificate $issued_current; previous certificate retained"
+  exit 0
+fi
 current_fingerprint=
 current_end=0
 for host in "$PLATFORM_CERT_DOMAIN" "$PLATFORM_CERT_WWW_DOMAIN"; do
@@ -144,7 +202,10 @@ else
   "$acme" --home "$acme_home" --issue --server letsencrypt --keylength ec-256 \
     --dns dns_gestalt_oidc -d "$PLATFORM_CERT_WWW_DOMAIN" -d "$PLATFORM_CERT_DOMAIN"
 fi
-cleanup_dns || fail 'challenge cleanup incomplete; record ids retained in runner evidence'
+if ! cleanup_dns; then
+  persist_cleanup_evidence || true
+  fail 'challenge cleanup incomplete; record ids retained in durable transaction evidence'
+fi
 
 cert_dir="$acme_home/${PLATFORM_CERT_WWW_DOMAIN}_ecc"
 cert="$cert_dir/fullchain.cer"
@@ -166,11 +227,7 @@ listener_cert_id="${cert_id}-${PLATFORM_ALIYUN_REGION}"
 tar -czf "$state_archive" -C "$acme_home" .
 aliyun oss cp "$state_archive" "$state_uri" --region "$PLATFORM_ALIYUN_REGION" \
   --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --meta 'x-oss-server-side-encryption:AES256' --force >/dev/null
-jq -nc --arg phase issued --arg prior "$prior_listener_cert" --arg current "$listener_cert_id" \
-  --arg fingerprint "$new_fingerprint" '{version:1,phase:$phase,priorCertificateId:$prior,currentCertificateId:$current,fingerprint:$fingerprint}' \
-  > "$workdir/transaction.json"
-aliyun oss cp "$workdir/transaction.json" "$metadata_uri" --region "$PLATFORM_ALIYUN_REGION" \
-  --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --meta 'x-oss-server-side-encryption:AES256' --force >/dev/null
+write_transaction issued "$prior_listener_cert" "$listener_cert_id" "$new_fingerprint"
 
 aliyun alb UpdateListenerAttribute --RegionId "$PLATFORM_ALIYUN_REGION" --ListenerId "$PLATFORM_CERT_ALB_LISTENER_ID" \
   --Certificates.1.CertificateId "$listener_cert_id" --force >/dev/null
@@ -183,10 +240,6 @@ for host in "$PLATFORM_CERT_DOMAIN" "$PLATFORM_CERT_WWW_DOMAIN"; do
     [ "$served" = "$new_fingerprint" ] || fail 'ALB did not serve renewed certificate on every name and EIP'
   done
 done
-jq -nc --arg phase committed --arg prior "$prior_listener_cert" --arg current "$listener_cert_id" \
-  --arg fingerprint "$new_fingerprint" '{version:1,phase:$phase,priorCertificateId:$prior,currentCertificateId:$current,fingerprint:$fingerprint}' \
-  > "$workdir/transaction.json"
-aliyun oss cp "$workdir/transaction.json" "$metadata_uri" --region "$PLATFORM_ALIYUN_REGION" \
-  --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --meta 'x-oss-server-side-encryption:AES256' --force >/dev/null
+write_transaction committed "$prior_listener_cert" "$listener_cert_id" "$new_fingerprint"
 listener_changed=0
 echo "platform certificate: renewed and activated certificate $listener_cert_id; previous certificate retained"

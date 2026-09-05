@@ -189,6 +189,15 @@ function clearMarkers(fixture: Fixture): void {
   rmSync(fixture.runMarker, { force: true })
 }
 
+/** Remove one owned fixture with Node's bounded Windows EPERM retry. */
+export function removeFixtureRoot(path: string, remove: typeof rmSync = rmSync): void {
+  remove(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+}
+
+function removeFixture(fixture: Fixture): void {
+  removeFixtureRoot(fixture.root)
+}
+
 function addLockedExtraDependency(fixture: Fixture): void {
   const manifestPath = join(fixture.repo, 'package.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
@@ -265,7 +274,7 @@ function verifyPolicyRejection(
       failures.push(`${state} ${entry} ${environmentClass}: cold rejection created node_modules`)
     }
   } finally {
-    rmSync(fixture.root, { recursive: true, force: true })
+    removeFixture(fixture)
   }
 }
 
@@ -298,7 +307,7 @@ function verifyExplicitRecovery(
     if (existsSync(fixture.lifecycleMarker)) failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command reran install lifecycle`)
     if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command changed lockfile bytes`)
   } finally {
-    rmSync(fixture.root, { recursive: true, force: true })
+    removeFixture(fixture)
   }
 }
 
@@ -316,7 +325,7 @@ function verifyDefaultNegativeControl(failures: string[]): void {
     if (!existsSync(fixture.extraSentinel)) failures.push('default-install negative control did not install the stale dependency')
     if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push('default-install negative control changed the prepared lockfile')
   } finally {
-    rmSync(fixture.root, { recursive: true, force: true })
+    removeFixture(fixture)
   }
 }
 
@@ -337,7 +346,7 @@ function verifyOverride(
       failures.push(`${kind} override did not exhibit explicit install precedence`)
     }
   } finally {
-    rmSync(fixture.root, { recursive: true, force: true })
+    removeFixture(fixture)
   }
 }
 

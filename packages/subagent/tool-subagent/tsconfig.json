@@ -45,6 +45,9 @@
       "path": "../subagent"
     },
     {
+      "path": "../subagent-route-preauthorization"
+    },
+    {
       "path": "../../jobs/jobs"
     },
     {

@@ -30,10 +30,12 @@ import {
   hasDelegationModelRequest,
   preflightChildLlmRoute,
   requestedAgentOptions,
+  unionModelRoutes,
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
 import type {} from './model-selection-settings.ts'
+import type {} from '@deepseek-ai/dsh-subagent-route-preauthorization'
 import {
   recordSubagentModelSelection,
   subagentModelSelectionProjectionDefinition,
@@ -57,6 +59,8 @@ export interface Config {
    * top-level session and inherit that decision in its child sessions.
    */
   modelSelectionSettings?: boolean
+  /** Include deployment-preauthorized exact routes when snapshotting a fresh top-level Session. */
+  deploymentRoutePreauthorization?: boolean
   /**
    * Expose `run_in_background` (default true). Disabled instances omit the
    * parameter and reject forced background calls.
@@ -105,6 +109,7 @@ export const Config: z<Config> = z.object({
   provider: z.string().required(),
   toolName: z.string().default('subagent'),
   modelSelectionSettings: z.boolean().default(false),
+  deploymentRoutePreauthorization: z.boolean().default(false),
   enableRunInBackground: z.boolean().default(true),
   backgroundMode: z.union(['one-shot', 'continuable'] as const).default('one-shot'),
   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
@@ -315,7 +320,7 @@ export function apply(ctx: Context, config: Config): void {
   const continuable = (config.backgroundMode ?? 'one-shot') === 'continuable'
   const toolName = config.toolName ?? 'subagent'
 
-  const modelSelectionCapable = config.modelSelectionSettings === true
+  const modelSelectionCapable = config.modelSelectionSettings === true || config.deploymentRoutePreauthorization === true
   ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
 
   const assertSubagentProviderConfiguration = (subagentProvider: SubagentProvider): void => {
@@ -598,7 +603,7 @@ export function apply(ctx: Context, config: Config): void {
     }
   }
 
-  if (config.modelSelectionSettings !== true) {
+  if (!modelSelectionCapable) {
     install(ctx, undefined)
     return
   }
@@ -606,9 +611,12 @@ export function apply(ctx: Context, config: Config): void {
   const settings = ctx.get('subagentModelSelection')
   if (settings === undefined) {
     throw new Error(
-      'tool-subagent: `modelSelectionSettings` requires '
+      'tool-subagent: model route authorization requires '
       + '@deepseek-ai/dsh-tool-subagent/model-selection-settings in the Host scope',
     )
+  }
+  if (config.deploymentRoutePreauthorization === true && ctx.get('subagentRoutePreauthorization') === undefined) {
+    throw new Error('tool-subagent: `deploymentRoutePreauthorization` requires @deepseek-ai/dsh-subagent-route-preauthorization')
   }
   const compositionScope = scopeOf(ctx)
   if (compositionScope === undefined) {
@@ -630,7 +638,12 @@ export function apply(ctx: Context, config: Config): void {
           : subagentModelSelectionPolicy(ctx.sessionProjections, parent.session)
       } else if (freshSession) {
         const current = settings.current()
-        allowedModels = current.enabled ? current.allowedModels : undefined
+        const userRoutes = config.modelSelectionSettings === true && current.enabled ? current.allowedModels : []
+        const deploymentRoutes = config.deploymentRoutePreauthorization === true
+          ? ctx.get('subagentRoutePreauthorization')?.snapshot() ?? []
+          : []
+        const routes = unionModelRoutes(userRoutes, deploymentRoutes)
+        allowedModels = routes.length === 0 ? undefined : routes
       }
     }
     if (allowedModels !== undefined) {

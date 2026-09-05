@@ -4,13 +4,21 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
+import {
+  modelRouteKey,
+  type SubagentRoute,
+} from '@deepseek-ai/dsh-subagent-route-preauthorization'
+export { modelRouteKey }
+export type AllowedModelRoute = SubagentRoute
 
-/** One exact child LLM route authorized by a user setting. */
-export interface AllowedModelRoute {
-  /** Registered LLM provider id. */
-  readonly provider: string
-  /** Provider-owned exact model id. */
-  readonly model: string
+/** Return a detached deterministic exact-route union. */
+export function unionModelRoutes(...sources: readonly (readonly AllowedModelRoute[])[]): AllowedModelRoute[] {
+  const routes = new Map<string, AllowedModelRoute>()
+  for (const source of sources) {
+    for (const route of source) routes.set(modelRouteKey(route), { ...route })
+  }
+  return [...routes.values()].sort((left, right) =>
+    left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model))
 }
 
 /** Schema shared by the Host setting and its deployment base. */
@@ -23,15 +31,6 @@ export const AllowedModelRouteSchema: z<AllowedModelRoute> = z.object({
 export interface ModelSelectionPolicy {
   /** Exact provider/model routes authorized for explicit selection. */
   readonly routes: readonly AllowedModelRoute[]
-}
-
-/**
- * Stable identity for one provider/model pair.
- * @param route - Exact provider/model route.
- * @returns Opaque key for equality checks.
- */
-export function modelRouteKey(route: AllowedModelRoute): string {
-  return `${route.provider}\0${route.model}`
 }
 
 /**

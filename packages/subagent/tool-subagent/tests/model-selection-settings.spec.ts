@@ -14,6 +14,7 @@ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-test
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import StaticSubagentRoutePreauthorization from '@deepseek-ai/dsh-subagent-route-preauthorization-static'
 import * as tool from '../src/index.ts'
 import * as ToolInvariant from '../src/invariant.ts'
 import SubagentModelSelectionConfig, {
@@ -56,10 +57,13 @@ function selectable(ctx: Context, agent: Awaited<ReturnType<Context['agents']['c
 }
 
 /** Mount the real settings, Agent, provider, and tool services. */
-async function boot(): Promise<Context> {
+async function boot(deploymentRoutes: readonly { provider: string; model: string }[] = []): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(MemorySettings)
   await ctx.plugin(SubagentModelSelectionConfig)
+  if (deploymentRoutes.length > 0) {
+    await ctx.plugin(StaticSubagentRoutePreauthorization, { allowedModels: [...deploymentRoutes] })
+  }
   await mountAgentLoopTestDependencies(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -72,6 +76,7 @@ async function boot(): Promise<Context> {
 async function createAgent(ctx: Context, id: string, options: {
   meta?: { parentSession: SessionId; origin: 'subagent' }
   seed?: readonly SessionEvent[]
+  deploymentRoutePreauthorization?: boolean
 } = {}) {
   const handle = await ctx.agents.create({
     sessionId: SessionId(id),
@@ -80,6 +85,9 @@ async function createAgent(ctx: Context, id: string, options: {
       await agentCtx.plugin(tool, {
         provider: 'spawn',
         modelSelectionSettings: true,
+        ...options.deploymentRoutePreauthorization === undefined
+          ? {}
+          : { deploymentRoutePreauthorization: options.deploymentRoutePreauthorization },
         backgroundMode: 'continuable',
       })
     },
@@ -88,6 +96,39 @@ async function createAgent(ctx: Context, id: string, options: {
 }
 
 describe('SubagentModelSelectionConfig', () => {
+  it('snapshots the sorted deduplicated user and deployment route union without writing Settings', async () => {
+    const deployment = [{ provider: 'beta', model: 'deploy' }, ALLOWED_MODELS[0]!]
+    const ctx = await boot(deployment)
+    await ctx.settings.update(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE, {
+      enabled: true,
+      allowedModels: [ALLOWED_MODELS[0]!, { provider: 'alpha', model: 'user' }],
+    })
+    const before = structuredClone(ctx.settings.get(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE))
+    const agent = await createAgent(ctx, 'deployment-union', { deploymentRoutePreauthorization: true })
+
+    expect(subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)).toEqual([
+      { provider: 'alpha', model: 'fast-model' },
+      { provider: 'alpha', model: 'user' },
+      { provider: 'beta', model: 'deploy' },
+    ])
+    expect(ctx.settings.get(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE)).toEqual(before)
+  })
+
+  it('enables deployment-only routes while user selection is disabled', async () => {
+    const ctx = await boot([{ provider: 'alpha', model: 'deploy' }])
+    const handle = await ctx.agents.create({
+      sessionId: SessionId('deployment-only'),
+      setup: async (agentCtx) => {
+        await agentCtx.plugin(tool, {
+          provider: 'spawn', modelSelectionSettings: false, deploymentRoutePreauthorization: true,
+        })
+      },
+    })
+    expect(selectable(ctx, handle.agent)).toBe(true)
+    expect(subagentModelSelectionPolicy(ctx.sessionProjections, handle.agent.session))
+      .toEqual([{ provider: 'alpha', model: 'deploy' }])
+  })
+
   it('uses the composed default without a settings provider', async () => {
     const ctx = new Context()
     await ctx.plugin(SubagentModelSelectionConfig, { enabled: true, allowedModels: ALLOWED_MODELS })

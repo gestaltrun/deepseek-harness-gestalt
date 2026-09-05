@@ -866,6 +866,46 @@ for line in sys.stdin:
     assert client._proc is None
 
 
+def test_client_close_reaps_after_shutdown_error_response(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif msg.get("method") == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32000, "message": "shutdown rejected"}}), flush=True)
+        time.sleep(60)
+""".strip()
+    )
+
+    client = HarnessClient(
+        HarnessConfig(
+            launch_args_override=(sys.executable, str(script)),
+            shutdown_timeout_seconds=0.1,
+        )
+    )
+    client.start()
+    proc = client._proc
+    assert proc is not None
+    client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+    start = time.monotonic()
+    client.close()
+
+    assert time.monotonic() - start < 2
+    assert proc.returncode is not None
+    assert client._proc is None
+    assert any("shutdown rejected" in line for line in client._stderr_lines)
+
+
 def test_client_close_times_out_when_shutdown_does_not_respond(tmp_path: Path) -> None:
     script = tmp_path / "fake_bridge.py"
     script.write_text(

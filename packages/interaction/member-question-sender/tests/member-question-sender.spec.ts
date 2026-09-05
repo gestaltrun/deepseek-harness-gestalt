@@ -217,25 +217,28 @@ describe('member-question sender', () => {
 
   it('does not duplicate the answerer when UserQuestionService is reinstalled', async () => {
     const ctx = new Context()
-    const delivery = new MemoryMemberQuestionDelivery()
-    const sender = await ctx.plugin(Sender, { delivery })
-    const firstProvider = await ctx.plugin(UserQuestionService)
-    await firstProvider.dispose()
-    await ctx.plugin(UserQuestionService)
-    const fallback = vi.fn(() => Promise.resolve({ answers: [] }))
-    ctx.on('user-questions/request', fallback)
+    try {
+      const delivery = new MemoryMemberQuestionDelivery()
+      await ctx.plugin(Sender, { delivery })
+      const firstProvider = await ctx.plugin(UserQuestionService)
+      await firstProvider.dispose()
+      await ctx.plugin(UserQuestionService)
+      const fallback = vi.fn(() => Promise.resolve({ answers: [] }))
+      ctx.on('user-questions/request', fallback)
 
-    const pending = ctx.userQuestions.ask({
-      questions: [{ id: 'q-1', question: 'Which rollback window?' }],
-      memberRoute: memberRoute(),
-    })
-    await Promise.resolve()
-    expect(delivery.delivered).toHaveLength(1)
-    const questionId = delivery.delivered[0]!.questionId
-    await ctx.memberQuestionSender.settle(questionId, declinedSettlement())
-    await expect(pending).resolves.toEqual({ answers: [] })
-    expect(fallback).not.toHaveBeenCalled()
-    await sender.dispose()
+      const pending = ctx.userQuestions.ask({
+        questions: [{ id: 'q-1', question: 'Which rollback window?' }],
+        memberRoute: memberRoute(),
+      })
+      await Promise.resolve()
+      expect(delivery.delivered).toHaveLength(1)
+      const questionId = delivery.delivered[0]!.questionId
+      await ctx.memberQuestionSender.settle(questionId, declinedSettlement())
+      await expect(pending).resolves.toEqual({ answers: [] })
+      expect(fallback).not.toHaveBeenCalled()
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('preserves the sender stable error through the user-questions waterfall', async () => {

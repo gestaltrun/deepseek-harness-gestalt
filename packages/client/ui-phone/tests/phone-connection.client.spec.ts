@@ -5,15 +5,16 @@
  * suspend/resume, and the touch/keyboard io frames with their coordinates.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { h264SurfaceForHost, PhoneConnectionController } from '../src/client/phone-connection.ts'
+import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import type { PhoneStreamGateway } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
-import { FakeGateway, flush, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
+import { FakeGateway, flush, ManualScheduler, SESSION_A, SESSION_B, SESSION_C } from './phone-fakes.client.ts'
 
 function controllerOn(gateway: FakeGateway, scheduler: ManualScheduler): PhoneConnectionController {
   return new PhoneConnectionController({
     gateway,
     deviceId: 'emulator-5554',
+    platform: 'android',
     schedule: scheduler.schedule,
   })
 }
@@ -27,6 +28,7 @@ function parseSentFrame(value: string): unknown {
 /** Drive one full connect cycle to the live phase. */
 async function connectToLive(gateway: FakeGateway, scheduler: ManualScheduler): Promise<PhoneConnectionController> {
   const controller = controllerOn(gateway, scheduler)
+  controller.noteLogicalDisplay({ width: 1080, height: 2248 })
   controller.connect()
   await flush()
   gateway.lastSocket!.accept()
@@ -281,7 +283,7 @@ describe('PhoneConnectionController lifecycle', () => {
       deviceId: 'UDID-9',
       agentManaged: true,
     } })
-    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', platform: 'ios', schedule: scheduler.schedule })
     controller.connect()
     await flush()
     expect(controller.snapshot()).toEqual({
@@ -302,7 +304,7 @@ describe('PhoneConnectionController lifecycle', () => {
 
   it('keeps agent recovery within an error generation and preserves a failed install result', async () => {
     const gateway = new FakeGateway()
-    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9' })
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', platform: 'ios' })
     controller.recoverAgent(false)
     expect(gateway.agentInstallCalls).toEqual([])
 
@@ -328,7 +330,7 @@ describe('PhoneConnectionController lifecycle', () => {
     for (const outcome of ['success', 'failure'] as const) {
       const gateway = new FakeGateway()
       gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
-      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9' })
+      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', platform: 'ios' })
       controller.connect()
       await flush()
       const pending = Promise.withResolvers<{ readonly deviceId: string; readonly installed: boolean }>()
@@ -352,7 +354,7 @@ describe('PhoneConnectionController lifecycle', () => {
         502, 'PHONE_REAL_DEVICE_ISSUE', 'device tunnel failed', 'tunnel-failed',
       ),
     })
-    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', platform: 'ios', schedule: scheduler.schedule })
     controller.connect()
     await flush()
     gateway.lastSocket!.accept()
@@ -378,7 +380,9 @@ describe('PhoneConnectionController lifecycle', () => {
       gateway.queueMint({ session })
       const controller = new PhoneConnectionController({
         gateway, deviceId: session.deviceId, schedule: new ManualScheduler().schedule,
+        platform: session.deviceId === 'UDID-9' ? 'ios' : 'android',
       })
+      if (session.deviceId !== 'UDID-9') controller.noteLogicalDisplay({ width: 2868, height: 1320 })
       controller.connect()
       await flush()
       gateway.lastSocket!.accept()
@@ -425,7 +429,7 @@ describe('PhoneConnectionController lifecycle', () => {
       const managed = { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true }
       for (let attempt = 0; attempt < 4; attempt += 1) gateway.queueMint({ session: managed })
       gateway.queueAgentStatus({ installed })
-      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', platform: 'ios', schedule: scheduler.schedule })
       controller.connect()
       await flush()
       gateway.lastSocket!.accept()
@@ -454,7 +458,7 @@ describe('PhoneConnectionController lifecycle', () => {
       for (let attempt = 0; attempt < 4; attempt += 1) gateway.queueMint({ session: managed })
       const pending = Promise.withResolvers<{ readonly deviceId: string; readonly installed: boolean }>()
       vi.spyOn(gateway, 'agentStatus').mockReturnValue(pending.promise)
-      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', schedule: scheduler.schedule })
+      const controller = new PhoneConnectionController({ gateway, deviceId: 'UDID-9', platform: 'ios', schedule: scheduler.schedule })
       controller.connect()
       await flush()
       gateway.lastSocket!.accept()
@@ -598,6 +602,45 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(gateway.mintedDevices).toHaveLength(2)
   })
 
+  it('clears the learned surface when refresh replaces the capture generation', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    const stale = gateway.lastSocket!
+    gateway.queueMint({ session: SESSION_B })
+    controller.refresh()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.surfaceSize()).toBeUndefined()
+    expect(controller.tap(0.5, 0.5)).toBe(false)
+    expect(stale.sent).toHaveLength(1)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    expect(controller.surfaceSize()).toBeUndefined()
+    controller.noteSurface('h264', SESSION_B.h264.captureId, 1080, 2248, 0)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'tap',
+      params: { captureId: SESSION_B.h264.captureId, captureWidth: 1080, captureHeight: 2248 },
+    })
+  })
+
+  it('does not remint from onOpen after a live listener replaces the generation', async () => {
+    const gateway = new FakeGateway()
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    controller.subscribe(() => {
+      if (controller.snapshot().kind === 'live') controller.disconnect()
+    })
+    controller.connect()
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(1)
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toEqual({ kind: 'idle' })
+    expect(gateway.mintedDevices).toHaveLength(1)
+  })
+
   it('drops stale socket callbacks after refresh replaces the generation', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
@@ -718,18 +761,249 @@ describe('PhoneConnectionController io', () => {
     expect(controller.surfaceSize()).toEqual({ width: 844, height: 390 })
   })
 
-  it('swaps a portrait H264 surface when Host logicalDisplay is landscape', () => {
-    expect(h264SurfaceForHost(1080, 2248, { width: 2248, height: 1080 }))
-      .toEqual({ width: 2248, height: 1080 })
-    expect(h264SurfaceForHost(1080, 2248, { width: 1080, height: 2248 }))
-      .toEqual({ width: 1080, height: 2248 })
-    expect(h264SurfaceForHost(2248, 1080, { width: 2248, height: 1080 }))
-      .toEqual({ width: 2248, height: 1080 })
+  it('records an absent Host logicalDisplay without reminting later identical absences', async () => {
+    const gateway = new FakeGateway()
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay(undefined)
+    controller.noteLogicalDisplay(undefined)
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(gateway.mintedDevices).toHaveLength(1)
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(2)
+  })
+
+  it('seeds the first Host logicalDisplay without reminting, then remints on a numeric size change', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = controllerOn(gateway, scheduler)
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(gateway.mintedDevices).toHaveLength(1)
+    gateway.queueMint({ session: SESSION_B })
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(2)
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toMatchObject({ kind: 'live', captureId: SESSION_B.h264.captureId })
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    expect(gateway.mintedDevices).toHaveLength(2)
+  })
+
+  it('does not remint a live MJPEG fallback when Host logicalDisplay changes', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
+    expect(controller.snapshot()).toMatchObject({
+      kind: 'live', format: 'mjpeg', captureId: SESSION_A.mjpeg.captureId,
+    })
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    expect(gateway.mintedDevices).toHaveLength(1)
+    expect(controller.snapshot()).toMatchObject({
+      kind: 'live', format: 'mjpeg', captureId: SESSION_A.mjpeg.captureId,
+    })
+  })
+
+  it('remints once live H264 when the first listing size arrives after connect started', async () => {
+    const gateway = new FakeGateway()
+    const controller = controllerOn(gateway, new ManualScheduler())
+    gateway.queueMint({ session: SESSION_A })
+    gateway.queueMint({ session: SESSION_B })
+    controller.connect()
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    expect(gateway.mintedDevices).toHaveLength(1)
+    await flush()
+    gateway.lastSocket!.accept()
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(2)
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toMatchObject({ kind: 'live', captureId: SESSION_B.h264.captureId })
+  })
+
+  it('remints once live H264 when Host logicalDisplay changed while connecting', async () => {
+    const gateway = new FakeGateway()
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    gateway.queueMint({ session: SESSION_A })
+    gateway.queueMint({ session: SESSION_B })
+    controller.connect()
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    expect(gateway.mintedDevices).toHaveLength(1)
+    await flush()
+    gateway.lastSocket!.accept()
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(2)
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toMatchObject({
+      kind: 'live', format: 'h264', captureId: SESSION_B.h264.captureId, streamUrl: SESSION_B.h264.url,
+    })
+    controller.noteSurface('h264', SESSION_B.h264.captureId, 2248, 1080, 0)
+    expect(controller.surfaceSize()).toEqual({ width: 2248, height: 1080 })
+  })
+
+  it('does not settle a stale landscape mint after logicalDisplay returns to portrait', async () => {
+    const gateway = new FakeGateway()
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    gateway.queueMint({ session: SESSION_A })
+    const resolveLandscape = gateway.queueDeferredMint(SESSION_B)
+    gateway.queueMint({ session: SESSION_C })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    expect(gateway.mintedDevices).toHaveLength(2)
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    resolveLandscape()
+    await flush()
+    gateway.sockets[1]?.accept()
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(3)
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toMatchObject({
+      kind: 'live', format: 'h264', captureId: SESSION_C.h264.captureId, streamUrl: SESSION_C.h264.url,
+    })
+  })
+
+  it('does not remint a preferred MJPEG live session when Host logicalDisplay changes', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ session: { ...SESSION_A, preferredFormat: 'mjpeg' } })
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toMatchObject({
+      kind: 'live', format: 'mjpeg', captureId: SESSION_A.mjpeg.captureId,
+    })
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    expect(gateway.mintedDevices).toHaveLength(1)
+    expect(controller.snapshot()).toMatchObject({
+      kind: 'live', format: 'mjpeg', captureId: SESSION_A.mjpeg.captureId,
+    })
+  })
+
+  it('blocks painted Android coordinates until listing classifies the platform', async () => {
+    const gateway = new FakeGateway()
+    const controller = new PhoneConnectionController({
+      gateway, deviceId: 'emulator-5554', schedule: new ManualScheduler().schedule,
+    })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    expect(controller.coordinateUnavailableReason()).toBe('unknown-platform')
+    expect(controller.tap(0.5, 0.5)).toBe(false)
+    expect(controller.button('HOME')).toBe(true)
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({ method: 'button' })
+    controller.notePlatform('ios')
+    expect(controller.coordinateIoAvailable()).toBe(true)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+  })
+
+  it('refuses coordinate IO when decoded H264 orientation disagrees with Host logicalDisplay', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    expect(controller.coordinateIoAvailable()).toBe(false)
+    expect(controller.tap(0.5, 0.5)).toBe(false)
+    expect(controller.swipe([{ u: 0.2, v: 0.2 }, { u: 0.8, v: 0.8 }])).toBe(false)
+    expect(gateway.lastSocket!.sent).toEqual([])
+  })
+
+  it('does not remint when current logicalDisplay misses then returns the last known size', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    expect(controller.coordinateIoAvailable()).toBe(true)
+    controller.noteLogicalDisplay(undefined)
+    expect(controller.coordinateUnavailableReason()).toBe('missing-logical')
+    expect(controller.tap(0.5, 0.5)).toBe(false)
+    expect(gateway.mintedDevices).toHaveLength(1)
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    expect(gateway.mintedDevices).toHaveLength(1)
+    expect(controller.coordinateIoAvailable()).toBe(true)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+  })
+
+  it('remints once when current logicalDisplay misses then returns a different known size', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    controller.noteLogicalDisplay(undefined)
+    expect(gateway.mintedDevices).toHaveLength(1)
+    gateway.queueMint({ session: SESSION_B })
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    await flush()
+    expect(gateway.mintedDevices).toHaveLength(2)
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot()).toMatchObject({ kind: 'live', captureId: SESSION_B.h264.captureId })
+  })
+
+  it('blocks Android coordinate IO when current logicalDisplay is missing', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 1080, height: 2248 })
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1080, 2248, 0)
+    expect(controller.coordinateIoAvailable()).toBe(true)
+    controller.noteLogicalDisplay(undefined)
+    expect(controller.coordinateUnavailableReason()).toBe('missing-logical')
+    expect(controller.coordinateIoAvailable()).toBe(false)
+    expect(controller.tap(0.5, 0.5)).toBe(false)
+    expect(controller.button('HOME')).toBe(true)
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({ method: 'button' })
+  })
+
+  it('keeps iOS coordinate IO when listing logicalDisplay is absent', async () => {
+    const gateway = new FakeGateway()
+    const controller = new PhoneConnectionController({
+      gateway, deviceId: 'UDID-9', platform: 'ios', schedule: new ManualScheduler().schedule,
+    })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    controller.noteLogicalDisplay(undefined)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
+    expect(controller.coordinateIoAvailable()).toBe(true)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'tap', params: { x: 195, y: 422, captureWidth: 390, captureHeight: 844 },
+    })
+  })
+
+  it('sends decoded-plane center coords for a downsampled matching-aspect H264 frame', async () => {
+    const gateway = new FakeGateway()
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 1124, 540, 0)
+    expect(controller.coordinateIoAvailable()).toBe(true)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'tap',
+      params: {
+        x: 562, y: 270, captureWidth: 1124, captureHeight: 540,
+        captureId: SESSION_A.h264.captureId, captureFormat: 'h264',
+      },
+    })
   })
 
   it('maps a tap through the rotated landscape surface onto landscape device coordinates', async () => {
     const gateway = new FakeGateway()
-    const controller = await connectToLive(gateway, new ManualScheduler())
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.noteLogicalDisplay({ width: 2248, height: 1080 })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
     controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
     controller.noteSurface('h264', SESSION_A.h264.captureId, 844, 390)
     expect(controller.tap(0.75, 0.5)).toBe(true)
@@ -863,6 +1137,82 @@ describe('PhoneConnectionController io', () => {
     expect(controller.snapshot().kind).toBe('live')
     expect(controller.button('HOME')).toBe(true)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({ id: 1, method: 'button' })
+  })
+
+  it('ignores a stale non-terminal reply after a newer outstanding action', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    expect(controller.button('HOME')).toBe(true)
+    expect(controller.button('BACK')).toBe(true)
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'stale action failed' },
+    }))
+    expect(controller.actionStatus()).toBeUndefined()
+    expect(controller.snapshot().kind).toBe('live')
+  })
+
+  it('surfaces an ordinary action failure without a code or message', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    expect(controller.button('HOME')).toBe(true)
+    gateway.lastSocket!.receive(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000 } }))
+    expect(controller.actionStatus()).toEqual({ code: -32000, message: '设备操作失败' })
+    expect(controller.button('BACK')).toBe(true)
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 2, error: { message: 'input command failed' },
+    }))
+    expect(controller.actionStatus()).toEqual({ message: 'input command failed' })
+  })
+
+  it('does not retry when a failed send already replaced the socket', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    gateway.lastSocket!.send = () => {
+      controller.disconnect()
+      return false
+    }
+    expect(controller.button('HOME')).toBe(false)
+    expect(controller.snapshot()).toEqual({ kind: 'idle' })
+    expect(gateway.mintedDevices).toHaveLength(1)
+  })
+
+  it('rolls back a nested failed send without rewinding a later frame id', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = await connectToLive(gateway, scheduler)
+    const socket = gateway.lastSocket!
+    const originalSend = socket.send.bind(socket)
+    socket.send = (data: string) => {
+      const id = (JSON.parse(data) as { id: number }).id
+      if (id === 1) {
+        socket.send = originalSend
+        expect(controller.button('BACK')).toBe(true)
+        return false
+      }
+      return originalSend(data)
+    }
+    expect(controller.button('HOME')).toBe(false)
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.h264.url })
+    scheduler.runNext()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.button('HOME')).toBe(true)
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({ id: 3, method: 'button' })
+  })
+
+  it('ignores rollback when send already settled the outstanding id', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    const socket = gateway.lastSocket!
+    const originalSend = socket.send.bind(socket)
+    socket.send = (data: string) => {
+      originalSend(data)
+      const id = (JSON.parse(data) as { id: number }).id
+      socket.receive(JSON.stringify({ jsonrpc: '2.0', id, result: { status: 'ok' } }))
+      return false
+    }
+    expect(controller.button('HOME')).toBe(false)
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.h264.url })
   })
 
   it('rolls back a send that throws and reconnects', async () => {

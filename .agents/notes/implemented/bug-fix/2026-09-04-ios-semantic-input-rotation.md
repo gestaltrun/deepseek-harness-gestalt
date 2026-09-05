@@ -12,7 +12,7 @@ DeviceKit applies an incorrect landscape transform to `device.io.tap` and its ar
 
 ## Decision
 
-`PhoneDevices.io()` owns the closed tap, swipe, text, and button actions and their platform conversion. Android sends semantic taps and swipes directly. Every iOS coordinate endpoint is scaled from the current displayed screenshot plane into portrait logical bounds and inverse-transformed through exact `0 | 90 | 180 | 270` rotation. Rotation-0 taps use `device.io.tap`; rotated taps use a zero-distance `device.io.swipe`; every semantic swipe uses `device.io.swipe` with transformed endpoints and the upstream default duration.
+`PhoneDevices.io()` owns the closed tap, swipe, text, and button actions and their platform conversion. Capture-source `x`/`y` and `captureWidth`/`captureHeight` remain the decoded plane. Android capture-source taps and swipes scale both axes onto the current incarnation `logicalDisplay`; missing or incompatible aspect fails with `PHONE_PROTOCOL` before RPC. Android fresh-probe pixels pass through. Every iOS coordinate endpoint is scaled from the current displayed screenshot plane into portrait logical bounds and inverse-transformed through exact `0 | 90 | 180 | 270` rotation. Rotation-0 taps use `device.io.tap`; rotated taps use a zero-distance `device.io.swipe`; every semantic swipe uses `device.io.swipe` with transformed endpoints and the upstream default duration.
 
 Browser coordinate actions carry the unique active capture identity, format, displayed dimensions, and exact H264 `VideoFrame.rotation` when applicable. Host accepts that evidence only while the exact signed capture pipe is active. MJPEG rotation comes from a bounded structural JPEG observer keyed to that capture. Model-only actions omit capture identity, derive the displayed `device_screenshot` extent from portrait logical size and scale, and use a fresh generation-owned MJPEG probe. Runtime replacement, device removal, capture closure, and disposal revoke observations and drain probes.
 
@@ -28,7 +28,7 @@ The public browser and Service request use semantic `swipe { x1, y1, x2, y2 }`; 
 
 **Infer rotation from aspect or refresh `device.info` for every action.** Both landscape rotations share dimensions, and `device.info.screenSize` stays portrait. Re-reading it adds work without exact direction.
 
-**Use Android `logicalDisplay` or let phone-stream own projection.** `logicalDisplay` is Android-specific. Semantic platform conversion belongs to the phone fleet Service; phone-stream authenticates current capture evidence and forwards bytes without interpreting user coordinates.
+**Use Android `logicalDisplay` as an iOS rotation source or let phone-stream own projection.** `logicalDisplay` is Android-specific and is the Android capture-to-logical scale target, not an iOS rotation source. Semantic platform conversion belongs to the phone fleet Service; phone-stream authenticates current capture evidence and forwards bytes without interpreting user coordinates. The Android conversion is [the capture-to-logical decision](2026-09-05-android-capture-logical-input.md).
 
 **Retain arbitrary gestures for advanced callers.** No current consumer needs them, and retaining the broken platform-specific program would create a second input contract. Reintroduction requires a demonstrated semantic action that cannot be expressed as tap, swipe, text, or button plus real UI-state verification on every supported platform.
 

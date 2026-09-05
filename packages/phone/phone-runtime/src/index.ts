@@ -20,6 +20,8 @@ import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
 import { iosScreenSize, upstreamIo, type IosScreenSize } from './io.ts'
+import { assertIoDispatchAuthority, type IoDispatchCapture } from './io-authorization.ts'
+import { retireOwnedProbe } from './rotation-probe.ts'
 import { JpegFrameOrientationObserver, probeMjpegExifRotation } from './jpeg.ts'
 import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
 import { rejectWhenAborted } from './recognizable-stream.ts'
@@ -319,8 +321,8 @@ export class PhoneDevices extends Service {
   private activeCaptures = new Map<PhoneCaptureId, ActiveCaptureObservation>()
   private rotationProbes = new Map<DeviceId, RotationProbe>()
   private deviceIncarnations = new Map<DeviceId, object>()
+  private lastKnownLogicalDisplay = new Map<DeviceId, { readonly width: number; readonly height: number }>()
   private generationIdentity = Object.freeze({})
-  private readonly openNativeAndroidH264 = openAndroidSystemH264
   private readonly readAndroidLogicalDisplay = readAndroidLogicalDisplay
   private startupOutcome: Promise<void> | undefined
   private pollTimer: ReturnType<typeof setTimeout> | undefined
@@ -439,6 +441,7 @@ export class PhoneDevices extends Service {
       this.activeCaptures = new Map()
       this.rotationProbes = new Map()
       this.deviceIncarnations = new Map()
+      this.lastKnownLogicalDisplay = new Map()
       this.child = new MobilecliServerProcess({
         executablePath: resolved,
         port: this.resolved.serverPort,
@@ -695,18 +698,27 @@ export class PhoneDevices extends Service {
   }
 
   /**
-   * Execute one semantic tap, swipe, text, or button action. Android coordinate
-   * actions retain their pixels. iOS obtains cached portrait `device.info`
-   * bounds and projects every displayed endpoint through exact rotation;
-   * browser actions bind current capture identity and model actions use a
-   * bounded fresh MJPEG EXIF probe. Physical handsets are valid targets; only
-   * ids absent from the latest published listing fail locally before any RPC.
+   * Execute one semantic tap, swipe, text, or button action. Capture-source
+   * `x`/`y` and `captureWidth`/`captureHeight` remain the decoded plane.
+   * Android capture-source taps and swipes scale both axes onto the current
+   * incarnation `logicalDisplay`; missing logical bounds or a capture plane
+   * that fails the uniform full-frame aspect assumption fail with
+   * `PHONE_PROTOCOL` before RPC. A dumpsys miss does not replace the
+   * incarnation. Android fresh-probe pixels
+   * pass through. iOS obtains cached portrait `device.info` bounds and
+   * projects every displayed endpoint through exact rotation; browser actions
+   * bind current capture identity and model actions use a bounded fresh MJPEG
+   * EXIF probe. Button and text stay independent of coordinate conversion.
+   * Physical handsets are valid targets; only ids absent from the latest
+   * published listing fail locally before any RPC.
    * @param request - Branded device id plus capture-pixel or non-coordinate input.
    * @param signal - Caller's optional cancellation signal.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
    *   absent from the latest published listing, `PHONE_PROTOCOL` when an iOS
-   *   `device.info` answer lacks a valid positive screen size, and otherwise
-   *   per the class-documented failure modes.
+   *   `device.info` answer lacks a valid positive screen size or Android
+   *   capture-source input lacks a current logical display that matches the
+   *   uniform full-frame aspect assumption, and
+   *   otherwise per the class-documented failure modes.
    */
   async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
     this.assertAccepting()
@@ -718,26 +730,29 @@ export class PhoneDevices extends Service {
     const generation = this.captureIoGeneration()
     const known = this.requireKnown(request.deviceId, 'io')
     const incarnation = generation.deviceIncarnations.get(known.id)
+    /* v8 ignore next -- requireKnown already established this listing token on the same Map with no await. */
     if (incarnation === undefined) throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `cannot io: ${JSON.stringify(known.id)} has no active incarnation`)
     const coordinate = request.method === 'tap' || request.method === 'swipe'
     const admittedCaptureSource = coordinate && request.source.kind === 'capture' ? request.source : undefined
-    const admittedCapture = admittedCaptureSource === undefined
-      ? undefined
-      : this.requireActiveCaptureSource(generation, known, admittedCaptureSource)
+    const capture: IoDispatchCapture = admittedCaptureSource === undefined
+      ? { kind: 'none' }
+      : {
+        kind: 'capture',
+        admitted: this.requireActiveCaptureSource(generation, known, admittedCaptureSource),
+        getCurrent: () => generation.activeCaptures.get(admittedCaptureSource.captureId),
+      }
     const rotation = known.platform === 'ios' && coordinate
       ? await this.rotationFor(generation, known, request, signal)
       : undefined
     const screen = known.platform === 'ios' && coordinate
       ? await this.ioScreen(generation, known, incarnation, signal)
       : undefined
-    const call = upstreamIo(request, known.platform, rotation, screen)
-    if (generation.deviceIncarnations.get(known.id) !== incarnation) {
-      throw new PhoneDevicesError('PHONE_ABORTED', 'device incarnation changed before io dispatch')
-    }
-    if (admittedCapture !== undefined && admittedCaptureSource !== undefined
-      && generation.activeCaptures.get(admittedCaptureSource.captureId) !== admittedCapture) {
-      throw new PhoneDevicesError('PHONE_PROTOCOL', 'capture authority changed before io dispatch')
-    }
+    const call = upstreamIo(request, known.platform, rotation, screen, known.logicalDisplay)
+    assertIoDispatchAuthority({
+      admittedIncarnation: incarnation,
+      getCurrentIncarnation: () => generation.deviceIncarnations.get(known.id),
+      capture,
+    })
     await this.roundTripInGeneration(
       generation,
       call.method,
@@ -780,6 +795,7 @@ export class PhoneDevices extends Service {
       }
       case 'fresh-probe':
         break
+      /* v8 ignore next -- PhoneCoordinateSource is the closed capture|fresh-probe union. */
       default:
         return assertNever(request.source)
     }
@@ -790,11 +806,11 @@ export class PhoneDevices extends Service {
       const published = {} as RotationProbe
       const promise = raw.then(
         (rotation) => {
-          if (generation.rotationProbes.get(known.id) === published) generation.rotationProbes.delete(known.id)
+          retireOwnedProbe(generation.rotationProbes, known.id, published)
           return rotation
         },
         (error: unknown) => {
-          if (generation.rotationProbes.get(known.id) === published) generation.rotationProbes.delete(known.id)
+          retireOwnedProbe(generation.rotationProbes, known.id, published)
           throw error
         },
       )
@@ -817,6 +833,7 @@ export class PhoneDevices extends Service {
       'IOS_ROTATION_PROBE',
     )
     const incarnation = generation.deviceIncarnations.get(known.id)
+    /* v8 ignore next -- requireKnown already established this listing token on the same Map with no await. */
     if (incarnation === undefined) throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `cannot probe rotation: ${JSON.stringify(known.id)} has no active incarnation`)
     let capture: PhoneCaptureStream
     try {
@@ -911,6 +928,7 @@ export class PhoneDevices extends Service {
     this.assertUsable()
     const known = this.requireKnown(request.deviceId, 'capture')
     const incarnation = this.deviceIncarnations.get(known.id)
+    /* v8 ignore next -- requireKnown already established this listing token on the same Map with no await. */
     if (incarnation === undefined) throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `cannot capture: ${JSON.stringify(known.id)} has no active incarnation`)
     const generation = this.captureIoGeneration()
     if (request.signal?.aborted === true) {
@@ -982,6 +1000,7 @@ export class PhoneDevices extends Service {
     const reader = body.getReader()
     let released = false
     const release = (): void => {
+      /* v8 ignore next -- pull done/error and cancel both enter release; the second is a no-op. */
       if (released) return
       released = true
       if (generation.rotations.get(key)?.revision === revision) generation.rotations.delete(key)
@@ -1066,6 +1085,18 @@ export class PhoneDevices extends Service {
       },
       async cancel(reason) { release(); await reader.cancel(reason) },
     }, { highWaterMark: 0 })
+  }
+
+  /**
+   * Open Android system H264 through the current `openAndroidSystemH264` export.
+   * Tests mock that module; a captured field would keep the unmocked launcher.
+   * @param options - Device, environment, signal, and optional `--size`.
+   * @returns the native H264 body.
+   */
+  private openNativeAndroidH264(
+    options: Parameters<typeof openAndroidSystemH264>[0],
+  ): ReturnType<typeof openAndroidSystemH264> {
+    return openAndroidSystemH264(options)
   }
 
   /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */
@@ -1403,10 +1434,18 @@ export class PhoneDevices extends Service {
     this.publishedList = change.list
     const stale = new Set<DeviceId>(change.removed)
     const nextIncarnations = new Map<DeviceId, object>()
+    const nextKnownLogical = new Map<DeviceId, { readonly width: number; readonly height: number }>()
     for (const next of allRefsOf(change.list)) {
       const prior = previous === undefined ? undefined : allRefsOf(previous).find(candidate => candidate.id === next.id)
       const priorToken = this.deviceIncarnations.get(next.id)
-      if (prior !== undefined && priorToken !== undefined && sameDeviceIncarnation(prior, next)) nextIncarnations.set(next.id, priorToken)
+      const retainedLogical = next.logicalDisplay ?? this.lastKnownLogicalDisplay.get(next.id)
+      if (retainedLogical !== undefined) nextKnownLogical.set(next.id, retainedLogical)
+      if (
+        prior !== undefined
+        && priorToken !== undefined
+        && sameDeviceIncarnation(prior, next)
+        && sameKnownLogicalDisplay(this.lastKnownLogicalDisplay.get(next.id), retainedLogical)
+      ) nextIncarnations.set(next.id, priorToken)
       else {
         nextIncarnations.set(next.id, Object.freeze({}))
         if (prior !== undefined) stale.add(next.id)
@@ -1414,6 +1453,7 @@ export class PhoneDevices extends Service {
     }
     this.deviceIncarnations.clear()
     for (const [id, token] of nextIncarnations) this.deviceIncarnations.set(id, token)
+    this.lastKnownLogicalDisplay = nextKnownLogical
     for (const id of stale) {
       this.iosScreenSizes.delete(id)
       const probe = this.rotationProbes.get(id)
@@ -1515,6 +1555,7 @@ export class PhoneDevices extends Service {
     this.rotations.clear()
     this.activeCaptures.clear()
     this.deviceIncarnations.clear()
+    this.lastKnownLogicalDisplay.clear()
     const activeProbes = [...this.rotationProbes.values()]
     for (const probe of activeProbes) probe.abort.abort(reason)
     const probes = activeProbes.map(probe => probe.settled)
@@ -1574,6 +1615,7 @@ function exitedBeforeReady(child: MobilecliServerProcess, exit: { readonly code:
   )
 }
 
+/* v8 ignore next -- PhoneCoordinateSource is the closed capture|fresh-probe union. */
 function assertNever(value: never): never {
   throw new PhoneDevicesError('PHONE_PROTOCOL', `unsupported coordinate source ${JSON.stringify(value)}`)
 }
@@ -1581,6 +1623,22 @@ function assertNever(value: never): never {
 function sameDeviceIncarnation(left: PhoneDeviceRef, right: PhoneDeviceRef): boolean {
   return left.id === right.id && left.platform === right.platform && left.kind === right.kind
     && left.state === right.state
+}
+
+/**
+ * Last-known logical-display pixels are incarnation identity, separate from
+ * current listing `logicalDisplay` mapping. A missing operand (never-observed
+ * or dumpsys miss) is treated as the same incarnation as a later or retained
+ * known size, so miss→firstKnown may keep an active grant; current bounds and
+ * aspect still validate at io. Two known sizes compare by pixels, so
+ * A→miss→B revokes through the retained known size.
+ */
+function sameKnownLogicalDisplay(
+  left: PhoneDeviceRef['logicalDisplay'],
+  right: PhoneDeviceRef['logicalDisplay'],
+): boolean {
+  if (left === undefined || right === undefined) return true
+  return left.width === right.width && left.height === right.height
 }
 
 function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
@@ -1643,6 +1701,7 @@ async function joinForeignCleanup(
     () => undefined,
     (error: unknown) => {
       if (!abandoned) throw error
+      /* v8 ignore next -- exact-once late reject: the first reportLate owns the diagnostic. */
       if (reported) return
       reported = true
       try {

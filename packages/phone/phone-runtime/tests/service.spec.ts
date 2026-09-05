@@ -1,23 +1,64 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import PhoneDevices, { deviceId, phoneCaptureId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import type { Config } from '@deepseek-ai/dsh-phone-runtime'
-import type { PhoneDeviceChange, PhoneDeviceList } from '@deepseek-ai/dsh-phone-runtime'
+import type { Config, PhoneDeviceChange, PhoneDeviceList } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
+import PhoneDevices, { deviceId, phoneCaptureId, PhoneDevicesError } from '../src/index.ts'
 import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, pngDimensions, PNG_SIGNATURE, stageFake, wireDevice } from './helpers.ts'
-import { buildGradientH264 } from './fixtures/u3-visible-frames.ts'
+import { buildGradientH264, buildGradientJpeg } from './fixtures/u3-visible-frames.ts'
 import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readAndroidLogicalDisplay } from '../src/android-display.ts'
+import { openAndroidSystemH264 } from '../src/android-h264-process.ts'
+import { assertIoDispatchAuthority } from '../src/io-authorization.ts'
+
+function syntheticAndroidH264(): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(buildGradientH264())
+      controller.close()
+    },
+  })
+}
+
+function nativeLaunchDiagnostics(): string {
+  return MobilecliServerProcess.diagnostics.join('\n')
+}
 
 vi.mock('../src/android-display.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/android-display.ts')>()
   return {
     ...actual,
     readAndroidLogicalDisplay: vi.fn(() => undefined),
+  }
+})
+
+vi.mock('../src/io-authorization.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/io-authorization.ts')>()
+  return {
+    ...actual,
+    assertIoDispatchAuthority: vi.fn((options: Parameters<typeof actual.assertIoDispatchAuthority>[0]) => {
+      actual.assertIoDispatchAuthority(options)
+    }),
+  }
+})
+
+vi.mock('../src/android-h264-process.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/android-h264-process.ts')>()
+  const { buildGradientH264: syntheticH264 } = await import('./fixtures/u3-visible-frames.ts')
+  return {
+    ...actual,
+    openAndroidSystemH264: vi.fn((...args: Parameters<typeof actual.openAndroidSystemH264>) => {
+      void args
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(syntheticH264())
+          controller.close()
+        },
+      })
+    }),
   }
 })
 
@@ -37,6 +78,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
+  vi.mocked(openAndroidSystemH264).mockReset()
+  vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+  vi.mocked(assertIoDispatchAuthority).mockClear()
   console.error('child diagnostics:', MobilecliServerProcess.diagnostics.splice(0))
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
@@ -139,6 +183,22 @@ describe('phone runtime service lifecycle', () => {
     expect(context.phoneDevices.isReady()).toBe(true)
     expect(readiness).toEqual([true, false, true])
     expect(removedReadiness).toEqual([true])
+  })
+
+  it('answers an empty initial listing without a devices-changed event', async () => {
+    const fake = await stageFake({ devices: [] })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    const changes: PhoneDeviceChange[] = []
+    context.phoneDevices.onChanged(change => changes.push(change))
+    expect(context.phoneDevices.isReady()).toBe(true)
+    const list = await context.phoneDevices.listDevices()
+    expect(list).toEqual({
+      android: [],
+      ios: { simulators: [], reals: [] },
+    })
+    expect(changes).toEqual([])
+    expect(context.phoneDevices.isReady()).toBe(true)
   })
 
   it('rejects activation whose caller is already cancelled', async () => {
@@ -355,6 +415,7 @@ describe('phone runtime service lifecycle', () => {
     ])
     expect(list.ios.simulators.map(device => [device.id, device.online])).toEqual([[IOS_SIMULATOR, false]])
     expect(list.ios.reals.map(device => [device.id, device.online])).toEqual([[IOS_REAL, true]])
+    expect(list.android[0]?.logicalDisplay).toBeUndefined()
     // Offline entries are present because every listing query sends includeOffline.
     const counters = await fake.counters()
     expect(counters.requests).toBeGreaterThanOrEqual(2)
@@ -487,6 +548,344 @@ describe('phone runtime service lifecycle', () => {
     ])
   })
 
+  it('scales Android capture-source io onto the listed logical display before RPC', async () => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('android-logical')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    expect(vi.mocked(openAndroidSystemH264)).toHaveBeenCalled()
+    expect(nativeLaunchDiagnostics()).not.toMatch(/\badb\b|screenrecord/u)
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    })
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'swipe',
+      x1: 0, y1: 0, x2: 1_124, y2: 540,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: 'emulator-5554', x: 1_124, y: 540 } },
+      {
+        method: 'device.io.swipe',
+        params: { deviceId: 'emulator-5554', x1: 0, y1: 0, x2: 2_248, y2: 1_080 },
+      },
+    ])
+    await reader.cancel()
+  })
+
+  it('refuses Android capture-source io whose plane mismatches logical display and still accepts buttons', async () => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('android-portrait-plane')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    expect(vi.mocked(openAndroidSystemH264)).toHaveBeenCalled()
+    expect(nativeLaunchDiagnostics()).not.toMatch(/\badb\b|screenrecord/u)
+    const refused = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 540, y: 1_124,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_080, captureHeight: 2_248,
+      },
+    }))
+    expect(refused.code).toBe('PHONE_PROTOCOL')
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'button', button: 'HOME',
+    })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.button', params: { deviceId: 'emulator-5554', button: 'HOME' } },
+    ])
+    await reader.cancel()
+  })
+
+  it('refuses Android capture-source io when logical display is missing', async () => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('android-missing-logical')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    const refused = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    }))
+    expect(refused.code).toBe('PHONE_PROTOCOL')
+    expect((await fake.counters()).io).toEqual([])
+    await reader.cancel()
+  })
+
+  it('revokes a stale Android capture after logical display replacement', async () => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 1080, height: 2248 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('android-stale-capture')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    expect(nativeLaunchDiagnostics()).not.toMatch(/\badb\b|screenrecord/u)
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    await context.phoneDevices.listDevices()
+    const refused = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 540, y: 1_124,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_080, captureHeight: 2_248,
+      },
+    }))
+    expect(refused.code).toBe('PHONE_PROTOCOL')
+    expect(refused.message).toMatch(/trusted capture evidence is not active/u)
+    expect((await fake.counters()).io).toEqual([])
+    await reader.cancel()
+  })
+
+  it('revokes Android capture when known logical display height changes', async () => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('android-height-change')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    expect(nativeLaunchDiagnostics()).not.toMatch(/\badb\b|screenrecord/u)
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1081 })
+    await context.phoneDevices.listDevices()
+    const refused = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    }))
+    expect(refused.code).toBe('PHONE_PROTOCOL')
+    expect(refused.message).toMatch(/trusted capture evidence is not active/u)
+    expect((await fake.counters()).io).toEqual([])
+    await reader.cancel()
+  })
+
+  it('leaves a second Android capture active when another device logical display changes', async () => {
+    const other = deviceId('emulator-5556')
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockImplementation(options => (
+      options.deviceId === other ? { width: 1080, height: 1920 } : { width: 2248, height: 1080 }
+    ))
+    const fake = await stageFake({
+      devices: [
+        ...BASE_DEVICES,
+        wireDevice('emulator-5556', 'android', 'emulator', 'online'),
+      ],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const keepId = phoneCaptureId('android-keep-other')
+    const staleId = phoneCaptureId('android-stale-one')
+    const keep = await context.phoneDevices.startCapture({
+      deviceId: other, format: 'h264', captureId: keepId,
+    })
+    const stale = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId: staleId,
+    })
+    const keepReader = keep.body.getReader()
+    const staleReader = stale.body.getReader()
+    vi.mocked(readAndroidLogicalDisplay).mockImplementation(options => (
+      options.deviceId === other ? { width: 1080, height: 1920 } : { width: 2248, height: 1081 }
+    ))
+    await context.phoneDevices.listDevices()
+    const refused = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId: staleId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    }))
+    expect(refused.code).toBe('PHONE_PROTOCOL')
+    expect(refused.message).toMatch(/trusted capture evidence is not active/u)
+    await context.phoneDevices.io({
+      deviceId: other, method: 'tap', x: 270, y: 480,
+      source: {
+        kind: 'capture', captureId: keepId, captureFormat: 'h264',
+        captureWidth: 540, captureHeight: 960,
+      },
+    })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: 'emulator-5556', x: 540, y: 960 } },
+    ])
+    await keepReader.cancel()
+    await staleReader.cancel()
+  })
+
+  it.each([
+    {
+      name: 'A→miss→A',
+      restore: { width: 2248, height: 1080 } as const,
+      restoreSource: { captureWidth: 1_124, captureHeight: 540, x: 562, y: 270 },
+      restoreRpc: { method: 'device.io.tap', params: { deviceId: 'emulator-5554', x: 1_124, y: 540 } },
+    },
+    {
+      name: 'A→miss→B',
+      restore: { width: 1080, height: 2248 } as const,
+      restoreSource: { captureWidth: 1_080, captureHeight: 2_248, x: 540, y: 1_124 },
+      restoreRpc: undefined,
+    },
+  ])('$name keeps the grant through a miss and restores or revokes by last-known size', async (scenario) => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId(`android-${scenario.name}`)
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    expect(vi.mocked(openAndroidSystemH264)).toHaveBeenCalled()
+    expect(nativeLaunchDiagnostics()).not.toMatch(/\badb\b|screenrecord/u)
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
+    const missing = await context.phoneDevices.listDevices()
+    expect(missing.android[0]?.logicalDisplay).toBeUndefined()
+    const refusedMissing = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    }))
+    expect(refusedMissing.code).toBe('PHONE_PROTOCOL')
+    expect(refusedMissing.message).toMatch(/logical display/u)
+    expect(refusedMissing.message).not.toMatch(/trusted capture evidence is not active/u)
+    expect((await fake.counters()).io).toEqual([])
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue(scenario.restore)
+    const restored = await context.phoneDevices.listDevices()
+    expect(restored.android[0]?.logicalDisplay).toEqual(scenario.restore)
+    if (scenario.restoreRpc === undefined) {
+      const refusedBridge = await errorOf(() => context.phoneDevices.io({
+        deviceId: ANDROID_EMULATOR, method: 'tap',
+        x: scenario.restoreSource.x, y: scenario.restoreSource.y,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'h264',
+          captureWidth: scenario.restoreSource.captureWidth,
+          captureHeight: scenario.restoreSource.captureHeight,
+        },
+      }))
+      expect(refusedBridge.code).toBe('PHONE_PROTOCOL')
+      expect(refusedBridge.message).toMatch(/trusted capture evidence is not active/u)
+      expect((await fake.counters()).io).toEqual([])
+      const nextId = phoneCaptureId(`${scenario.name}-B`)
+      const nextCapture = await context.phoneDevices.startCapture({
+        deviceId: ANDROID_EMULATOR, format: 'h264', captureId: nextId,
+      })
+      const nextReader = nextCapture.body.getReader()
+      await context.phoneDevices.io({
+        deviceId: ANDROID_EMULATOR, method: 'tap', x: 540, y: 1_124,
+        source: {
+          kind: 'capture', captureId: nextId, captureFormat: 'h264',
+          captureWidth: 1_080, captureHeight: 2_248,
+        },
+      })
+      expect((await fake.counters()).io).toEqual([
+        { method: 'device.io.tap', params: { deviceId: 'emulator-5554', x: 540, y: 1_124 } },
+      ])
+      await nextReader.cancel()
+    } else {
+      await context.phoneDevices.io({
+        deviceId: ANDROID_EMULATOR, method: 'tap',
+        x: scenario.restoreSource.x, y: scenario.restoreSource.y,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'h264',
+          captureWidth: scenario.restoreSource.captureWidth,
+          captureHeight: scenario.restoreSource.captureHeight,
+        },
+      })
+      expect((await fake.counters()).io).toEqual([scenario.restoreRpc])
+    }
+    await reader.cancel()
+  })
+
+  it('revokes a portrait capture after dumpsys miss then landscape logical display', async () => {
+    vi.mocked(openAndroidSystemH264).mockImplementation(() => syntheticAndroidH264())
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 1080, height: 2248 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('android-portrait-to-landscape')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
+    const missing = await context.phoneDevices.listDevices()
+    expect(missing.android[0]?.logicalDisplay).toBeUndefined()
+    const refusedMissing = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 540, y: 1_124,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_080, captureHeight: 2_248,
+      },
+    }))
+    expect(refusedMissing.code).toBe('PHONE_PROTOCOL')
+    expect(refusedMissing.message).toMatch(/logical display/u)
+    expect(refusedMissing.message).not.toMatch(/trusted capture evidence is not active/u)
+    expect((await fake.counters()).io).toEqual([])
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    await context.phoneDevices.listDevices()
+    const refusedOld = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    }))
+    expect(refusedOld.code).toBe('PHONE_PROTOCOL')
+    expect(refusedOld.message).toMatch(/trusted capture evidence is not active/u)
+    expect((await fake.counters()).io).toEqual([])
+    const nextId = phoneCaptureId('android-portrait-to-landscape-B')
+    const nextCapture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId: nextId,
+    })
+    const nextReader = nextCapture.body.getReader()
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+      source: {
+        kind: 'capture', captureId: nextId, captureFormat: 'h264',
+        captureWidth: 1_124, captureHeight: 540,
+      },
+    })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: 'emulator-5554', x: 1_124, y: 540 } },
+    ])
+    await nextReader.cancel()
+    await reader.cancel()
+  })
+
   it('uses fresh probing when the caller chooses the model coordinate source', async () => {
     const fake = await stageFake({
       devices: [{
@@ -521,6 +920,29 @@ describe('phone runtime service lifecycle', () => {
     await reader.cancel()
   })
 
+  it('refuses H264 capture-source io when exact rotation is omitted', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('h264-missing-rotation')
+    const capture = await context.phoneDevices.startCapture({ deviceId: IOS_REAL, format: 'h264', captureId })
+    const reader = capture.body.getReader()
+    try {
+      const refused = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'h264',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(refused.code).toBe('PHONE_PROTOCOL')
+      expect(refused.message).toBe('H264 capture evidence requires exact rotation')
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel()
+    }
+  })
+
   it('keeps unique MJPEG capture observations isolated on one device', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES, streamFrameCount: 2, mjpegOrientations: [8, 6] })
     fakes.push(fake)
@@ -549,6 +971,456 @@ describe('phone runtime service lifecycle', () => {
     await rightReader.cancel()
   })
 
+  it('delivers a JPEG after iOS listing incarnation change without republishing rotation', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }],
+      streamFrameCount: 8,
+      mjpegOrientations: [8, 8, 8, 8],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    const captureId = phoneCaptureId('ios-incarnation-jpeg')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      await context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      })
+      await fake.setDevices([{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'offline'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }])
+      await context.phoneDevices.listDevices()
+      const second = await reader.read()
+      expect(second.done).toBe(false)
+      expect(second.value?.byteLength ?? 0).toBeGreaterThan(0)
+      const inactive = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(inactive.code).toBe('PHONE_PROTOCOL')
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  })
+
+  it('delivers a JPEG after duplicate captureId revision replacement without touching a distinct capture', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      streamFrameCount: 8,
+      mjpegOrientations: [8, 8, 8, 8, 8, 8],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const reused = phoneCaptureId('mjpeg-revision')
+    const other = phoneCaptureId('mjpeg-distinct')
+    const firstCapture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId: reused,
+    })
+    const otherCapture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId: other,
+    })
+    const firstReader = firstCapture.body.getReader()
+    const otherReader = otherCapture.body.getReader()
+    try {
+      const first = await firstReader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      const otherFirst = await otherReader.read()
+      expect(otherFirst.done).toBe(false)
+      expect(otherFirst.value?.byteLength ?? 0).toBeGreaterThan(0)
+      const secondCapture = await context.phoneDevices.startCapture({
+        deviceId: IOS_REAL, format: 'mjpeg', captureId: reused,
+      })
+      const secondReader = secondCapture.body.getReader()
+      try {
+        const replaced = await secondReader.read()
+        expect(replaced.done).toBe(false)
+        expect(replaced.value?.byteLength ?? 0).toBeGreaterThan(0)
+        const staleFrame = await firstReader.read()
+        expect(staleFrame.done).toBe(false)
+        expect(staleFrame.value?.byteLength ?? 0).toBeGreaterThan(0)
+        await context.phoneDevices.io({
+          deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+          source: {
+            kind: 'capture', captureId: other, captureFormat: 'mjpeg',
+            captureWidth: 2_622, captureHeight: 1_206,
+          },
+        })
+        await context.phoneDevices.io({
+          deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+          source: {
+            kind: 'capture', captureId: reused, captureFormat: 'mjpeg',
+            captureWidth: 2_622, captureHeight: 1_206,
+          },
+        })
+      } finally {
+        await secondReader.cancel().catch(() => {})
+      }
+    } finally {
+      await firstReader.cancel().catch(() => {})
+      await otherReader.cancel().catch(() => {})
+    }
+  })
+
+  it('revokes published MJPEG rotation when a later complete JPEG has no supported EXIF', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      streamFrameCount: 2,
+      mjpegOrientations: [8, 2],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('mjpeg-exif-then-none')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      await context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      })
+      expect((await fake.counters()).io).toEqual([{
+        method: 'device.io.swipe',
+        params: { deviceId: 'REAL-UDID', x1: 42, y1: 530, x2: 42, y2: 530 },
+      }])
+      const second = await reader.read()
+      expect(second.done).toBe(false)
+      expect(second.value?.byteLength ?? 0).toBeGreaterThan(0)
+      const unpublished = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(unpublished.code).toBe('PHONE_PROTOCOL')
+      expect(unpublished.message).toMatch(/has not published exact rotation/u)
+      expect((await fake.counters()).io).toHaveLength(1)
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('does not republish MJPEG rotation after generation replacement while the reader is held', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      streamFrameCount: 80,
+      mjpegOrientations: [8],
+    })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    const captureId = phoneCaptureId('mjpeg-stale-generation')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      await context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      })
+      await context.phoneDevices.deactivate()
+      await context.phoneDevices.activateExecutable(fake.executablePath)
+      expect(context.phoneDevices.isReady()).toBe(true)
+      await reader.read().catch(() => {})
+      const refused = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(refused.code).toBe('PHONE_PROTOCOL')
+      expect(refused.message).toMatch(/trusted capture evidence is not active/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  })
+
+  it('drains a finite public MJPEG capture until the body closes', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, streamFrameCount: 1 })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('mjpeg-drain')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      let bytes = 0
+      let done = false
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) {
+          done = true
+          break
+        }
+        bytes += next.value.byteLength
+      }
+      expect(bytes).toBeGreaterThan(0)
+      expect(done).toBe(true)
+      const inactive = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(inactive.code).toBe('PHONE_PROTOCOL')
+      expect(inactive.message).toMatch(/trusted capture evidence is not active/u)
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('drains a finite public H264 capture until the body closes', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('h264-drain')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      let bytes = 0
+      let done = false
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) {
+          done = true
+          break
+        }
+        bytes += next.value.byteLength
+      }
+      expect(bytes).toBeGreaterThan(0)
+      expect(done).toBe(true)
+      const inactive = await errorOf(() => context.phoneDevices.io({
+        deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'h264',
+          captureWidth: 1_124, captureHeight: 540,
+        },
+      }))
+      expect(inactive.code).toBe('PHONE_PROTOCOL')
+      expect(inactive.message).toMatch(/trusted capture evidence is not active/u)
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('refuses iOS capture-source io before EXIF rotation is published', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, streamFrameCount: 8 })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('mjpeg-before-exif')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const refused = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(refused.code).toBe('PHONE_PROTOCOL')
+      expect(refused.message).toMatch(/has not published exact rotation/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('refuses capture-source io after a first MJPEG frame with no supported EXIF', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      streamFrameCount: 2,
+      mjpegOrientations: [2],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('mjpeg-first-unsupported-exif')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      const unpublished = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(unpublished.code).toBe('PHONE_PROTOCOL')
+      expect(unpublished.message).toMatch(/has not published exact rotation/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('refuses caller-supplied MJPEG captureRotation', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, streamFrameCount: 2 })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('mjpeg-caller-rotation')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const refused = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206, captureRotation: 90,
+        },
+      }))
+      expect(refused.code).toBe('PHONE_PROTOCOL')
+      expect(refused.message).toMatch(/MJPEG rotation is runtime-owned/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('rejects a public H264 capture reader when the synthetic body errors', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+    }
+    let pulls = 0
+    const failingBody = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1
+        if (pulls === 1) {
+          controller.enqueue(Uint8Array.from([1, 2, 3]))
+          return
+        }
+        controller.error(new Error('synthetic H264 body reset'))
+      },
+    })
+    vi.spyOn(captured, 'inspectAndroidH264').mockResolvedValue({
+      recognizable: true,
+      body: failingBody,
+    })
+    const captureId = phoneCaptureId('h264-pull-error')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR, format: 'h264', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      await expect(reader.read()).rejects.toBeInstanceOf(Error)
+      const inactive = await errorOf(() => context.phoneDevices.io({
+        deviceId: ANDROID_EMULATOR, method: 'tap', x: 562, y: 270,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'h264',
+          captureWidth: 1_124, captureHeight: 540,
+        },
+      }))
+      expect(inactive.code).toBe('PHONE_PROTOCOL')
+      expect(inactive.message).toMatch(/trusted capture evidence is not active/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  })
+
+  it('rejects a public MJPEG capture reader after the upstream capture socket dies', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, streamFrameCount: 80 })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('mjpeg-pull-error')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      expect(first.value?.byteLength ?? 0).toBeGreaterThan(0)
+      const pid = (await (await fetch(`${fake.baseUrl}/__test/pid`)).json() as { pid: number }).pid
+      process.kill(pid, 'SIGKILL')
+      await waitFor(async () => {
+        try {
+          await fetch(`${fake.baseUrl}/__test/counters`)
+          return false
+        } catch {
+          return true
+        }
+      })
+      await expect(reader.read()).rejects.toBeInstanceOf(Error)
+      const inactive = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      expect(['PHONE_PROTOCOL', 'PHONE_UNAVAILABLE']).toContain(inactive.code)
+      if (inactive.code === 'PHONE_PROTOCOL') {
+        expect(inactive.message).toMatch(/trusted capture evidence is not active/u)
+      }
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  })
+
   it('single-flights a model rotation probe while caller cancellation remains independent', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES, screencaptureDelayMs: 100, mjpegOrientations: [8] })
     fakes.push(fake)
@@ -562,6 +1434,85 @@ describe('phone runtime service lifecycle', () => {
     const counters = await fake.counters()
     expect(counters.captures.filter(capture => capture.deviceId === 'REAL-UDID' && capture.format === 'mjpeg')).toHaveLength(1)
     expect(counters.io).toEqual([{
+      method: 'device.io.swipe',
+      params: { deviceId: 'REAL-UDID', x1: 42, y1: 530, x2: 42, y2: 530 },
+    }])
+  })
+
+  it('aborts a pending iOS rotation probe on deactivate and starts a new probe after reactivation', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      screencaptureDelayMs: 400,
+      mjpegOrientations: [8],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    const pending = errorOf(() => context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+    }))
+    await waitFor(async () => (
+      (await fake.counters()).rpc.filter(entry => entry.method === 'device.screencapture').length >= 1
+    ))
+    const deactivating = context.phoneDevices.deactivate()
+    const aborted = await pending
+    expect(aborted.code).toBe('PHONE_ABORTED')
+    await deactivating
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+    })
+    // Replacement child has its own RPC journal; one screencapture proves the
+    // aborted probe did not remain a zombie on the new generation.
+    expect((await fake.counters()).rpc.filter(entry => entry.method === 'device.screencapture')).toHaveLength(1)
+    expect((await fake.counters()).io).toEqual([{
+      method: 'device.io.swipe',
+      params: { deviceId: 'REAL-UDID', x1: 42, y1: 530, x2: 42, y2: 530 },
+    }])
+  })
+
+  it('rejects ready-service io cancelled before the request is sent', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    controller.abort(new Error('cancelled before send'))
+    const refused = await errorOf(() => context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR, method: 'tap', source: { kind: 'fresh-probe' }, x: 1, y: 1,
+    }, controller.signal))
+    expect(refused.code).toBe('PHONE_ABORTED')
+    expect(refused.message).toMatch(/cancelled before the request was sent/u)
+    expect((await fake.counters()).io).toEqual([])
+  })
+
+  it('single-flights a failed iOS fresh-probe and allows a later retry', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      mjpegOrientations: [8],
+      screencaptureDelayMs: 200,
+      failArm: { method: 'device.screencapture', message: 'probe capture refused', remaining: 1 },
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const first = errorOf(() => context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+    }))
+    const second = errorOf(() => context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+    }))
+    const a = await first
+    const b = await second
+    expect(a.code).toBe('PHONE_UPSTREAM')
+    expect(b.code).toBe('PHONE_UPSTREAM')
+    expect(a.message).toMatch(/probe capture refused/u)
+    expect(b.message).toMatch(/probe capture refused/u)
+    expect((await fake.counters()).io).toEqual([])
+    expect((await fake.counters()).rpc.filter(entry => entry.method === 'device.screencapture')).toHaveLength(1)
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+    })
+    expect((await fake.counters()).rpc.filter(entry => entry.method === 'device.screencapture')).toHaveLength(2)
+    expect((await fake.counters()).io).toEqual([{
       method: 'device.io.swipe',
       params: { deviceId: 'REAL-UDID', x1: 42, y1: 530, x2: 42, y2: 530 },
     }])
@@ -674,6 +1625,241 @@ describe('phone runtime service lifecycle', () => {
       infoCount: 1,
       io: [{ method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 6, y: 9 } }],
     })
+  })
+
+  it('aborts replacement activation after old generation teardown starts and before the new child is ready', async () => {
+    const first = await stageFake({ devices: BASE_DEVICES, ignoreTerm: true })
+    const second = await stageFake({ devices: BASE_DEVICES, hang: true })
+    fakes.push(first, second)
+    await first.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: first.port,
+    }).await()
+    await context.phoneDevices.activateExecutable(first.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    await second.claim()
+    const controller = new AbortController()
+    const replacing = context.phoneDevices.activateExecutable(second.executablePath, controller.signal)
+    await first.awaitOnline()
+    controller.abort(new Error('cancel after old generation teardown'))
+    await expect(replacing).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).not.toContain(true)
+  })
+
+  it('rejects iOS capture-source io when listing removes the device during delayed device.info', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }],
+      infoDelayMs: 400,
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('ios-info-stale')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      const inflight = errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 201, y: 437,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 1_206, captureHeight: 2_622,
+        },
+      }))
+      await waitFor(async () => (await fake.counters()).infoCount === 1)
+      await fake.setDevices([])
+      await context.phoneDevices.listDevices()
+      const stale = await inflight
+      expect(stale.code).toBe('PHONE_ABORTED')
+      expect(stale.message).toMatch(/incarnation changed during screen observation/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('authorizes io dispatch with live accessors after coordinate awaits', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }],
+      streamFrameCount: 8,
+      mjpegOrientations: [8],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('ios-live-authorization')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      vi.mocked(assertIoDispatchAuthority).mockClear()
+      await context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      })
+      expect(assertIoDispatchAuthority).toHaveBeenCalledOnce()
+      const options = vi.mocked(assertIoDispatchAuthority).mock.calls[0]?.[0]
+      expect(options?.admittedIncarnation).toEqual(expect.any(Object))
+      expect(options?.getCurrentIncarnation()).toBe(options?.admittedIncarnation)
+      expect(options?.capture.kind).toBe('capture')
+      if (options?.capture.kind === 'capture') {
+        expect(options.capture.getCurrent()).toBe(options.capture.admitted)
+      }
+      expect((await fake.counters()).io).toHaveLength(1)
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('rejects capture-source io when the admitted capture is cancelled during delayed device.info', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }],
+      infoDelayMs: 400,
+      streamFrameCount: 8,
+      mjpegOrientations: [8],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('ios-capture-authority')
+    const capture = await context.phoneDevices.startCapture({
+      deviceId: IOS_REAL, format: 'mjpeg', captureId,
+    })
+    const reader = capture.body.getReader()
+    try {
+      const first = await reader.read()
+      expect(first.done).toBe(false)
+      const inflight = errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+        source: {
+          kind: 'capture', captureId, captureFormat: 'mjpeg',
+          captureWidth: 2_622, captureHeight: 1_206,
+        },
+      }))
+      await waitFor(async () => (await fake.counters()).infoCount === 1)
+      await reader.cancel()
+      const stale = await inflight
+      expect(stale.code).toBe('PHONE_PROTOCOL')
+      expect(stale.message).toMatch(/^capture authority changed before io dispatch$/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      await reader.cancel().catch(() => {})
+    }
+  })
+
+  it('rejects a queued listDevices when generation replacement wins before admission', async () => {
+    const fake = await stageFake({
+      devices: BASE_DEVICES,
+      listDelayMs: 800,
+      delaySubsequentDeviceLists: true,
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    expect(context.phoneDevices.isReady()).toBe(true)
+    const baselineLists = (await fake.counters()).rpc.filter(entry => entry.method === 'devices.list').length
+    const first = context.phoneDevices.listDevices().then(
+      list => list,
+      (error: unknown) => error,
+    )
+    const second = context.phoneDevices.listDevices().then(
+      list => list,
+      (error: unknown) => error,
+    )
+    await waitFor(async () => (
+      (await fake.counters()).rpc.filter(entry => entry.method === 'devices.list').length >= baselineLists + 1
+    ))
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    const later = await second
+    expect(later).toBeInstanceOf(PhoneDevicesError)
+    expect((later as PhoneDevicesError).code).toBe('PHONE_ABORTED')
+    expect((later as PhoneDevicesError).message).toBe('device listing generation changed before admission')
+    const earlier = await first
+    if (earlier instanceof PhoneDevicesError) {
+      expect(earlier.code).toBe('PHONE_ABORTED')
+    }
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect((await context.phoneDevices.listDevices()).android[0]?.id).toBe(ANDROID_EMULATOR)
+  })
+
+  it('rejects in-flight listDevices when generation replacement wins before publication', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    const captured = context.phoneDevices as unknown as {
+      rpcClient: { call(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> }
+    }
+    const original = captured.rpcClient.call.bind(captured.rpcClient)
+    const spy = vi.spyOn(captured.rpcClient, 'call').mockImplementation(async (method, params, signal) => {
+      const result = await original(method, params, signal)
+      if (method === 'devices.list') {
+        void context.phoneDevices.deactivate()
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+      return result
+    })
+    try {
+      const result = await errorOf(() => context.phoneDevices.listDevices())
+      expect(result.code).toBe('PHONE_ABORTED')
+      expect(result.message).toBe('device listing generation changed before publication')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('rejects a queued listDevices when deactivate aborts the current generation', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    const queued = context.phoneDevices.listDevices().then(
+      list => list,
+      (error: unknown) => error,
+    )
+    const second = context.phoneDevices.listDevices().then(
+      list => list,
+      (error: unknown) => error,
+    )
+    await context.phoneDevices.deactivate()
+    const later = await second
+    expect(later).toBeInstanceOf(PhoneDevicesError)
+    expect((later as PhoneDevicesError).code).toBe('PHONE_ABORTED')
+    const abortedGeneration = new RegExp(
+      'generation (retired before admission|changed before admission|changed before publication)'
+      + '|generation was disabled',
+      'u',
+    )
+    expect((later as PhoneDevicesError).message).toMatch(abortedGeneration)
+    const first = await queued
+    if (first instanceof PhoneDevicesError) {
+      expect(first.code).toBe('PHONE_ABORTED')
+    } else {
+      expect(first).toHaveProperty('android.0.id', ANDROID_EMULATOR)
+    }
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect((await context.phoneDevices.listDevices()).android[0]?.id).toBe(ANDROID_EMULATOR)
   })
 
   it('refuses io and capture for ids absent from the latest listing', async () => {
@@ -827,6 +2013,26 @@ describe('phone runtime service lifecycle', () => {
     const list = await context.phoneDevices.listDevices()
     expect(list.android[0]?.logicalDisplay).toEqual({ width: 2248, height: 1080 })
     expect(list.ios.reals[0]?.logicalDisplay).toBeUndefined()
+  })
+
+  it('skips dumpsys for offline Android listing rows', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const fake = await stageFake({
+      devices: [
+        wireDevice('emulator-5554', 'android', 'emulator', 'offline'),
+        wireDevice('SIM-UDID', 'ios', 'simulator', 'offline'),
+        wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+      ],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    vi.mocked(readAndroidLogicalDisplay).mockClear()
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2248, height: 1080 })
+    const list = await context.phoneDevices.listDevices()
+    expect(list.android.map(device => [device.id, device.online, device.logicalDisplay])).toEqual([
+      [ANDROID_EMULATOR, false, undefined],
+    ])
+    expect(vi.mocked(readAndroidLogicalDisplay)).not.toHaveBeenCalled()
   })
 
   it('uses the listed logicalDisplay for screenrecord --size when a live dumpsys miss happens', async () => {
@@ -1148,6 +2354,19 @@ describe('phone runtime service lifecycle', () => {
    * stale check runs bounded capture-body cancel. `stream` is mocked because
    * a real RPC would abort before returning a body.
    */
+  function mockStreamBody(
+    context: CordisContext,
+    body: ReadableStream<Uint8Array>,
+  ): { mockRestore(): void } {
+    const captured = context.phoneDevices as unknown as {
+      rpcClient: { stream(...args: unknown[]): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }> }
+    }
+    return vi.spyOn(captured.rpcClient, 'stream').mockImplementation(async () => ({
+      contentType: 'multipart/x-mixed-replace',
+      body,
+    }))
+  }
+
   function mockStaleAfterHeaders(
     context: CordisContext,
     body: ReadableStream<Uint8Array>,
@@ -1161,6 +2380,85 @@ describe('phone runtime service lifecycle', () => {
       return { contentType: 'multipart/x-mixed-replace', body }
     })
   }
+
+  it('discards a completed iOS rotation probe after listing incarnation change', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake, { pollIntervalMs: 60_000 })
+    const stream = mockStreamBody(context, new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(buildGradientJpeg(0, 8))
+      },
+      async cancel() {
+        await fake.setDevices([{
+          ...wireDevice('REAL-UDID', 'ios', 'real', 'offline'),
+          screenSize: { width: 402, height: 874, scale: 3 },
+        }])
+        await context.phoneDevices.listDevices()
+      },
+    }))
+    try {
+      const stale = await errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+      }))
+      expect(stale.code).toBe('PHONE_ABORTED')
+      expect(stale.message).toMatch(/stale iOS rotation probe was discarded/u)
+      expect((await fake.counters()).io).toEqual([])
+    } finally {
+      stream.mockRestore()
+    }
+  })
+
+  it('logs abandoned rotation-probe cleanup after captureCleanupTimeoutMs', async () => {
+    const fake = await stageFake({
+      devices: [{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake, { captureCleanupTimeoutMs: 20, pollIntervalMs: 60_000 })
+    let rejectCancel!: (error: unknown) => void
+    const cancel = new Promise<void>((_resolve, reject) => { rejectCancel = reject })
+    let entered!: () => void
+    const began = new Promise<void>((resolve) => { entered = resolve })
+    const warnings: unknown[] = []
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const stream = mockStreamBody(context, new ReadableStream<Uint8Array>({
+      pull() {
+        entered()
+        return new Promise<void>(() => {})
+      },
+      cancel() { return cancel },
+    }))
+    try {
+      const inflight = errorOf(() => context.phoneDevices.io({
+        deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080,
+      }))
+      await began
+      await fake.setDevices([{
+        ...wireDevice('REAL-UDID', 'ios', 'real', 'offline'),
+        screenSize: { width: 402, height: 874, scale: 3 },
+      }])
+      await context.phoneDevices.listDevices()
+      const stale = await inflight
+      expect(stale.code).toBe('PHONE_ABORTED')
+      const failure = new Error('late probe cancel failure')
+      rejectCancel(failure)
+      await vi.waitFor(() => {
+        expect(warnings).toContain('phone-runtime: abandoned rotation probe cleanup failed')
+        expect(warnings).toContain(failure)
+      })
+    } finally {
+      stream.mockRestore()
+      warn.mockRestore()
+    }
+  })
 
   it('surfaces a prompt stale-capture cancel rejection and does not log later', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
@@ -1177,6 +2475,39 @@ describe('phone runtime service lifecycle', () => {
       await new Promise<void>((resolve) => { setImmediate(resolve) })
       expect(cancel).toHaveBeenCalledOnce()
       expect(warnings).toEqual([])
+    } finally {
+      stream.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('completes stale-capture cancel once and refuses later io', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake, { captureCleanupTimeoutMs: 20, pollIntervalMs: 60_000 })
+    const cancel = vi.fn(async () => {})
+    const warnings: unknown[] = []
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const stream = mockStaleAfterHeaders(context, new ReadableStream<Uint8Array>({ cancel }))
+    try {
+      const stale = await errorOf(() => context.phoneDevices.startCapture({
+        deviceId: ANDROID_EMULATOR, format: 'mjpeg', captureId: phoneCaptureId('stale-success-cancel'),
+      }))
+      expect(stale.code).toBe('PHONE_ABORTED')
+      expect(stale.message).toMatch(/capture generation changed before publication/u)
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(warnings).toEqual([])
+      const inactive = await errorOf(() => context.phoneDevices.io({
+        deviceId: ANDROID_EMULATOR, method: 'tap', x: 1, y: 1,
+        source: {
+          kind: 'capture',
+          captureId: phoneCaptureId('stale-success-cancel'),
+          captureFormat: 'mjpeg',
+          captureWidth: 390,
+          captureHeight: 844,
+        },
+      }))
+      expect(inactive.code).toBe('PHONE_UNRESOLVED')
     } finally {
       stream.mockRestore()
       warn.mockRestore()

@@ -1,0 +1,14 @@
+# Keyless Host composition for the Android capture-source IO wire:
+# real phone-runtime + phone-stream over synthetic fakemobilecli. The snapshot
+# writes synthetic `adb` plus native.h264 into owned ANDROID_SDK_ROOT/platform-tools
+# and prepends that directory onto the Loader child PATH so dumpsys/screenrecord
+# never launch a device SDK binary.
+- name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: '127.0.0.1'
+    port: 0
+- id: phone-runtime-staged
+  name: './tests/fixtures/phone-runtime-staged.ts'
+- name: '@deepseek-ai/dsh-phone-stream'
+- id: phone-capture-wire-scenario
+  name: './start.ts'

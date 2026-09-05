@@ -1091,9 +1091,15 @@ importers:
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../packages/interaction/permission-presets
+      '@deepseek-ai/dsh-phone-capture-wire-demo':
+        specifier: workspace:*
+        version: link:../packages/examples/phone-capture-wire-demo
       '@deepseek-ai/dsh-phone-runtime':
         specifier: workspace:*
         version: link:../packages/phone/phone-runtime
+      '@deepseek-ai/dsh-phone-stream':
+        specifier: workspace:*
+        version: link:../packages/phone/phone-stream
       '@deepseek-ai/dsh-plan-mode':
         specifier: workspace:*
         version: link:../packages/plan/plan-mode
@@ -5460,6 +5466,19 @@ importers:
         version: link:../../../native/landlock-run/packages/entry
 
   packages/examples/jsonrpc-demo:
+    dependencies:
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:^
+        version: link:../../boot/app-boot
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
+  packages/examples/phone-capture-wire-demo:
     dependencies:
       '@deepseek-ai/dsh-app-boot':
         specifier: workspace:^

@@ -55,7 +55,7 @@ The delegation definition is static across adapter registration and catalog chan
 - Omission retains configured defaults plus static provider route defaults or compatible parent inheritance; a route change without an explicit effort uses the selected model's default.
 - Adapter catalog and topology changes leave the delegation definition and its prompt-cache prefix unchanged.
 - DSH SDK children accept configured and model-selected Agent routes; ACP, Codex, and Claude Code reject them until they implement and advertise the capability.
-- Unit coverage owns the default-off Host preference, new-Session sampling, child inheritance, resumed decisions, opt-in schema and execution enforcement, merge precedence, route-aware effort inheritance, preflight cancellation, live discovery, diagnostics, definition stability, capability rejection, and optional-service behavior. A shipped headless snapshot pins inheritance from a logged parent selection; the shipped examples own the assembled keyless model-visible schemas, and the SDK Loader and snapshot evidence pin the complete route through a separate child runtime.
+- Unit coverage owns the default-off Host preference, new-Session sampling, child inheritance, resumed decisions, opt-in schema and execution enforcement, merge precedence, route-aware effort inheritance, preflight cancellation, live discovery, diagnostics, definition stability, capability rejection, and optional-service behavior. A real Loader composition and the SDK dynamic-route snapshot pin the user/deployment union without writing Settings; the shipped examples own the assembled keyless model-visible schemas, and the SDK Loader evidence pins the complete route through a separate child runtime.
 
 ## Related decisions
 

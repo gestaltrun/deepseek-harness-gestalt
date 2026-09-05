@@ -16,7 +16,10 @@ export function apply(ctx: Context, config: Config): void {
   const install = (agent: NonNullable<Context['agent']>): void => {
     agent.ctx.plugin(ToolSubagent, {
       provider: config.provider,
-      modelSelectionSettings: true,
+      modelSelectionSettings: config.modelSelectionSettings ?? true,
+      ...(config.deploymentRoutePreauthorization === undefined
+        ? {}
+        : { deploymentRoutePreauthorization: config.deploymentRoutePreauthorization }),
       ...(config.toolName === undefined ? {} : { toolName: config.toolName }),
       ...(config.enableRunInBackground === undefined
         ? {}

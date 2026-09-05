@@ -19,7 +19,8 @@
     "test:e2e-project-members-electron": "tsx tests/member-question-e2e/run-electron.ts",
     "test:e2e-sub2api": "node scripts/run-e2e-sub2api.mjs",
     "typecheck:fake-policy": "tsc -p tests/tsconfig.fake-policy.json",
-    "typecheck:e2e-electron": "pnpm run typecheck:fake-policy && tsc -p tests/e2e-electron/tsconfig.json",
+    "typecheck:source-e2e": "tsc -p tests/tsconfig.source-e2e.json",
+    "typecheck:e2e-electron": "pnpm run typecheck:fake-policy && pnpm run typecheck:source-e2e && tsc -p tests/e2e-electron/tsconfig.json",
     "test:e2e-electron": "node scripts/run-e2e-electron.mjs",
     "package": "node scripts/build-main.mjs && electron-builder --publish never",
     "package:unsigned": "node scripts/build-main.mjs && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 --publish never -c.mac.notarize=false"

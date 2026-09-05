@@ -49,6 +49,7 @@ function scrubEnvironment(source) {
       'DSH_ELECTRON_E2E_FAKE_OWNER', 'DSH_ELECTRON_E2E_WORKSPACE',
       'DSH_PHONE_MANAGED_FIXTURE_BYTES', 'DSH_PHONE_MANAGED_FIXTURE_SHA256',
       'DSH_PHONE_MANAGED_FIXTURE_URL',
+      'DSH_DESKTOP_E2E', 'DSH_DESKTOP_E2E_PROFILE',
       'DSH_ANDROID_E2E_PID_FILE', 'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'ANDROID_AVD_HOME',
     ].includes(name)
   }))
@@ -268,6 +269,12 @@ async function runSpecAttempt({
       else await symlink(process.execPath, node)
     }
     await writeFile(smokeFile, '')
+    const e2eProfile = join(runtimeRoot, 'e2e-profile.json')
+    await writeFile(e2eProfile, `${JSON.stringify({
+      DSH_HOME: dshHome,
+      DSH_DESKTOP_SMOKE_FILE: smokeFile,
+      windowPresentation: 'hidden',
+    }, undefined, 2)}\n`, { mode: 0o600 })
     await writeFile(provisioningProfile, 'Electron e2e fixture provisioning profile')
     await writeFile(join(dshHome, 'settings.yaml'), [
       'ui-phone:',
@@ -300,6 +307,8 @@ async function runSpecAttempt({
       CI: 'true',
       LANG: 'zh_CN.UTF-8',
       LANGUAGE: 'zh_CN',
+      DSH_DESKTOP_E2E: '1',
+      DSH_DESKTOP_E2E_PROFILE: e2eProfile,
       DSH_HOME: dshHome,
       DSH_NODE: process.execPath,
       DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: operatedPlatform,

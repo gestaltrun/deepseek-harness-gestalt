@@ -104,10 +104,45 @@ describe('Desktop Electron runner ownership', () => {
 
     expect(desktopManifest.scripts?.['typecheck:fake-policy'])
       .toBe('tsc -p tests/tsconfig.fake-policy.json')
+    expect(desktopManifest.scripts?.['typecheck:source-e2e'])
+      .toBe('tsc -p tests/tsconfig.source-e2e.json')
     expect(desktopManifest.scripts?.['typecheck:e2e-electron'])
-      .toBe('pnpm run typecheck:fake-policy && tsc -p tests/e2e-electron/tsconfig.json')
+      .toBe('pnpm run typecheck:fake-policy && pnpm run typecheck:source-e2e && tsc -p tests/e2e-electron/tsconfig.json')
+    expect(desktopManifest.scripts?.['typecheck:e2e-electron']).not.toContain('tsc -p tsconfig.json')
     expect(rootManifest.scripts?.['typecheck:contracts-ready'])
       .toContain('pnpm --filter @deepseek-ai/dsh-desktop run typecheck:e2e-electron')
+    const sourceE2E = JSON.parse(await readFile(join(repoRoot, 'apps', 'desktop', 'tests', 'tsconfig.source-e2e.json'), 'utf8')) as {
+      compilerOptions?: {
+        noEmit?: boolean
+        rewriteRelativeImportExtensions?: boolean
+        strict?: boolean
+      }
+      include?: readonly string[]
+    }
+    expect(sourceE2E.compilerOptions?.noEmit).toBe(true)
+    expect(sourceE2E.compilerOptions?.strict).toBe(true)
+    expect(sourceE2E.compilerOptions?.rewriteRelativeImportExtensions).toBe(false)
+    expect(sourceE2E.include).toEqual(['../src/e2e-profile.ts', './e2e-profile.spec.ts'])
+  })
+
+  it('arms a source-only hidden window profile and does not treat CI as presentation', async () => {
+    const repoRoot = join(import.meta.dirname, '..', '..', '..', '..')
+    const runner = await readFile(join(repoRoot, 'apps', 'desktop', 'scripts', 'run-e2e-electron.mjs'), 'utf8')
+    const wdio = await readFile(join(repoRoot, 'apps', 'desktop', 'tests', 'e2e-electron', 'wdio.conf.ts'), 'utf8')
+    const main = await readFile(join(repoRoot, 'apps', 'desktop', 'src', 'main.ts'), 'utf8')
+
+    expect(runner).toContain("windowPresentation: 'hidden'")
+    expect(runner).toContain("DSH_DESKTOP_E2E: '1'")
+    expect(runner).toContain('DSH_DESKTOP_E2E_PROFILE: e2eProfile')
+    expect(runner).toContain("CI: 'true'")
+    expect(wdio).toContain('--dsh-e2e-profile=${process.env.DSH_DESKTOP_E2E_PROFILE')
+    expect(main).toContain("desktopE2EProfile?.windowPresentation ?? 'visible'")
+    expect(main).toContain('...desktopWindowConstructorOptions(windowPresentation)')
+    expect(main).toContain('if (handleDesktopWindowActivate(windowPresentation, window) === \'handled\') return')
+    expect(main).toContain("if (planDesktopWindowReopen(host !== undefined) === 'boot')")
+    expect(main).toContain('await boot()')
+    expect(main).toContain('const target = createWindow()')
+    expect(main).not.toMatch(/if \(process\.env\.CI/)
   })
 
   it('returns only after stdout and stderr are fully persisted', async () => {

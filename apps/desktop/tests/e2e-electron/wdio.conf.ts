@@ -45,6 +45,7 @@ export const config: WebdriverIO.Config = {
       appEntryPoint: join(desktopRoot, 'out', 'main.mjs'),
       appArgs: [
         `--user-data-dir=${process.env.DSH_ELECTRON_E2E_USER_DATA ?? ''}`,
+        `--dsh-e2e-profile=${process.env.DSH_DESKTOP_E2E_PROFILE ?? ''}`,
         '--no-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',

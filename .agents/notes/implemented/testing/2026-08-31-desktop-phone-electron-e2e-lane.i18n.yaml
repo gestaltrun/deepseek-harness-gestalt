@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-08-31-desktop-phone-electron-e2e-lane.md
-2026-08-31-desktop-phone-electron-e2e-lane.md: d401348f3df1c78f211285f6ff5376ddb23a400f
-2026-08-31-desktop-phone-electron-e2e-lane.zh.md: fa11077747c3bd75acd9572cdd7a7934502cf23d
+2026-08-31-desktop-phone-electron-e2e-lane.md: df5b033b11921a286e9021f0adc9e5bb4546ce66
+2026-08-31-desktop-phone-electron-e2e-lane.zh.md: 5d31a13899a564a799052689b7396d14a8d44ba5

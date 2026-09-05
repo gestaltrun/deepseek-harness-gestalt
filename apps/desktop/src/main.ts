@@ -115,10 +115,20 @@ import {
   startDesktopProjectMembershipAgentRuntime,
   type DesktopProjectMembershipAgentRuntime,
 } from './project-membership-agent-runtime.ts'
-import { applyDesktopE2EProfile, resolveDesktopNetworkProxy } from './e2e-profile.ts'
+import {
+  applyDesktopE2EProfile,
+  desktopWindowConstructorOptions,
+  handleDesktopWindowActivate,
+  planDesktopWindowReopen,
+  resolveDesktopNetworkProxy,
+  type DesktopWindowPresentation,
+} from './e2e-profile.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
-applyDesktopE2EProfile({ packaged: app.isPackaged, argv: process.argv, environment: process.env })
+const desktopE2EProfile = applyDesktopE2EProfile({
+  packaged: app.isPackaged, argv: process.argv, environment: process.env,
+})
+const windowPresentation: DesktopWindowPresentation = desktopE2EProfile?.windowPresentation ?? 'visible'
 let systemFetch: typeof globalThis.fetch
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
@@ -414,12 +424,8 @@ async function handleDesktopCompanionOperation(
 }
 
 async function focusOrReopen(): Promise<void> {
-  if (window !== undefined && !window.isDestroyed()) {
-    if (window.isMinimized()) window.restore()
-    window.focus()
-    return
-  }
-  if (host === undefined) {
+  if (handleDesktopWindowActivate(windowPresentation, window) === 'handled') return
+  if (planDesktopWindowReopen(host !== undefined) === 'boot') {
     await boot()
     return
   }
@@ -450,7 +456,7 @@ function createWindow(): BrowserWindow {
     height: 800,
     minWidth: 800,
     minHeight: 560,
-    show: true,
+    ...desktopWindowConstructorOptions(windowPresentation),
     backgroundColor: bootBackgroundColor(nativeTheme.shouldUseDarkColors),
     title: 'DeepSeek Gestalt',
     webPreferences: {

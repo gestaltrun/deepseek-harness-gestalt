@@ -40,7 +40,7 @@ export type SurfaceEventType =
  */
 export type SurfaceOp =
   | 'append'
-  | { op: 'replace'; start: number; end: number }
+  | { op: 'replace'; start: SessionSeq; end: SessionSeq }
 
 /**
  * One immutable entry in the session log.
@@ -59,7 +59,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
   [K in SessionEventType]: {
     type: K
     /** Monotonic sequence number within the session. */
-    seq: number
+    seq: SessionSeq
     /** Unix epoch milliseconds. */
     time: number
     data: SessionEventMap[K]
@@ -83,14 +83,14 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
      * provider stream; when the field is absent, the event does not record which
      * earlier events produced the message.
      */
-    sourceEventSeqs?: number[]
+    sourceEventSeqs?: SessionSeq[]
     /** How this event entered the surface; absent for non-surface events. */
     surfaceOp?: SurfaceOp
   } : object)
 }[T]
 ```
 
-Sources: [`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:414`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:368`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:375`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:404`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:442`](../packages/core/session/src/types.ts)
 
 ## Events
 
@@ -115,7 +115,7 @@ Sources: [`packages/core/session/src/types.ts:340`](../packages/core/session/src
 }
 ```
 
-Source: [`packages/core/agent/src/types.ts:19`](../packages/core/agent/src/types.ts)
+Source: [`packages/core/agent/src/types.ts:58`](../packages/core/agent/src/types.ts)
 
 ### `agent-preset/*`
 
@@ -133,7 +133,7 @@ Source: [`packages/core/agent/src/types.ts:19`](../packages/core/agent/src/types
 'agent-preset/selected': { agentPreset: string }
 ```
 
-Source: [`packages/preset/agent-presets/src/session.ts:26`](../packages/preset/agent-presets/src/session.ts)
+Source: [`packages/preset/agent-presets/src/session.ts:28`](../packages/preset/agent-presets/src/session.ts)
 
 ### `approval/*`
 
@@ -153,14 +153,14 @@ Source: [`packages/preset/agent-presets/src/session.ts:26`](../packages/preset/a
 'approval/asked': {
   id: ApprovalRequestId
   toolName: string
-  callId?: CallId
+  callId?: ToolCallId
   reason?: string
 }
 ```
 
-Types: [CallId](subsystems/core.md)
+Types: [ToolCallId](subsystems/core.md)
 
-Source: [`packages/interaction/user-approval/src/index.ts:44`](../packages/interaction/user-approval/src/index.ts)
+Source: [`packages/interaction/user-approval/src/types.ts:44`](../packages/interaction/user-approval/src/types.ts)
 
 <a id="approvaldecided--log-only"></a>
 
@@ -178,7 +178,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:44`](../packages/inter
 }
 ```
 
-Source: [`packages/interaction/user-approval/src/index.ts:55`](../packages/interaction/user-approval/src/index.ts)
+Source: [`packages/interaction/user-approval/src/types.ts:55`](../packages/interaction/user-approval/src/types.ts)
 
 <a id="approvalpolicy--log-only"></a>
 
@@ -189,7 +189,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:55`](../packages/inter
  * The session's approval policy was switched — log-only, durable,
  * replayable, never in the model transcript (the model learns the policy
  * from the runtime-context snapshot and live switch notices). The LAST
- * such event is the session's override ({@link effectiveApprovalPolicy}).
+ * such event is the session's override.
  * `source: 'delegation'` marks an override seeded into a child; an absent
  * source is a runtime switch.
  */
@@ -200,7 +200,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:55`](../packages/inter
 }
 ```
 
-Source: [`packages/interaction/user-approval/src/index.ts:67`](../packages/interaction/user-approval/src/index.ts)
+Source: [`packages/interaction/user-approval/src/index.ts:33`](../packages/interaction/user-approval/src/index.ts)
 
 ### `assistant/*`
 
@@ -215,7 +215,7 @@ Source: [`packages/interaction/user-approval/src/index.ts:67`](../packages/inter
 
 Types: [StreamChunk](subsystems/llm-streaming.md)
 
-Source: [`packages/core/session/src/types.ts:266`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:291`](../packages/core/session/src/types.ts)
 
 <a id="assistantmessage--surface"></a>
 
@@ -237,7 +237,7 @@ Source: [`packages/core/session/src/types.ts:266`](../packages/core/session/src/
 
 Types: [TokenUsage](subsystems/llm-streaming.md)
 
-Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:302`](../packages/core/session/src/types.ts)
 
 ### `browser/*`
 
@@ -274,11 +274,11 @@ Source: [`packages/browser/browser-workspace/src/types.ts:86`](../packages/brows
   commandId: CommandId
   kind: 'success' | 'error'
   text?: string
-  sourceEventSeq?: number
+  sourceEventSeq?: import('@deepseek-ai/dsh-session/types').SessionSeq
 }
 ```
 
-Source: [`packages/interaction/commands/src/types.ts:103`](../packages/interaction/commands/src/types.ts)
+Source: [`packages/interaction/commands/src/types.ts:104`](../packages/interaction/commands/src/types.ts)
 
 <a id="commandrun--log-only"></a>
 
@@ -298,7 +298,7 @@ Source: [`packages/interaction/commands/src/types.ts:103`](../packages/interacti
 'command/run': { commandId: CommandId; name: string; args?: string; source: CommandSource }
 ```
 
-Source: [`packages/interaction/commands/src/types.ts:96`](../packages/interaction/commands/src/types.ts)
+Source: [`packages/interaction/commands/src/types.ts:97`](../packages/interaction/commands/src/types.ts)
 
 ### `compaction/*`
 
@@ -314,7 +314,7 @@ Source: [`packages/interaction/commands/src/types.ts:96`](../packages/interactio
 'compaction/end': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null; error?: string }
 ```
 
-Source: [`packages/compaction/compaction/src/types.ts:71`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:72`](../packages/compaction/compaction/src/types.ts)
 
 <a id="compactionprune--log-only"></a>
 
@@ -332,15 +332,15 @@ Source: [`packages/compaction/compaction/src/types.ts:71`](../packages/compactio
  */
 'compaction/prune': {
   /** The replaced range's first and last surface-node seqs (a surface-position span, like {@link CompactionResult.shadowedRange}). */
-  shadowedRange: { start: number; end: number }
+  shadowedRange: { start: SessionSeq; end: SessionSeq }
   /** The seqs of all shadowed surface nodes, in surface order. */
-  shadowedSeqs: number[]
+  shadowedSeqs: SessionSeq[]
   /** Heuristic price of the shadowed content under the token-meter's fixed estimator. */
   shadowedTokenCount: number
 }
 ```
 
-Source: [`packages/compaction/compaction/src/types.ts:81`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:82`](../packages/compaction/compaction/src/types.ts)
 
 <a id="compactionstart--log-only"></a>
 
@@ -355,7 +355,7 @@ Source: [`packages/compaction/compaction/src/types.ts:81`](../packages/compactio
 'compaction/start': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null }
 ```
 
-Source: [`packages/compaction/compaction/src/types.ts:23`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:24`](../packages/compaction/compaction/src/types.ts)
 
 <a id="compactionsummary--log-only"></a>
 
@@ -375,8 +375,8 @@ Source: [`packages/compaction/compaction/src/types.ts:23`](../packages/compactio
   compactionId: CompactionId
   sourceCommandId?: CommandId
   summary: ContentBlock[]
-  shadowedRange: { start: number; end: number }
-  shadowedSeqs: number[]
+  shadowedRange: { start: SessionSeq; end: SessionSeq }
+  shadowedSeqs: SessionSeq[]
   shadowedTokenCount: number
   /** The provider route that wrote the summary. */
   provider: string
@@ -409,7 +409,7 @@ Source: [`packages/compaction/compaction/src/types.ts:23`](../packages/compactio
 
 Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streaming.md)
 
-Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:34`](../packages/compaction/compaction/src/types.ts)
 
 ### `feedback/*`
 
@@ -582,6 +582,22 @@ Source: [`packages/interaction/member-question-receiver/src/types.ts:283`](../pa
 
 Source: [`packages/interaction/member-question-receiver/src/types.ts:296`](../packages/interaction/member-question-receiver/src/types.ts)
 
+### `model/*`
+
+<a id="modelselection--log-only"></a>
+
+#### `model/selection` — log-only
+
+```ts persistence-catalog
+/**
+ * Complete validated model selection requested for subsequent prompt
+ * assembly. Log-only: it never enters derived model history.
+ */
+'model/selection': ModelSelection
+```
+
+Source: [`packages/api/session-controller/src/types.ts:41`](../packages/api/session-controller/src/types.ts)
+
 ### `permission/*`
 
 <a id="permissionpreset--log-only"></a>
@@ -592,13 +608,13 @@ Source: [`packages/interaction/member-question-receiver/src/types.ts:296`](../pa
 /**
  * Records the selected preset as durable, log-only user intent. The knob
  * events follow in the same turn and control execution; this event stays
- * out of the model transcript and lets {@link effectivePermissionPreset}
+ * out of the model transcript and lets the permission projection unit
  * preserve a selection when bundles match.
  */
 'permission/preset': { preset: string }
 ```
 
-Source: [`packages/interaction/permission-presets/src/index.ts:51`](../packages/interaction/permission-presets/src/index.ts)
+Source: [`packages/interaction/permission-presets/src/index.ts:53`](../packages/interaction/permission-presets/src/index.ts)
 
 ### `plan/*`
 
@@ -610,12 +626,12 @@ Source: [`packages/interaction/permission-presets/src/index.ts:51`](../packages/
 /**
  * Whether plan mode is in force from this point on: log-only, non-surface,
  * whole-value replace. The last `plan/mode` wins; a log with none folds to
- * inactive through {@link foldPlanMode}.
+ * inactive through the projection unit's fold.
  */
 'plan/mode': { active: boolean }
 ```
 
-Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
+Source: [`packages/plan/plan-mode/src/index.ts:46`](../packages/plan/plan-mode/src/index.ts)
 
 ### `request/*`
 
@@ -631,7 +647,7 @@ Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/s
 'request/context': RequestContext
 ```
 
-Source: [`packages/core/session/src/types.ts:313`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:341`](../packages/core/session/src/types.ts)
 
 <a id="requestheader--log-only"></a>
 
@@ -642,10 +658,15 @@ Source: [`packages/core/session/src/types.ts:313`](../packages/core/session/src/
  * Full header for the next request, appended inside its step before dispatch.
  * It is log-only; the latest snapshot reconstructs the request header.
  */
-'request/header': { header: EpochHeader; reason: RequestHeaderReason }
+'request/header': {
+  header: EpochHeader
+  reason: RequestHeaderReason
+  /** A changed header also begins a distinct model-message series. */
+  startsSeries?: true
+}
 ```
 
-Source: [`packages/core/session/src/types.ts:308`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:331`](../packages/core/session/src/types.ts)
 
 ### `sandbox/*`
 
@@ -658,7 +679,7 @@ Source: [`packages/core/session/src/types.ts:308`](../packages/core/session/src/
  * The session's sandbox mode was switched — log-only (like `approval/*`;
  * NOT a surface event, carries no `surfaceOp`): durable and replayable,
  * never in the model transcript. The LAST such event is the session's
- * override ({@link effectiveSandboxMode}). `source: 'delegation'` marks
+ * override (folded by the sandboxMode projection unit). `source: 'delegation'` marks
  * an override seeded into a child; an absent source is a runtime switch.
  */
 'sandbox/mode': {
@@ -686,7 +707,7 @@ Source: [`packages/sandbox/sandbox-policy/src/session-mode.ts:33`](../packages/s
 
 Types: [ScheduleChange](subsystems/schedule.md)
 
-Source: [`packages/schedule/schedule/src/types.ts:248`](../packages/schedule/schedule/src/types.ts)
+Source: [`packages/schedule/schedule/src/types.ts:219`](../packages/schedule/schedule/src/types.ts)
 
 ### `session/*`
 
@@ -741,7 +762,7 @@ Source: [`packages/host/apiproxy/src/api/sessions.ts:29`](../packages/host/apipr
 'session/end-seed': Record<string, never>
 ```
 
-Source: [`packages/core/session/src/types.ts:336`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:364`](../packages/core/session/src/types.ts)
 
 <a id="sessiontitle--log-only"></a>
 
@@ -757,7 +778,7 @@ Source: [`packages/core/session/src/types.ts:336`](../packages/core/session/src/
 
 Types: [SessionTitleEventData](subsystems/session-title.md)
 
-Source: [`packages/session/session-title/src/index.ts:100`](../packages/session/session-title/src/index.ts)
+Source: [`packages/session/session-title/src/index.ts:77`](../packages/session/session-title/src/index.ts)
 
 <a id="sessiontitle-llm-request--log-only"></a>
 
@@ -770,7 +791,25 @@ Source: [`packages/session/session-title/src/index.ts:100`](../packages/session/
 
 Types: [SessionTitleLlmRequestEventData](subsystems/session-title.md)
 
-Source: [`packages/session/session-title-llm/src/index.ts:43`](../packages/session/session-title-llm/src/index.ts)
+Source: [`packages/session/session-title-llm/src/index.ts:45`](../packages/session/session-title-llm/src/index.ts)
+
+### `session-log-deepseek/*`
+
+<a id="session-log-deepseekdelivery-accepted--log-only"></a>
+
+#### `session-log-deepseek/delivery-accepted` — log-only
+
+```ts persistence-catalog
+/** Records that the configured endpoint accepted one delivery through `throughSeq`. */
+'session-log-deepseek/delivery-accepted': {
+  /** Session identity the accepted delivery carried; inherited fork markers retain the parent's id. */
+  sessionId: import('@deepseek-ai/dsh-session/types').SessionId
+  /** Last canonical event included in the accepted request. */
+  throughSeq: import('@deepseek-ai/dsh-session/types').SessionSeq
+}
+```
+
+Source: [`packages/session/session-log-deepseek/src/types.ts:57`](../packages/session/session-log-deepseek/src/types.ts)
 
 ### `step/*`
 
@@ -783,7 +822,7 @@ Source: [`packages/session/session-title-llm/src/index.ts:43`](../packages/sessi
 'step/end': { turn: number; step: number }
 ```
 
-Source: [`packages/core/session/src/types.ts:256`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:281`](../packages/core/session/src/types.ts)
 
 <a id="stepstart--log-only"></a>
 
@@ -794,7 +833,7 @@ Source: [`packages/core/session/src/types.ts:256`](../packages/core/session/src/
 'step/start': { turn: number; step: number }
 ```
 
-Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:279`](../packages/core/session/src/types.ts)
 
 ### `subagent/*`
 
@@ -813,7 +852,26 @@ Source: [`packages/core/session/src/types.ts:254`](../packages/core/session/src/
 'subagent/descriptor': SubagentDescriptorData
 ```
 
-Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent/subagent/src/descriptor.ts)
+Source: [`packages/subagent/subagent/src/descriptor.ts:38`](../packages/subagent/subagent/src/descriptor.ts)
+
+<a id="subagentmodel-selection-policy--log-only"></a>
+
+#### `subagent/model-selection-policy` — log-only
+
+```ts persistence-catalog
+/**
+ * Records that this session's delegation tool exposes child provider,
+ * model, and reasoning-effort selection. Appended before the first model
+ * request; absence means the fixed-route definition. Log-only: it carries
+ * no `surfaceOp` and never enters model history.
+ */
+'subagent/model-selection-policy': {
+  /** Exact routes this Session may select explicitly for a child. */
+  allowedModels: AllowedModelRoute[]
+}
+```
+
+Source: [`packages/subagent/tool-subagent/src/model-selection-state.ts:17`](../packages/subagent/tool-subagent/src/model-selection-state.ts)
 
 ### `team/*`
 
@@ -885,9 +943,9 @@ Source: [`packages/experimental/agent-team/src/types.ts:223`](../packages/experi
 'todo/write': { todos: TodoItem[] }
 ```
 
-Types: [TodoItem](subsystems/session.md)
+Types: [TodoItem](subsystems/todo.md)
 
-Source: [`packages/core/session/src/types.ts:303`](../packages/core/session/src/types.ts)
+Source: [`packages/todo/tool-todo/src/types.ts:31`](../packages/todo/tool-todo/src/types.ts)
 
 ### `tool/*`
 
@@ -901,12 +959,12 @@ Source: [`packages/core/session/src/types.ts:303`](../packages/core/session/src/
  * JSON string exactly as the model produced it (unparsed). `callId` pairs the
  * call with its `tool/result`.
  */
-'tool/call': { turn: number; step: number; callId: CallId; name: string; arguments: string }
+'tool/call': { turn: number; step: number; callId: ToolCallId; name: string; arguments: string }
 ```
 
-Types: [CallId](subsystems/core.md)
+Types: [ToolCallId](subsystems/core.md)
 
-Source: [`packages/core/session/src/types.ts:283`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:308`](../packages/core/session/src/types.ts)
 
 <a id="toolcode-dispatch--log-only"></a>
 
@@ -928,7 +986,7 @@ Source: [`packages/core/session/src/types.ts:283`](../packages/core/session/src/
  * before returning), so its execution-enclosure relation holds by
  * construction.
  */
-'tool/code-dispatch': CodeDispatchEventData
+'tool/code-dispatch': PtcDispatchEventData
 ```
 
 Source: [`packages/core/tools/src/types.ts:56`](../packages/core/tools/src/types.ts)
@@ -951,7 +1009,7 @@ Source: [`packages/core/tools/src/types.ts:56`](../packages/core/tools/src/types
  * with `tool/code-dispatch` by `subCallId` (timing = the two events'
  * `time` fields).
  */
-'tool/code-dispatch-start': CodeDispatchStartEventData
+'tool/code-dispatch-start': PtcDispatchStartEventData
 ```
 
 Source: [`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types.ts)
@@ -981,7 +1039,7 @@ Source: [`packages/core/tools/src/types.ts:40`](../packages/core/tools/src/types
 }
 ```
 
-Source: [`packages/core/session/src/types.ts:295`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:320`](../packages/core/session/src/types.ts)
 
 ### `tool-workflow/*`
 
@@ -1061,7 +1119,7 @@ Source: [`packages/workflow/tool-workflow/src/types.ts:47`](../packages/workflow
 
 Types: [TurnEndReason](subsystems/session.md)
 
-Source: [`packages/core/session/src/types.ts:252`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/types.ts)
 
 <a id="turnstart--log-only"></a>
 
@@ -1077,7 +1135,7 @@ Source: [`packages/core/session/src/types.ts:252`](../packages/core/session/src/
 'turn/start': { turn: number }
 ```
 
-Source: [`packages/core/session/src/types.ts:243`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:268`](../packages/core/session/src/types.ts)
 
 ### `user/*`
 
@@ -1096,7 +1154,7 @@ Source: [`packages/core/session/src/types.ts:243`](../packages/core/session/src/
 'user/message': UserMessage
 ```
 
-Source: [`packages/core/session/src/types.ts:264`](../packages/core/session/src/types.ts)
+Source: [`packages/core/session/src/types.ts:289`](../packages/core/session/src/types.ts)
 
 ### `web/*`
 
@@ -1109,4 +1167,4 @@ Source: [`packages/core/session/src/types.ts:264`](../packages/core/session/src/
 'web/deepseek-search-llm-request': DeepSeekSearchLlmRequest
 ```
 
-Source: [`packages/web/web-search-deepseek/src/provider.ts:85`](../packages/web/web-search-deepseek/src/provider.ts)
+Source: [`packages/web/web-search-deepseek/src/provider.ts:83`](../packages/web/web-search-deepseek/src/provider.ts)

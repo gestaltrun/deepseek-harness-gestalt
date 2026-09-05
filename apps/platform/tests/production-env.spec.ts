@@ -246,7 +246,7 @@ function runRecoveryHarness(
     'aliyun() {',
     '  if [ "$1 $2" = "oss cat" ]; then',
     '    if [ "$RECOVERY_MODE" = bootstrap ]; then',
-    '      printf \'{"version":2,"mode":"bootstrap","phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
+    '      printf \'{"version":2,"mode":"bootstrap","phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","candidateCommit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
     '    else',
     '      printf \'{"version":1,"phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
     '    fi',
@@ -266,6 +266,7 @@ function runRecoveryHarness(
     '        *".mode"*) printf \'%s\\n\' "$RECOVERY_MODE" ;;',
     '        *".phase"*) printf \'%s\\n\' "$RECOVERY_PHASE" ;;',
     '        *".objectRoot"*) printf \'deploy-artifacts/platform/123-1\\n\' ;;',
+    '        *".candidateCommit"*) printf \'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n\' ;;',
     '        *".instanceIds"*) printf \'i-first123\\ni-second456\\n\' ;;',
     '        *) return 2 ;;',
     '      esac',
@@ -288,7 +289,8 @@ function runRecoveryHarness(
     'tail() { printf \'true\\n\'; }',
     'platform_cloud_run() {',
     '  action=$(sed -n \'1s/set -- //p\' "$2")',
-    '  printf \'RUN:%s:%s:%s\\n\' "$action" "$1" "$3" >> "$LOG"',
+    '  candidate=$(sed -n \'2s/export DSH_DEPLOY_CANDIDATE=//p\' "$2")',
+    '  printf \'RUN:%s:%s:%s:%s\\n\' "$action" "$1" "$3" "$candidate" >> "$LOG"',
     '  if [ "$RECOVERY_FAILURE" = second-rollback ] && [ "$action:$1" = rollback:i-second456 ]; then',
     '    return 1',
     '  fi',
@@ -948,7 +950,7 @@ describe('Platform release workflows', () => {
   })
 
   it('requires exactly two bootstrap EIPs and probes each address directly', () => {
-    for (const invalid of ['203.0.113.10', '203.0.113.10,203.0.113.11,203.0.113.12', '203.0.113.10,203.0.113.10']) {
+    for (const invalid of ['203.0.113.10', '203.0.113.10,203.0.113.11,203.0.113.12', '203.0.113.10,203.0.113.10', '999.999.999.999,203.0.113.11']) {
       const result = runPublicReadinessHarness('success', invalid)
       expect(result.status, invalid).toBe(1)
       expect(result.stdout).not.toContain('CLEANUP')
@@ -1040,6 +1042,7 @@ describe('Platform release workflows', () => {
     expect(rollbackable.status).toBe(0)
     expect(rollbackable.stdout).toContain('RUN:bootstrap-rollback:i-first123:2100')
     expect(rollbackable.stdout).toContain('RUN:bootstrap-rollback:i-second456:2100')
+    expect(rollbackable.stdout).toContain(':aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     expect(rollbackable.stdout).not.toContain('RUN:rollback:')
 
     const committed = runRecoveryHarness('committed', 'none', 'bootstrap')

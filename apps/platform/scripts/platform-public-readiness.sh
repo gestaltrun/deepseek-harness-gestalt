@@ -75,10 +75,17 @@ platform_public_readiness() {
       return 1
     fi
     for expected_index in 0 1; do
-      if [[ ! "${readiness_eips[$expected_index]}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+      IFS='.' read -r first_octet second_octet third_octet fourth_octet extra_octet <<< "${readiness_eips[$expected_index]}"
+      if [ -n "${extra_octet:-}" ] || [ -z "${fourth_octet:-}" ]; then
         echo 'platform: bootstrap readiness contains an invalid EIP address' >&2
         return 1
       fi
+      for octet in "$first_octet" "$second_octet" "$third_octet" "$fourth_octet"; do
+        if [[ ! "$octet" =~ ^[0-9]+$ ]] || [ "$octet" -gt 255 ]; then
+          echo 'platform: bootstrap readiness contains an invalid EIP address' >&2
+          return 1
+        fi
+      done
     done
     echo 'pre-DNS readiness through both explicit EIP addresses'
     for expected_index in 0 1; do

@@ -159,7 +159,6 @@ case "$action" in
       docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
       ensure_container_absent dsh-platform || rollback_failed=1
     elif docker inspect dsh-platform >/dev/null 2>&1; then
-      docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
       rollback_failed=1
     fi
     ensure_container_absent dsh-platform-candidate || rollback_failed=1

@@ -20,6 +20,10 @@ if [ "$version" = 2 ]; then
 fi
 phase=$(jq -er '.phase | select(. == "rollbackable" or . == "commit-pending" or . == "committed")' <<< "$state")
 object_root=$(jq -er '.objectRoot' <<< "$state")
+candidate_commit=
+if [ "$mode" = bootstrap ]; then
+  candidate_commit=$(jq -er '.candidateCommit | select(test("^[0-9a-f]{40}$"))' <<< "$state")
+fi
 state_instance_ids=()
 while IFS= read -r instance_id; do
   state_instance_ids+=("$instance_id")
@@ -50,6 +54,9 @@ trap 'stop_recovery 143' TERM
 write_recovery_command() {
   {
     printf 'set -- %s\n' "$1"
+    if [ "$mode" = bootstrap ]; then
+      printf 'export DSH_DEPLOY_CANDIDATE=%q\n' "$candidate_commit"
+    fi
     tail -n +2 "$script_dir/platform-host-deploy.sh"
   } > "$RECOVERY_COMMAND"
 }

@@ -12,23 +12,23 @@ Status: proposed
 
 #480 记录了当前 ALB/TLS 边界以 `net_error -101` 拒绝 Android System WebView 83。切换会替换该边界上呈现的 TLS 证书，因此 #480 的诊断必须对照新域名证书重新验证，不能作为证据或阻碍直接沿用。#415 跟踪一条发布列车对齐，需等其自身发布证据完成后才关闭。
 
-用户还明确要求最便宜的、足够的按月 ECS 实例以及包括负载均衡在内的其他节省，因此迁移方案必须携带成本右尺寸依赖，而不是假设当前架构固定不变。
+用户还明确要求以足够服务运行的最低配置按月（包月）订阅 ECS，并降低包括负载均衡在内的其他云成本，因此迁移方案必须携带必需的成本右尺寸依赖，而不是假设当前拓扑——ALB 之后的两个 ECS 实例——固定不变。成本决策不可触碰的是持久基底：身份、数据库与数据。
 
 旧客户端过渡已在代码中验证而非假设。登录 POST 只携带安装身份（`packages/platform/platform-account-client/src/index.ts` —— `beginLogin` 发送 `InstallationLoginIdentity` 与公钥）；服务器用它配置的 `redirect_uri` 与固定回调生成 GitHub `authorizationUrl`（`packages/platform/platform-account-core/src/index.ts` —— `authorizeUrl` 以 `client_id`、环境的 `callbackUrl`、`state` 与 S256 code challenge 构造 `https://github.com/login/oauth/authorize`）；客户端解析器只校验返回的 `authorizationUrl` 的 HTTPS scheme（`packages/platform/platform-account/src/parsers.ts` —— `parseLoginAttemptView` 要求 `httpsUrl(record.authorizationUrl)`）。推论：只要两个主机名带着同一身份到达同一后端，旧客户端可以在旧主机名上继续 POST 登录尝试并轮询，而服务器发出新域名的 OAuth 回调；Environment 的 origin 变更不会关停旧主机名；也不需要第二个 OAuth App。
 
 ## 提案
 
-通过下述分阶段序列，将运营 Platform 切换到 `https://www.beikejiedeliulangmao.top` 并支持裸域（`beikejiedeliulangmao.top`）。用户已确认以 www 为规范 origin，并批准替换两条旧 DNS A 记录（`120.77.49.2`）以及正式的 Desktop/Mobile 重新发布，但本说明与其 PR 不执行任何变更：以下全部步骤是由另行授权的发布执行的持久计划。撰写本说明时，尚无任何实时部署授权被下放；每个部署、DNS、证书、控制台与发布步骤在执行时都需要新的显式批准。
+通过下述分阶段序列，将运营 Platform 切换到 `https://www.beikejiedeliulangmao.top` 并支持裸域（`beikejiedeliulangmao.top`）。用户已确认以 www 为规范 origin，且已同时授权域名部署与正式的 Desktop/Mobile 重新发布；这些工作无需每步重新征求整体批准。仍需基于各自的具体证据等待用户显式批准的是：任何报价支出（采购、续费、规格或计费模式变更）、任何破坏性资源变更（释放、删除、数据存储移除），以及任何高可用性取舍（拓扑削减）。本说明与其 PR 不执行任何变更：各阶段是授权执行遵循的持久计划，且在选定成本方案之前所有云上工作保持只读。
 
 切换后的规范权威：
 
 - Environment `production` 的 `PLATFORM_ORIGIN` 变为 `https://www.beikejiedeliulangmao.top`；`PLATFORM_GITHUB_CALLBACK` 变为 `https://www.beikejiedeliulangmao.top/v1/account/oauth/github/callback`。
-- Environment `desktop-release` 与 `mobile-release` 将 `VITE_PLATFORM_ORIGIN` / `VITE_PLATFORM_CALLBACK_URL` / `VITE_REMOTE_RELAY_WSS_URL` 集合更新为同一 www origin，并保持 `VITE_REMOTE_RELAY_WSS_URL = wss://www.beikejiedeliulangmao.top/v1/remote-access/relay` 与 Desktop 推导的 relay 地址一致。
-- GitHub OAuth App（client id `Ov23lip9LTmnFuFpFeeV`）的回调 URL 重新注册到新回调路径。该 App 区别于仓库的自动化 GitHub Apps，不被替换。
-- 完全不变的是：`PLATFORM_POSTGRES_DATABASE`（数据库身份）、`PLATFORM_IDENTITY_NAMESPACE`、`PLATFORM_TOKEN_SIGNING_KEY`、`PLATFORM_POLLING_SIGNING_KEY`、两台 ECS 实例、ALB 服务器组及其余全部生产名称。账号、安装、配对与持久状态得以保留，因为为其提供键的身份未变。
-- 区域上的三条 TXT 记录及其他所有 DNS 记录逐字保留；仅替换两条旧 A 记录（裸域与 www 的 `120.77.49.2`），并记录变更前的值用于回滚。两个主机名都迁移；规范权威保持为 www origin。
+- Environment `desktop-release` 更新同两个名称 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK`——Desktop 配置投影读取的是 `PLATFORM_*` 名称而非 `VITE_*`。Environment `mobile-release` 将 `VITE_PLATFORM_ORIGIN`、`VITE_PLATFORM_CALLBACK_URL` 与 `VITE_REMOTE_RELAY_WSS_URL` 更新为同一 www origin，并保持 `VITE_REMOTE_RELAY_WSS_URL = wss://www.beikejiedeliulangmao.top/v1/remote-access/relay` 与 Desktop 推导的 relay 地址一致。
+- GitHub OAuth App（client id `Ov23lip9LTmnFuFpFeeV`）的回调 URL 重新注册到新回调路径。该 App 区别于仓库的自动化 GitHub Apps，不被替换；经代码验证的过渡不需要第二个 OAuth App。
+- 无条件保留：`PLATFORM_POSTGRES_DATABASE`（数据库身份）、`PLATFORM_IDENTITY_NAMESPACE`、`PLATFORM_TOKEN_SIGNING_KEY`、`PLATFORM_POLLING_SIGNING_KEY` 与全部持久数据。账号、安装、配对与持久状态得以保留，因为为其提供键的身份未变。
+- 区域上的三条 TXT 记录及其他所有 DNS 记录逐字保留；仅替换两条旧 A 记录（裸域与 www 的 `120.77.49.2`），并记录变更前的值用于回滚。两个主机名都迁移；规范权威保持为 www origin。此前已停用的 `www.gestaltrun.com` 记录不会被静默重新启用。
 - gestaltrun.com 证书保持挂载，旧主机名在旧客户端过渡证据关闭之前持续服务；origin 切换不会退役旧主机名，为其提供服务的身份命名空间保持不变。
-- 数据库、Platform 身份（命名空间、token/polling 签名密钥、数据库身份）与全部持久数据无条件保留，无论成本决策选择何种架构。当前拓扑的其余部分——两台 ECS 实例、ALB 及其服务器组、监听器与任何前端——都是右尺寸的输入，而非固定约束：用户的明确成本诉求可以选择更便宜的架构，包括在只读评估显示更便宜且足够的月度形态时替换或去掉 ALB。
+- 拓扑是评估输入而非保留范围：两台 ECS 实例、ALB 及其服务器组与监听器、以及任何前端，都是成本右尺寸决策的候选对象——议题的成本范围扩展已明确打开该决策；在报价/利用率评估与用户批准选出形态之前，不假设必须保留两台 ECS 或 ALB。
 - 对高可用性的削减（单实例部署、移除负载均衡层）与每一笔计价采购（新实例、升配、预留或包年包月计费）都逐项以用户显式决策为闸门，且决策发生在只读评估报告实际账单、利用率与报价之后。本说明不授权任何下单、续费、规格变更或破坏性变更。
 - 品牌名称、README、历史发布说明及引用 gestaltrun.com 的文档不改名。官网 SEO canonical 默认保持 `https://www.gestaltrun.com/`，等待显式决策，因为 `apps/platform/public/index.html` 及其发现元数据同时服务于两个主机名，过早切换 canonical 会在新域名积累权重之前丢弃已索引的 origin。
 
@@ -38,7 +38,7 @@ Status: proposed
 
 Stage 0 —— 冻结并记录（不改生产）。记录当前裸域/www A 值（`120.77.49.2`，TTL 600 秒）、三条 TXT 记录、ALB 监听器 id 及其当前证书、服务器组、ECS 实例 id，以及当前 GitHub OAuth App 回调 URL。重新拉取 `origin/master` 并确认发布列车状态（PR #584 / 计划 0012 选择 Desktop 0.1.16），使本次切换不与该列车交错。
 
-Stage 0.5 —— 成本右尺寸依赖（只读评估，然后用户决策）。一次只读的基础设施评估收集 ECS 实例与负载均衡层的实际账单、利用率以及各候选形态的报价。两份新拉取的账户/账单报告互相矛盾——一份报告 ALB 为 Active，另一份报告 FinancialLocked 且余额 −13.48——因此在进行带时间戳的复核使其一致之前，任何结论都不依赖其中任何一份；该分歧被记录为未决输入，且不对 API 写入是否被封锁或放行作任何笼统断言。评估输出按候选形态列出：月度成本、相对观测利用率的容量余量、削减或保留的 HA，以及该形态所需的迁移/重建工作。随后由用户逐项显式决定购买哪种形态；只有该决策才释放对应的 Stage 1/3 变更。若所选形态保留 ALB，Stage 1 在现有监听器上挂载证书；若其替换或去掉 ALB，Stage 1 在任何 DNS 变更之前按所选前端重新规划。
+Stage 0.5 —— 成本右尺寸依赖（只读评估，然后用户决策）。按议题的成本范围评论，用户要求以足够服务运行的最低配置按月订阅 ECS，并降低包括负载均衡在内的其他成本，因此架构决策在本阶段完成前保持开放。一次只读的基础设施评估报告：按产品与资源划分的实际当前账单；可得情况下近期的 CPU/内存/网络利用率；有报价支撑的按月选项（估算明确标注为估算，而非采购报价）；包括带宽、NAT、EIP、存储与日志在内的总经常性成本；单节点与多节点在故障和部署上的取舍；以及各选项的回滚/数据保留。在不削弱 TLS 校验的前提下评估受支持的更低成本证书/续期路径。两份新拉取的账户/账单报告互相矛盾——一份报告 ALB 为 Active，另一份报告财务锁定且余额 −13.48——因此在进行带时间戳的复核使其一致之前，任何结论都不依赖其中任何一份；特别是，不假设负余额会封锁所有 API。随后由用户逐项显式决定购买哪种形态；只有该决策才释放对应的 Stage 1/3 变更——在用户看到并确认具体方案与金额之前，不发生任何计价采购、破坏性资源释放、数据存储删除或可用性削减。若所选形态保留 ALB，Stage 1 在现有监听器上挂载证书；若其替换或去掉 ALB，Stage 1 在任何 DNS 变更之前按所选前端重新规划。
 
 Stage 1 —— 证书与 DNS（阿里云控制台，经授权操作者，按 Stage 0.5 选定的架构）。保留 ALB 时：签发一张同时覆盖 `beikejiedeliulangmao.top` 与 `www.beikejiedeliulangmao.top` 的 HTTPS 证书（在现有 DNS 上完成 DCV），将其与当前 gestaltrun.com 证书一并挂到现有 ALB HTTPS 监听器（多证书监听器，而非替换），然后仅替换两条旧 A 记录，使裸域与 www 解析到现有 ALB 前端地址。选择了其他前端时：签发同一张证书，按该架构的方案完成终止，并将两个主机名指向它。两种情况都在记录中保留 TXT 记录与 TTL 值。验证：两个名称的权威与公共 DNS 解析、普通客户端对两个名称的 TLS 握手与主机名校验，以及本阶段期间 gestaltrun.com 服务不中断（旧证书仍挂载）。
 
@@ -48,7 +48,7 @@ gestaltrun.com 上的旧 DNS 记录当前处于 DISABLED 状态 —— 这是本
 
 Stage 3 —— Platform 部署（受保护工作流，显式批准，按所选架构执行）。以候选 SHA 派发 platform-deploy。保留双实例形态时，派发保留工作流已拥有的 ECS 双实例滚动替换、回滚记录与附件存储切换；当用户已显式选择削减 HA 的形态时，部署按适应该形态的工作流恢复与回滚契约运行，并将被接受的 HA 削减记入发布证据。验证新 origin 上的账号登录与新 origin 上的 Relay WSS。旧客户端行为在 Stage 5 验证，不在此处假设：仍指向 gestaltrun.com 的已安装客户端会继续到达双证书前端，但其登录是否完成是 Stage 5 的证据问题，不是 Stage 3 的断言。
 
-Stage 4 —— 客户端重发布（从一个经评审候选发布正式 Desktop 与 Mobile）。在 `master` 上通过新的 Product Release Plan 提升 Desktop 与 Mobile 版本；新 origin 在该候选上固化进 Desktop 运营配置与两个 Mobile 构建。Desktop 经 desktop-release 发布（签名、公证、`--latest`）。Mobile 需要一次绑定候选的 Mobile Companion Acceptance 运行，将签名 APK 发布为持久的 GitHub 预发布，并且只有当请求过 `upload_testflight` 且存在已校验的构建号时才把 TestFlight 报告为已发布；仅 GitHub 预发布不构成正式 Mobile 发布。任何 Mobile 发布之前，从物理 Android 路径（WebView，而非仅桌面浏览器）验证新域名的 TLS/就绪，因为 #480 的故障正发生在那里。
+Stage 4 —— 客户端重发布（从一个经评审候选发布正式 Desktop 与 Mobile）。在 `master` 上通过新的 Product Release Plan 提升 Desktop 与 Mobile 版本；新 origin 在该候选上固化进 Desktop 运营配置与两个 Mobile 构建。Desktop 经 desktop-release 发布（签名、公证、`--latest`）。用户的正式 Mobile 诉求是面向 Mobile 用户的产品分发，工作流将其拆为两个分别取证的渠道：签名 Android APK 作为持久的产品分发，以及 iOS TestFlight 上传作为独立的受闸步骤，仅当请求过 `upload_testflight` 且存在已校验构建号时才报告为已发布。任一渠道单独都不满足正式诉求：仅 GitHub 预发布不构成正式 Mobile 发布，而 TestFlight 上传是独立的产品分发闸门，不是对诉求的降级。任何 Mobile 发布之前，从物理 Android 路径（WebView，而非仅桌面浏览器）验证新域名的 TLS/就绪，因为 #480 的故障正发生在那里。
 
 Stage 5 —— 物理验收与旧客户端过渡证据。手机侧：有效 TLS、全新 GitHub 登录准备、同账号认证、WSS 附件、显式链接配对、Remote Online、手机侧发起的 ping/pong —— 保留用户设备与 Desktop 实例，并通过 `gif-assets` 发布脱敏证据。Desktop 侧：通过 GitHub 更新器（其可达性独立于 Platform origin）将一台安装了旧 origin 的构建更新到新版本，并确认重发布渠道。旧客户端过渡在此处基于已验证的机制证明，先于任何旧证书退役：一台安装了旧 origin 的客户端在旧主机名上（当旧 DNS 启用时）POST 登录并轮询，完成服务器生成的新域名回调对应的 OAuth 流程；否则该发现被记录为过渡缺口，阻止 Stage 4 声称一次不破坏性的重发布。切换后未能完成的切换前挂起登录尝试由客户端重启重新发起处理，且该重启要求被记录为过渡证据。gestaltrun.com 证书保持挂载、其命名空间不变，直至该证据关闭；只有显式的后续决策才会摘除它。各阶段回滚：Stage 1 恢复旧 A 值并摘除新证书；Stage 2 恢复两个 Environment 变量与 OAuth App 回调；Stage 3 使用工作流自身的回滚记录；Stage 4 不下架旧版本 —— 旧安装包仍是有效的下载目标，回滚方式是重指 origin 变量并从上一候选重新发布。
 
@@ -78,7 +78,7 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 - 一张同时覆盖裸域与 `www.beikejiedeliulangmao.top` 的有效 HTTPS 证书终止在所选前端上；无论成本决策选择哪种架构，现有 Platform 身份、数据库、签名密钥、命名空间与账号全部保留（不新建身份体系，不更换密钥）。
 - 裸域与 www 通过 Stage 1 选定的阿里云 DNS 机制公共解析；三条 TXT 记录及所有无关 DNS 记录逐字保留；旧 A 记录值已记录用于回滚；两个名称的证书主机名校验通过。
 - Environment `production` 的 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK`、运营 Desktop 配置及 Mobile 构建变量全部指向 `https://www.beikejiedeliulangmao.top` 且回调路径固定；WSS 与 `/pair` 链接由该 origin 推导；OAuth App `Ov23lip9LTmnFuFpFeeV` 的回调与之匹配。
-- 新的正式 Desktop 与 Mobile 版本从一个经评审候选发布：Desktop 附签名/公证安装包与 `--latest` GitHub Release；Mobile 附签名 APK 预发布、绑定候选的验收运行，且 TestFlight 仅在存在已校验构建号时报告为已发布 —— 绝不仅凭预发布声称。各单元分别校验发布清单、签名产物、更新渠道与固化权威。
+- 新的正式 Desktop 与 Mobile 版本从一个经评审候选发布：Desktop 附签名/公证安装包与 `--latest` GitHub Release；Mobile 附绑定候选的验收运行，且两条产品分发渠道分别取证 —— 签名 APK 作为持久分发，TestFlight 仅在请求过上传且存在已校验构建号时报告为已发布。正式 Mobile 诉求只能由用户实际需要的渠道证据满足，绝不仅凭 APK 预发布。各单元分别校验发布清单、签名产物、更新渠道与固化权威。
 - 正式 Mobile 发布前，物理 Android 验收在新域名通过：TLS、GitHub 登录准备、同账号认证、WSS、显式链接配对、Remote Online、手机侧发起的 ping/pong；保留用户设备与 Desktop 实例；通过 `gif-assets` 发布脱敏证据。
 - 旧客户端过渡与回滚得到演示而非假设：一台安装了旧 origin Desktop 的设备经独立于 origin 的 GitHub 更新器更新到重发布渠道；一台安装了旧 origin 的客户端在旧主机名上（当旧 DNS 启用时）POST 登录并轮询，完成服务器生成的新域名回调对应的 OAuth；需要客户端重启的切换前挂起尝试被如实记录；每一阶段的回滚路径连同确切的变更前值一并记录。gestaltrun.com 证书保持挂载、其命名空间不变，直至该证据关闭。
 - 当前处于 DISABLED 的旧 DNS 记录不会被本次变更隐式重新启用；对该状态的任何改变都是单独的显式用户决策。
@@ -94,5 +94,5 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 - 互相矛盾的账单报告（Active 对 FinancialLocked，余额 −13.48）意味着账户状态不是已定输入：被锁定或负余额的账户无论选什么形态都可能暂停采购或续费，而在未做带时间戳复核前断言任何一份报告，都有把计划建立在过期或误读状态上的风险。不对任何一份报告单独得出 API 写入可用性的结论。
 - 物理 Android WebView 路径（#480）可能因不同于旧诊断的原因在新证书上失败；Stage 4 以该路径为发布闸门，因此风险是重发布受阻，而非已发布构建损坏。
 - 两个主机名提供同一产品页会分割 SEO 权重；默认 canonical 保住已索引 origin，代价是新域名积累权重更慢。
-- 保留身份意味着保留影响面：一次失败的 Stage 3 部署触及与旧域名相同的生产实例与持久状态。工作流既有的回滚记录与双实例替换持有这一点；此处不新增机制。
+- 保留身份意味着保留影响面：一次失败的 Stage 3 部署触及与旧域名相同的持久状态。所选拓扑的部署契约——保留时为双实例滚动替换，或已批准削减 HA 形态的适配回滚——持有这一点；此处不新增机制。
 - 多证书监听器在 ALB 上有配额与匹配顺序行为；Stage 1 验证在切 DNS 之前观察实际监听器状态，计划不假设超出该观察所确认的 SNI 行为。

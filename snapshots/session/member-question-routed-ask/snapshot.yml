@@ -1,0 +1,12 @@
+version: 1
+scenario: member-question-routed-ask
+profile: headless
+composition: member-question-routed-ask
+recording: authored
+header:
+  class: member-question-routed-ask
+  pin: true
+  systemPromptSource: text-turn
+  toolSchemasSource: text-turn
+replay:
+  override: true

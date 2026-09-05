@@ -48,4 +48,4 @@ Project 与 origin 身份不由工具编造。路由提问需要注入的 `route
 
 ## Testing
 
-`packages/interaction/tool-ask-user/tests/tool-ask-user.spec.ts` 固定 schema 矩阵（`background` 缺失／超限、`references` 越出工作区、路由提问必须有 `background`）、投递前的 `INELIGIBLE_ADDRESSEE`，本地提问仍到达 user-questions 提供方，以及组装后的提示按绑定项目解析器包含或省略 `to_project_member`。`packages/interaction/member-question-sender/tests/member-question-sender.spec.ts` 固定经 T4 解码器的 codec 往返、内存 port 投递、每条终态发布路径、重放、后到的本地回答消费外部已保留到期结果、每个稳定生命周期错误，以及同路由键 supersede 竞态。
+`packages/interaction/tool-ask-user/tests/tool-ask-user.spec.ts` 固定 schema 矩阵（`background` 缺失／超限、`references` 越出工作区、路由提问必须有 `background`）、投递前的 `INELIGIBLE_ADDRESSEE`，本地提问仍到达 user-questions 提供方，以及组装后的提示按绑定项目解析器包含或省略 `to_project_member`。`packages/interaction/member-question-sender/tests/member-question-sender.spec.ts` 固定经 T4 解码器的 codec 往返、内存 port 投递、每条终态发布路径、重放、后到的本地回答消费外部已保留到期结果、每个稳定生命周期错误，以及同路由键 supersede 竞态。`packages/interaction/member-question-sender/tests/loader-composition.spec.ts` 启动公开 Loader 入口，证明 prepend 的 Host waterfall 会认领成员路由，而本地提问仍调用 `next()`。`snapshots/session/member-question-routed-ask/` 是无密钥 headless 录制会话：一次真实 `ask_user_question` 调用、可忽略的 asked/outcome 记录、工具结果，以及最终确认。

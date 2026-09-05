@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
+import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import UserQuestionService, {
+  UserQuestionError,
+  type AskUserQuestionItem,
+  type AskUserQuestionRequest,
+} from '@deepseek-ai/dsh-user-questions'
 import {
   decodeCompanionMessage,
   parseCompanionSessionId,
@@ -44,7 +51,7 @@ function answeredSettlement(
 
 function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQuestionSendPayload {
   return {
-    toProjectMember: 'account-peer',
+    toProjectMember: parsePlatformAccountId('account-peer'),
     projectId: parseMemberQuestionProjectId('project-atlas'),
     background: 'The ingest pipeline fails under load; pick a rollback window.',
     questions: [
@@ -63,7 +70,7 @@ function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQues
     origin: {
       projectName: 'Atlas',
       originSessionTitle: 'Refactor the ingest pipeline',
-      askerAccountId: 'account-asker',
+      askerAccountId: parsePlatformAccountId('account-asker'),
       askerRole: 'admin',
       askerDisplayName: 'Ada',
       askerAvatarUrl: 'https://example.test/ada.png',
@@ -77,6 +84,37 @@ function session(): ReturnType<typeof Session.create> {
   return Session.create(SessionId('session-origin'))
 }
 
+function stubAgent(id: string): Agent {
+  const agentId = SessionId(id)
+  const asking = Session.create(agentId)
+  return {
+    id: agentId,
+    options: {},
+    session: asking,
+    inbox: new Inbox(asking, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
+    status: 'idle',
+    ctx: new Context(),
+    send: () => {},
+    followup: () => {},
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    inject: () => {},
+    cancel: () => {},
+    runMaintenance: task => task(new AbortController().signal),
+    whenIdle: () => Promise.resolve(),
+  }
+}
+
+function memberRoute() {
+  return {
+    projectId: parseMemberQuestionProjectId('project-atlas'),
+    toProjectMember: parsePlatformAccountId('account-peer'),
+    background: payload().background,
+    references: [],
+    origin: payload().origin,
+    originSessionId: parseCompanionSessionId('session-origin'),
+  } as const
+}
+
 async function startSend(
   ctx: Context,
   sendPayload: MemberQuestionSendPayload = payload(),
@@ -88,6 +126,149 @@ async function startSend(
 }
 
 describe('member-question sender', () => {
+  it('delegates an ordinary request exactly once to a Remote-like answerer registered first', async () => {
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    const delivery = new MemoryMemberQuestionDelivery()
+    const remoteAnswerer = vi.fn((request: AskUserQuestionRequest) => Promise.resolve({
+      answers: request.questions.map(question => ({ id: question.id, selected: ['local'] })),
+    }))
+    ctx.on('user-questions/request', remoteAnswerer)
+    await ctx.plugin(Sender, { delivery })
+
+    await expect(ctx.userQuestions.ask({
+      questions: [{ id: 'q-1', question: 'Local?' }],
+    })).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['local'] }] })
+    expect(remoteAnswerer).toHaveBeenCalledOnce()
+    expect(delivery.delivered).toEqual([])
+  })
+
+  it('prepends member routing ahead of a Remote-like answerer registered first', async () => {
+    const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(UserQuestionService)
+    const delivery = new MemoryMemberQuestionDelivery()
+    const remoteAnswerer = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['local'] }] }))
+    ctx.on('user-questions/request', remoteAnswerer)
+    await ctx.plugin(Sender, { delivery })
+    const agent = stubAgent('asking-root')
+    ctx.agents.enter(agent, undefined)
+
+    const answer = ctx.userQuestions.ask({
+      questions: payload().questions.map((question): AskUserQuestionItem => ({
+        id: question.id,
+        question: question.question,
+        ...question.header === undefined ? {} : { header: question.header },
+        ...question.multiSelect === undefined ? {} : { multiSelect: question.multiSelect },
+        ...question.options === undefined ? {} : { options: question.options.map(option => ({ ...option })) },
+      })),
+      agent,
+      memberRoute: memberRoute(),
+    })
+    await Promise.resolve()
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      answeredSettlement([{ id: 'q-1', selected: ['24 hours'] }]),
+    )
+
+    await expect(answer).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['24 hours'] }] })
+    expect(remoteAnswerer).not.toHaveBeenCalled()
+  })
+
+  it('removes the global answerer when the Sender fiber is disposed', async () => {
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    const delivery = new MemoryMemberQuestionDelivery()
+    const fallback = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['fallback'] }] }))
+    ctx.on('user-questions/request', fallback)
+    const fiber = await ctx.plugin(Sender, { delivery })
+
+    await fiber.dispose()
+
+    await expect(ctx.userQuestions.ask({
+      questions: [{ id: 'q-1', question: 'Which rollback window?' }],
+      memberRoute: memberRoute(),
+    })).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['fallback'] }] })
+    expect(fallback).toHaveBeenCalledOnce()
+    expect(delivery.delivered).toEqual([])
+  })
+
+  it('answers after UserQuestionService mounts when Sender registered first', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    await ctx.plugin(UserQuestionService)
+    const fallback = vi.fn(() => Promise.resolve({ answers: [{ id: 'q-1', selected: ['fallback'] }] }))
+    ctx.on('user-questions/request', fallback)
+
+    const answer = ctx.userQuestions.ask({
+      questions: [{ id: 'q-1', question: 'Which rollback window?' }],
+      memberRoute: memberRoute(),
+    })
+    await Promise.resolve()
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      answeredSettlement([{ id: 'q-1', selected: ['24 hours'] }]),
+    )
+
+    await expect(answer).resolves.toEqual({ answers: [{ id: 'q-1', selected: ['24 hours'] }] })
+    expect(fallback).not.toHaveBeenCalled()
+  })
+
+  it('does not duplicate the answerer when UserQuestionService is reinstalled', async () => {
+    const ctx = new Context()
+    try {
+      const delivery = new MemoryMemberQuestionDelivery()
+      await ctx.plugin(Sender, { delivery })
+      const firstProvider = await ctx.plugin(UserQuestionService)
+      await firstProvider.dispose()
+      await ctx.plugin(UserQuestionService)
+      const fallback = vi.fn(() => Promise.resolve({ answers: [] }))
+      ctx.on('user-questions/request', fallback)
+
+      const pending = ctx.userQuestions.ask({
+        questions: [{ id: 'q-1', question: 'Which rollback window?' }],
+        memberRoute: memberRoute(),
+      })
+      await Promise.resolve()
+      expect(delivery.delivered).toHaveLength(1)
+      const questionId = delivery.delivered[0]!.questionId
+      await ctx.memberQuestionSender.settle(questionId, declinedSettlement())
+      await expect(pending).resolves.toEqual({ answers: [] })
+      expect(fallback).not.toHaveBeenCalled()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('preserves the sender stable error through the user-questions waterfall', async () => {
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    const local = vi.fn(() => Promise.resolve({ answers: [] }))
+    ctx.on('user-questions/request', local)
+    await ctx.plugin(Sender)
+
+    const failure = await ctx.userQuestions.ask({
+      questions: payload().questions.map((question): AskUserQuestionItem => ({
+        id: question.id,
+        question: question.question,
+        ...question.header === undefined ? {} : { header: question.header },
+        ...question.multiSelect === undefined ? {} : { multiSelect: question.multiSelect },
+        ...question.options === undefined ? {} : { options: question.options.map(option => ({ ...option })) },
+      })),
+      memberRoute: memberRoute(),
+    }).then(() => undefined, (error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(MemberQuestionSenderError)
+    expect(failure).toMatchObject({ code: 'DELIVERY_UNAVAILABLE' })
+    expect(failure).not.toBeInstanceOf(UserQuestionError)
+    expect(local).not.toHaveBeenCalled()
+  })
+
   it('encodes a member-question operation that round-trips the T4 codec', () => {
     const protocol = createMemberQuestionProtocol()
     const encoded = encodeMemberQuestion(protocol, payload(), 1_788_089_400_000)
@@ -126,18 +307,20 @@ describe('member-question sender', () => {
       outcome: 'answered',
       answers: [{ id: 'q-1', selected: ['24 hours'] }],
     })
-    expect(asking.events.map(event => event.type)).toEqual([
+    const events = asking.snapshotEvents()
+    expect(events.map(event => event.type)).toEqual([
       'member-question/asked',
       'member-question/outcome',
     ])
-    expect(asking.events[0]?.data).toMatchObject({
+    expect(events.map(event => event.ignorable)).toEqual([true, true])
+    expect(events[0]?.data).toMatchObject({
       questionId,
-      toProjectMember: 'account-peer',
-      projectId: 'project-atlas',
+      toProjectMember: parsePlatformAccountId('account-peer'),
+      projectId: parseMemberQuestionProjectId('project-atlas'),
       background: payload().background,
-      originSessionId: 'session-origin',
+      originSessionId: parseCompanionSessionId('session-origin'),
     })
-    expect(asking.events[1]?.data).toMatchObject({
+    expect(events[1]?.data).toMatchObject({
       questionId,
       outcome: 'answered',
       answers: [{ id: 'q-1', selected: ['24 hours'] }],
@@ -335,7 +518,10 @@ describe('member-question sender', () => {
       })
       await vi.advanceTimersByTimeAsync(50)
       await expired
-      expect(asking.events[1]?.data).toMatchObject({ outcome: 'expired' })
+      expect(asking.snapshotEvents()).toMatchObject([
+        { type: 'member-question/asked', ignorable: true },
+        { type: 'member-question/outcome', ignorable: true, data: { outcome: 'expired' } },
+      ])
       await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
         questionId,
         outcome: 'expired',
@@ -358,7 +544,9 @@ describe('member-question sender', () => {
       name: 'MemberQuestionSenderError',
       code: 'QUESTION_WITHDRAWN',
     })
-    expect(asking.events[1]?.data).toMatchObject({ outcome: 'withdrawn' })
+    expect(asking.snapshotEvents()[1]).toMatchObject({
+      type: 'member-question/outcome', ignorable: true, data: { outcome: 'withdrawn' },
+    })
   })
 
   it('rejects with QUESTION_WITHDRAWN when withdraw() is called', async () => {
@@ -403,7 +591,7 @@ describe('member-question sender', () => {
     expect(secondId).toBeDefined()
     await ctx.memberQuestionSender.settle(secondId!, declinedSettlement())
     await expect(second).resolves.toMatchObject({ outcome: 'declined', questionId: secondId })
-    const outcomes = asking.events.filter(event => event.type === 'member-question/outcome')
+    const outcomes = asking.snapshotEvents().filter(event => event.type === 'member-question/outcome')
     expect(outcomes.map(event => event.data.outcome)).toEqual(['superseded', 'declined'])
   })
 
@@ -423,7 +611,7 @@ describe('member-question sender', () => {
       name: 'MemberQuestionSenderError',
       code: 'REVOKED_DURING_FLIGHT',
     })
-    expect(asking.events[1]?.data).toMatchObject({ outcome: 'revoked' })
+    expect(asking.snapshotEvents()[1]?.data).toMatchObject({ outcome: 'revoked' })
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
     await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
@@ -519,7 +707,7 @@ describe('member-question sender', () => {
     await ctx.plugin(Sender, { delivery })
     const { pending: first } = await startSend(ctx)
     const { pending: second } = await startSend(ctx, payload({
-      toProjectMember: 'account-other',
+      toProjectMember: parsePlatformAccountId('account-other'),
       originSessionId: parseCompanionSessionId('session-other'),
     }))
     expect(delivery.delivered).toHaveLength(2)
@@ -559,7 +747,7 @@ describe('member-question sender', () => {
     expect(questionId).toBeDefined()
     await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
     await expect(pending).resolves.toMatchObject({ outcome: 'declined', questionId })
-    expect(asking.events[1]?.data).toEqual({ questionId, outcome: 'declined' })
+    expect(asking.snapshotEvents()[1]?.data).toEqual({ questionId, outcome: 'declined' })
     await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
       questionId,
       outcome: 'declined',
@@ -635,7 +823,7 @@ describe('member-question sender', () => {
     await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
 
     await expect(pending).rejects.toMatchObject({ code: 'DELIVERY_UNAVAILABLE' })
-    expect(asking.events).toHaveLength(1)
+    expect(asking.snapshotEvents()).toHaveLength(1)
     await expect(delivery.queryTerminal(questionId!)).resolves.toBeUndefined()
   })
 

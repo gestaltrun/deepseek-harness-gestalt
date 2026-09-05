@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -180,7 +180,7 @@ async function execute(
 ) {
   return ctx.tools.execute({
     signal: testToolSignal,
-    callId: CallId(callId),
+    callId: ToolCallId(callId),
     name: 'project_members',
     arguments: arguments_,
     ...agent === undefined ? {} : { agent },
@@ -503,7 +503,7 @@ describe('project_members tool', () => {
     const controller = new AbortController()
     const executing = ctx.tools.execute({
       signal: controller.signal,
-      callId: CallId('pm-account-cancelled'),
+      callId: ToolCallId('pm-account-cancelled'),
       name: 'project_members',
       arguments: { projectId: 'proj-alpha' },
     })

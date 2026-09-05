@@ -192,13 +192,13 @@ const TOOL_PACKAGES: ToolPackage[] = [
     dir: 'tool-ask-user',
     source: 'packages/interaction/tool-ask-user/src/index.ts',
     requires: ['ctx.tools', 'ctx.userQuestions'],
-    writes: ['tool/call', 'tool/result after a UI/provider answers the question'],
+    writes: ['tool/call', 'tool/result after a composed answerer answers the question'],
     async mount(ctx) {
       await ctx.plugin(UserQuestionService)
       await ctx.plugin(ToolAskUser)
     },
     note:
-      'ask_user_question pauses the tool call until the active UI provider returns a human answer.',
+      'ask_user_question pauses the tool call until the composed answerer waterfall returns a human answer.',
   },
   {
     pkg: '@deepseek-ai/dsh-tools',

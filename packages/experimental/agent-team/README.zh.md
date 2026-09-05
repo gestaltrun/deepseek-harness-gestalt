@@ -143,7 +143,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 ### 持久性模型
 
-Team 事件追加到精确的 live Lead Session，并在操作报告成功或唤醒等待者之前 flush。`team/member`、`team/task`、`team/message/queued` 与 `team/message/delivered` 仅存在于日志：它们从不进入会话表面，因此派生模型历史不受协作记录影响。顺序与时间由 Session event 的 `seq` 与 `time` 负责，快照不重复保存。`./invariant` 伴生插件把每条候选 Team event 对照已提交前缀回放，并在 append 前拒绝非法转换。
+Team 事件追加到精确的 live Lead Session，并在操作报告成功或唤醒等待者之前 flush。writer 为 `team/member`、`team/task`、`team/message/queued` 与 `team/message/delivered` 写入 version 2；私有持久读取器也接受仓库曾写出的 version 1，并在 fold 前规范化。version 1 queued message 的 `delivery` metadata 会被丢弃，因为恢复后的消息使用当前 Steer 语义。foreign Team record 会先按 Team identity 选择，再读取 version 或嵌套 payload，随后直接忽略。这些事件仅存在于日志：它们从不进入会话表面，因此派生模型历史不受协作记录影响。顺序与时间由 Session event 的 `seq` 与 `time` 负责，快照不重复保存。`./invariant` 伴生插件把每条候选 Team event 对照已提交前缀回放，并在 append 前拒绝非法转换。
 
 ### Dispose
 

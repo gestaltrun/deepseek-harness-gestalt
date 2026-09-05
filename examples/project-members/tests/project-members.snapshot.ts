@@ -111,8 +111,12 @@ describe('project_members keyless assembled transcript', () => {
     const askPayload = (askCall?.data as JsonObject | undefined)?.arguments
     const askArguments = JSON.parse(typeof askPayload === 'string' ? askPayload : '{}') as JsonObject
     expect(askArguments.to_project_member).toBe('grace')
-    expect(events.filter(event => event.type === 'member-question/asked')).toHaveLength(1)
-    expect(events.filter(event => event.type === 'member-question/outcome')).toHaveLength(1)
+    const asked = events.filter(event => event.type === 'member-question/asked')
+    const outcomes = events.filter(event => event.type === 'member-question/outcome')
+    expect(asked).toHaveLength(1)
+    expect(outcomes).toHaveLength(1)
+    expect(asked[0]?.ignorable).toBe(true)
+    expect(outcomes[0]?.ignorable).toBe(true)
     expect(assistantText(events.filter(event => event.type === 'assistant/message').at(-1)))
       .toBe(FINAL_TEXT)
     expect((records.at(-1) as JsonObject).output).toBe(FINAL_TEXT)

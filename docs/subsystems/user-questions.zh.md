@@ -2,7 +2,7 @@
 
 [English](user-questions.md) | 中文
 
-[dsh-user-questions](../../packages/interaction/user-questions) 的用户交互 seam。它是工具或权限插件需要人类回答后 agent（智能体）才能继续时所使用的、提供方无关的词汇。UI 界面提供活跃的 `UserQuestionProvider`；host 运行时把请求转发给其连接的客户端。带 `to_project_member` 的路由提问离开该提供方，改走 [`ctx.memberQuestionSender`](#ctxmemberquestionsender--memberquestionsenderservice-abstract-seam)。
+[dsh-user-questions](../../packages/interaction/user-questions) 的用户交互 seam。它是工具或权限插件需要人类回答后 agent（智能体）才能继续时所使用的、提供方无关的词汇。UI 界面贡献普通回答器；host 运行时把带 Agent 作用域的请求转发给其连接的客户端。路由提问通过同一 waterfall 携带 `memberRoute`，由发送方的全局前置回答器在本地 UI 回答器之前认领。
 
 源码：[`packages/interaction/user-questions/src/index.ts`](../../packages/interaction/user-questions/src/index.ts)
 

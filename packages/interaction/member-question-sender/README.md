@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Service Definition and codec-backed Provider for member-directed questions. `ctx.memberQuestionSender.send(payload)` encodes one Companion `member-question` operation through the T4 remote-protocol codec, delivers the bytes through an injected port, and waits for the authoritative first terminal. Peer credentials are retrieved through an injected B-side lookup over Remote Access `getProjectPeerGrant`.
+Service Definition and codec-backed Provider for member-directed questions. The Provider prepends a Host-root unscoped `user-questions/request` answerer: ordinary requests call `next()`, while requests carrying `memberRoute` are claimed before previously registered Remote or UI answerers, encoded as one Companion `member-question` operation through the T4 remote-protocol codec, delivered through an injected port, and settled from the authoritative first terminal. Peer credentials are retrieved through an injected B-side lookup over Remote Access `getProjectPeerGrant`.
 
 ## Service: `MemberQuestionSenderService` (ctx key: `memberQuestionSender`)
 
@@ -34,7 +34,7 @@ Service Definition and codec-backed Provider for member-directed questions. `ctx
 
 ### Session events
 
-When `send()` is given an asking session, it appends a log-only `member-question/asked` summary and a matching `member-question/outcome`. The pair records already model-visible facts (the tool-call arguments and the tool result); it is not a surface event and does not re-enter derived history.
+When `send()` is given an asking session, it appends an ignorable log-only `member-question/asked` summary and a matching ignorable `member-question/outcome`. The pair records already model-visible facts (the tool-call arguments and the tool result); it is not a surface event and does not re-enter derived history. Readers that do not know these audit records may skip them without changing reconstructed model history.
 
 The sender keeps at most one pending ask per `(originSessionId, toProjectMember)` route key. Answer, decline, expiry, initiator withdrawal, same-route supersession, and membership removal all publish a terminal candidate before the local promise settles. A newer same-key send claims `superseded` for the previous ask; membership removal claims the receiver-facing `withdrawn` terminal while the initiating caller retains `REVOKED_DURING_FLIGHT` when that local claim wins.
 
@@ -44,7 +44,7 @@ This package is the Service Definition and the codec-backed Provider for the mem
 
 ## Model Experience
 
-Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `send()` and retains the sender's stable errors as ordinary tool results.
+Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `ctx.userQuestions.ask()` with `memberRoute`; this sender's Host-root answerer claims that request and retains its stable errors as ordinary tool results.
 
 #### KV Cache effect
 

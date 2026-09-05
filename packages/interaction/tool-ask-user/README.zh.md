@@ -74,11 +74,11 @@ kind: "package-reference"
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | 工具注册：`ask_user_question` schema、执行路径、结果渲染 |
-| — | 不发布运行时不变式伴生入口；执行关系由 seam 拥有。 |
+| — | 不发布运行时不变式伴生入口；该面向模型的适配器没有独立生命周期流；执行关系由它调用的 capability seam 拥有。 |
 
 ### Consumer 角色
 
-该插件以 `['tools', 'userQuestions']` 注入，在 `ctx.tools` 上注册一个 `defineTool` 条目。`execute` 把模型参数映射为 `AskUserQuestionRequest`，转发确切的调用 agent 与当前轮次的信号，并把接受的回答映射回规范的 `answers` 数组。身份检查、意图校验、waterfall 分派与错误分类由 seam 拥有；本包只做转换。
+该插件以 `['tools', 'userQuestions']` 注入，在 `ctx.tools` 上注册一个 `defineTool` 条目。`execute` 把模型参数映射为 `AskUserQuestionRequest`，转发确切的调用 agent 与当前轮次的信号，并把接受的回答映射回规范的 `answers` 数组。路由调用会把 `memberRoute` 加到同一请求上；工具绝不直接调用 `ctx.memberQuestionSender`。身份检查、意图校验、waterfall 分派与错误分类由 seam 拥有；Host 根发送器 answerer 认领路由请求并保留其稳定错误。
 
 ### 结果渲染
 

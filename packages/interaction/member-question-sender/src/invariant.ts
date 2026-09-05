@@ -76,7 +76,7 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
   const seed = (session: Session): MemberQuestionTrace => {
     const trace: MemberQuestionTrace = { pending: new Set() }
     traces.set(session, trace)
-    for (const event of session.events) {
+    for (const event of session.snapshotEvents()) {
       const transition = validateMemberQuestionEvent(trace, event, fail)
       if (transition === undefined) continue
       applyMemberQuestionTransition(trace.pending, transition)

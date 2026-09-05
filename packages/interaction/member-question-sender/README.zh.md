@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-成员提问的 Service Definition 与基于 codec 的 Provider。`ctx.memberQuestionSender.send(payload)` 通过 T4 remote-protocol codec 将一次 Companion `member-question` 操作编码，经注入的 port 投递字节，并等待权威的首个终态。对端凭证通过注入的 B 侧检索，走 Remote Access 的 `getProjectPeerGrant`。
+成员提问的 Service Definition 与基于 codec 的 Provider。该 Provider 以 `prepend` 在 Host 根上下文注册非 scoped `user-questions/request` answerer：普通请求调用 `next()`，携带 `memberRoute` 的请求会在已有 Remote 或 UI answerer 之前被认领，经 T4 remote-protocol codec 编码为一次 Companion `member-question` 操作，经注入的 port 投递，并从权威的首个终态结算。对端凭证通过注入的 B 侧检索，走 Remote Access 的 `getProjectPeerGrant`。
 
 ## 服务：`MemberQuestionSenderService`（ctx 键：`memberQuestionSender`）
 
@@ -34,7 +34,7 @@
 
 ### 会话事件
 
-当 `send()` 被给予提问会话时，它会追加仅写入日志的 `member-question/asked` 摘要以及匹配的 `member-question/outcome`。该配对记录已经对模型可见的事实（工具调用参数与工具结果）；它不是 surface 事件，也不会重新进入派生历史。
+当 `send()` 被给予提问会话时，它会追加可忽略、仅写入日志的 `member-question/asked` 摘要以及匹配的可忽略 `member-question/outcome`。该配对记录已经对模型可见的事实（工具调用参数与工具结果）；它不是 surface 事件，也不会重新进入派生历史。不认识这些审计记录的读取方可以跳过它们，而不改变重建出的模型历史。
 
 发送器对每个 `(originSessionId, toProjectMember)` 路由键最多保留一次待答提问。回答、拒绝、到期、发起方撤回、同路由取代与成员移除都会先发布终态候选，再结算本地 Promise。同键的新发送为旧提问 claim `superseded`；成员移除 claim 接收端可见的 `withdrawn` 终态，而该本地 claim 获胜时，发起调用方仍得到 `REVOKED_DURING_FLIGHT`。
 
@@ -42,14 +42,14 @@
 
 本包是成员提问发送器 seam 的 Service Definition 与基于 codec 的 Provider。编码由 [`dsh-remote-protocol`](../../platform/remote-protocol/README.zh.md) 拥有；授权记录由 [`dsh-remote-access`](../../platform/remote-access/README.zh.md) 拥有。面向模型的 Consumer 是 [`dsh-tool-ask-user`](../tool-ask-user/README.zh.md)。
 
-## Model Experience
+## 模型体验
 
-Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `send()` and retains the sender's stable errors as ordinary tool results.
+间接地，通过 `dsh-tool-ask-user`：它把 `to_project_member` 路由到带 `memberRoute` 的 `ctx.userQuestions.ask()`；本发送器的 Host 根 answerer 认领该请求，并将其稳定错误作为普通工具结果保留。
 
-#### KV Cache effect
+#### KV Cache 影响
 
 不会直接产生 token 开销，也不会使 KV Cache 失效。`dsh-tool-ask-user` 拥有 `to_project_member`、`background` 与 `references` 的 schema 增长，以及已回答批次与发送器生命周期错误作为工具结果保留的 token。
 
-## Known Limitations and Deferred Work
+## 已知限制与暂缓事项
 
 - **跨机投递依赖被推迟的项目注册表传输**：编码、分块帧与投递接口已经定义；无密钥测试注入内存实现，缺少生产 port 的组合则失败关闭。在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。生产密封仍受那里记录的独立加密评审约束。本包不发明新协议。

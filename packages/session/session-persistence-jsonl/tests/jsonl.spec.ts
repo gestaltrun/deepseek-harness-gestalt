@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
-import { SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
+import { KNOWN_SESSION_EVENT_TYPES, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -417,6 +417,47 @@ describe('JsonlSessionPersistence: stored-format refusals', () => {
 
     await expect(readAll(ctx.sessionPersistence, m.id))
       .rejects.toThrow(/unsupported legacy reason "fallback"/)
+  })
+})
+
+describe('JsonlSessionPersistence: official vocabulary portability', () => {
+  it('retains an ignorable unknown event across reopen and continued writes', async () => {
+    const storage = await freshRoot()
+    const mount = async (): Promise<Context> => {
+      const ctx = new Context()
+      await ctx.plugin(JsonlSessionPersistence, { root: storage, compression: 'none' })
+      return ctx
+    }
+    const m = meta('official-ignorable-roundtrip', '/work')
+    expect(KNOWN_SESSION_EVENT_TYPES.has('official/unknown-event')).toBe(false)
+    const unknown = {
+      type: 'official/unknown-event', seq: SessionSeq(6), time: 7007,
+      data: { payload: ['retained', 2], nested: { exact: true } }, ignorable: true,
+    } as unknown as SessionEvent
+    const second = [
+      unknown,
+      { type: 'turn/start', seq: SessionSeq(7), time: 8008, data: { turn: 2 } },
+      { type: 'turn/end', seq: SessionSeq(8), time: 8009, data: { turn: 2, reason: { kind: 'completed' } } },
+    ] as SessionEvent[]
+
+    const first = await mount()
+    await writeLog(first.sessionPersistence, m, [...oneTurnLog(), ...second])
+    await first.fiber.dispose()
+
+    const reopened = await mount()
+    const writer = await reopened.sessionPersistence.open(m.id, 'write')
+    expect(await writer.read()).toEqual([...oneTurnLog(), ...second])
+    const third = [
+      { type: 'turn/start', seq: SessionSeq(9), time: 9009, data: { turn: 3 } },
+      { type: 'turn/end', seq: SessionSeq(10), time: 9010, data: { turn: 3, reason: { kind: 'completed' } } },
+    ] as SessionEvent[]
+    await writer.append(third)
+    await writer.close()
+    await reopened.fiber.dispose()
+
+    const final = await mount()
+    expect((await readAll(final.sessionPersistence, m.id)).events).toEqual([...oneTurnLog(), ...second, ...third])
+    await final.fiber.dispose()
   })
 })
 

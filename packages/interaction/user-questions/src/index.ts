@@ -24,7 +24,7 @@ import type {
 
 export type {
   AskUserQuestionAnswer, AskUserQuestionAnswerItem, AskUserQuestionIntent, AskUserQuestionItem,
-  AskUserQuestionOption,
+  AskUserQuestionMemberOrigin, AskUserQuestionMemberRoute, AskUserQuestionOption,
 } from './types.ts'
 
 /** Request for a human answer. */

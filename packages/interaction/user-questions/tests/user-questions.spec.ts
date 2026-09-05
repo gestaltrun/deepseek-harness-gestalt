@@ -71,21 +71,31 @@ describe('UserQuestionService', () => {
       .rejects.toMatchObject({ code: 'NO_PROVIDER' })
   })
 
-  it('delegates through composed answerers', async () => {
+  it('delegates through composed answerers in registration order exactly once', async () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)
-    const delegated = vi.fn()
+    const order: string[] = []
+    ctx.on('user-questions/request', async (_request, next) => {
+      order.push('first:before')
+      const answer = await next()
+      order.push('first:after')
+      return answer
+    })
     ctx.on('user-questions/request', (_request, next) => {
-      delegated()
+      order.push('second')
       return next()
     })
-    const p = provider('second')
-    registerAnswerer(ctx, p)
+    ctx.on('user-questions/request', (request) => {
+      order.push('answer')
+      return Promise.resolve({
+        answers: request.questions.map(question => ({ id: question.id, selected: ['accepted'] })),
+      })
+    })
 
     await expect(ctx.userQuestions.ask({
-      questions: [{ id: 'confirm', question: 'Proceed?', options: [{ label: 'second' }] }],
-    })).resolves.toEqual({ answers: [{ id: 'confirm', selected: ['second'] }] })
-    expect(delegated).toHaveBeenCalledOnce()
+      questions: [{ id: 'confirm', question: 'Proceed?', options: [{ label: 'accepted' }] }],
+    })).resolves.toEqual({ answers: [{ id: 'confirm', selected: ['accepted'] }] })
+    expect(order).toEqual(['first:before', 'second', 'answer', 'first:after'])
   })
 
   it('fails before reaching the provider when the signal is already aborted', async () => {
@@ -356,7 +366,7 @@ describe('UserQuestionService', () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)
     const p = provider('Remove')
-    ctx.userQuestions.registerProvider(p)
+    registerAnswerer(ctx, p)
     const intent = memberQuestionIntent()
 
     const result = await ctx.userQuestions.ask({

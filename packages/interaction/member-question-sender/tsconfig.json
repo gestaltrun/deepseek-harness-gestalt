@@ -21,6 +21,9 @@
       "path": "../../llm/llm"
     },
     {
+      "path": "../../platform/platform-account"
+    },
+    {
       "path": "../../platform/remote-access"
     },
     {
@@ -28,6 +31,9 @@
     },
     {
       "path": "../../core/session"
+    },
+    {
+      "path": "../user-questions"
     },
     {
       "path": "../../runtime-diagnostics/invariants"

@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
@@ -314,6 +315,73 @@ function runRecoveryHarness(
       PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: 'deploy-artifacts/platform',
     },
   })
+}
+
+function runRealBootstrapRecoveryHarness(
+  phase: 'rollbackable' | 'committed',
+  owner: 'matching' | 'foreign' | 'missing',
+) {
+  const temp = mkdtempSync(join(tmpdir(), 'dsh-bootstrap-recovery-'))
+  const recoveryCopy = join(temp, 'platform-recover.sh')
+  const hostCopy = join(temp, 'platform-host-deploy.sh')
+  const cloudCopy = join(temp, 'platform-cloud-assistant.sh')
+  const candidateEnv = join(temp, 'candidate.env')
+  const hostLock = join(temp, 'host.lock')
+  const log = join(temp, 'docker.log')
+  writeFileSync(log, '')
+  writeFileSync(recoveryCopy, recoverySource)
+  writeFileSync(cloudCopy, 'true\n')
+  writeFileSync(hostCopy, hostDeploySource
+    .replace('candidate_env=/run/dsh-platform-candidate.env', `candidate_env=${JSON.stringify(candidateEnv)}`)
+    .replace('exec 9>/run/dsh-platform-deploy.lock', `exec 9>${JSON.stringify(hostLock)}`))
+  const harness = [
+    'set -eEuo pipefail',
+    'aliyun() {',
+    '  if [ "$1 $2" = "oss cat" ]; then',
+    `    printf '%s\\n' '{"version":2,"mode":"bootstrap","phase":"${phase}","objectRoot":"deploy-artifacts/platform/123-1","candidateCommit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","instanceIds":["i-first123","i-second456"]}'`,
+    '  elif [ "$1 $2" = "oss rm" ]; then printf \'DELETE:%s\\n\' "$3" >> "$LOG"; fi',
+    '}',
+    'flock() { :; }',
+    'sleep() { :; }',
+    'curl() { printf \'{"ok":true}\\n\'; }',
+    'docker() {',
+    '  printf \'%s\\n\' "$*" >> "$LOG"',
+    '  case "$1:${2:-}" in',
+    '    info:*) return 0 ;;',
+    '    inspect:dsh-platform)',
+    '      if [[ "$*" == *bootstrap-candidate* ]]; then',
+    '        case "$BOOTSTRAP_OWNER" in matching) printf \'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n\' ;; foreign) printf \'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\n\' ;; missing) return 1 ;; esac',
+    '      fi',
+    '      return 0 ;;',
+    '    inspect:dsh-platform-rollback) return 1 ;;',
+    '    ps:*) return 0 ;;',
+    '    rm:*|stop:*) return 0 ;;',
+    '  esac',
+    '}',
+    'export -f flock sleep curl docker',
+    'platform_cloud_run() { bash "$2"; }',
+    `source ${JSON.stringify(recoveryCopy)}`,
+  ].join('\n')
+  try {
+    const result = spawnSync('bash', ['-c', harness], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        LOG: log,
+        BOOTSTRAP_OWNER: owner,
+        RECOVERY_COMMAND: join(temp, 'recovery-command.sh'),
+        PLATFORM_ALIYUN_REGION: 'cn-hangzhou',
+        PLATFORM_ECS_INSTANCE_IDS: 'i-first123,i-second456',
+        PLATFORM_OSS_BUCKET: 'bucket',
+        PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: 'oss-cn-hangzhou.aliyuncs.com',
+        PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: 'deploy-artifacts/platform',
+      },
+    })
+    const dockerLog = readFileSync(log, 'utf8')
+    return { ...result, stdout: `${result.stdout}${dockerLog}` }
+  } finally {
+    rmSync(temp, { recursive: true, force: true })
+  }
 }
 
 function runBootstrapHostRecoveryHarness(
@@ -1125,6 +1193,29 @@ describe('Platform release workflows', () => {
     expect(targetMismatch.stderr).toContain('recovery targets differ from the durable state')
     expect(targetMismatch.stdout).not.toContain('RUN:')
     expect(targetMismatch.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+  })
+
+  it('executes generated bootstrap recovery commands through the real host script', () => {
+    const rollback = runRealBootstrapRecoveryHarness('rollbackable', 'matching')
+    expect(rollback.status, rollback.stderr).toBe(0)
+    expect(rollback.stdout).toContain('stop --time 60 dsh-platform')
+    expect(rollback.stdout).toContain('rm -f dsh-platform')
+
+    const committed = runRealBootstrapRecoveryHarness('committed', 'matching')
+    expect(committed.status).toBe(0)
+    expect(committed.stdout).toContain('inspect dsh-platform --format')
+
+    for (const owner of ['foreign', 'missing'] as const) {
+      const failedRollback = runRealBootstrapRecoveryHarness('rollbackable', owner)
+      expect(failedRollback.status, owner).toBe(1)
+      expect(failedRollback.stdout).not.toContain('stop --time 60 dsh-platform')
+      expect(failedRollback.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
+      expect(failedRollback.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+
+      const failedCommit = runRealBootstrapRecoveryHarness('committed', owner)
+      expect(failedCommit.status, owner).toBe(1)
+      expect(failedCommit.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+    }
   })
 
   it('executes real bootstrap rollback only for the exact candidate owner', () => {

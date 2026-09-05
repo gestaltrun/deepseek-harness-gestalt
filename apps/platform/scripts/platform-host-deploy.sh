@@ -154,12 +154,13 @@ case "$action" in
       exit $?
     fi
     docker info >/dev/null || exit 1
-    bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}' 2>/dev/null || true)
-    if [ "$bootstrap_owned" = "$DSH_DEPLOY_CANDIDATE" ]; then
+    if docker inspect dsh-platform >/dev/null 2>&1; then
+      bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}' 2>/dev/null || true)
+      if [ "$bootstrap_owned" != "$DSH_DEPLOY_CANDIDATE" ]; then
+        exit 1
+      fi
       docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
       ensure_container_absent dsh-platform || rollback_failed=1
-    elif docker inspect dsh-platform >/dev/null 2>&1; then
-      rollback_failed=1
     fi
     ensure_container_absent dsh-platform-candidate || rollback_failed=1
     unlink "$candidate_env" 2>/dev/null || true

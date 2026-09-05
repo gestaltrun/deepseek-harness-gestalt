@@ -228,7 +228,10 @@ export class SubagentRuntime extends TypertRemoteService {
    * @throws when continuation services are unavailable or materialization fails.
    */
   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
-    return this.requireContinuations().startContinuable(spec)
+    const continuations = this.requireContinuations()
+    const provider = this.expectProvider(spec.provider)
+    this.assertCapabilities(provider, { ...spec.request, label: spec.label, signal: spec.signal })
+    return continuations.startContinuable(spec)
   }
 
   /**

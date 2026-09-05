@@ -19,7 +19,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { AttachmentError } from '@deepseek-ai/dsh-attachment'
 import type { ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-fs'
-import { imageMediaTypeForPath, resolveRegularReadTarget } from '@deepseek-ai/dsh-tool-fs/src/read-policy.ts'
+import { imageMediaTypeForPath, resolveRegularReadTarget } from '@deepseek-ai/dsh-tool-fs/read-policy'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import {

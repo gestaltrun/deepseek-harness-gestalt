@@ -101,6 +101,50 @@ describe('dsh-tool-subagent', () => {
     expect(schema!.description).not.toContain('job_output')
   })
 
+  it('delivers admitted workspace images to a capable provider in order', async () => {
+    let received: SubagentStartRequest | undefined
+    const ctx = await setup({ provider: 'mock' }, { onStart: (request) => { received = request } })
+    const reads: string[] = []
+    ctx.provide('fs', {
+      resolve: async (filePath: string) => ({ displayPath: `/workspace/${filePath}` }),
+      stat: async () => ({ type: 'file', size: 3, version: 'v1' }),
+      readBytes: async (target: { displayPath: string }) => {
+        reads.push(target.displayPath)
+        return Uint8Array.of(1, 2, 3)
+      },
+    } as never)
+    ctx.provide('attachments', {
+      imageLimits: {
+        maxImagesPerMessage: 20,
+        maxImageBytes: 1024,
+        maxMessageImageBytes: 2048,
+        mediaTypes: ['image/png'],
+      },
+      saveImages: async (inputs: readonly { name?: string }[]) => inputs.map((input, index) => ({
+        id: `image-${index}`,
+        mediaType: 'image/png',
+        bytes: 3,
+        width: 1,
+        height: 1,
+        ...input.name === undefined ? {} : { name: input.name },
+      })),
+    } as never)
+
+    const result = await ctx.tools.execute({
+      callId: ToolCallId('capable-images'), name: 'subagent',
+      arguments: { description: 'inspect images', prompt: 'compare', images: ['first.png', 'second.png'] },
+      agent: fakeAgent(), signal: testToolSignal,
+    })
+
+    expect(result.isError).toBe(false)
+    expect(reads).toEqual(['/workspace/first.png', '/workspace/second.png'])
+    expect(received?.prompt).toEqual([
+      { type: 'text', text: 'compare' },
+      { type: 'image', attachment: expect.objectContaining({ id: 'image-0', name: 'first.png' }) },
+      { type: 'image', attachment: expect.objectContaining({ id: 'image-1', name: 'second.png' }) },
+    ])
+  })
+
   it('rejects images on an incapable provider before filesystem access or provider startup', async () => {
     const ctx = await setup({ provider: 'mock' }, { capabilities: { images: false } })
     let fsReads = 0

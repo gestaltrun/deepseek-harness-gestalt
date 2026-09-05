@@ -94,6 +94,7 @@ The tools are the executor; policy is an event gate. The tools inject no policy 
 | [`src/index.ts`](src/index.ts) | Plugin entry: `Config`, tool composition, `read_image` attachments gate |
 | [`src/read.ts`](src/read.ts) | `read` executor: one stat, streaming decision, window build, observation |
 | [`src/read-image.ts`](src/read-image.ts) | `read_image` executor: route and media-type gates, bounded bytes, attachment save |
+| [`src/read-policy.ts`](src/read-policy.ts) | Public `./read-policy` helper for session-relative regular-file admission and declared image media types |
 | [`src/write.ts`](src/write.ts) | `write` executor: intent waterfall, atomic write, observation |
 | [`src/edit.ts`](src/edit.ts) | `edit` executor: intent waterfall, literal edit, observation |
 | [`src/read-render.ts`](src/read-render.ts) | Cordis-free windowing and envelope formatting |

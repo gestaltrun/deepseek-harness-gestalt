@@ -18,6 +18,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./read-policy": {
+      "types": "./lib/types/read-policy.d.ts",
+      "default": "./lib/read-policy.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

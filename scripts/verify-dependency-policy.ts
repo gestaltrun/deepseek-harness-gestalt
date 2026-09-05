@@ -133,6 +133,10 @@ function requireSuccess(label: string, outcome: Outcome): void {
   }
 }
 
+export function fixtureScripts(): Record<string, string> {
+  return { check: 'node check.cjs', postinstall: 'node postinstall.cjs' }
+}
+
 function createFixture(policy: Policy, environmentClass: EnvironmentClass): Fixture {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'dsh-dependency-policy-'))
   const depRoot = join(fixtureRoot, 'deps')
@@ -149,14 +153,13 @@ function createFixture(policy: Policy, environmentClass: EnvironmentClass): Fixt
 
   const lifecycleMarker = join(repo, 'postinstall-ran.txt')
   const runMarker = join(repo, 'requested-script-ran.txt')
+  writeFileSync(join(repo, 'check.cjs'), "require('node:fs').writeFileSync('requested-script-ran.txt','run')\n")
+  writeFileSync(join(repo, 'postinstall.cjs'), "require('node:fs').writeFileSync('postinstall-ran.txt','install')\n")
   writeFileSync(join(repo, 'package.json'), `${JSON.stringify({
     name: 'dependency-policy-fixture',
     version: '1.0.0',
     private: true,
-    scripts: {
-      check: `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync('requested-script-ran.txt','run')"`,
-      postinstall: `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync('postinstall-ran.txt','install')"`,
-    },
+    scripts: fixtureScripts(),
     devDependencies: {
       'fixture-base': 'file:../deps/fixture-base',
     },

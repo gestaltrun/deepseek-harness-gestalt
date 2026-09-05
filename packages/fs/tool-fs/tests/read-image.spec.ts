@@ -6,7 +6,7 @@
  * regression that `read` keeps its text-only contract.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -503,9 +503,13 @@ describe('argument and service preconditions', () => {
     expect(empty.isError).toBe(true)
     expect(text(empty)).toContain('non-empty')
 
+    const readBytes = vi.spyOn(ctx.fs, 'readBytes')
+    const resolve = vi.spyOn(ctx.fs, 'resolve')
     const nonImage = await readImage(ctx, { file_path: 'notes.txt' }, agentOn('vision-model'))
     expect(nonImage.isError).toBe(true)
     expect(text(nonImage)).toContain('the .txt extension does not declare a supported image format')
+    expect(readBytes).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
   })
 
   it('refuses when no attachment service is mounted', async () => {

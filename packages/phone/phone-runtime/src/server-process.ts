@@ -7,6 +7,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { childEnv } from '@deepseek-ai/dsh-subprocess'
+import { PhoneDevicesError } from './errors.ts'
 
 /** Stderr bytes retained for failure diagnostics. */
 const STDERR_TAIL_BYTES = 4096
@@ -47,6 +48,69 @@ export class MobilecliProcessTreeError extends Error {
 export function retainTail(current: string, addition: string): string {
   const joined = `${current}${addition}`
   return joined.length > STDERR_TAIL_BYTES ? joined.slice(joined.length - STDERR_TAIL_BYTES) : joined
+}
+
+/** Exit-and-stop handle used by one-shot agent and screenshot joins. */
+export interface MobilecliTreeJoin {
+  /** Settles exactly once with how the child ended. */
+  readonly exit: Promise<ServerExit>
+  /**
+   * Bounded tree teardown. Callers may invoke this more than once; later
+   * invocations observe the same settlement.
+   * @returns quiescence of this tree generation.
+   */
+  stop(): Promise<void>
+}
+
+/**
+ * Publish abort-driven `tree.stop()` immediately, join child exit, then halt if the budget aborted.
+ * Callers keep halt classification and post-join error wrapping. This helper owns one memoized stop
+ * publication (including already-aborted budgets), contains a synchronous `stop()` throw, and removes
+ * the abort listener on every path. It does not invoke a second stop after exit.
+ * @param tree - Spawned process tree exposing `exit` and `stop`.
+ * @param budget - Fused caller-plus-ceiling signal.
+ * @param halt - Public failure for an aborted run.
+ * @returns the child's exit facts when the budget did not abort first.
+ */
+export async function awaitMobilecliTreeExit(
+  tree: MobilecliTreeJoin,
+  budget: AbortSignal,
+  halt: () => PhoneDevicesError,
+): Promise<ServerExit> {
+  const stopped = Promise.withResolvers<void>()
+  let stopPublished: Promise<void> | undefined
+  const publishStop = (): Promise<void> => {
+    if (stopPublished === undefined) {
+      const publication = Promise.withResolvers<void>()
+      stopPublished = publication.promise
+      try {
+        const stopping = tree.stop()
+        void Promise.resolve(stopping).then(publication.resolve, publication.reject)
+      } catch (error) {
+        publication.reject(error)
+      }
+    }
+    void stopPublished.then(stopped.resolve, stopped.reject)
+    return stopPublished
+  }
+  const onAbort = (): void => {
+    void publishStop()
+  }
+  budget.addEventListener('abort', onAbort, { once: true })
+  try {
+    if (budget.aborted) onAbort()
+    const exit = await Promise.race([
+      tree.exit,
+      stopped.promise.then(() => tree.exit),
+    ])
+    if (budget.aborted) {
+      await (stopPublished ?? publishStop())
+      throw halt()
+    }
+    return exit
+  } finally {
+    budget.removeEventListener('abort', onAbort)
+  }
 }
 
 function treePoll(): Promise<void> {

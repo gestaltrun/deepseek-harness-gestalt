@@ -6,9 +6,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildPhoneTabDescriptor, createPhoneTabSwitcher, installPhoneTab, PHONE_TAB_ID, PHONE_TAB_TITLE,
+  buildPhoneTabDescriptor, createPhoneTabSwitcher, installPhoneTab, openPhoneTabOf, PHONE_TAB_ID, PHONE_TAB_TITLE,
   openPhoneDevicePanel, phoneDeviceTabMetaOf, phoneTabTitleOf, showPhonePicker,
-  type PhoneListingSource, type PhoneTabDescriptor, type PhoneTabView,
+  type PhoneListingSource, type PhoneSidebarState, type PhoneTabDescriptor, type PhoneTabView,
 } from '../src/client/registry.ts'
 
 /** One tab instance the fake sidebar holds. */
@@ -311,5 +311,45 @@ describe('single phone tab with in-place switching', () => {
     expect(sidebar.tabs[0]!.title).toBe('Phone')
     openPhoneDevicePanel(sidebar, () => true, 'emulator-5554', 'Pixel_6_API_35', enOccupiedTitle)
     expect(sidebar.tabs[0]!.title).toBe('Phone · Pixel_6_API_35')
+  })
+
+  it('finds the Phone tab across split trees, nested children, and floats', () => {
+    expect(openPhoneTabOf(undefined)).toBeUndefined()
+    const phone = { id: PHONE_TAB_ID, type: PHONE_TAB_ID, title: '手机' }
+    const nested: PhoneSidebarState = {
+      splits: {
+        kind: 'split',
+        children: [
+          { kind: 'leaf', tabs: [{ id: 'editor', type: 'editor' }], active: 'editor' },
+          { kind: 'leaf', tabs: [phone], active: PHONE_TAB_ID },
+        ],
+      },
+      bottomSplits: { kind: 'leaf', tabs: [], active: null },
+      floats: [],
+    }
+    expect(openPhoneTabOf(nested)?.id).toBe(PHONE_TAB_ID)
+    const emptyNested: PhoneSidebarState = {
+      splits: {
+        kind: 'split',
+        children: [
+          { kind: 'leaf', tabs: [{ id: 'editor', type: 'editor' }], active: 'editor' },
+        ],
+      },
+      bottomSplits: { kind: 'leaf', tabs: [], active: null },
+      floats: [],
+    }
+    expect(openPhoneTabOf(emptyNested)).toBeUndefined()
+    const bottom: PhoneSidebarState = {
+      splits: { kind: 'leaf', tabs: [{ id: 'editor', type: 'editor' }], active: 'editor' },
+      bottomSplits: { kind: 'leaf', tabs: [phone], active: PHONE_TAB_ID },
+      floats: [],
+    }
+    expect(openPhoneTabOf(bottom)?.id).toBe(PHONE_TAB_ID)
+    const floating: PhoneSidebarState = {
+      splits: { kind: 'leaf', tabs: [{ id: 'editor', type: 'editor' }], active: 'editor' },
+      bottomSplits: { kind: 'leaf', tabs: [], active: null },
+      floats: [{ tab: phone }],
+    }
+    expect(openPhoneTabOf(floating)?.id).toBe(PHONE_TAB_ID)
   })
 })

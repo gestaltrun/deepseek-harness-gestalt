@@ -200,16 +200,35 @@ export class PhoneStream extends Service {
     else writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing'))
   }
 
-  private async handleSession(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
-    if (this.closing) { writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing')); return }
+  /**
+   * Shared JSON-API admission: a fenced Host answers 503, an untrusted Host is
+   * forbidden, and a wrong method is rejected before path or body work. Owner
+   * teardown sets `this.closing` before HTTP admission closes, so a request
+   * that still enters `PhoneHttpTransactions.run` must observe the fence here.
+   * @param req - Incoming JSON-API request.
+   * @param res - Response that receives 503, 403, or 405 when admission fails.
+   * @param method - Required HTTP method for this route family.
+   * @param methodMessage - 405 diagnostic naming the route family and method.
+   * @returns true when the handler may continue.
+   */
+  private admitTrustedJsonApi(req: IncomingMessage, res: ServerResponse, method: 'GET' | 'POST', methodMessage: string): boolean {
+    if (this.closing) {
+      writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing'))
+      return false
+    }
     if (!isTrustedApiRequest(req, this.trustedHosts())) {
       writeForbidden(res)
-      return
+      return false
     }
-    if (req.method !== 'POST') {
-      writeHttpError(res, new HttpError(405, 'method-not-allowed', 'phone session minting is POST-only'))
-      return
+    if (req.method !== method) {
+      writeHttpError(res, new HttpError(405, 'method-not-allowed', methodMessage))
+      return false
     }
+    return true
+  }
+
+  private async handleSession(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (!this.admitTrustedJsonApi(req, res, 'POST', 'phone session minting is POST-only')) return
     const pathname = pathnameOf(req)
     if (pathname !== PHONE_SESSION_PATH) {
       writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone session path'))
@@ -238,7 +257,6 @@ export class PhoneStream extends Service {
         let status = await this.ctx.phoneDevices.agentStatus(id)
         if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
         if (!status.installed) {
-          if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
           await this.ctx.phoneDevices.installAgent(id)
           if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
           status = await this.ctx.phoneDevices.agentStatus(id)
@@ -254,7 +272,6 @@ export class PhoneStream extends Service {
           return
         }
       }
-      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       writeJson(res, 200, this.sessionFor(
         id,
         knownReal !== undefined || known.platform === 'android',
@@ -266,15 +283,7 @@ export class PhoneStream extends Service {
   }
 
   private async handleAgent(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
-    if (this.closing) { writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing')); return }
-    if (!isTrustedApiRequest(req, this.trustedHosts())) {
-      writeForbidden(res)
-      return
-    }
-    if (req.method !== 'POST') {
-      writeHttpError(res, new HttpError(405, 'method-not-allowed', 'phone agent operations are POST-only'))
-      return
-    }
+    if (!this.admitTrustedJsonApi(req, res, 'POST', 'phone agent operations are POST-only')) return
     const pathname = pathnameOf(req)
     if (pathname !== `${PHONE_AGENT_PATH}/status` && pathname !== `${PHONE_AGENT_PATH}/install`) {
       writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone agent path'))
@@ -298,7 +307,6 @@ export class PhoneStream extends Service {
       if (body.force !== undefined && typeof body.force !== 'boolean') {
         throw new HttpError(400, 'bad-request', 'force must be a boolean')
       }
-      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       const installed = await this.ctx.phoneDevices.installAgent(id, { force: body.force === true })
       if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       writeJson(res, 200, installed)
@@ -328,15 +336,7 @@ export class PhoneStream extends Service {
    * @param res - Response to write the listing JSON onto.
    */
   private async handleDevices(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
-    if (this.closing) { writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing')); return }
-    if (!isTrustedApiRequest(req, this.trustedHosts())) {
-      writeForbidden(res)
-      return
-    }
-    if (req.method !== 'GET') {
-      writeHttpError(res, new HttpError(405, 'method-not-allowed', 'phone device listing is GET-only'))
-      return
-    }
+    if (!this.admitTrustedJsonApi(req, res, 'GET', 'phone device listing is GET-only')) return
     if (pathnameOf(req) !== PHONE_DEVICES_PATH) {
       writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone device listing path'))
       return
@@ -392,9 +392,8 @@ export class PhoneStream extends Service {
     const lifetime = new AbortController()
     const transactionAbort = (): void => { lifetime.abort(signal.reason) }
     signal.addEventListener('abort', transactionAbort, { once: true })
-    if (signal.aborted) transactionAbort()
     const abort = (): void => { lifetime.abort() }
-    const close = (): void => { if (!res.writableFinished) abort() }
+    const close = (): void => { abort() }
     req.on('aborted', abort)
     res.on('close', close)
     const multipart = grant.format === 'mjpeg'
@@ -585,15 +584,14 @@ function captureSource(record: Record<string, unknown>): {
 }
 
 async function cleanupDeadline(cleanup: Promise<void>, timeoutMs: number): Promise<'settled' | 'timeout'> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      cleanup.then(() => 'settled' as const),
-      new Promise<'timeout'>((resolve) => { timer = setTimeout(() => { resolve('timeout') }, timeoutMs) }),
-    ])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-  }
+  const timeout = new Promise<'timeout'>((resolve) => {
+    const timer = setTimeout(() => { resolve('timeout') }, timeoutMs)
+    void cleanup.finally(() => { clearTimeout(timer) })
+  })
+  return await Promise.race([
+    cleanup.then(() => 'settled' as const),
+    timeout,
+  ])
 }
 
 function safeWebSocketSend(ws: { readonly readyState?: number; send(data: string): void }, payload: unknown): void {

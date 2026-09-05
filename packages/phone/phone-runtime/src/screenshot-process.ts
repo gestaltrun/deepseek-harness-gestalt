@@ -13,7 +13,7 @@ import { realDeviceIssueError } from './classify.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
 import { isPng } from './png.ts'
 import { normalizeOperationError } from './rpc.ts'
-import { MobilecliProcessTree, retainTail } from './server-process.ts'
+import { awaitMobilecliTreeExit, MobilecliProcessTree, retainTail } from './server-process.ts'
 
 /** Maximum PNG file bytes admitted from one screenshot command. */
 const SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024
@@ -61,20 +61,12 @@ export async function runMobilecliScreenshot(options: MobilecliScreenshotRunOpti
   child.stderr?.on('data', (chunk: Buffer) => {
     stderrTail = retainTail(stderrTail, chunk.toString('utf8'))
   })
-  const stopped = Promise.withResolvers<void>()
-  const onAbort = (): void => {
-    void tree.stop().then(stopped.resolve, stopped.reject)
-  }
-  budget.signal.addEventListener('abort', onAbort, { once: true })
   try {
-    const exit = await Promise.race([
-      tree.exit,
-      stopped.promise.then(() => tree.exit),
-    ])
-    if (budget.signal.aborted) {
-      await tree.stop()
-      throw screenshotHalt(budget.signal.reason, options.timeoutMs)
-    }
+    const exit = await awaitMobilecliTreeExit(
+      tree,
+      budget.signal,
+      () => screenshotHalt(budget.signal.reason, options.timeoutMs),
+    )
     if (tree.error !== undefined) {
       throw new PhoneDevicesError(
         'PHONE_UNAVAILABLE',
@@ -134,7 +126,6 @@ export async function runMobilecliScreenshot(options: MobilecliScreenshotRunOpti
     )
     /* v8 ignore stop */
   } finally {
-    budget.signal.removeEventListener('abort', onAbort)
     budget[Symbol.dispose]()
     /* v8 ignore next -- leftover temp files must not replace a classified screenshot result. */
     await rm(dir, { recursive: true, force: true }).catch(() => {})

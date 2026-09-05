@@ -80,6 +80,9 @@ export interface ToolCallOwnerProps {
 /** Full props of a registered atomic Tool view. */
 export type ToolCallViewProps = PropsRuntime<'tool.call.toolview'>
 
+/** Slot view props plus locale used by the built-in keyed roster. */
+export type ToolPresentationViewProps = ToolCallViewProps & PropsLocale<'conversation'>
+
 /** Injected Host description for POSIX home-path display. */
 export type ToolHostInfoInjected = {
   hooks: {

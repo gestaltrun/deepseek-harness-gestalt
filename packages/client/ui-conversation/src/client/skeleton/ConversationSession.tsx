@@ -58,7 +58,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  */
 export function ConversationSessionHeader({
   sessionId, useSession, useSessions, useConversation, useConversationViews, useStore,
-  renderSlot, open, selectView, t,
+  renderSlot, open, selectView, renderMode, openSession, t,
 }: ConversationSessionHeaderProps) {
   const tabs = useConversationViews(value => value)
   const selectedId = useStore(s => s.view)
@@ -67,6 +67,12 @@ export function ConversationSessionHeader({
   const session = useSession(s => s)
   const conversation = useConversation(s => s)
   const hideChrome = session.blank && conversationPhase(session, conversation) === 'blank'
+  const compact = renderMode === 'sidechat'
+  const navigate = openSession ?? open
+  const actionOwner = {
+    ...(renderMode !== undefined ? { renderMode } : {}),
+    ...(openSession !== undefined ? { openSession } : {}),
+  }
 
   return (
     <header
@@ -77,7 +83,7 @@ export function ConversationSessionHeader({
         <>
           <div className={css.titleRow}>
             <div className={css.titleCluster}>
-              <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
+              {!compact && <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
                 {ancestry.map((summary, index) => {
                   const last = index === ancestry.length - 1
                   const title = (
@@ -89,7 +95,7 @@ export function ConversationSessionHeader({
                         last && css.crumbCurrent,
                       )}
                       disabled={last}
-                      onClick={() => { open(summary.id) }}
+                      onClick={() => { navigate(summary.id) }}
                     >
                       {summary.displayTitle}
                     </button>
@@ -98,7 +104,7 @@ export function ConversationSessionHeader({
                   const lineageOwner = {
                     lineageSessionId: summary.id,
                     displayTitle: summary.displayTitle,
-                    ...last ? {} : { openTitle: () => { open(summary.id) } },
+                    ...last ? {} : { openTitle: () => { navigate(summary.id) } },
                   }
                   return (
                     <span key={summary.id} className={css.crumbSeg}>
@@ -125,13 +131,13 @@ export function ConversationSessionHeader({
                   )
                 })}
                 {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
-              </nav>
+              </nav>}
               <div className={css.headerActions}>
-                {renderSlot('conversation.session.header.actions', {})}
+                {renderSlot('conversation.session.header.actions', actionOwner)}
               </div>
             </div>
             <div className={css.headerUtilities}>
-              {renderSlot('conversation.session.header.utilities', {})}
+              {renderSlot('conversation.session.header.utilities', actionOwner)}
             </div>
           </div>
           {tabs.length > 1 && (

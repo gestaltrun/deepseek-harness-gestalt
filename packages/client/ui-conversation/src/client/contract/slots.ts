@@ -10,7 +10,7 @@ import type {
   InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionPendingInteraction } from '@deepseek-ai/dsh-client-ui-session/client'
-import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type { ConvOwnerProps } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ComposerBlock } from './composer-blocks.ts'
@@ -94,7 +94,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Strict per-Session Conversation body. */
     'conversation.session': { kind: 'single'; scope: 'session' }
     /** Strict per-Session title, actions, and View navigation. */
-    'conversation.session.header': { kind: 'single'; scope: 'session' }
+    'conversation.session.header': { kind: 'single'; scope: 'session'; owner: ConvOwnerProps }
     /** Optional replacement for one Session breadcrumb title. */
     'conversation.session.header.lineage': {
       kind: 'single'
@@ -177,9 +177,9 @@ export interface HeroAgentPresetOwnerProps {
   children?: never
 }
 
-/** Header actions derive their state from standard Session props. */
-export interface ConversationHeaderActionOwnerProps {
-  /** Marker field: entries receive no owner-specific values. */
+/** Header actions inherit Conversation owner props for compact Side Chat presentation. */
+export interface ConversationHeaderActionOwnerProps extends ConvOwnerProps {
+  /** Marker field: compact presentation and retargeting arrive through ConvOwnerProps. */
   children?: never
 }
 

@@ -18,7 +18,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { SlotCore, standardHookPropName } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  HostObservable, LiveSlotNode, LocaleFace, OwnerOf, SlotEntryDef, SlotMap, SlotRenderer, SlotRendererHost,
+  HostObservable, LiveSlotNode, LocaleFace, OwnerOf, SessionSlotKey, SlotEntryDef, SlotMap, SlotRenderer, SlotRendererHost,
   RootStandardSourceContribution, ScopedStandardSourceBinding, SlotScope, SlotScopeAdapter, SlotSpec,
   StandardSourceBinding,
   StoreDecl, StoreFactory, StoredEntry, StoreInstanceLike,
@@ -365,10 +365,10 @@ export class SlotRegistry extends Service {
    * @param owner - owner share for this slot occurrence.
    * @returns rendered tree and idempotent scope release.
    */
-  prepareSessionSlot(
-    key: string,
+  prepareSessionSlot<K extends SessionSlotKey>(
+    key: K,
     sessionId: string,
-    owner: object,
+    owner: OwnerOf<K>,
   ): { element: ReturnType<SlotRenderer['renderSession']>; release: () => void } {
     if (key === 'root') throw new Error("explicit Session rendering cannot target 'root'")
     const spec = this._core.specDynamic(key)

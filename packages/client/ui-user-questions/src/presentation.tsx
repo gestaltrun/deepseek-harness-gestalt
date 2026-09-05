@@ -1,9 +1,9 @@
 /** Public question presentation seam shared by non-Desktop Web compositions. */
 
 import type { ReactNode } from 'react'
-import type { PendingWait } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { QuestionPresentationView } from './client/QuestionComposer.tsx'
+import { QuestionComposer } from './client/QuestionComposer.tsx'
+import type { PendingQuestion, QuestionComposerProps } from './client/contract/slots.ts'
 import { en, zh } from './client/locales.ts'
 
 /** Locale ids supported by the shared question presentation. */
@@ -29,7 +29,7 @@ export function questionPresentationTranslate(locale: QuestionPresentationLocale
 /** Props for the shared Ask User takeover. */
 export interface QuestionPresentationProps {
   /** Desktop-authoritative pending question carrier. */
-  wait: PendingWait<'question'>
+  wait: PendingQuestion
   /** Shared question translator. */
   t: TranslateNS<'question'>
   /** Disable settlement while the composition lacks current mutation authority. */
@@ -38,5 +38,30 @@ export interface QuestionPresentationProps {
 
 /** Render and settle Ask User through the same QuestionComposer used by Desktop. */
 export function QuestionPresentation({ wait, t, disabled = false }: QuestionPresentationProps): ReactNode {
-  return <QuestionPresentationView wait={wait} t={t} disabled={disabled} />
+  const store = {
+    getSnapshot: () => ({
+      requestKey: wait.key,
+      progress: { index: 0, drafts: wait.questions.map(() => ({ selected: [], custom: '', skipped: false })) },
+    }),
+    subscribe: () => () => {},
+    actions: {
+      replace: () => {},
+      clear: () => {},
+    },
+  }
+  return (
+    <fieldset disabled={disabled}>
+      <QuestionComposer
+        {
+          ...{
+            matched: wait,
+            t,
+            useStore: ((selector: (state: ReturnType<typeof store.getSnapshot>) => unknown) =>
+              selector(store.getSnapshot())) as QuestionComposerProps['useStore'],
+            actions: store.actions,
+          } as QuestionComposerProps
+        }
+      />
+    </fieldset>
+  )
 }

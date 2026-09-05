@@ -1,9 +1,10 @@
 /** Public Tool presentation seam for Web compositions outside the Desktop page shell. */
 
 import type { ReactNode } from 'react'
-import type { ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ToolCallBlock } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { DirectToolCallTree } from './client/tool/ToolCallTree.tsx'
+import type { MessageImageLoader } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ToolCallOwnerProps, ToolPresentationViewProps } from './client/contract/slots.ts'
 import { BuiltinToolview } from './client/tool/toolviews/builtins.tsx'
 import { GenericToolCard } from './client/tool/toolviews/GenericToolCard.tsx'
 
@@ -23,23 +24,52 @@ export interface ToolPresentationProps {
   t: TranslateNS<'conversation'>
 }
 
+const NOOP_OPEN_FILE = (_path: string): void => {}
+const NOOP_LOAD_IMAGE: MessageImageLoader = async () => ''
+
+function callName(block: ToolCallBlock): string {
+  return 'kind' in block ? block.call?.name ?? '' : block.name
+}
+
+function ToolPresentationBranch({
+  block, cwd, home, openFile, inspectCall, t,
+}: ToolPresentationProps): ReactNode {
+  const owner: ToolCallOwnerProps = {
+    callId: block.callId,
+    toolName: callName(block),
+    block,
+    openFile: openFile ?? NOOP_OPEN_FILE,
+    loadImage: NOOP_LOAD_IMAGE,
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(home === undefined ? {} : { home }),
+    ...(inspectCall === undefined ? {} : { inspect: () => { inspectCall(block.callId) } }),
+  }
+  return (
+    <div>
+      <BuiltinToolview
+        {...owner as ToolPresentationViewProps}
+        t={t}
+        fallback={<GenericToolCard {...owner} t={t} />}
+      />
+      {block.subCalls.map(child => (
+        <ToolPresentationBranch
+          key={child.callId}
+          block={child}
+          cwd={cwd}
+          home={home}
+          openFile={openFile}
+          inspectCall={inspectCall}
+          t={t}
+        />
+      ))}
+    </div>
+  )
+}
+
 /**
  * Render one Tool lifecycle through the same keyed built-in roster as Desktop.
  * Unknown wire Tool names alone use GenericToolCard.
  */
-export function ToolPresentation({
-  block, cwd, home, openFile, inspectCall, t,
-}: ToolPresentationProps): ReactNode {
-  return (
-    <DirectToolCallTree
-      block={block}
-      cwd={cwd}
-      home={home}
-      openFile={openFile}
-      inspectCall={inspectCall}
-      renderCall={owner => (
-        <BuiltinToolview {...owner} t={t} fallback={<GenericToolCard {...owner} t={t} />} />
-      )}
-    />
-  )
+export function ToolPresentation(props: ToolPresentationProps): ReactNode {
+  return <ToolPresentationBranch {...props} />
 }

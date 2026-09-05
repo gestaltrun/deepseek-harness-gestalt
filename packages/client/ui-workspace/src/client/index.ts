@@ -32,7 +32,9 @@ import { en, zh, type WorkspaceKey } from './locales.ts'
 export type { UiWorkspace } from './navigation.ts'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
-  WorkspaceBrowserInjected, WorkspaceBrowserProps, WorkspacePickerInjected, WorkspacePickerProps,
+  ProjectMembershipGateway, WorkspaceBrowserInjected, WorkspaceBrowserProps,
+  WorkspaceIssuedInvitation, WorkspaceMemberRow, WorkspacePendingInvitation,
+  WorkspacePickerInjected, WorkspacePickerProps, WorkspaceProjectRole, WorkspaceProjectView,
 } from './contract/slots.ts'
 export type { WorkspaceKey } from './locales.ts'
 

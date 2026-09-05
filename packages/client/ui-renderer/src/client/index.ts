@@ -8,6 +8,7 @@ import { flushSync } from 'react-dom'
 import { createRoot, hydrateRoot, type Root } from 'react-dom/client'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { OwnerOf, SessionSlotKey } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 import { SlotRegistry } from './registry.ts'
@@ -37,7 +38,12 @@ export interface UiRendererService {
    * @param ownerProps - owner props for the slot occurrence.
    * @returns idempotent disposer that unmounts the independent React root.
    */
-  mountSession: (container: HTMLElement, slotKey: string, sessionId: SessionId, ownerProps: object) => () => void
+  mountSession: <K extends SessionSlotKey>(
+    container: HTMLElement,
+    slotKey: K,
+    sessionId: SessionId,
+    ownerProps: OwnerOf<K>,
+  ) => () => void
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -122,11 +128,11 @@ export function apply(ctx: Context): void {
   ctx.reflect.provide('uiRenderer', {
     mount: (container: HTMLElement): (() => void) =>
       ownRoot(mountApp(container, buildRenderApp({ ctx }))),
-    mountSession: (
+    mountSession: <K extends SessionSlotKey>(
       container: HTMLElement,
-      slotKey: string,
+      slotKey: K,
       sessionId: SessionId,
-      ownerProps: object,
+      ownerProps: OwnerOf<K>,
     ): (() => void) => {
       const prepared = slots.prepareSessionSlot(slotKey, sessionId, ownerProps)
       const root = createRoot(container)

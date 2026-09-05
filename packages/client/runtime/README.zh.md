@@ -103,3 +103,4 @@ reason 为 `max-tokens` 的 `turn/end` 会在该轮位置投影出一个 `turn-m
 - **`loader.unload` 是 stub**：它会抛出 not-implemented；客户端没有从 fiber dispose 到注册与样式移除的卸载链。
 - **scope 拆卸由阶段驱动，目前只能有一个占用者**：已 staged 的会话精确跟随 `list.current`（staging 就是打开信号：事件窗口打开 ⟺ 会话位于 stage）；在 staged 状态下被移除的会话，其 scope 会冻结保留，直到 stage 转向其他会话，而非直到真实观察者数量降为零。解析（`binding()`／`scope()`）只是纯寻址，可安全用于渲染；渲染层经 `currentProvideInfo` observable 读取当前 bundle。并发 pane 落地时，staged 状态可以扩展为多 pane 列表。
 - **插件 bundle 从该包导入值时必须使用 `/client` 子路径**：裸包名不在 loader externals 表中，会内联第二个模块实例；其私有 scope-tag Symbol 永远无法匹配。
+- **删除该包仍被 #591 阻塞**：已迁出的 Web 共享包不再导入此 barrel，但 Gestalt 产品包仍在使用。精确剩余消费方：`ui-better-sidebar`（`SessionAdmissionAdapter` 以及 `/client` 模块表行）、`ui-workbench`、`ui-browser`、`ui-desktop`、`ui-member-questions` 与 `apps/mobile`。在这些面获得 Side Chat 准入、产品 Session/Workspace 快照与 Mobile presentation 的公开所有者之前，不能删除该包。

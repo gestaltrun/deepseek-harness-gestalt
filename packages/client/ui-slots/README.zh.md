@@ -47,7 +47,7 @@ register 调用可以用 `store: defineStore(...)` 声明 store 席位：`init` 
 <details>
 <summary>实现细节——点击展开</summary>
 
-设计就是一张表：声明 = 渲染授权 = 运行时规范。`SlotMap` 在这里声明为空，由消费方通过 `declare module` 增补合并，标准工具包接口（`SessionStandardProps`、`GlobalStandardProps`）也是如此，由 runtime 包以真实成员合并。
+设计就是一张表：声明 = 渲染授权 = 运行时规范。`SlotMap` 在这里声明为空，由消费方通过 `declare module` 增补合并，标准工具包接口（`SessionStandardProps`、`GlobalStandardProps`）也是如此，由 `ui-session` 与各域 UI 适配器以真实成员合并。`SessionSlotKey` 与 `OwnerOf<K>` 为显式 Session 挂载面提供类型。
 
 ### 注册与路由
 

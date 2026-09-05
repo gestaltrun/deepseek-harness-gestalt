@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import type { DraftAttachmentId } from '../src/client/input/contract.ts'
 import {
@@ -54,7 +54,7 @@ describe('composer image pin annotations', () => {
 
   it('keeps text and image pins in one order and drops pins when their image is removed', () => {
     const shell = new SessionInputShell({
-      actx: {} as ClientContext,
+      actx: {} as Context,
       defaultSink: () => Promise.resolve({ kind: 'success' }),
       annotationLabels: LABELS,
     })
@@ -75,7 +75,7 @@ describe('composer image pin annotations', () => {
 
   it('forwards a history pin source through the public action face', () => {
     const shell = new SessionInputShell({
-      actx: {} as ClientContext,
+      actx: {} as Context,
       defaultSink: () => Promise.resolve({ kind: 'success' }),
       annotationLabels: LABELS,
     })

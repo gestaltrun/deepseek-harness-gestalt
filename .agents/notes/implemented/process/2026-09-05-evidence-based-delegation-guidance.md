@@ -18,7 +18,7 @@ Dispatchers inspect direct continuable children before starting a new child. Rel
 
 Skills consume shared workflows as ordinary references when the target skill is user-invoked. Generic workflows defer to repository terminology, decision records, source layout, hook ownership, and changed-behavior test policy. Code review distinguishes committed-only and work-in-progress modes so staged, unstaged, and untracked work remains visible. Parsed skill-description validation rejects an unquoted YAML comment marker that would truncate hash-bearing descriptions.
 
-Conditional client scaffolding lives in a cookbook reached from the standing client rules, and `apps/web/AGENTS.md` provides the missing discovery pointer. Root instructions link the routing owner and state the unstable-format policy by the format owner's compatibility declaration rather than repository tag presence. GitHub runner details defer to live workflow expressions.
+Conditional client scaffolding lives in a cookbook reached from the standing client rules, and `apps/web/AGENTS.md` provides the missing discovery pointer. Root instructions link the routing owner, define the user-visible language precedence for subagent descriptions and todo content without changing identifiers or internal prompts, and state the unstable-format policy by the format owner's compatibility declaration rather than repository tag presence. GitHub runner details defer to live workflow expressions.
 
 ## Alternatives considered
 
@@ -36,4 +36,4 @@ Delegation has one discoverable provider-neutral policy and an optional concrete
 
 Instruction context shrinks where conditional client scaffolding moves behind a cookbook pointer, while safety, credentials, lifecycle, testing, release, and logging obligations remain in standing owners. Documentation-only workflow guidance does not alter assembled product or model-visible runtime output, so no keyless runtime snapshot changes; focused script tests pin the parsed-description regression, and documentation gates pin links, pairing, format, and budgets.
 
-The policy still relies on dispatcher judgment and accumulated task evidence. It does not provide cross-parent child adoption, arbitrary session-history search, effort selection, cache telemetry, billing data, or a universal model ranking.
+The policy still relies on dispatcher judgment and accumulated task evidence. It does not provide cross-parent child adoption, arbitrary session-history search, effort selection, cache telemetry, billing data, or a universal model ranking. Delivery still requires the exact pull-request head to pass `all checks passed`, followed by a merge-queue candidate that passes `candidate verdict`; neither check substitutes for the other.

@@ -8,7 +8,7 @@ Use this reference before dispatching or continuing a subagent. It governs task-
 
 Use deterministic tools directly for file discovery, status, exact transformations, and small local checks. Delegate when a bounded independent task benefits from separate context, parallel work, a different model, or an isolated review. Keep one mutable writer per worktree; read-only investigation and review may run in parallel.
 
-Define the deliverable, read/write scope, risk, acceptance evidence, required context, and independence before choosing a route. Source code and observable checks—not a model's confidence—decide acceptance.
+Define the deliverable, read/write scope, risk, acceptance evidence, required context, and independence before choosing a route. Follow the root task-language rule for subagent descriptions and todo content; it does not constrain internal child prompts. Source code and observable checks—not a model's confidence—decide acceptance.
 
 ## Select a model explicitly
 

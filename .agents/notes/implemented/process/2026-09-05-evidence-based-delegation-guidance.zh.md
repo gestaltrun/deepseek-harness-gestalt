@@ -18,7 +18,7 @@ Status: implemented
 
 当目标技能只能由用户启动时，其他技能把共享流程作为普通参考读取。通用工作流服从仓库术语、决策记录、源码布局、hook owner 与按变更行为选择测试的政策。代码审查区分仅提交与进行中两种模式，使 staged、unstaged 和 untracked 工作都保持可见。技能描述解析校验会拒绝可截断带井号描述的未引用 YAML 注释标记。
 
-条件式客户端脚手架流程位于由客户端常驻规则指向的 cookbook，`apps/web/AGENTS.md` 提供缺失的发现入口。根指令链接路由 owner，并按格式 owner 是否声明兼容来表述不稳定格式政策，而不是按仓库标签是否存在。GitHub runner 细节服从当前 workflow 表达式。
+条件式客户端脚手架流程位于由客户端常驻规则指向的 cookbook，`apps/web/AGENTS.md` 提供缺失的发现入口。根指令链接路由 owner，为子 agent 描述与 todo 内容定义用户可见语言优先级且不改变标识符或内部 prompt，并按格式 owner 是否声明兼容来表述不稳定格式政策，而不是按仓库标签是否存在。GitHub runner 细节服从当前 workflow 表达式。
 
 ## Alternatives considered
 
@@ -36,4 +36,4 @@ Status: implemented
 
 条件式客户端脚手架移到 cookbook 指针后，常驻指令上下文缩小；安全、凭据、生命周期、测试、发布与日志义务仍留在常驻 owner。仅文档的工作流指导不会改变组装后的产品输出或模型可见运行时输出，因此不需要 keyless 运行时快照变更；聚焦脚本测试固定描述解析回归，文档 gates 固定链接、配对、格式和预算。
 
-该政策仍依赖调度者判断与逐步积累的任务证据。它不提供跨 parent 子会话接管、任意会话历史检索、effort 选择、cache telemetry、计费数据或通用模型排名。
+该政策仍依赖调度者判断与逐步积累的任务证据。它不提供跨 parent 子会话接管、任意会话历史检索、effort 选择、cache telemetry、计费数据或通用模型排名。交付仍要求精确 pull request head 通过 `all checks passed`，随后 merge queue candidate 通过 `candidate verdict`；两项检查不能互相替代。

@@ -84,6 +84,24 @@ export interface MessageImagesOwnerProps {
 /** Slot-backed renderer used by Conversation targets without importing an attachment implementation. */
 export type RenderMessageImages = (owner: Omit<MessageImagesOwnerProps, 'loadImage'>) => ReactNode
 
+/** Pin overlay supplied to one opened image preview. */
+export interface MessageImagePinOverlay {
+  /** Visible pins on this image. */
+  pins: readonly { id: string; x: number; y: number; index: number }[]
+  /** Enter-pin-mode label. */
+  modeLabel: string
+  /** Exit-pin-mode label. */
+  exitLabel: string
+  /** Place a pin at displayed percentages. */
+  onPlace: (x: number, y: number) => void
+  /** Open the note editor for one pin. */
+  onSelect: (id: string) => void
+  /** Close the open note editor. */
+  onCloseEditor?: () => void
+  /** Optional note editor for the selected pin. */
+  editor?: ReactNode
+}
+
 /** Selector hook over the current Session's assembled Conversation. */
 export type UseConversation = SnapshotSelectorHook<ConversationSnapshot>
 /** Selector hook over the registered Conversation View roster. */

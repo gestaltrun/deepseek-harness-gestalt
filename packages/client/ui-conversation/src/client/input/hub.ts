@@ -90,6 +90,13 @@ export class InputHub implements SessionInputResolver {
       queue: queueReadFaceOf(session),
       defaultSink: (text, imageIds, mode, signal) => this.sink(session, text, imageIds, mode, signal),
       steerQueue: () => { void this.steerQueue(session, shell) },
+      annotationLabels: {
+        heading: index => this.t('annotation.compiled.heading', { index }),
+        quote: value => this.t('annotation.compiled.quote', { value }),
+        note: value => this.t('annotation.compiled.note', { value }),
+        image: (name, x, y) => this.t('annotation.compiled.image', { name, x, y }),
+        overflow: this.t('annotation.overflow'),
+      },
       commandImages: {
         serialize: ids => this.conversation().serializeDraftImages(ids),
         // Asymmetric with serialize on purpose: release settles AFTER the

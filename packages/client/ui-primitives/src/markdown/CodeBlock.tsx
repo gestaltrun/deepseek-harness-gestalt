@@ -3,10 +3,11 @@ import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import { writeClipboard } from '../clipboard.ts'
 import {
-  StreamingHighlightSession, grammarLoadCount, highlightToHtml, subscribeGrammarLoaded,
+  StreamingHighlightSession, grammarLoadCount, highlightLines, highlightToHtml, subscribeGrammarLoaded,
 } from './highlight.ts'
 import type { HighlightSpan, StreamingHighlightFrame } from './highlight.ts'
 import { useViewportHighlighting } from './useViewportHighlighting.ts'
+import type { MarkdownTextContribution, MarkdownTextRun } from './selection-map.tsx'
 import css from './CodeBlock.module.css'
 
 export interface CodeBlockProps {
@@ -29,6 +30,8 @@ export interface CodeBlockProps {
   copyLabel: string
   /** Copy-button label during the post-copy confirmation window. */
   copiedLabel: string
+  /** Optional stable renderer-owned registration for this code contribution. */
+  textContribution?: MarkdownTextContribution | undefined
 }
 
 /**
@@ -57,7 +60,9 @@ function renderLine(line: readonly HighlightSpan[], index: number): ReactNode {
   )
 }
 
-export function CodeBlock({ code, lang, streaming, className, copyLabel, copiedLabel }: CodeBlockProps) {
+export function CodeBlock({
+  code, lang, streaming, className, copyLabel, copiedLabel, textContribution,
+}: CodeBlockProps) {
   const trimmed = code.endsWith('\n') ? code.slice(0, -1) : code
   const rootRef = useRef<HTMLDivElement>(null)
   const highlighting = useViewportHighlighting(rootRef, lang)
@@ -134,10 +139,14 @@ export function CodeBlock({ code, lang, streaming, className, copyLabel, copiedL
     return body
   }, [streaming, highlighting, trimmed, lang, loaded])
   const html = useMemo(
-    () => (highlighting && streaming !== true && streamedBody === undefined
+    () => (highlighting && streaming !== true && streamedBody === undefined && textContribution === undefined
       ? highlightToHtml(trimmed, lang)
       : undefined),
-    [streaming, highlighting, streamedBody, trimmed, lang, loaded],
+    [streaming, highlighting, streamedBody, trimmed, lang, loaded, textContribution],
+  )
+  const registeredLines = useMemo(
+    () => (textContribution === undefined ? undefined : highlightLines(trimmed, lang)),
+    [trimmed, lang, loaded, textContribution],
   )
   const [copied, setCopied] = useState(false)
 
@@ -156,15 +165,39 @@ export function CodeBlock({ code, lang, streaming, className, copyLabel, copiedL
   // shiki's HTML output is a static span tree it generated from `code` (no
   // user HTML passes through), the sanctioned innerHTML consumption path per
   // shiki's own docs.
-  const body = streamedBody !== undefined
-    ? streamedBody
-    : html === undefined
-      ? (
-        <pre className={css.plain}><code>{trimmed}</code></pre>
-      )
-      : (
-        <div dangerouslySetInnerHTML={{ __html: html }} />
-      )
+  let body: ReactNode
+  if (textContribution !== undefined && registeredLines !== undefined) {
+    const runs: MarkdownTextRun[] = []
+    const lineLengths: number[] = []
+    for (const [lineIndex, line] of registeredLines.entries()) {
+      lineLengths.push(line.length + (lineIndex < registeredLines.length - 1 ? 1 : 0))
+      for (const [tokenIndex, token] of line.entries()) {
+        runs.push({ value: token.text, key: `${lineIndex}:${tokenIndex}`, style: token.style })
+      }
+      if (lineIndex < registeredLines.length - 1) runs.push({ value: '\n', key: `${lineIndex}:newline` })
+    }
+    const registered = textContribution.render(runs)
+    let runIndex = 0
+    body = (
+      <pre {...SHIKI_PRE_PROPS}>
+        <code>
+          {lineLengths.map((length, lineIndex) => {
+            const line = registered.slice(runIndex, runIndex + length)
+            runIndex += length
+            return <span className="line" key={lineIndex}>{line}</span>
+          })}
+        </code>
+      </pre>
+    )
+  } else if (textContribution !== undefined) {
+    body = <pre className={css.plain}><code>{textContribution.render([{ value: trimmed, key: 'code' }])}</code></pre>
+  } else if (streamedBody !== undefined) {
+    body = streamedBody
+  } else if (html === undefined) {
+    body = <pre className={css.plain}><code>{trimmed}</code></pre>
+  } else {
+    body = <div dangerouslySetInnerHTML={{ __html: html }} />
+  }
 
   return (
     <div ref={rootRef} className={clsx(css.block, 'md-code-block', className)}>

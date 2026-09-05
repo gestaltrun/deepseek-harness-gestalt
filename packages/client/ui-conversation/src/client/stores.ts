@@ -2,6 +2,7 @@
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConversationStoreState } from './contract/views.ts'
+import type { PersistedAnnotationDraft } from './contract/annotation.ts'
 
 const CONVERSATION_STORE_KEY = 'dsh.conversation'
 
@@ -49,4 +50,25 @@ export function readConversationViewPreference(sessionId: SessionId): string | n
   } catch {
     return null
   }
+}
+
+/** Annotation-draft persistence used by the Chat transcript store key. */
+interface AnnotationChatStoreState {
+  annotationDraft: PersistedAnnotationDraft | null
+}
+
+/**
+ * Persist Annotation Drafts under the Chat store key.
+ * @returns the store handle.
+ */
+export function createChatStore(): EngineStoreHandle<AnnotationChatStoreState, {
+  setAnnotationDraft: (draft: AnnotationChatStoreState, value: PersistedAnnotationDraft | null) => void
+}> {
+  return defineStore({
+    init: (): AnnotationChatStoreState => ({ annotationDraft: null }),
+    persist: 'dsh.conversation.chat',
+    actions: {
+      setAnnotationDraft: (draft, value) => { draft.annotationDraft = value },
+    },
+  })
 }

@@ -7,7 +7,7 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { createTextAnchor, TextAnnotationId } from '../src/client/annotation/model.ts'
 import type { PersistedAnnotationDraft } from '../src/client/annotation/model.ts'
-import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
+import { AssistantMarkdown } from '../src/client/annotation/AssistantMarkdown.tsx'
 import { zh } from '../src/client/locales.ts'
 import { createChatStore } from '../src/client/stores.ts'
 import type { SessionInputDeps } from '../src/client/input/facade.ts'
@@ -220,7 +220,6 @@ describe('annotation draft persistence', () => {
       [],
       'queue',
       expect.any(AbortSignal),
-      [],
     )
     // Newer text typed during the attempt must not enter the snapshot.
     shell.setDraft('A later edit must not win.')

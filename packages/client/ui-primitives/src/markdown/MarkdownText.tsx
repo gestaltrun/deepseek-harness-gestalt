@@ -11,7 +11,7 @@
  * full parse self-heals it.
  */
 
-import { memo, useMemo, useRef } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { IncrementalMarkdownParser } from './incremental.ts'
 import { parseGfm, parseGfmWithMath } from './parse.ts'
@@ -20,6 +20,8 @@ import {
   wrapBlockChildren,
 } from './render.tsx'
 import type { MarkdownFileMentions, MarkdownLabels, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
+import { MarkdownSelectionCollector } from './selection-map.tsx'
+import type { MarkdownSelectionMapRef } from './selection-map.tsx'
 import 'katex/dist/katex.min.css'
 import css from './MarkdownText.module.css'
 
@@ -30,6 +32,7 @@ function renderSettled(
   text: string,
   labels: MarkdownLabels,
   fileMentions: MarkdownFileMentions | undefined,
+  selection: MarkdownSelectionCollector | undefined,
 ): ReactNode[] {
   const root = parseGfmWithMath(text)
   const targets = createReferenceTargets()
@@ -41,6 +44,7 @@ function renderSettled(
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
+    ...(selection === undefined ? {} : { selection }),
   }
   const blocks = wrapBlockChildren(
     renderBlocks(root.children.map((node, index) => ({
@@ -158,24 +162,36 @@ class StreamingRenderer {
  * relative links, and unsafe protocols are disabled, while absolute HTTP(S)
  * images render directly.
  */
-export const MarkdownText = memo(function MarkdownText({ text, streaming = false, labels, fileMentions }: {
+export const MarkdownText = memo(function MarkdownText({
+  text, streaming = false, labels, fileMentions, selectionMapRef,
+}: {
   text: string
   streaming?: boolean
   labels: MarkdownLabels
   fileMentions?: MarkdownFileMentions | undefined
+  /** Receives the settled renderer's selectable text/image mapping. */
+  selectionMapRef?: MarkdownSelectionMapRef | undefined
 }) {
   const streamRef = useRef<StreamingRenderer | null>(null)
   const streamLabelsRef = useRef<MarkdownLabels>(labels)
-  const children = useMemo(() => {
+  const rendered = useMemo(() => {
     if (!streaming) {
       streamRef.current = null
-      return renderSettled(text, labels, fileMentions)
+      const selection = selectionMapRef === undefined ? undefined : new MarkdownSelectionCollector()
+      return { children: renderSettled(text, labels, fileMentions, selection), selection }
     }
     if (streamRef.current === null || streamLabelsRef.current !== labels) {
       streamRef.current = new StreamingRenderer(labels)
       streamLabelsRef.current = labels
     }
-    return streamRef.current.render(text)
-  }, [text, streaming, labels, fileMentions])
-  return <div className={css.markdown}>{children}</div>
+    return { children: streamRef.current.render(text), selection: undefined }
+  }, [text, streaming, labels, fileMentions, selectionMapRef])
+  useLayoutEffect(() => {
+    if (selectionMapRef === undefined) return
+    selectionMapRef.current = rendered.selection ?? null
+    return () => {
+      if (selectionMapRef.current === rendered.selection) selectionMapRef.current = null
+    }
+  }, [rendered.selection, selectionMapRef])
+  return <div className={css.markdown}>{rendered.children}</div>
 })

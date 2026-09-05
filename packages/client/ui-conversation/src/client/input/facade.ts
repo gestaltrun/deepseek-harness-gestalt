@@ -27,6 +27,11 @@ import type {
   SubmitOutcome, TokenSpan,
 } from '../contract/input.ts'
 import type { InputSubmitMode } from '../contract/composer-submission.ts'
+import type {
+  AnnotationCompilerLabels, DraftAnnotation, ImagePinAnnotation, PersistedAnnotationDraft,
+  TextAnchor, TextAnnotationId,
+} from '../contract/annotation.ts'
+import { compileAnnotationSubmission, TextAnnotationId as brandAnnotationId } from '../contract/annotation.ts'
 import { SubmitMachine } from './machine.ts'
 import { ReferenceChipNode, $createReferenceChipNode } from './editor/chip-node.tsx'
 import { refreshClaimDecoration, registerClaimDecoration } from './editor/claim-decor.ts'
@@ -68,7 +73,7 @@ export interface SessionInputDeps {
     signal: AbortSignal,
   ): Promise<SubmitOutcome>
   /** Command-plane image plumbing (the hub owns the conversation face and the copy). */
-  commandImages: {
+  commandImages?: {
     /** Resolve ordered draft ids to wire payloads without sending them; rejects when an id no longer resolves. */
     serialize(ids: readonly DraftAttachmentId[]): Promise<readonly SubmitImageAttachment[]>
     /** Free consumed draft images after a successful command submit. */
@@ -76,6 +81,8 @@ export interface SessionInputDeps {
     /** Localized composer notice for a claimed command that does not accept images. */
     unsupportedNotice(token: string): string
   }
+  /** Locale-owned annotation compiler labels; absence disables annotation compile-on-submit. */
+  annotationLabels?: AnnotationCompilerLabels | undefined
 }
 
 /** Guard tier from the machine phase. */
@@ -139,6 +146,13 @@ export class SessionInputShell implements SessionInput {
     removeImage: (id) => { this.removeImage(id) },
     pruneImages: (ids) => { this.pruneImages(ids) },
     submit: () => { this.submit('queue') },
+    addTextAnnotation: (anchor, note) => this.addTextAnnotation(anchor, note),
+    updateTextAnnotation: (id, note) => { this.updateTextAnnotation(id, note) },
+    removeTextAnnotation: (id) => { this.removeTextAnnotation(id) },
+    discardTextAnnotations: () => { this.discardTextAnnotations() },
+    addImagePin: (imageId, imageName, x, y, note, source) =>
+      this.addImagePin(imageId, imageName, x, y, note, source),
+    updateImagePin: (id, patch) => { this.updateImagePin(id, patch) },
   }
 
   private readonly core = new SubmitMachine()
@@ -151,6 +165,11 @@ export class SessionInputShell implements SessionInput {
   private noticeSeq = 0
   private lastMirroredDraft = ''
   private imageIds: readonly DraftAttachmentId[] = []
+  private annotations: DraftAnnotation[] = []
+  private annotationSeq = 1
+  private annotationSubmitting = false
+  annotationReservation: { restoreText: string; ids: readonly TextAnnotationId[] } | undefined
+  private annotationMirrorFn: ((value: PersistedAnnotationDraft | null) => void) | undefined
   private disposed = false
   /** Draft persistence mirror (Conversation store write; receives the clipboard projection). */
   private mirrorFn: ((text: string) => void) | undefined
@@ -267,6 +286,7 @@ export class SessionInputShell implements SessionInput {
    * @param text - the full next draft.
    */
   setDraft(text: string): void {
+    if (this.annotationReservation !== undefined) return
     const clean = text.replace(REFERENCE_PLACEHOLDER_RE, '')
     if (clean === this.projection.clipboardText) return
     this.editor.update(() => {
@@ -300,6 +320,7 @@ export class SessionInputShell implements SessionInput {
     const next = this.imageIds.filter(candidate => candidate !== id)
     if (next.length === this.imageIds.length) return
     this.imageIds = next
+    this.annotations = this.annotations.filter(item => item.kind !== 'image-pin' || item.imageId !== id)
     this.publish()
   }
 
@@ -358,6 +379,26 @@ export class SessionInputShell implements SessionInput {
    * dismisses and the menu tracks frozen.
    */
   submit(mode: InputSubmitMode = 'queue'): void {
+    if (this.annotationReservation !== undefined) return
+    if (this.snapshot.draft.trim() === '' && this.imageIds.length === 0 && this.annotations.length === 0) return
+    if (this.annotations.length > 0 && this.snapshot.draft.trim() === '' && this.imageIds.length === 0) {
+      const labels = this.deps.annotationLabels
+      if (labels === undefined) return
+      const controller = new AbortController()
+      this.annotationReservation = {
+        restoreText: '',
+        ids: this.annotations.map(item => item.id),
+      }
+      this.annotationSubmitting = true
+      this.publish()
+      void this.deps.defaultSink(
+        compileAnnotationSubmission('', this.annotations, labels),
+        [],
+        mode,
+        controller.signal,
+      )
+      return
+    }
     if (this.snapshot.draft.trim() === '' && this.imageIds.length > 0) {
       if (this.snapshot.phase === 'plain') {
         const imageIds = [...this.imageIds]
@@ -385,7 +426,7 @@ export class SessionInputShell implements SessionInput {
     // inside the command source itself.
     const before = this.snapshot
     if (before.phase === 'claimed' && this.imageIds.length > 0 && before.claim?.images !== true) {
-      this.notify('error', this.deps.commandImages.unsupportedNotice(before.claim?.token ?? before.draft))
+      this.notify('error', this.deps.commandImages?.unsupportedNotice(before.claim?.token ?? before.draft) ?? '')
       return
     }
     this.dispatchRun(({ type: 'enter', mode, draft: this.projection.clipboardText }))
@@ -606,6 +647,123 @@ export class SessionInputShell implements SessionInput {
     }
   }
 
+  /**
+   * Bind the annotation-draft persistence mirror.
+   * @param write - store write for the JSON-persisted annotation draft.
+   * @returns the unbind disposer.
+   */
+  bindAnnotationMirror(write: (value: PersistedAnnotationDraft | null) => void): () => void {
+    this.annotationMirrorFn = write
+    write(this.persistedAnnotationDraft())
+    return () => {
+      if (this.annotationMirrorFn === write) this.annotationMirrorFn = undefined
+    }
+  }
+
+  /**
+   * Adopt a persisted annotation draft after remount.
+   * @param value - stored draft; malformed values are ignored.
+   */
+  restoreAnnotationDraft(value: PersistedAnnotationDraft): void {
+    if (!Array.isArray(value.annotations) || typeof value.nextSeq !== 'number') return
+    const restored: DraftAnnotation[] = []
+    for (const item of value.annotations) {
+      if (item === null || typeof item !== 'object' || !('kind' in item) || !('id' in item)) return
+      if (item.kind === 'text' && 'anchor' in item && typeof item.note === 'string') restored.push(item)
+      else if (item.kind === 'image-pin' && typeof item.imageId === 'string') restored.push(item)
+      else return
+    }
+    this.annotations = restored
+    this.annotationSeq = value.nextSeq
+    this.publish()
+  }
+
+  addTextAnnotation(anchor: TextAnchor, note: string): TextAnnotationId {
+    const id = brandAnnotationId(`annotation-${this.annotationSeq}`)
+    this.annotationSeq += 1
+    this.annotations = [...this.annotations, { id, kind: 'text', anchor, note }]
+    this.publish()
+    return id
+  }
+
+  updateTextAnnotation(id: TextAnnotationId, note: string): void {
+    if (this.annotationReservation?.ids.includes(id) === true) return
+    this.annotations = this.annotations.map(item =>
+      item.id === id && item.kind === 'text' ? { ...item, note } : item)
+    this.publish()
+  }
+
+  removeTextAnnotation(id: TextAnnotationId): void {
+    if (this.annotationReservation?.ids.includes(id) === true) return
+    this.annotations = this.annotations.filter(item => item.id !== id)
+    this.publish()
+  }
+
+  discardTextAnnotations(): void {
+    this.annotations = []
+    this.publish()
+  }
+
+  addImagePin(
+    imageId: string,
+    imageName: string,
+    x: number,
+    y: number,
+    note: string,
+    source: ImagePinAnnotation['source'] = 'composer',
+  ): TextAnnotationId {
+    const id = brandAnnotationId(`annotation-${this.annotationSeq}`)
+    this.annotationSeq += 1
+    this.annotations = [...this.annotations, {
+      id, kind: 'image-pin', imageId, source, imageName, x, y, note,
+    }]
+    this.publish()
+    return id
+  }
+
+  updateImagePin(id: TextAnnotationId, patch: { x?: number; y?: number; note?: string }): void {
+    this.annotations = this.annotations.map((item) => {
+      if (item.id !== id || item.kind !== 'image-pin') return item
+      return {
+        ...item,
+        x: patch.x ?? item.x,
+        y: patch.y ?? item.y,
+        note: patch.note ?? item.note,
+      }
+    })
+    this.publish()
+  }
+
+  /**
+   * Clear or restore a reserved annotation admission.
+   * @param reservation - reservation captured at submit.
+   * @param ok - whether Host admission succeeded.
+   */
+  settleAnnotationSubmission(
+    reservation: { restoreText: string; ids: readonly TextAnnotationId[] },
+    ok: boolean,
+  ): void {
+    if (this.annotationReservation !== reservation) return
+    this.releaseAnnotationReservation(ok)
+  }
+
+  private releaseAnnotationReservation(ok: boolean): void {
+    const reservation = this.annotationReservation
+    if (reservation === undefined) return
+    this.annotationReservation = undefined
+    this.annotationSubmitting = false
+    if (ok) {
+      const admitted = new Set(reservation.ids)
+      this.annotations = this.annotations.filter(item => !admitted.has(item.id))
+    }
+    this.publish()
+  }
+
+  private persistedAnnotationDraft(): PersistedAnnotationDraft | null {
+    if (this.annotations.length === 0) return null
+    return { annotations: this.annotations, nextSeq: this.annotationSeq }
+  }
+
   // ---- effect executor ----
 
   /** The claim token the decoration transform styles; null while unclaimed. */
@@ -648,6 +806,7 @@ export class SessionInputShell implements SessionInput {
         return
       }
       case 'commit-draft': {
+        if (this.annotationReservation !== undefined) return
         this.commitDraft(fx.retainSuffixOf)
         return
       }
@@ -696,8 +855,19 @@ export class SessionInputShell implements SessionInput {
       this.failedDetached.clear()
       this.failedRestoreRev = undefined
     }
+    const labels = this.deps.annotationLabels
+    const compiled = labels === undefined || this.annotations.length === 0
+      ? draft.trim()
+      : compileAnnotationSubmission(draft, this.annotations, labels)
+    if (labels !== undefined && this.annotations.length > 0 && this.annotationReservation === undefined) {
+      this.annotationReservation = {
+        restoreText: draft,
+        ids: this.annotations.map(item => item.id),
+      }
+      this.annotationSubmitting = true
+    }
     if (occurrences.length === 0) {
-      this.settleSink(attempt, this.deps.defaultSink(draft.trim(), imageIds, mode, attempt.signal))
+      this.settleSink(attempt, this.deps.defaultSink(compiled, imageIds, mode, attempt.signal))
       return
     }
     const inputTriggers = this.deps.inputTriggers?.()
@@ -721,7 +891,10 @@ export class SessionInputShell implements SessionInput {
           cursor = part.offset + part.length
         }
         out += draft.slice(cursor)
-        this.settleSink(attempt, this.deps.defaultSink(out.trim(), imageIds, mode, attempt.signal))
+        const compiled = labels === undefined || this.annotations.length === 0
+          ? out.trim()
+          : compileAnnotationSubmission(out, this.annotations, labels)
+        this.settleSink(attempt, this.deps.defaultSink(compiled, imageIds, mode, attempt.signal))
       },
       (error: unknown) => {
         if (this.dead(attempt)) return
@@ -741,6 +914,7 @@ export class SessionInputShell implements SessionInput {
         if (this.dead(attempt)) return
         if (outcome.kind !== 'success') {
           this.settleDetachedFailure(attempt, outcome.text)
+          this.releaseAnnotationReservation(false)
           return
         }
         this.detachedDrafts.delete(attempt.seq)
@@ -749,6 +923,7 @@ export class SessionInputShell implements SessionInput {
       (error: unknown) => {
         if (this.dead(attempt)) return
         this.settleDetachedFailure(attempt, error instanceof Error ? error.message : String(error))
+        this.releaseAnnotationReservation(false)
       },
     )
   }
@@ -863,7 +1038,7 @@ export class SessionInputShell implements SessionInput {
     const imageIds = claim.images === true ? [...this.imageIds] : []
     Promise.resolve()
       .then(async () => {
-        const images = imageIds.length > 0 ? await this.deps.commandImages.serialize(imageIds) : []
+        const images = imageIds.length > 0 ? await this.deps.commandImages?.serialize(imageIds) ?? [] : []
         // Serialization may outlive the attempt (large files, session
         // teardown); a dead attempt must not reach the Host executor.
         if (this.dead(attempt)) return undefined
@@ -875,7 +1050,7 @@ export class SessionInputShell implements SessionInput {
           if (outcome.kind === 'success' && imageIds.length > 0) {
             const submitted = new Set(imageIds)
             this.imageIds = this.imageIds.filter(id => !submitted.has(id))
-            this.deps.commandImages.release(imageIds)
+            this.deps.commandImages?.release(imageIds)
           }
           this.dispatchRun(({
             type: 'submit-settled', attempt, ok: outcome.kind === 'success',
@@ -909,6 +1084,8 @@ export class SessionInputShell implements SessionInput {
       ...(core.claim !== undefined ? { claim: core.claim } : {}),
       occurrences: this.projection.occurrences,
       queue: this.deps.queue?.getSnapshot() ?? EMPTY_QUEUE,
+      annotations: this.annotations,
+      annotationSubmitting: this.annotationSubmitting,
     }
   }
 
@@ -919,5 +1096,6 @@ export class SessionInputShell implements SessionInput {
       this.lastMirroredDraft = next.draft
       this.mirrorFn?.(next.draft)
     }
+    this.annotationMirrorFn?.(this.persistedAnnotationDraft())
   }
 }

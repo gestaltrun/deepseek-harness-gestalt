@@ -36,4 +36,4 @@ Side Chat 删除自有 transcript 映射、轮询、消息行、输入框 CSS �
 
 ## 验证
 
-渲染器测试固定显式 Session 绑定在主选中 Session 变化或消失时保持不变，并覆盖 typed `mountSession<K extends SessionSlotKey>(..., ownerProps: OwnerOf<K>)`。Session Controller 测试固定临时行存续、发布、释放与冷 `openForRender()`。会话头测试固定紧凑 Side Chat 形态：`renderMode: 'sidechat'` 省略面包屑导航，同时会话头操作项仍接收显式 owner。Side Chat 产品测试在 #591 完成前仍依赖 `packages/client/runtime`。组件测试固定准确的 `conversation` slot、子 Session id、sidechat render mode、外层工具栏与 preset 标签缺席、紧凑会话头操作项和标签页、不改变主 Session 选中项的本地下级重定向、根句柄释放、新建标签图标与文案，以及挂载释放。
+渲染器测试固定显式 Session 绑定在主选中 Session 变化或消失时保持不变，并覆盖 typed `mountSession<K extends SessionSlotKey>(..., ownerProps: OwnerOf<K>)`。Session Controller 测试固定临时行存续、发布、释放与冷 `openForRender()`。会话头测试固定紧凑 Side Chat 形态：`renderMode: 'sidechat'` 省略面包屑导航，同时会话头操作项仍接收显式 owner。会话注释测试固定 SessionInput 的文本与图片标注动词、仅注释提交、Markdown 选区映射，以及不导入 `@deepseek-ai/dsh-client-runtime/client` 的 Chat store 草稿持久化。Side Chat 产品测试在 #591 完成前仍依赖 `packages/client/runtime`。组件测试固定准确的 `conversation` slot、子 Session id、sidechat render mode、外层工具栏与 preset 标签缺席、紧凑会话头操作项和标签页、不改变主 Session 选中项的本地下级重定向、根句柄释放、新建标签图标与文案，以及挂载释放。

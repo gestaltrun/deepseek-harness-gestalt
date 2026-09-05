@@ -10,7 +10,7 @@ import {
 } from '../src/client/annotation/model.ts'
 import type { TextAnchor } from '../src/client/annotation/model.ts'
 import { AnnotationEditor } from '../src/client/annotation/AnnotationEditor.tsx'
-import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
+import { AssistantMarkdown } from '../src/client/annotation/AssistantMarkdown.tsx'
 import { zh } from '../src/client/locales.ts'
 import {
   removeDraftHighlightOwner, replaceDraftHighlightRanges,

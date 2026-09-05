@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-05-evidence-based-delegation-guidance.md
-2026-09-05-evidence-based-delegation-guidance.md: 44df306e4504dc96ec67a054857e99cd7b4fcbd3
-2026-09-05-evidence-based-delegation-guidance.zh.md: 99bd19e5e7ffb4773f20235c89bc5122bf657c87
+2026-09-05-evidence-based-delegation-guidance.md: a219c524eaed0ab55d2492f69dfae9d0a3067050
+2026-09-05-evidence-based-delegation-guidance.zh.md: 585cc2a673ba53d41ca65626ef2c6a37204ef2ae

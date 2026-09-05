@@ -16,7 +16,7 @@ Status: implemented
 
 [`docs/agents/delegation-routing-cliproxyapi.md`](../../../../docs/agents/delegation-routing-cliproxyapi.zh.md) 是可选安装 profile。它保留本地可运行的精确 id 与能力限制，但不要求其他环境提供 CLIProxyAPI。它排除已移除的候选，不把 Astra 作为静默 fallback，区分纯文本 GLM-5.3 与视觉 GLM-5.3-Flash，并记录 `gemini-3.8-flash-high` 的后端映射未知。
 
-当目标技能只能由用户启动时，其他技能把共享流程作为普通参考读取。通用工作流服从仓库术语、决策记录、源码布局、hook owner 与按变更行为选择测试的政策。代码审查区分仅提交与进行中两种模式，使 staged、unstaged 和 untracked 工作都保持可见。技能描述解析校验会拒绝可截断带井号描述的未引用 YAML 注释标记。
+当目标技能只能由用户启动时，其他技能把共享流程作为普通参考读取。通用工作流服从仓库术语、决策记录、源码布局、hook owner 与按变更行为选择测试的政策。代码审查区分仅提交与进行中两种模式，使 staged、unstaged 和 untracked 工作都保持可见。YAML 保持标准 plain scalar 语义：未引用的 ` #` 会开始注释。因此，带井号的技能描述使用引号或 block scalar，聚焦 metadata 回归证明最终解析后的 catalog description 保留完整触发词；parser 不会保留错误编写的 plain scalar 文本。
 
 条件式客户端脚手架流程位于由客户端常驻规则指向的 cookbook，`apps/web/AGENTS.md` 提供缺失的发现入口。根指令链接路由 owner，为子 agent 描述与 todo 内容定义用户可见语言优先级且不改变标识符或内部 prompt，并按格式 owner 是否声明兼容来表述不稳定格式政策，而不是按仓库标签是否存在。GitHub runner 细节服从当前 workflow 表达式。
 

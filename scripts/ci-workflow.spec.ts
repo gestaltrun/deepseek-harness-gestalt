@@ -1177,7 +1177,8 @@ describe('Python release workflows', () => {
     expect(plan.if).toContain('inputs.ci')
     expect(plan.if).toContain('inputs.release')
     expect(JSON.stringify(plan.steps)).toContain('pep440_version')
-    expect(install.run).toContain('scripts/retry-transient-ci.ts')
+    expect(install.run).toContain('node scripts/retry-transient-ci.ts')
+    expect(install.run).not.toContain('pnpm --silent exec tsx')
     expect(install.run).toContain('install-${{ matrix.target }}.json')
     expect(install.run).toContain('-- pnpm install --frozen-lockfile')
     expect(transientAttempts).toMatchObject({

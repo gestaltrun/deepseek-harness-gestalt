@@ -40,13 +40,14 @@ describe('Platform certificate renewal automation', () => {
     expect(JSON.stringify(workflow)).toContain("github.event_name == 'schedule' && 'renew' || inputs.mode")
   })
 
-  it('keeps secret state encrypted and temporary files owner-only', () => {
+  it('uses private OSS AES256 at rest and owner-only runner state without a reusable secret', () => {
     expect(script).toContain('umask 077')
     expect(script).toContain('chmod 700 "$workdir"')
-    expect(script).toContain('openssl enc -d -aes-256-cbc -pbkdf2')
-    expect(script).toContain('openssl enc -aes-256-cbc -pbkdf2 -salt')
+    expect(script).toContain("--meta 'x-oss-server-side-encryption:AES256'")
+    expect(script).not.toContain('PLATFORM_CERT_STATE_KEY')
+    expect(script).not.toContain('openssl enc')
     expect(script).not.toContain('set -x')
-    expect(JSON.stringify(workflow)).toContain('secrets.PLATFORM_CERT_STATE_KEY')
+    expect(JSON.stringify(workflow)).not.toContain('PLATFORM_CERT_STATE_KEY')
   })
 
   it('cleans DNS records and validates certificate identity before the listener update', () => {

@@ -12,7 +12,7 @@ Status: implemented
 
 每日 GitHub Actions workflow 检查生产证书，并且仅在配置的续期窗口内续期。它在 `production` Environment 中运行，通过 OIDC 承担既有阿里云部署角色，不使用阿里云 AccessKey 或工作站状态。
 
-workflow 下载一个不可变的 acme.sh 源码归档，并在执行前校验其 SHA-256。ACME 账号与域名状态在存入既有私有部署 OSS bucket 的单个精确对象前，使用 AES-256-CBC 与 PBKDF2 在客户端加密。加密密钥是受保护的 Environment secret。临时状态仅属主可访问，并在 job 退出时删除。
+workflow 下载一个不可变的 acme.sh 源码归档，并在执行前校验其 SHA-256。ACME 账号与域名状态归档在既有私有部署 OSS bucket 的单个精确 key 下。bucket 使用 OSS 托管的 AES256 服务端加密，每次状态上传也会显式请求该加密。临时状态仅属主可访问，并在 job 退出时删除。
 
 ACME DNS hook 通过 workflow 的 OIDC 凭据调用 AliDNS，而不是使用 acme.sh 的 AccessKey 集成。每个创建的挑战记录 id 都保存在私有临时文件中，并由保证执行的清理路径删除。证书只有在私钥匹配、SAN 集合严格等于 apex 与 www、且剩余有效期满足配置下限后才能启用。workflow 只更新实际运行的 ALB 监听器，通过正常 TLS 校验验证两个 ALB 地址，并且绝不自动删除之前的证书。
 
@@ -20,7 +20,7 @@ ACME DNS hook 通过 workflow 的 OIDC 凭据调用 AliDNS，而不是使用 acm
 
 ## Alternatives considered
 
-**专用 KMS 密钥与托管调度器。** 拒绝，因为受保护的 GitHub Environment 已提供 OIDC、加密 secret 存储、调度与失败报告，新增方案会引入付费云服务和额外执行面。
+**客户端 envelope encryption 或专用 KMS 密钥。** 拒绝，因为这会增加可复用解密 secret 或付费云服务。私有 OSS、AES256 服务端加密、精确 object OIDC authorization、HTTPS 与仅属主可访问的 runner 文件构成所选的低成本边界。
 
 **阿里云 RAM 用户或 acme.sh AliDNS 插件。** 拒绝，因为两者都需要长期 AccessKey，而标准 AliDNS 插件还会把凭据持久化到 ACME 账号状态中。
 
@@ -30,8 +30,8 @@ ACME DNS hook 通过 workflow 的 OIDC 凭据调用 AliDNS，而不是使用 acm
 
 ## Consequences
 
-续期依赖 GitHub Actions 与一个受保护的 Environment 加密 secret，但阿里云授权仍是短期联合身份。加密 secret 丢失时需要受控地重新注册 ACME 账号，或从受保护的运维副本恢复；它不会暴露阿里云凭据。之前的 CAS 证书继续保留用于显式回滚，生命周期清理属于另一项经审核的操作。
+续期依赖 GitHub Actions 与 OSS control-plane confidentiality，而阿里云授权仍是短期联合身份。服务端加密保护存储介质与提供方备份，但拥有 object-read authority 的 OSS compromise 可以暴露 ACME 私有状态，因此精确 object IAM 是安全边界的一部分。之前的 CAS 证书继续保留用于显式回滚，生命周期清理属于另一项经审核的操作。
 
 ## Verification
 
-Platform workflow 测试固定 OIDC 权限、不可变 ACME 源码校验、到期与校验模式、加密且仅属主可访问的状态、挑战清理、密钥／SAN／有效期校验顺序、仅监听器变更与旧证书保留。实际运行的 dry-run 在不签发证书的前提下校验当前 TLS 与云端读取路径。
+Platform workflow 测试固定 OIDC 权限、不可变 ACME 源码校验、到期与校验模式、OSS AES256 与仅属主可访问的状态、挑战清理、密钥／SAN／有效期校验顺序、仅监听器变更与旧证书保留。实际运行的 dry-run 在不签发证书的前提下校验当前 TLS 与云端读取路径。

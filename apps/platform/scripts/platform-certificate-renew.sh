@@ -25,7 +25,6 @@ trap cleanup EXIT INT TERM
 chmod 700 "$workdir"
 acme_home="$workdir/acme-home"
 archive="$workdir/acme.tar.gz"
-state_encrypted="$workdir/state.tar.gz.enc"
 state_archive="$workdir/state.tar.gz"
 mkdir -m 700 "$acme_home" "$workdir/acme-source"
 
@@ -36,14 +35,11 @@ chmod 700 "$workdir/acme-source/acme.sh"
 
 state_uri="oss://${PLATFORM_CERT_OSS_BUCKET}/${PLATFORM_CERT_STATE_OBJECT}"
 set +e
-aliyun oss cp "$state_uri" "$state_encrypted" --region "$PLATFORM_ALIYUN_REGION" \
+aliyun oss cp "$state_uri" "$state_archive" --region "$PLATFORM_ALIYUN_REGION" \
   --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --force >/dev/null 2>"$workdir/state-read.err"
 state_status=$?
 set -e
 if [ "$state_status" = 0 ]; then
-  : "${PLATFORM_CERT_STATE_KEY:?}"
-  PLATFORM_CERT_STATE_KEY="$PLATFORM_CERT_STATE_KEY" openssl enc -d -aes-256-cbc -pbkdf2 \
-    -in "$state_encrypted" -out "$state_archive" -pass env:PLATFORM_CERT_STATE_KEY
   tar -xzf "$state_archive" -C "$acme_home"
 elif ! grep -Fq 'StatusCode=404' "$workdir/state-read.err"; then
   echo 'platform certificate: failed to read encrypted ACME state' >&2
@@ -152,11 +148,8 @@ for ip in "${alb_eips[@]}"; do
     | openssl x509 -checkend $((minimum_days * 86400)) -noout >/dev/null
 done
 
-: "${PLATFORM_CERT_STATE_KEY:?}"
 tar -czf "$state_archive" -C "$acme_home" .
-PLATFORM_CERT_STATE_KEY="$PLATFORM_CERT_STATE_KEY" openssl enc -aes-256-cbc -pbkdf2 -salt \
-  -in "$state_archive" -out "$state_encrypted" -pass env:PLATFORM_CERT_STATE_KEY
-aliyun oss cp "$state_encrypted" "$state_uri" --region "$PLATFORM_ALIYUN_REGION" \
-  --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --force >/dev/null
+aliyun oss cp "$state_archive" "$state_uri" --region "$PLATFORM_ALIYUN_REGION" \
+  --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --meta 'x-oss-server-side-encryption:AES256' --force >/dev/null
 
 echo "platform certificate: renewed and activated certificate $listener_cert_id; previous certificate retained"

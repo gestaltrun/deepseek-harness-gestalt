@@ -1,0 +1,60 @@
+{
+  "mint": {
+    "deviceId": "emulator-5554",
+    "ioPath": "/phone/ws/io",
+    "preferredFormat": "h264",
+    "h264": {
+      "captureId": "{{captureId}}",
+      "url": "/phone/stream/emulator-5554/h264?token={{token}}",
+      "expiresAt": "{{expiresAt}}"
+    }
+  },
+  "listingLogical": {
+    "width": 2248,
+    "height": 1080
+  },
+  "wrongPlane": {
+    "request": {
+      "captureWidth": 1080,
+      "captureHeight": 2248,
+      "captureRotation": 0,
+      "x": 540,
+      "y": 1124
+    },
+    "reply": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "error": {
+        "code": -32000,
+        "message": "Android capture plane is not the same aspect as the current logical display"
+      }
+    },
+    "upstreamIoDelta": []
+  },
+  "compatibleDownsample": {
+    "request": {
+      "captureWidth": 1124,
+      "captureHeight": 540,
+      "captureRotation": 0,
+      "x": 562,
+      "y": 270
+    },
+    "reply": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "status": "ok"
+      }
+    },
+    "upstreamIoDelta": [
+      {
+        "method": "device.io.tap",
+        "params": {
+          "deviceId": "emulator-5554",
+          "x": 1124,
+          "y": 540
+        }
+      }
+    ]
+  }
+}

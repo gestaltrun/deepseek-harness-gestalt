@@ -20,14 +20,14 @@
     },
     "./read-policy": {
       "types": "./lib/types/read-policy.d.ts",
-      "default": "./lib/read-policy.js"
+      "default": "./lib/types/read-policy.js"
     },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
-    "lib/read-policy.js",
+    "lib/types/**/*.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

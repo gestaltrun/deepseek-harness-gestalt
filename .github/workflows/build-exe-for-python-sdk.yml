@@ -181,7 +181,7 @@ jobs:
 
       - name: Install (immutable)
         run: >-
-          pnpm --silent exec tsx scripts/retry-transient-ci.ts
+          node scripts/retry-transient-ci.ts
           --report "$RUNNER_TEMP/ci-evidence/install-${{ matrix.target }}.json"
           -- pnpm install --frozen-lockfile
 

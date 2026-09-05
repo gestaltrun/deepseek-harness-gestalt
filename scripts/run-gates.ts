@@ -389,6 +389,7 @@ function ciSharedStaticGates(): Gate[] {
     pnpmScript('companion-product-entry', 'verify-companion-product-entry', { label: 'Companion product entry' }),
     pnpmScript('runtime-closure', 'verify-runtime-closure', { label: 'runtime closure' }),
     pnpmScript('constraints', 'constraints'),
+    pnpmScript('dependency-policy', 'verify-dependency-policy', { label: 'dependency preparation policy' }),
     pnpmScript('dsh-package-licenses', 'verify-dsh-package-licenses', { label: 'DSH package licenses' }),
     pnpmScript('package-invariants', 'verify-package-invariants', { label: 'package invariants' }),
     pnpmScript('cordis-config', 'verify-cordis-config', { label: 'Cordis config' }),

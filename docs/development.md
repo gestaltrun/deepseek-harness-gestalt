@@ -41,6 +41,18 @@ Setup is complete when `pnpm run typecheck` exits successfully.
 
 ## Contributor reference
 
+<a id="dependency-preparation-policy"></a>
+
+### Dependency preparation policy
+
+Checks do not repair dependencies. `pnpm-workspace.yaml` sets `verifyDepsBeforeRun: error`, so a top-level `pnpm run` or `pnpm exec` fails with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` when the installed state is cold or stale. Prepare from the repo root in the same environment class as the checks:
+
+```sh
+pnpm install --frozen-lockfile
+```
+
+Use the frozen command after switching to a revision whose manifests and lockfile already agree but whose installed state is stale. When intentionally changing dependencies, use `pnpm add` or `pnpm install` to update the lockfile, review that diff, and commit it; CI never updates the lockfile. Keep the environment class consistent: for example, state prepared with `CI=true` records `enableGlobalVirtualStore: false`, so prepare again without `CI` before local checks. `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` requests explicit preparation; `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` means an explicit or overridden install needs to purge `node_modules` without a terminal. `CI=true` affects the latter confirmation but does not repair dependency state. A deliberate pnpm CLI or `pnpm_config_verify_deps_before_run` override still takes precedence over the workspace default. The [dependency preparation policy Agent Note](../.agents/notes/implemented/process/2026-09-05-dependency-preparation-policy.md) owns the rationale; `pnpm run verify-dependency-policy` executes the offline regression fixture.
+
 ### TypeScript project layout
 
 The repository uses isolated Host and Client aggregates. An ordinary package is registered in exactly one aggregate: Host packages in `tsconfig.host.json` and Client packages in `tsconfig.client.json`.

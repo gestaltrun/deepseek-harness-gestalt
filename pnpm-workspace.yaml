@@ -32,6 +32,14 @@ peerDependencyRules:
   allowedVersions:
     typescript: '>=5 <7'
 
+# pnpm 11 defaults verify-deps-before-run to `install`, which may repair stale
+# state and run installation lifecycle before a requested top-level run/exec.
+# `error` retains consistency verification without implicit mutation. A
+# deliberate CLI or pnpm_config_* environment override still takes precedence;
+# this is a repository default, not a security boundary.
+# Rationale: .agents/notes/implemented/process/2026-09-05-dependency-preparation-policy.md
+verifyDepsBeforeRun: error
+
 # Runner-global pnpm settings must not expand a clean install into every
 # platform payload. Each checkout materializes only the binaries executable by
 # its host; cross-platform packaging lanes override this in their isolated tree.

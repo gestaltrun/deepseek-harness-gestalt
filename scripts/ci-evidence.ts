@@ -104,6 +104,7 @@ const GENERATED_GATE_IDS = new Set([
 
 const WORKFLOW_POLICY_GATE_IDS = new Set([
   'constraints',
+  'dependency-policy',
   'issue-management',
   'skill-invocation-metadata',
 ])

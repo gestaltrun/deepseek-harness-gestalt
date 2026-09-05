@@ -10,11 +10,11 @@ The operated ALB certificate was issued through a local ACME home and local Alib
 
 ## Decision
 
-A daily GitHub Actions workflow checks the active production certificate and renews only inside its configured renewal window. It runs in Environment `production`, assumes the existing Alibaba Cloud deploy role through OIDC, and uses no Alibaba Cloud AccessKey or workstation state.
+A daily GitHub Actions workflow checks the active production certificate and renews only inside its configured renewal window. An unprivileged job requires an explicit enable variable before the Environment `production` OIDC job can start. The privileged job assumes the existing Alibaba Cloud deploy role and uses no Alibaba Cloud AccessKey or workstation state.
 
 The workflow downloads one immutable acme.sh source archive and verifies its SHA-256 before execution. ACME account and domain state is archived under one exact key in the existing private deployment OSS bucket. The bucket applies OSS-managed AES256 server-side encryption, and each state upload explicitly requests it. Temporary state is owner-only and deleted when the job exits.
 
-The ACME DNS hook calls AliDNS through the workflow's OIDC credentials instead of acme.sh's AccessKey integration. Every created challenge record id is retained in a private temporary file and deleted from a guaranteed cleanup path. Certificate activation requires a matching private key, the exact apex and www SAN set, and the configured minimum remaining lifetime. The workflow updates only the operated ALB listener, verifies both ALB addresses through normal TLS validation, and never deletes the previous certificate automatically.
+The ACME DNS hook calls AliDNS through the workflow's OIDC credentials instead of acme.sh's AccessKey integration and accepts only the two exact operated challenge names. A failed record deletion retains its id and fails the job. Certificate activation requires a matching private key, the exact apex and www SAN set, and the configured minimum remaining lifetime. Durable transaction metadata records the prior and candidate certificate ids and candidate fingerprint before the listener update. Both names on both ALB addresses must serve that fingerprint before commit; TLS or metadata-commit failure restores the prior binding while preserving renewed ACME state for retry. The workflow never deletes the previous certificate automatically.
 
 Manual execution defaults to validation without issuance or listener mutation. Scheduled failures remain visible GitHub checks, and a failure inside the renewal window is the expiry alert.
 
@@ -34,4 +34,4 @@ Renewal depends on GitHub Actions and OSS control-plane confidentiality, while A
 
 ## Verification
 
-Platform workflow tests pin OIDC permissions, immutable ACME source verification, due and validation modes, OSS AES256 and owner-only state, challenge cleanup, key/SAN/lifetime validation order, listener-only mutation, and old-certificate retention. The operated dry-run validates current TLS and cloud read paths without certificate issuance.
+Executable shell tests pin the pre-OIDC enable gate, mutation-free validation, exact DNS-name rejection, OSS AES256 and owner-only state, and automatic prior-listener restoration after a failed durable commit. Static assertions retain immutable ACME source and credential-absence checks.

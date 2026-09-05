@@ -28,9 +28,9 @@ docker build -f apps/platform/Dockerfile -t dsh-platform .
 
 `.github/workflows/platform-certificate-renew.yml` 支持按需校验实际运行的证书，并每日检查是否进入续期窗口。它通过 GitHub OIDC 承担既有的生产阿里云角色；不使用阿里云 AccessKey、可复用 GitHub secret 或本地 OAuth 状态。workflow 在执行前校验不可变 acme.sh 源码归档，在仅属主可访问的临时 home 中运行，并把 ACME 账号与证书状态存入既有私有部署 OSS bucket 的精确 key。bucket 使用 OSS 托管的 AES256 服务端加密，上传还会显式请求同一种加密。
 
-定时任务在活动 ALB 证书进入三十天续期窗口前不会签发。续期使用原生 OIDC AliDNS hook，并且无论成功或失败都会删除所有挑战记录。只有私钥匹配、SAN 集合严格等于 apex 与 www、且有效期达到最低要求的证书才会上传。随后 workflow 只修改配置的 ALB listener 证书，使用正常 TLS 校验验证两个 ALB 地址，并保留之前的证书用于回滚。`workflow_dispatch` 默认选择 `validate`，在不签发或修改证书的前提下校验固定 client、存在时的加密状态访问、当前证书元数据、TLS endpoint 与云端读取权限。GitHub 会报告定时 job 失败；运维方必须把续期窗口内的失败视为到期告警。
+无特权 gate job 要求 `PLATFORM_CERT_RENEWAL_ENABLED=true`，OIDC production job 才能启动，因此合并 schedule 不会启用续期。定时任务在活动 ALB 证书进入三十天续期窗口前不会签发。续期使用原生 OIDC AliDNS hook，并且只接受 apex 与 www 的 challenge name；记录删除失败时会保留其 id 作为失败证据。只有私钥匹配、SAN 集合严格正确且有效期达到最低要求的证书才会上传。事务 metadata 会记录签发状态、之前与候选 certificate id、候选 fingerprint 与最终 commit。只有两个域名在两个 ALB 地址上都提供候选 leaf fingerprint，listener 变更才会被接受；TLS 或 metadata commit 失败会恢复之前的 binding，同时保留已续期 ACME state 供重试。`workflow_dispatch` 默认选择 `validate`，在不签发或修改任何云资源的前提下校验固定 client、存在时的状态访问、当前证书一致性、TLS endpoint 与云端读取权限。GitHub 会报告定时 job 失败；运维方必须把续期窗口内的失败视为到期告警。
 
-生产环境需要非 secret 变量 `PLATFORM_CERT_DOMAIN`、`PLATFORM_CERT_WWW_DOMAIN`、`PLATFORM_CERT_ALB_EIPS`、`PLATFORM_CERT_ALB_LISTENER_ID` 与 `PLATFORM_CERT_STATE_OBJECT`。部署角色只增加实际运行域名的 challenge-record 操作、证书上传／读取、指定 listener 的证书更新／读取，以及精确状态对象的 Get/Put；旧 listener 与旧证书继续保留用于回滚。OSS 服务端加密保护存储介质与提供方备份，精确 key IAM policy 和 HTTPS 保护云端访问路径。与 envelope encryption 不同，拥有 object-read authority 的 OSS control-plane compromise 可以暴露 ACME 私有状态；接受这个边界可以避免付费 KMS 服务与任何可复用解密 secret。
+生产环境需要非 secret 变量 `PLATFORM_CERT_RENEWAL_ENABLED`、`PLATFORM_CERT_DOMAIN`、`PLATFORM_CERT_WWW_DOMAIN`、`PLATFORM_CERT_ALB_EIPS`、`PLATFORM_CERT_ALB_LISTENER_ID` 与 `PLATFORM_CERT_STATE_OBJECT`。部署角色只增加实际运行域名的 challenge-record 操作、证书上传／读取、指定 listener 的证书更新／读取，以及精确状态对象的 Get/Put；旧 listener 与旧证书继续保留用于回滚。OSS 服务端加密保护存储介质与提供方备份，精确 key IAM policy 和 HTTPS 保护云端访问路径。与 envelope encryption 不同，拥有 object-read authority 的 OSS control-plane compromise 可以暴露 ACME 私有状态；接受这个边界可以避免付费 KMS 服务与任何可复用解密 secret。
 
 ## 已知限制与暂缓事项
 

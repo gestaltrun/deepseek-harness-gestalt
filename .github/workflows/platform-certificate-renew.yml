@@ -22,8 +22,22 @@ permissions:
   contents: read
 
 jobs:
+  enabled:
+    name: Check certificate automation gate
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - id: gate
+        env:
+          ENABLED: ${{ vars.PLATFORM_CERT_RENEWAL_ENABLED }}
+        run: |
+          if [[ "$ENABLED" == true ]]; then echo 'enabled=true' >> "$GITHUB_OUTPUT"; else echo 'enabled=false' >> "$GITHUB_OUTPUT"; fi
+
   renew:
     name: Renew production ALB certificate
+    needs: enabled
+    if: needs.enabled.outputs.enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production

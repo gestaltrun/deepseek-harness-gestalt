@@ -17,7 +17,7 @@
  * `current`; `openForRender()` opens a published Session's history without
  * selecting it. The package README owns the consumer contract.
  */
-import type { Context, Fiber } from '@deepseek-ai/cordis'
+import { FiberState, type Context, type Fiber } from '@deepseek-ai/cordis'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
@@ -271,8 +271,8 @@ export class ClientSessions implements ISessions {
       this.watched = undefined
       for (const [id, record] of scopes) this.startScopeDrop(id, record)
       await this.manager.dispose()
-      this.projectList()
       await Promise.allSettled(this.commandOps)
+      this.projectList()
       await this.drainScopeDrops()
     }, 'session-controller.client.sessions')
     rootCtx.reflect.provide('sessions', this, undefined)
@@ -600,23 +600,37 @@ export class ClientSessions implements ISessions {
   }
 
   /**
-   * Register one public async command so root disposal can await it.
+   * Own one public command before its next-microtask execution. Root disposal
+   * can suppress unstarted Host work and awaits every command that did start.
    * @param operation - public method name for the stable diagnostic.
    * @param run - command body; must re-assert activity after every await.
    * @returns the tracked command promise.
    */
   private trackCommand<T>(operation: string, run: () => Promise<T>): Promise<T> {
-    const op = (async () => {
-      this.assertActive(operation)
-      try {
-        return await run()
-      } catch (error: unknown) {
-        if (this.disposed) throw this.disposedError(operation)
-        throw error
-      }
-    })()
+    if (this.disposed) return Promise.reject(this.disposedError(operation))
+    const op = new Promise<T>((resolve, reject) => {
+      queueMicrotask(() => {
+        if (this.disposed || this.rootCtx.fiber.state !== FiberState.ACTIVE) {
+          reject(this.disposedError(operation))
+          return
+        }
+        let running: Promise<T>
+        try {
+          running = run()
+        } catch (error: unknown) {
+          reject(error)
+          return
+        }
+        void running.then(resolve, (error: unknown) => {
+          reject(this.disposed ? this.disposedError(operation) : error)
+        })
+      })
+    })
     this.commandOps.add(op)
-    void Promise.allSettled([op]).then(() => { this.commandOps.delete(op) })
+    void op.then(
+      () => { this.commandOps.delete(op) },
+      () => { this.commandOps.delete(op) },
+    )
     return op
   }
 
@@ -630,11 +644,9 @@ export class ClientSessions implements ISessions {
   }
 
   /**
-   * Move the stage to the list's current session: sweep teardowns deferred
-   * behind the previous occupant and pull the new occupant's history window.
-   * Staging IS the open signal — the window opens ⟺ the session is on stage
-   * — and open() is idempotent (an in-flight or completed open no-ops; a
-   * failed one retries the next time current is touched).
+   * Follow a valid current selection by sweeping deferred scope drops and
+   * opening that Session's history and direct-child catalog once per stage.
+   * A masked missing selection retains the prior stage and its frozen scope.
    */
   private followCurrent(): void {
     if (this.disposed) return

@@ -528,7 +528,58 @@ describe('provisional identity lifecycle', () => {
     expect(b.svc.scope(sid('born'))).toBeUndefined()
     expect(b.svc.list.getSnapshot().byId[sid('born')]).toBeUndefined()
     expect(notified.mock.calls.length).toBe(notifyCount)
+    notified.mockClear()
+    await Promise.resolve()
+    expect(notified).not.toHaveBeenCalled()
     expect(b.api.callsOf('session.rename')).toEqual([])
+  })
+
+  it('does not start create Host I/O when same-stack disposal owns the command', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const created = b.svc.create({ cwd: '/w' })
+    const disposal = b.ctx.fiber.dispose()
+    await expect(created).rejects.toThrow('sessions.create: ClientSessions is disposed')
+    await disposal
+    expect(b.api.callsOf('session.create')).toEqual([])
+  })
+
+  it('does not start fork Host I/O when same-stack disposal owns the command', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'source' }])
+    const forked = b.svc.fork({ sessionId: sid('source') })
+    const disposal = b.ctx.fiber.dispose()
+    await expect(forked).rejects.toThrow('sessions.fork: ClientSessions is disposed')
+    await disposal
+    expect(b.api.callsOf('session.fork')).toEqual([])
+  })
+
+  it('does not start search Host I/O when same-stack disposal owns the command', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const searching = b.svc.search('needle', new AbortController().signal)
+    const disposal = b.ctx.fiber.dispose()
+    await expect(searching).rejects.toThrow('sessions.search: ClientSessions is disposed')
+    await disposal
+    expect(b.api.callsOf('session.search')).toEqual([])
+  })
+
+  it('propagates a live synchronous Remote rejection without retaining command ownership', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const rejectCreate = vi.fn(() => { throw new Error('create transport failed') })
+    b.api.onCreate = rejectCreate
+    await expect(b.svc.create({ cwd: '/w' })).rejects.toThrow('create transport failed')
+    expect(rejectCreate).toHaveBeenCalledOnce()
+    await expect(b.ctx.fiber.dispose()).resolves.toBeUndefined()
   })
 
   it('rejects an in-flight titled fork after disposal without rename or a child binding', async () => {
@@ -560,6 +611,9 @@ describe('provisional identity lifecycle', () => {
     expect(b.svc.list.getSnapshot().byId[sid('child')]).toBeUndefined()
     expect(b.api.callsOf('session.rename')).toEqual([])
     expect(notified.mock.calls.length).toBe(notifyCount)
+    notified.mockClear()
+    await Promise.resolve()
+    expect(notified).not.toHaveBeenCalled()
   })
 
   it('aborts in-flight search on disposal without a Host response', async () => {
@@ -589,6 +643,9 @@ describe('provisional identity lifecycle', () => {
     expect(settled).toHaveBeenCalledOnce()
     expect(b.api.lastSearchSignal?.aborted).toBe(true)
     expect(notified.mock.calls.length).toBe(notifyCount)
+    notified.mockClear()
+    await Promise.resolve()
+    expect(notified).not.toHaveBeenCalled()
     expect(b.api.callsOf('session.search')).toHaveLength(1)
   })
 

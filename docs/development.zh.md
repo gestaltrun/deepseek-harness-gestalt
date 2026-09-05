@@ -43,6 +43,20 @@ pnpm run typecheck
 
 ## 贡献者参考
 
+<a id="dependency-preparation-policy"></a>
+
+### 依赖准备策略
+
+检查不安装依赖。`pnpm-workspace.yaml` 设置 `verifyDepsBeforeRun: error`，因此当已安装状态过冷或过旧时，`pnpm run` 与 `pnpm exec` 以 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` 失败，而不是静默重装。请从仓库根目录、在与检查相同的环境类中显式准备：
+
+```sh
+pnpm install --frozen-lockfile
+```
+
+同一命令可在切换分支或编辑 manifest 后恢复过旧的检出；在 `CI=true` 下安装的状态会向非 CI 运行报告 `enableGlobalVirtualStore` 设置已更改，因此本地检查请去掉该变量重新安装。存在两条不同的非交互错误：策略的 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` 要求执行上面的安装，而需要在无 TTY 下清除 `node_modules` 的安装以 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 失败——`CI=true` 只会静默该清除确认，不是万能解。刻意使用 CLI 标志或导出 `pnpm_config_verify_deps_before_run` 会按 pnpm 优先级覆盖仓库默认。[依赖准备策略 Agent Note](../.agents/notes/implemented/process/2026-09-05-dependency-preparation-policy.zh.md) 负责设计依据；`pnpm run verify-dependency-policy` 执行离线回归 fixture。
+
+<a id="typescript-project-layout"></a>
+
 <a id="typescript-project-layout"></a>
 
 ### TypeScript 项目布局

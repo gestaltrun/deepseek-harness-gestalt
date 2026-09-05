@@ -103,6 +103,7 @@
     "verify-package-paths": "tsx scripts/verify-package-paths.ts",
     "verify-dsh-package-licenses": "tsx scripts/verify-dsh-package-licenses.ts",
     "verify-config-source-ownership": "tsx scripts/verify-config-source-ownership.ts",
+    "verify-dependency-policy": "tsx scripts/verify-dependency-policy.ts",
     "verify-companion-no-push": "tsx scripts/verify-companion-no-push.ts",
     "verify-companion-product-entry": "tsx scripts/verify-companion-product-entry.ts",
     "verify-package-invariants": "tsx scripts/verify-package-invariants.ts",

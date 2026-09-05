@@ -350,10 +350,21 @@ describe('SubagentModelSelectionConfig', () => {
     await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
     const parent = await createAgent(ctx, 'deployment-parent', { deploymentRoutePreauthorization: true })
     const parentEvents = parent.session.snapshotEvents()
+    const policyEventCount = () => parent.session.snapshotEvents()
+      .filter(event => event.type === 'subagent/model-selection-policy').length
+    expect(selectable(ctx, parent)).toBe(true)
+    expect(policyEventCount()).toBe(1)
+
     await providerFiber.dispose()
-    await ctx.plugin(StaticSubagentRoutePreauthorization, {
+    await vi.waitFor(() => { expect(selectable(ctx, parent)).toBe(false) })
+    const replacementFiber = ctx.plugin(StaticSubagentRoutePreauthorization, {
       allowedModels: [{ provider: 'beta', model: 'new' }],
     })
+    await replacementFiber
+    await vi.waitFor(() => { expect(selectable(ctx, parent)).toBe(true) })
+    expect(subagentModelSelectionPolicy(ctx.sessionProjections, parent.session))
+      .toEqual([{ provider: 'alpha', model: 'old' }])
+    expect(policyEventCount()).toBe(1)
 
     const child = await createAgent(ctx, 'deployment-child', {
       meta: { parentSession: parent.id, origin: 'subagent' },

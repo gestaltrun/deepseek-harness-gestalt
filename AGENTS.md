@@ -1,14 +1,14 @@
 # AGENTS.md
 
-DeepSeek Harness is a plugin harness on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
+DeepSeek Harness runs on vendored Cordis: **everything is a plugin**. Read [architecture](docs/architecture.md) for package composition changes; follow [documentation rules](docs/AGENTS.md) for docs.
 
 ## Agent skills
 
-Use the [Gestalt tracker](docs/agents/issue-tracker.md), [labels](docs/agents/triage-labels.md), [context map](CONTEXT-MAP.md), and [domain rules](docs/agents/domain.md). Agent Notes own decisions. [Orchestrate issue/spec delivery](.agents/skills/orchestrate-dsh-delivery/SKILL.md) through verified merge by default; tags and releases require explicit approval.
+Use the [tracker](docs/agents/issue-tracker.md), [labels](docs/agents/triage-labels.md), [context map](CONTEXT-MAP.md), and [domain rules](docs/agents/domain.md). Agent Notes own decisions. Before delegating, apply [model routing and context reuse](docs/agents/delegation-routing.md). [Orchestrate delivery](.agents/skills/orchestrate-dsh-delivery/SKILL.md) through verified merge; releases require explicit approval.
 
-## Pre-release stance: foundation over blast radius
+## Unstable-format stance: foundation over blast radius
 
-**Remove this section at the first tagged release.** Prefer foundations to compatibility shims: rename or repackage and update every reference. Backends reject old formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` without compatibility promises.
+Until a format's owning document declares compatibility, prefer foundations to shims: rename or repackage and update every reference. Backends reject old formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` without compatibility promises.
 
 ## Repository layout
 

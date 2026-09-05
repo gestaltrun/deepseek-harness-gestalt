@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Setup TS Deep Modules
 
-Make every package in this repo a **deep module**: a lot of behaviour behind a small interface. A package's public surface is its **entry points** (the files at the package root), and everything in its subfolders is hidden. This skill installs [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) and the rules that make the entry points the only way in, then proves the rules bite.
+Make packages deep modules within the repository's established source, export, and test layout. This skill installs [dependency-cruiser](https://github.com/sverweij/dependency-cruiser), encodes the agreed package boundaries, and proves the rules reject a real violation. Do not impose the example layout below when project instructions define another owner.
 
 For the vocabulary (deep module, interface, seam, depth), call the Skill tool with "codebase-design" and use its language throughout.
 
@@ -39,7 +39,7 @@ Layering (which packages may depend on which) is a *different* concern and is le
 ### 1. Detect the environment
 
 - **Package manager**: `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb` → bun, else npm. Use it for every command below (`pnpm`/`yarn`/`npm run`/`bunx`).
-- **Packages root**: if `src/` exists use `src/packages`, else `packages`. Confirm the choice with the user if the repo already has a different obvious convention.
+- **Packages and source roots**: read workspace manifests, exports, tsconfig paths, and repository instructions. Preserve grouped or package-local `src/` layouts; confirm only when no owner establishes the convention.
 - **Existing config**: check for a `.dependency-cruiser.*` file. If one exists, do **not** overwrite it: merge the four rules and the options in, and tell the user what you added.
 
 **Done when:** package manager, packages root, and existing-config status are all known.
@@ -66,7 +66,7 @@ Copy [`dependency-cruiser.config.cjs`](./dependency-cruiser.config.cjs) to the r
 
 ### 5. Scaffold the example package
 
-Create a committed `<packages-root>/example/` as a copy-me template:
+Create a committed example package only when the user requested scaffolding and the repository permits template packages. Otherwise use an existing package or a temporary fixture to prove the rule:
 
 - `index.ts` is an entry point. Export one function that delegates to an internal file (so the package is visibly *deep*, not a pass-through).
 - `lib/impl.ts`: an internal file in a **subfolder**, imported by `index.ts`, not reachable from outside.
@@ -90,7 +90,7 @@ This is the completion criterion for the whole skill: a config that doesn't fail
 
 Write a `README.md` **in the packages folder** (`<packages-root>/README.md`, next to the packages it governs) covering: the `src/packages/<name>/` layout (entry points at the root, `lib/` for implementation, `tests/` for tests), "import only through a package's entry points (its root files)", and how to run `lint:boundaries`. **Discourage barrel files** explicitly: expose several small entry points instead of re-exporting a whole subtree through one index. Keep it to the copy-me snippet plus the four rules in one paragraph each.
 
-Then add a **context pointer** to it from the repo's agent-instructions file (`CLAUDE.md` if present, else `AGENTS.md`, creating `AGENTS.md` if neither exists). One line is enough, e.g. `Packages are deep modules: see [src/packages/README.md](./src/packages/README.md) before adding or importing one.` This is what makes an agent discover the boundary rule instead of tripping over it.
+Then add a **context pointer** from the repository's owning agent-instructions file. Resolve symlinks and edit the real target; when both `CLAUDE.md` and `AGENTS.md` exist, follow repository policy rather than choosing by filename. One line is enough, for example: `Packages are deep modules: see [packages/README.md](./packages/README.md) before adding or importing one.`
 
 **Done when:** `<packages-root>/README.md` exists and discourages barrels, and the repo's `CLAUDE.md`/`AGENTS.md` links to it.
 

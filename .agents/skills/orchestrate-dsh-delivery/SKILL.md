@@ -1,6 +1,10 @@
 ---
 name: orchestrate-dsh-delivery
-description: Orchestrate DeepSeek Harness issue and specification delivery from the Gestalt GitHub tracker through isolated ticket writers, a merger subagent, one specification pull request, a retro gate, and merge. Use by default when the user asks to implement, fix, continue, or land a ticket or specification in this repository, including short requests such as "implement #123" or "continue this spec".
+description: >-
+  Orchestrate DeepSeek Harness issue and specification delivery through isolated
+  writers, one specification pull request, review, retro, and merge. Use when the
+  user asks to implement, fix, continue, or land repository work, including
+  "implement #123" and "continue this spec".
 ---
 
 # Orchestrate DSH Delivery
@@ -18,7 +22,7 @@ Complete this phase when the requested outcome, live ticket graph, mutation auth
 
 ## Keep the root on orchestration
 
-1. Restrict the root session to demand clarification, scheme decomposition, task dispatch, and result acceptance. Choose the most appropriate model for each worker at dispatch; no role pins a model.
+1. Restrict the root session to demand clarification, scheme decomposition, task dispatch, and result acceptance. Before dispatch or continuation, apply [delegation routing and context reuse](../../../docs/agents/delegation-routing.md): choose an explicit available provider/model under current user restrictions, and reuse a suitable direct child only when independence and a model change are unnecessary.
 2. Dispatch implementation through the runtime's Agent tool: under DSH, `subagent` or `subagent_fork`; under Codex, a worktree task when available. Implementation is reading a large code surface to change it, writing or editing product or documentation files, running local tests or other executable evidence, and bulk edits.
 3. Treat user feedback, CI failures, review findings, and retro keep-or-drop landings the same way, including after the specification looks done. Classify the work, brief a writer, wait, and accept reported evidence. Do not implement the follow-up in the coordinating session.
 4. The root may read GitHub, the tracker, worker reports, and CI status; write a brief; create an empty specification branch and Draft pull request; and enqueue a merge once reported evidence passes. It does not land code, documentation, or environment edits in the coordinating checkout.
@@ -48,7 +52,7 @@ Complete this phase when every selected ticket has one writer branch, one accept
 
 ## Dispatch isolated writers
 
-1. Keep the root task as coordinator and monitor. It does not merge writer branches. Match the writer executor to the runtime: under Codex, prefer one Codex Worktree task per ready ticket when task/worktree tools are available; under DSH, dispatch one `subagent_fork` writer per ready ticket and use plain `subagent` where conversation inheritance adds nothing. Choose each ticket's model at dispatch by the root's judgment; no role pins a model. On the normal path, every writer commits only inside its own isolated worktree. Assign the project `ticket_worker` role when custom agents are available.
+1. Keep the root task as coordinator and monitor. It does not merge writer branches. Match the writer executor to the runtime: under Codex, prefer one Codex Worktree task per ready ticket when task/worktree tools are available; under DSH, choose continuation, `subagent`, or `subagent_fork` through [the routing reference](../../../docs/agents/delegation-routing.md). Pass an explicit available provider/model when the tool supports routing; no role pins a model. On the normal path, every writer commits only inside its own isolated worktree. Assign the project `ticket_worker` role when custom agents are available.
 2. Give each worker exactly one ticket, one `codex/<issue>-<slug>` branch, one worktree, the verified remote specification branch and SHA, the scratch exploration path when one exists, the acceptance criteria, and the required reporting format. Never let two writers mutate the same worktree.
 3. Allow read-heavy exploration, log analysis, and review to run as subagents inside a ticket. Keep one writer for that ticket unless every writer has a disjoint worktree and branch.
 4. Route follow-ups and dependency discoveries through the root task as briefs to writers. Sibling agents need no direct communication. Record durable cross-ticket facts in the relevant Issue, the specification pull request, Context document, or Agent Note.
@@ -70,7 +74,7 @@ Complete this phase when every dispatched executor's final state has been observ
 Require each ticket worker to:
 
 1. Fetch the recorded remote specification branch, create the ticket branch from its exact SHA, and re-read the ticket and mapped domain sources from that checkout. Read scratch exploration notes when the handoff recorded a path.
-2. Use the Matt [`implement`](../implement/SKILL.md) workflow and TDD at an agreed seam where practical. That skill owns one ticket in the current worktree: red-green at the agreed seam, narrow checks, `code-review`, then commit. Repository instructions and [DSH pre-push checks](../dsh-pre-push-checks/SKILL.md) override the Matt `implement` workflow's generic full-suite advice.
+2. Follow the shared implementation workflow in [`implement`](../implement/SKILL.md) as an ordinary reference; it is a user-invoked entry, not a required automatic Skill-tool call. Use TDD at an agreed seam where practical, then select narrow checks through [DSH pre-push checks](../dsh-pre-push-checks/SKILL.md).
 3. Preserve unrelated worktree changes. Add the required documentation, Agent Note, and real runnable snapshot when their repository rules apply. For a GUI change, prove the ticket's slice of the experience route with a non-recording smoke through [dsh-desktop-test-instance](../dsh-desktop-test-instance/SKILL.md) (headless) and [ego-browser](../ego-browser/SKILL.md) (one DSH task space per goal). Do not start a headed instance for the user. Defer GIF recording and the whole-route walk until the fidelity and acceptance sessions below.
 4. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote ticket head. Do not open a pull request.
 5. Return the branch, commit, checks run, review blockers, scratch notes path, and any changed dependency to the root task.

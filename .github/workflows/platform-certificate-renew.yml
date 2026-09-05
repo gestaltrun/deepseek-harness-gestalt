@@ -102,3 +102,12 @@ jobs:
           ACME_ARCHIVE_SHA256: 9af3ad3d775a5782246df4cdd4b4e7b9b3179deb63c509b10e3ba0433093a884
           REQUESTED_MODE: ${{ github.event_name == 'schedule' && 'renew' || inputs.mode }}
         run: bash apps/platform/scripts/platform-certificate-renew.sh "$REQUESTED_MODE"
+
+      - name: Upload cleanup failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certificate-renewal-cleanup-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-certificate-renewal-cleanup-evidence.json
+          if-no-files-found: ignore
+          retention-days: 30

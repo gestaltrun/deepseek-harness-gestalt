@@ -64,11 +64,174 @@ describe('exact iOS input rotation', () => {
   })
 
   it('dispatches Android semantic actions directly', () => {
-    expect(upstreamIo(tap(0), 'android')).toEqual({
-      method: 'device.io.tap', params: { deviceId: 'ios', x: 603, y: 1311 },
+    expect(upstreamIo({
+      deviceId: deviceId('android'), method: 'tap', source: { kind: 'fresh-probe' }, x: 603, y: 1_311,
+    }, 'android')).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'android', x: 603, y: 1311 },
     })
     expect(upstreamIo({ deviceId: deviceId('android'), method: 'swipe', source: { kind: 'fresh-probe' }, x1: 1, y1: 2, x2: 3, y2: 4 }, 'android')).toEqual({
       method: 'device.io.swipe', params: { deviceId: 'android', x1: 1, y1: 2, x2: 3, y2: 4 },
+    })
+  })
+
+  it('scales Android capture-source taps and swipes onto the current logical display', () => {
+    const captureId = phoneCaptureId('android-capture')
+    const source = {
+      kind: 'capture' as const,
+      captureId,
+      captureFormat: 'h264' as const,
+      captureWidth: 1_124,
+      captureHeight: 540,
+    }
+    const logical = { width: 2_248, height: 1_080 }
+    expect(upstreamIo({
+      deviceId: deviceId('android'), method: 'tap', x: 562, y: 270, source,
+    }, 'android', undefined, undefined, logical)).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'android', x: 1_124, y: 540 },
+    })
+    expect(upstreamIo({
+      deviceId: deviceId('android'), method: 'swipe',
+      x1: 0, y1: 0, x2: 1_124, y2: 540, source,
+    }, 'android', undefined, undefined, logical)).toEqual({
+      method: 'device.io.swipe',
+      params: { deviceId: 'android', x1: 0, y1: 0, x2: 2_248, y2: 1_080 },
+    })
+  })
+
+  it('refuses Android capture-source coordinates whose plane is not the logical display aspect', () => {
+    const source = {
+      kind: 'capture' as const,
+      captureId: phoneCaptureId('android-portrait'),
+      captureFormat: 'h264' as const,
+      captureWidth: 1_080,
+      captureHeight: 2_248,
+    }
+    expect(() => upstreamIo({
+      deviceId: deviceId('android'), method: 'tap', x: 540, y: 1_124, source,
+    }, 'android', undefined, undefined, { width: 2_248, height: 1_080 }))
+      .toThrow(/logical display/u)
+    expect(upstreamIo({
+      deviceId: deviceId('android'), method: 'button', button: 'HOME',
+    }, 'android')).toEqual({
+      method: 'device.io.button', params: { deviceId: 'android', button: 'HOME' },
+    })
+  })
+
+  it('refuses Android capture-source coordinates without a current logical display', () => {
+    expect(() => upstreamIo({
+      deviceId: deviceId('android'),
+      method: 'tap',
+      x: 562,
+      y: 270,
+      source: {
+        kind: 'capture',
+        captureId: phoneCaptureId('android-missing'),
+        captureFormat: 'h264',
+        captureWidth: 1_124,
+        captureHeight: 540,
+      },
+    }, 'android')).toThrow(/logical display/u)
+  })
+
+  it('accepts even-coded Android capture rounding onto the logical display', () => {
+    const logical = { width: 2_248, height: 1_080 }
+    expect(upstreamIo({
+      deviceId: deviceId('android'),
+      method: 'tap',
+      x: 539,
+      y: 259,
+      source: {
+        kind: 'capture',
+        captureId: phoneCaptureId('android-even-round'),
+        captureFormat: 'h264',
+        captureWidth: 1_078,
+        captureHeight: 518,
+      },
+    }, 'android', undefined, undefined, logical)).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'android', x: 1_124, y: 540 },
+    })
+    expect(upstreamIo({
+      deviceId: deviceId('android'),
+      method: 'tap',
+      x: 541,
+      y: 260,
+      source: {
+        kind: 'capture',
+        captureId: phoneCaptureId('android-one-pixel'),
+        captureFormat: 'h264',
+        captureWidth: 1_082,
+        captureHeight: 520,
+      },
+    }, 'android', undefined, undefined, logical)).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'android', x: 1_124, y: 540 },
+    })
+  })
+
+  it('refuses Android capture rounding beyond one reconstructed logical pixel', () => {
+    const logical = { width: 2_248, height: 1_080 }
+    expect(() => upstreamIo({
+      deviceId: deviceId('android'),
+      method: 'tap',
+      x: 542,
+      y: 260,
+      source: {
+        kind: 'capture',
+        captureId: phoneCaptureId('android-round-mismatch'),
+        captureFormat: 'h264',
+        captureWidth: 1_084,
+        captureHeight: 520,
+      },
+    }, 'android', undefined, undefined, logical))
+      .toThrow(/logical display/u)
+    expect(() => upstreamIo({
+      deviceId: deviceId('android'),
+      method: 'tap',
+      x: 200,
+      y: 96,
+      source: {
+        kind: 'capture',
+        captureId: phoneCaptureId('android-400x192'),
+        captureFormat: 'h264',
+        captureWidth: 400,
+        captureHeight: 192,
+      },
+    }, 'android', undefined, undefined, logical))
+      .toThrow(/logical display/u)
+  })
+
+  it('refuses non-positive Android logical display and capture extents', () => {
+    const source = {
+      kind: 'capture' as const,
+      captureId: phoneCaptureId('android-extents'),
+      captureFormat: 'h264' as const,
+      captureWidth: 1_124,
+      captureHeight: 540,
+    }
+    expect(() => upstreamIo({
+      deviceId: deviceId('android'), method: 'tap', x: 562, y: 270, source,
+    }, 'android', undefined, undefined, { width: 0, height: 1_080 }))
+      .toThrow(/logical display must be positive/u)
+    expect(() => upstreamIo({
+      deviceId: deviceId('android'),
+      method: 'tap',
+      x: 562,
+      y: 270,
+      source: { ...source, captureWidth: 0 },
+    }, 'android', undefined, undefined, { width: 2_248, height: 1_080 }))
+      .toThrow(/capture dimensions must be positive/u)
+  })
+
+  it('forwards Android fresh-probe coordinates without a logical display', () => {
+    expect(upstreamIo({
+      deviceId: deviceId('android'), method: 'tap', source: { kind: 'fresh-probe' }, x: 562, y: 270,
+    }, 'android')).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'android', x: 562, y: 270 },
+    })
+  })
+
+  it('keeps iOS exact projection when an Android logical display is also supplied', () => {
+    expect(upstreamIo(tap(0), 'ios', 0, SCREEN, { width: 2_248, height: 1_080 })).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'ios', x: 201, y: 437 },
     })
   })
 
@@ -102,6 +265,7 @@ describe('exact iOS input rotation', () => {
 
   it('refuses unknown rotation and derives the model screenshot extent when dimensions are omitted', () => {
     expect(() => upstreamIo(tap(90), 'ios')).toThrow(/exact iOS capture rotation is unknown/u)
+    expect(() => upstreamIo(tap(0), 'ios', 0)).toThrow(/iOS input requires device.info screenSize/u)
     expect(upstreamIo({ deviceId: deviceId('ios'), method: 'tap', source: { kind: 'fresh-probe' }, x: 603, y: 1_311 }, 'ios', 0, SCREEN))
       .toEqual({ method: 'device.io.tap', params: { deviceId: 'ios', x: 201, y: 437 } })
     expect(upstreamIo({ deviceId: deviceId('ios'), method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 }, 'ios', 90, SCREEN))

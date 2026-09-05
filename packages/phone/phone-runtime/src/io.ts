@@ -1,4 +1,4 @@
-/** Exact-rotation input projection for mobilecli device-control calls. */
+/** Platform input projection for mobilecli device-control calls. */
 
 import { PhoneDevicesError } from './errors.ts'
 import type { PhoneIoRequest, PhoneRotation } from './types.ts'
@@ -14,6 +14,12 @@ export interface IosScreenSize {
 export interface PhoneUpstreamIo {
   readonly method: 'device.io.tap' | 'device.io.swipe' | 'device.io.text' | 'device.io.button'
   readonly params: Record<string, unknown>
+}
+
+/** Current Android `dumpsys display` `logicalFrame` pixels. */
+export interface AndroidLogicalDisplay {
+  readonly width: number
+  readonly height: number
 }
 
 /**
@@ -62,10 +68,12 @@ export function iosPortraitEventPoint(
     case 90: return { x: displayedY, y: screen.height - displayedX }
     case 180: return { x: screen.width - displayedX, y: screen.height - displayedY }
     case 270: return { x: screen.width - displayedY, y: displayedX }
+    /* v8 ignore next -- PhoneRotation is the closed 0|90|180|270 union. */
     default: return assertNever(rotation)
   }
 }
 
+/* v8 ignore next -- closed PhoneIoRequest / PhoneCoordinateSource / PhoneRotation exhaustiveness. */
 function assertNever(value: never): never { throw new TypeError(`unexpected phone io value: ${String(value)}`) }
 
 /**
@@ -74,13 +82,18 @@ function assertNever(value: never): never { throw new TypeError(`unexpected phon
  * @param platform - listed device platform.
  * @param rotation - exact capture rotation for coordinate actions.
  * @param screen - iOS portrait logical bounds for coordinate actions.
+ * @param logicalDisplay - current Android logical display for capture-source coordinate actions.
  * @returns one upstream mobilecli IO call.
+ * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when Android capture-source
+ *   coordinates lack a current logical display or the capture plane is not the
+ *   same aspect as that display.
  */
 export function upstreamIo(
   request: PhoneIoRequest,
   platform: 'android' | 'ios',
   rotation?: PhoneRotation,
   screen?: IosScreenSize,
+  logicalDisplay?: AndroidLogicalDisplay,
 ): PhoneUpstreamIo {
   switch (request.method) {
     case 'text':
@@ -90,25 +103,11 @@ export function upstreamIo(
     case 'tap':
     case 'swipe':
       break
+    /* v8 ignore next -- PhoneIoRequest is the closed tap|swipe|text|button union. */
     default:
       return assertNever(request)
   }
-  switch (request.source.kind) {
-    case 'capture':
-    case 'fresh-probe':
-      break
-    default:
-      return assertNever(request.source)
-  }
-  if (platform === 'android') {
-    if (request.method === 'tap') {
-      return { method: 'device.io.tap', params: { deviceId: request.deviceId, x: request.x, y: request.y } }
-    }
-    return {
-      method: 'device.io.swipe',
-      params: { deviceId: request.deviceId, x1: request.x1, y1: request.y1, x2: request.x2, y2: request.y2 },
-    }
-  }
+  if (platform === 'android') return androidUpstreamIo(request, logicalDisplay)
   if (rotation === undefined) {
     throw new PhoneDevicesError('PHONE_PROTOCOL', 'exact iOS capture rotation is unknown; observe a current frame before input')
   }
@@ -126,6 +125,99 @@ export function upstreamIo(
     x, y, captureWidth, captureHeight, screen, rotation,
   )
   return iosPortraitGesture(request, point, rotation)
+}
+
+/**
+ * Project one Android tap or swipe. Fresh-probe pixels stay unscaled. Capture
+ * pixels are the decoded plane and scale onto the current logical display
+ * under the uniform full-frame aspect assumption; missing or incompatible
+ * aspect fails before any RPC.
+ * @param request - Semantic tap or swipe.
+ * @param logicalDisplay - Current incarnation logical display, when known.
+ * @returns one upstream tap or swipe call.
+ */
+function androidUpstreamIo(
+  request: Extract<PhoneIoRequest, { method: 'tap' | 'swipe' }>,
+  logicalDisplay: AndroidLogicalDisplay | undefined,
+): PhoneUpstreamIo {
+  const point = androidCoordinateProjector(request.source, logicalDisplay)
+  switch (request.method) {
+    case 'tap': {
+      const target = point(request.x, request.y)
+      return { method: 'device.io.tap', params: { deviceId: request.deviceId, x: target.x, y: target.y } }
+    }
+    case 'swipe': {
+      const start = point(request.x1, request.y1)
+      const end = point(request.x2, request.y2)
+      return {
+        method: 'device.io.swipe',
+        params: { deviceId: request.deviceId, x1: start.x, y1: start.y, x2: end.x, y2: end.y },
+      }
+    }
+    /* v8 ignore next -- Android coordinate methods are the closed tap|swipe union. */
+    default:
+      return assertNever(request)
+  }
+}
+
+function androidCoordinateProjector(
+  source: Extract<PhoneIoRequest, { method: 'tap' | 'swipe' }>['source'],
+  logicalDisplay: AndroidLogicalDisplay | undefined,
+): (x: number, y: number) => { readonly x: number; readonly y: number } {
+  switch (source.kind) {
+    case 'fresh-probe':
+      return (x, y) => ({ x, y })
+    case 'capture': {
+      if (logicalDisplay === undefined) {
+        throw new PhoneDevicesError(
+          'PHONE_PROTOCOL',
+          'Android capture-source input requires the current logical display',
+        )
+      }
+      const captureWidth = source.captureWidth
+      const captureHeight = source.captureHeight
+      assertSameAspect(captureWidth, captureHeight, logicalDisplay.width, logicalDisplay.height)
+      return (x, y) => ({
+        x: scaledAxis(x, captureWidth, logicalDisplay.width),
+        y: scaledAxis(y, captureHeight, logicalDisplay.height),
+      })
+    }
+    /* v8 ignore next -- PhoneCoordinateSource is the closed capture|fresh-probe union. */
+    default:
+      return assertNever(source)
+  }
+}
+
+/**
+ * Treat capture and logical display as the same aspect when each reconstructed
+ * logical axis, rounded to an integer pixel, lands within 1 logical pixel of
+ * the known display. That bound is integer reconstruction of a uniform
+ * full-frame scale, not a ratio epsilon and not proof of bar-free pixels.
+ * @param captureWidth - Decoded capture width.
+ * @param captureHeight - Decoded capture height.
+ * @param displayWidth - Current logical display width.
+ * @param displayHeight - Current logical display height.
+ */
+function assertSameAspect(
+  captureWidth: number,
+  captureHeight: number,
+  displayWidth: number,
+  displayHeight: number,
+): void {
+  if (!Number.isFinite(displayWidth) || displayWidth <= 0 || !Number.isFinite(displayHeight) || displayHeight <= 0) {
+    throw new PhoneDevicesError('PHONE_PROTOCOL', 'Android logical display must be positive finite numbers')
+  }
+  if (!Number.isFinite(captureWidth) || captureWidth <= 0 || !Number.isFinite(captureHeight) || captureHeight <= 0) {
+    throw new PhoneDevicesError('PHONE_PROTOCOL', 'capture dimensions must be positive finite numbers')
+  }
+  const reconstructedWidth = Math.round(captureWidth * displayHeight / captureHeight)
+  const reconstructedHeight = Math.round(captureHeight * displayWidth / captureWidth)
+  if (Math.abs(reconstructedWidth - displayWidth) > 1 || Math.abs(reconstructedHeight - displayHeight) > 1) {
+    throw new PhoneDevicesError(
+      'PHONE_PROTOCOL',
+      'Android capture plane is not the same aspect as the current logical display',
+    )
+  }
 }
 
 /**
@@ -161,6 +253,7 @@ function iosPortraitGesture(
         params: { deviceId: request.deviceId, x1: start.x, y1: start.y, x2: end.x, y2: end.y },
       }
     }
+    /* v8 ignore next -- iOS coordinate methods are the closed tap|swipe union. */
     default:
       return assertNever(request)
   }

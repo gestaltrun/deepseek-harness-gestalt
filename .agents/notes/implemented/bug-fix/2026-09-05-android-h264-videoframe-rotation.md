@@ -34,4 +34,4 @@ H264 90/270 metadata flips the box without Host help. Android screenrecord with 
 
 ## Related
 
-The frame box, `--phone-surface-ratio`, and `object-fit: contain` remain [the measured-surface decision](2026-09-03-phone-frame-follows-measured-surface.md). WebCodecs playback ownership remains [the H264 WebCodecs note](2026-08-30-ui-phone-h264-webcodecs-playback.md).
+The frame box, `--phone-surface-ratio`, and `object-fit: contain` remain [the measured-surface decision](2026-09-03-phone-frame-follows-measured-surface.md). WebCodecs playback ownership remains [the H264 WebCodecs note](2026-08-30-ui-phone-h264-webcodecs-playback.md). Android capture-source scaling onto `logicalDisplay` is [the capture-to-logical decision](2026-09-05-android-capture-logical-input.md).

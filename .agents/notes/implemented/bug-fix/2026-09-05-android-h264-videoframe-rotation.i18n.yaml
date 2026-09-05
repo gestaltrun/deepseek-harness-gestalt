@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-05-android-h264-videoframe-rotation.md
-2026-09-05-android-h264-videoframe-rotation.md: 9b0c66298e8a91787e7cfd5a97714eef36580fdf
-2026-09-05-android-h264-videoframe-rotation.zh.md: 6872bb0a2ce67f6675db7f3a2db4a30dd0e33e66
+2026-09-05-android-h264-videoframe-rotation.md: 4c5f4be4c19790b236b0dbe1789514b0d77f6211
+2026-09-05-android-h264-videoframe-rotation.zh.md: d4b41dea7875b169697d87d0e99ceb8c1ff87b5f

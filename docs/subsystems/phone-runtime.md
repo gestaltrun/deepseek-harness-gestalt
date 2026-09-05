@@ -231,18 +231,27 @@ async boot(id: DeviceId, signal?: AbortSignal): Promise<void>
 async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
 
 /**
- * Execute one semantic tap, swipe, text, or button action. Android coordinate
- * actions retain their pixels. iOS obtains cached portrait `device.info`
- * bounds and projects every displayed endpoint through exact rotation;
- * browser actions bind current capture identity and model actions use a
- * bounded fresh MJPEG EXIF probe. Physical handsets are valid targets; only
- * ids absent from the latest published listing fail locally before any RPC.
+ * Execute one semantic tap, swipe, text, or button action. Capture-source
+ * `x`/`y` and `captureWidth`/`captureHeight` remain the decoded plane.
+ * Android capture-source taps and swipes scale both axes onto the current
+ * incarnation `logicalDisplay`; missing logical bounds or a capture plane
+ * that fails the uniform full-frame aspect assumption fail with
+ * `PHONE_PROTOCOL` before RPC. A dumpsys miss does not replace the
+ * incarnation. Android fresh-probe pixels
+ * pass through. iOS obtains cached portrait `device.info` bounds and
+ * projects every displayed endpoint through exact rotation; browser actions
+ * bind current capture identity and model actions use a bounded fresh MJPEG
+ * EXIF probe. Button and text stay independent of coordinate conversion.
+ * Physical handsets are valid targets; only ids absent from the latest
+ * published listing fail locally before any RPC.
  * @param request - Branded device id plus capture-pixel or non-coordinate input.
  * @param signal - Caller's optional cancellation signal.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
  *   absent from the latest published listing, `PHONE_PROTOCOL` when an iOS
- *   `device.info` answer lacks a valid positive screen size, and otherwise
- *   per the class-documented failure modes.
+ *   `device.info` answer lacks a valid positive screen size or Android
+ *   capture-source input lacks a current logical display that matches the
+ *   uniform full-frame aspect assumption, and
+ *   otherwise per the class-documented failure modes.
  */
 async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
 

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-05-android-capture-logical-input.md
+2026-09-05-android-capture-logical-input.md: ac1985f7e221d6bc7b56c310b86e0ac099685a19
+2026-09-05-android-capture-logical-input.zh.md: 9decd67d2a4a3add8c43b1474d2aaeed7386be5d

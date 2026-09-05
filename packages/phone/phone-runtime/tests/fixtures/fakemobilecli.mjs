@@ -66,6 +66,7 @@ const state = {
   infoCount: 0,
   io: [],
   captures: [],
+  rpc: [],
   scroll: {},
 }
 let requests = 0
@@ -77,6 +78,7 @@ const exitAfter = typeof knobs.exitAfter === 'number' ? knobs.exitAfter : null
 // When set, the named RPC method answers with this JSON-RPC error instead of
 // its normal handler; the suite pins structured real-device error arms on it.
 const failArm = knobs.failArm ?? null
+let failArmRemaining = typeof failArm?.remaining === 'number' ? failArm.remaining : (failArm === null ? 0 : Number.POSITIVE_INFINITY)
 
 const AGENT_STATE_FILE = join(selfDir, 'fakemobilecli.agent-state.json')
 
@@ -262,12 +264,21 @@ async function handleRpc(req, res) {
   const request = JSON.parse(raw)
   const { id, method, params } = request ?? {}
   requests += 1
+  state.rpc.push({ method })
   if (hangEveryResponse) return
-  if (failArm !== null && failArm.method === method) {
+  if (failArm !== null && failArm.method === method && failArmRemaining > 0) {
+    failArmRemaining -= 1
     reply(res, id, { error: { code: failArm.code ?? -32000, message: failArm.message } })
     return
   }
-  if (listDelayMs > 0 && requests > listDelayAfterRequests && method === 'devices.list') {
+  const subsequentList = knobs.delaySubsequentDeviceLists === true
+    && method === 'devices.list'
+    && state.rpc.filter(entry => entry.method === 'devices.list').length > 1
+  const afterRequestGate = knobs.delaySubsequentDeviceLists !== true
+    && listDelayMs > 0
+    && method === 'devices.list'
+    && requests > listDelayAfterRequests
+  if (listDelayMs > 0 && method === 'devices.list' && (subsequentList || afterRequestGate)) {
     await new Promise(resolveDelay => setTimeout(resolveDelay, listDelayMs))
   }
   // The exit knob fires only after the real method reply, so response content
@@ -430,6 +441,7 @@ const server = http.createServer((req, res) => {
           infoCount: state.infoCount,
           io: state.io,
           captures: state.captures,
+          rpc: state.rpc,
           screenshots: state.screenshots,
           scroll: state.scroll,
         })

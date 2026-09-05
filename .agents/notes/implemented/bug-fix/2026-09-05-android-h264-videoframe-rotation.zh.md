@@ -34,4 +34,4 @@ Status: implemented
 
 ## Related
 
-画面框、`--phone-surface-ratio` 与 `object-fit: contain` 仍由 [实测画面决策](2026-09-03-phone-frame-follows-measured-surface.zh.md) 持有。WebCodecs 播放所有权仍由 [H264 WebCodecs 笔记](2026-08-30-ui-phone-h264-webcodecs-playback.zh.md) 持有。
+画面框、`--phone-surface-ratio` 与 `object-fit: contain` 仍由 [实测画面决策](2026-09-03-phone-frame-follows-measured-surface.zh.md) 持有。WebCodecs 播放所有权仍由 [H264 WebCodecs 笔记](2026-08-30-ui-phone-h264-webcodecs-playback.zh.md) 持有。 Android 采集源缩放到 `logicalDisplay` 由[采集到逻辑输入决策](2026-09-05-android-capture-logical-input.zh.md)持有。

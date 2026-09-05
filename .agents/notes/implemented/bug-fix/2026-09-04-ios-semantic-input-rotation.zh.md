@@ -12,7 +12,7 @@ Status: implemented
 
 ## Decision
 
-`PhoneDevices.io()` 统一拥有 tap、swipe、text 与 button 的闭合语义动作及平台转换。Android 直接发送语义 tap 和 swipe。每个 iOS 坐标端点都从当前显示截图平面缩放到竖屏逻辑边界，再按精确的 `0 | 90 | 180 | 270` 旋转执行逆变换。0 度 tap 使用 `device.io.tap`；旋转后的 tap 使用零距离 `device.io.swipe`；所有语义 swipe 都使用变换后的端点调用 `device.io.swipe`，并沿用上游默认时长。
+`PhoneDevices.io()` 统一拥有 tap、swipe、text 与 button 的闭合语义动作及平台转换。采集源的 `x`/`y` 与 `captureWidth`/`captureHeight` 仍是解码平面。Android 采集源 tap 与 swipe 把两轴缩放到当前 incarnation 的 `logicalDisplay`；缺少逻辑边界或宽高比不兼容时，在 RPC 之前以 `PHONE_PROTOCOL` 失败。Android fresh-probe 像素原样转发。每个 iOS 坐标端点都从当前显示截图平面缩放到竖屏逻辑边界，再按精确的 `0 | 90 | 180 | 270` 旋转执行逆变换。0 度 tap 使用 `device.io.tap`；旋转后的 tap 使用零距离 `device.io.swipe`；所有语义 swipe 都使用变换后的端点调用 `device.io.swipe`，并沿用上游默认时长。
 
 浏览器坐标操作携带唯一的活跃采集身份、格式、显示尺寸，以及适用时的精确 H264 `VideoFrame.rotation`。Host 仅在对应签名采集管道活跃期间接受这些证据。MJPEG 旋转来自按采集身份隔离的有界结构化 JPEG 观察器。模型操作省略采集身份，从竖屏逻辑尺寸与 scale 推导显示的 `device_screenshot` 范围，并使用属于当前 runtime generation 的全新 MJPEG 探测。runtime 替换、设备移除、采集关闭与 dispose 都会撤销观察并排空探测。
 
@@ -28,7 +28,7 @@ Status: implemented
 
 **从宽高比推断旋转，或每次操作刷新 `device.info`。** 两个横屏方向尺寸相同，而 `device.info.screenSize` 始终为竖屏。重复读取只增加工作，不能提供精确方向。
 
-**使用 Android `logicalDisplay`，或让 phone-stream 拥有投影。** `logicalDisplay` 仅适用于 Android。语义平台转换属于 phone fleet Service；phone-stream 只认证当前采集证据并转发字节，不解释用户坐标。
+**把 Android `logicalDisplay` 当作 iOS 旋转来源，或让 phone-stream 拥有投影。** `logicalDisplay` 仅适用于 Android，是 Android 采集平面到逻辑坐标的缩放目标，不是 iOS 旋转来源。语义平台转换属于 phone fleet Service；phone-stream 只认证当前采集证据并转发字节，不解释用户坐标。Android 转换见[采集到逻辑输入决策](2026-09-05-android-capture-logical-input.zh.md)。
 
 **为高级调用者保留任意 gesture。** 当前 Consumer 不需要它，保留损坏的平台专用程序会形成第二套输入约定。只有当真实语义动作无法由 tap、swipe、text 或 button 表达，并且在每个支持平台上有真实 UI 状态验证时，才可重新引入。
 

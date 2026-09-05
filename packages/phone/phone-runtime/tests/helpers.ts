@@ -38,6 +38,8 @@ export interface FakeKnobs {
   listDelayMs?: number
   /** Apply listDelayMs only after this many total RPC requests. */
   listDelayAfterRequests?: number
+  /** Apply listDelayMs to devices.list after this process has already answered one. */
+  delaySubsequentDeviceLists?: boolean
   screencaptureDelayMs?: number
   /** Delay one device.info answer after recording that the request arrived. */
   infoDelayMs?: number
@@ -58,7 +60,7 @@ export interface FakeKnobs {
     ignoreTerm?: boolean
   }
   /** Makes the named RPC method answer this JSON-RPC error verbatim. */
-  failArm?: { method: string; code?: number; message: string }
+  failArm?: { method: string; code?: number; message: string; remaining?: number }
   /** Wraps the devices.list result in the real mobilecli 1.0.5 `{ devices: [...] }` envelope. */
   listEnvelope?: boolean
   /** Answers device.screencapture with the 1.0.5 `{ format, sessionUrl }` envelope; the stream moves to GET /stream?s=. */
@@ -105,6 +107,7 @@ export interface StagedFake {
     infoCount: number
     io: unknown[]
     captures: Array<{ readonly deviceId: string; readonly format: string }>
+    rpc: Array<{ readonly method: string }>
     scroll: Record<string, number>
   }>
   /** Resolve when this fake's exact owner identity answers on its staged origin. */
@@ -348,6 +351,7 @@ export async function stageFake(
         infoCount: number
         io: unknown[]
         captures: Array<{ readonly deviceId: string; readonly format: string }>
+        rpc: Array<{ readonly method: string }>
         scroll: Record<string, number>
       }> {
         return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
@@ -357,6 +361,7 @@ export async function stageFake(
           infoCount: number
           io: unknown[]
           captures: Array<{ readonly deviceId: string; readonly format: string }>
+          rpc: Array<{ readonly method: string }>
           scroll: Record<string, number>
         }
       },

@@ -90,7 +90,7 @@ describe('dsh-tool-subagent model selection', () => {
     }).toThrow('without an effective provider and model')
   })
 
-  it('leaves deployment or parent defaults outside the allowlist usable when the call selects nothing', async () => {
+  it('permits pure parent-route inheritance when the call selects nothing', async () => {
     let starts = 0
     const ctx = await setup(
       { provider: 'mock', withModelSelection: true },
@@ -106,6 +106,24 @@ describe('dsh-tool-subagent model selection', () => {
 
     expect(result.isError).toBe(false)
     expect(starts).toBe(1)
+  })
+
+  it('rejects a configured route outside the Session policy before child creation', async () => {
+    let starts = 0
+    const ctx = await setup(
+      {
+        provider: 'mock',
+        withModelSelection: true,
+        agentOptions: { provider: 'outside', model: 'configured' },
+      },
+      { onStart: () => { starts += 1 } },
+    )
+
+    const result = await callSubagent(ctx, { description: 'configured route', prompt: 'do it' })
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('outside/configured')
+    expect(starts).toBe(0)
   })
   it('exposes Session-authorized route fields and discovery when selection is enabled', async () => {
     const ctx = await setup({ provider: 'mock', withModelSelection: true })

@@ -28,6 +28,8 @@ subagent 组是委派能力家族：它让 agent（智能体）把任务交给�
 | [`subagent-in-process-driver/`](subagent-in-process-driver/README.zh.md) | 提供共享的进程内运行驱动器 | 无 |
 | [`subagent-spawn-in-process/`](subagent-spawn-in-process/README.zh.md) | 运行全新的进程内子 agent | 注册到 `ctx.subagents` |
 | [`subagent-fork-in-process/`](subagent-fork-in-process/README.zh.md) | 运行从父级已完成历史派生的进程内子 agent | 注册到 `ctx.subagents` |
+| [`subagent-route-preauthorization/`](subagent-route-preauthorization/README.zh.md) | 定义部署所有的精确路由授权注册表 | `ctx.subagentRoutePreauthorization` |
+| [`subagent-route-preauthorization-static/`](subagent-route-preauthorization-static/README.zh.md) | 贡献静态部署所有的精确路由 | 注册到 `ctx.subagentRoutePreauthorization` |
 | [`subagent-acp/`](subagent-acp/README.zh.md) | 经 Agent Client Protocol 运行进程外子 agent | 注册到 `ctx.subagents` |
 | [`subagent-codex/`](subagent-codex/README.zh.md) | 经官方 app-server 协议运行真实 Codex 子 agent | 注册到 `ctx.subagents` |
 | [`subagent-claude-code/`](subagent-claude-code/README.zh.md) | 经官方 Agent SDK 运行真实 Claude Code 子 agent | 注册到 `ctx.subagents` |

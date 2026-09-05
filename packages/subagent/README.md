@@ -28,6 +28,8 @@ The subagent group is the delegation family: it lets an agent hand a task to a c
 | [`subagent-in-process-driver/`](subagent-in-process-driver/README.md) | Provides the shared in-process run driver | — |
 | [`subagent-spawn-in-process/`](subagent-spawn-in-process/README.md) | Runs a fresh in-process child | registers on `ctx.subagents` |
 | [`subagent-fork-in-process/`](subagent-fork-in-process/README.md) | Runs an in-process child seeded from the parent's completed history | registers on `ctx.subagents` |
+| [`subagent-route-preauthorization/`](subagent-route-preauthorization/README.md) | Defines the deployment-owned exact-route authorization registry | `ctx.subagentRoutePreauthorization` |
+| [`subagent-route-preauthorization-static/`](subagent-route-preauthorization-static/README.md) | Contributes static deployment-owned exact routes | registers on `ctx.subagentRoutePreauthorization` |
 | [`subagent-acp/`](subagent-acp/README.md) | Runs an out-of-process child over the Agent Client Protocol | registers on `ctx.subagents` |
 | [`subagent-codex/`](subagent-codex/README.md) | Runs a real Codex child through the official app-server protocol | registers on `ctx.subagents` |
 | [`subagent-claude-code/`](subagent-claude-code/README.md) | Runs a real Claude Code child through the official Agent SDK | registers on `ctx.subagents` |

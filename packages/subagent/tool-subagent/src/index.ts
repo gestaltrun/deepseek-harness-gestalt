@@ -668,22 +668,22 @@ export function apply(ctx: Context, config: Config): void {
     return
   }
 
-  const settings = ctx.get('subagentModelSelection')
-  if (settings === undefined) {
+  const settings = config.modelSelectionSettings === true ? ctx.get('subagentModelSelection') : undefined
+  if (config.modelSelectionSettings === true && settings === undefined) {
     throw new Error(
-      'tool-subagent: model route authorization requires '
+      'tool-subagent: `modelSelectionSettings` requires '
       + '@deepseek-ai/dsh-tool-subagent/model-selection-settings in the Host scope',
     )
   }
-  if (config.deploymentRoutePreauthorization === true && ctx.get('subagentRoutePreauthorization') === undefined) {
-    throw new Error('tool-subagent: `deploymentRoutePreauthorization` requires @deepseek-ai/dsh-subagent-route-preauthorization')
-  }
   const compositionScope = scopeOf(ctx)
   if (compositionScope === undefined) {
-    throw new Error('tool-subagent: `modelSelectionSettings` requires an Agent or preset scope')
+    throw new Error('tool-subagent: model route authorization requires an Agent or preset scope')
   }
 
-  const selectForAgent = (agent: NonNullable<Context['agent']>): ModelSelectionPolicy | undefined => {
+  const selectForAgent = (
+    agent: NonNullable<Context['agent']>,
+    deploymentRoutes: readonly import('@deepseek-ai/dsh-subagent-route-preauthorization').SubagentRoute[] = [],
+  ): ModelSelectionPolicy | undefined => {
     const freshSession = agent.session.firstLiveSeq === 0
       && agent.session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
     let allowedModels = subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)
@@ -697,11 +697,8 @@ export function apply(ctx: Context, config: Config): void {
           ? undefined
           : subagentModelSelectionPolicy(ctx.sessionProjections, parent.session)
       } else if (freshSession) {
-        const current = settings.current()
-        const userRoutes = config.modelSelectionSettings === true && current.enabled ? current.allowedModels : []
-        const deploymentRoutes = config.deploymentRoutePreauthorization === true
-          ? ctx.get('subagentRoutePreauthorization')?.snapshot() ?? []
-          : []
+        const current = settings?.current()
+        const userRoutes = current?.enabled === true ? current.allowedModels : []
         const routes = unionModelRoutes(userRoutes, deploymentRoutes)
         allowedModels = routes.length === 0 ? undefined : routes
       }
@@ -714,7 +711,13 @@ export function apply(ctx: Context, config: Config): void {
 
   const agent = ctx.agent
   if (agent !== undefined) {
-    install(ctx, selectForAgent(agent))
+    if (config.deploymentRoutePreauthorization === true) {
+      ctx.inject(['subagentRoutePreauthorization'], (runtimeCtx) => {
+        install(runtimeCtx, selectForAgent(agent, runtimeCtx.subagentRoutePreauthorization.snapshot()))
+      })
+    } else {
+      install(ctx, selectForAgent(agent))
+    }
     return
   }
   const agents = ctx.get('agents')
@@ -731,9 +734,17 @@ export function apply(ctx: Context, config: Config): void {
     installing.add(candidate)
     let fiber: ReturnType<Context['inject']>
     try {
-      const policy = selectForAgent(candidate)
-      fiber = candidate.ctx.inject(['tools', 'subagents', 'systemPrompt'], (runtimeCtx) => {
-        install(runtimeCtx, policy)
+      const dependencies = config.deploymentRoutePreauthorization === true
+        ? ['tools', 'subagents', 'systemPrompt', 'subagentRoutePreauthorization']
+        : ['tools', 'subagents', 'systemPrompt']
+      const policy = config.deploymentRoutePreauthorization === true
+        ? undefined
+        : selectForAgent(candidate)
+      fiber = candidate.ctx.inject(dependencies, (runtimeCtx) => {
+        const deploymentRoutes = config.deploymentRoutePreauthorization === true
+          ? runtimeCtx.subagentRoutePreauthorization.snapshot()
+          : []
+        install(runtimeCtx, policy ?? selectForAgent(candidate, deploymentRoutes))
       })
     } finally {
       installing.delete(candidate)

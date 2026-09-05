@@ -141,9 +141,13 @@ export function assertAllowedModelSelection(
   requested: AgentOptions | undefined,
   request: DelegationModelRequest,
 ): void {
-  if (policy === undefined || !hasDelegationModelRequest(request)) return
+  if (policy === undefined) return
   const provider = requested?.provider ?? parentOptions.provider
   const model = requested?.model ?? parentOptions.model
+  const inheritsParentRoute = !hasDelegationModelRequest(request)
+    && requested?.provider === undefined
+    && requested?.model === undefined
+  if (inheritsParentRoute) return
   if (provider === undefined || model === undefined) {
     throw new Error('cannot select child LLM values without an effective provider and model')
   }

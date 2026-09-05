@@ -27,8 +27,17 @@ export class StaticSubagentRoutePreauthorization extends SubagentRoutePreauthori
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
+    if (!Array.isArray(config.allowedModels)) {
+      throw new Error('subagent-route-preauthorization-static: `allowedModels` must be an array')
+    }
     const routes = new Map<string, SubagentRoute>()
-    for (const route of config.allowedModels) routes.set(modelRouteKey(route), { ...route })
+    for (const route of config.allowedModels) {
+      if (typeof route.provider !== 'string' || route.provider.length === 0
+        || typeof route.model !== 'string' || route.model.length === 0) {
+        throw new Error('subagent-route-preauthorization-static: routes require non-empty provider and model ids')
+      }
+      routes.set(modelRouteKey(route), { ...route })
+    }
     this.allowed = Object.freeze([...routes.values()].sort((left, right) =>
       left.provider.localeCompare(right.provider) || left.model.localeCompare(right.model)))
   }

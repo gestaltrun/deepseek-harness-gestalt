@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import StaticSubagentRoutePreauthorization, { Config } from '../src/index.ts'
+import StaticSubagentRoutePreauthorization from '../src/index.ts'
 
 describe('static subagent route preauthorization', () => {
   it('validates, sorts, deduplicates, and returns detached frozen snapshots', async () => {
@@ -26,9 +26,14 @@ describe('static subagent route preauthorization', () => {
     expect(second).toEqual(first)
   })
 
-  it('rejects empty provider or model ids at the Config boundary', () => {
-    expect(() => Config({ allowedModels: [{ provider: '', model: 'm' }] })).toThrow()
-    expect(() => Config({ allowedModels: [{ provider: 'p', model: '' }] })).toThrow()
+  it('rejects empty provider or model ids in direct plugin construction', async () => {
+    const ctx = new Context()
+    await expect(ctx.plugin(StaticSubagentRoutePreauthorization, {
+      allowedModels: [{ provider: '', model: 'm' }],
+    })).rejects.toThrow()
+    await expect(ctx.plugin(StaticSubagentRoutePreauthorization, {
+      allowedModels: [{ provider: 'p', model: '' }],
+    })).rejects.toThrow()
   })
 
   it('removes the service on disposal and allows a replacement Provider', async () => {

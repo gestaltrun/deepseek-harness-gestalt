@@ -44,7 +44,8 @@ kind: "package-reference"
 |---|---|---|
 | `provider` | 必填 | `ctx.subagents` 上的提供方名称（如 `spawn`、`fork`、`acp`） |
 | `toolName` | `subagent` | 面向模型的工具名称；每个已加载实例必须不同 |
-| `modelSelectionSettings` | `false` | 为每个新顶层 Session 读取宿主的精确路由授权偏好；只在 Agent 作用域内有效，并要求提供方支持 `agentOptions` |
+| `modelSelectionSettings` | `false` | 为每个全新顶层 Session 读取宿主已启用的用户精确路由授权；要求 Settings owner 与提供方支持 `agentOptions` |
+| `deploymentRoutePreauthorization` | `false` | 把当前部署注册表快照并入每个全新顶层 Session；独立于 Settings，并要求提供方支持 `agentOptions` |
 | `enableRunInBackground` | `true` | 公开 `run_in_background`；禁用时也会拒绝强制后台调用 |
 | `backgroundMode` | `one-shot` | 后台策略：`one-shot` 默认前台调用；`continuable` 默认后台调用，并要求提供方具备 `prepareContinuable` 能力 |
 | `agentOptions` | — | 配置的子级 `provider`、`model`、适配器所有的 `reasoningEffort` 与正整数 `maxTokens` 默认值；要求提供方支持 `agentOptions`，并会覆盖提供方持有的路由默认值 |

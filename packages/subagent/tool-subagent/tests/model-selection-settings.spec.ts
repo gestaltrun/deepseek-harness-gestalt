@@ -114,8 +114,16 @@ describe('SubagentModelSelectionConfig', () => {
     expect(ctx.settings.get(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE)).toEqual(before)
   })
 
-  it('enables deployment-only routes while user selection is disabled', async () => {
-    const ctx = await boot([{ provider: 'alpha', model: 'deploy' }])
+  it('enables deployment-only routes without the Settings owner', async () => {
+    const ctx = new Context()
+    await ctx.plugin(StaticSubagentRoutePreauthorization, {
+      allowedModels: [{ provider: 'alpha', model: 'deploy' }],
+    })
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
     const handle = await ctx.agents.create({
       sessionId: SessionId('deployment-only'),
       setup: async (agentCtx) => {
@@ -127,9 +135,10 @@ describe('SubagentModelSelectionConfig', () => {
     expect(selectable(ctx, handle.agent)).toBe(true)
     expect(subagentModelSelectionPolicy(ctx.sessionProjections, handle.agent.session))
       .toEqual([{ provider: 'alpha', model: 'deploy' }])
+    await ctx.fiber.dispose()
   })
 
-  it('uses the composed default without a settings provider', async () => {
+  it('uses the composed user preference default without a settings provider', async () => {
     const ctx = new Context()
     await ctx.plugin(SubagentModelSelectionConfig, { enabled: true, allowedModels: ALLOWED_MODELS })
 
@@ -323,6 +332,41 @@ describe('SubagentModelSelectionConfig', () => {
     await vi.waitFor(() => { expect(selectable(ctx, handle.agent)).toBe(true) })
 
     await handle.dispose()
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps resumed and child policies stable after deployment Provider replacement', async () => {
+    const ctx = new Context()
+    await ctx.plugin(MemorySettings)
+    await ctx.plugin(SubagentModelSelectionConfig)
+    const providerFiber = ctx.plugin(StaticSubagentRoutePreauthorization, {
+      allowedModels: [{ provider: 'alpha', model: 'old' }],
+    })
+    await providerFiber
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
+    const parent = await createAgent(ctx, 'deployment-parent', { deploymentRoutePreauthorization: true })
+    const parentEvents = parent.session.snapshotEvents()
+    await providerFiber.dispose()
+    await ctx.plugin(StaticSubagentRoutePreauthorization, {
+      allowedModels: [{ provider: 'beta', model: 'new' }],
+    })
+
+    const child = await createAgent(ctx, 'deployment-child', {
+      meta: { parentSession: parent.id, origin: 'subagent' },
+      deploymentRoutePreauthorization: true,
+    })
+    const resumed = await createAgent(ctx, 'deployment-resumed', {
+      seed: parentEvents,
+      deploymentRoutePreauthorization: true,
+    })
+    expect(subagentModelSelectionPolicy(ctx.sessionProjections, child.session))
+      .toEqual([{ provider: 'alpha', model: 'old' }])
+    expect(subagentModelSelectionPolicy(ctx.sessionProjections, resumed.session))
+      .toEqual([{ provider: 'alpha', model: 'old' }])
     await ctx.fiber.dispose()
   })
 

@@ -116,6 +116,51 @@ describe('Session fixture lifecycle', () => {
     await runtime.dispose()
   })
 
+  it('stages a provisional identity with a resolvable stable binding and releases it', async () => {
+    const runtime = await SlotTestRuntime.create()
+    await runtime.sessions.add({ id: 'parent' }, { current: true })
+    const current = runtime.sessions.list.getSnapshot().current
+    const release = runtime.sessions.stageProvisional({
+      sessionId: 'draft' as SessionId,
+      parentSessionId: 'parent' as SessionId,
+      origin: 'subagent',
+      title: 'Side: New thread',
+    })
+    const binding = runtime.sessions.binding('draft')
+    expect(runtime.sessions.behavior('draft').sessionId).toBe('draft')
+    expect(binding?.sessionId).toBe('draft')
+    expect(runtime.sessions.scope('draft')).toBe(binding?.ctx)
+    expect(runtime.sessions.sessionOf(binding!.ctx)).toBe(binding?.session)
+    expect(runtime.sessions.binding('draft')).toBe(binding)
+    expect(runtime.sessions.list.getSnapshot().current).toBe(current)
+    expect(runtime.sessions.list.getSnapshot().byId['draft' as SessionId]).toMatchObject({
+      displayTitle: 'Side: New thread', blank: true, provisional: true,
+    })
+    release()
+    expect(runtime.sessions.binding('draft')).toBeUndefined()
+    expect(runtime.sessions.scope('draft')).toBeUndefined()
+    expect(runtime.sessions.list.getSnapshot().byId['draft' as SessionId]).toBeUndefined()
+    await runtime.dispose()
+  })
+
+  it('does not let a provisional disposer remove a published fixture identity', async () => {
+    const runtime = await SlotTestRuntime.create()
+    await runtime.sessions.add({ id: 'parent' }, { current: false })
+    const release = runtime.sessions.stageProvisional({
+      sessionId: 'draft' as SessionId,
+      parentSessionId: 'parent' as SessionId,
+      origin: 'subagent',
+      title: 'Side: New thread',
+    })
+    const binding = runtime.sessions.binding('draft')
+    await runtime.sessions.updateSummary('draft', { blank: false, provisional: undefined })
+    release()
+    expect(runtime.sessions.binding('draft')).toBe(binding)
+    expect(runtime.sessions.list.getSnapshot().byId['draft' as SessionId]?.provisional).toBeUndefined()
+    expect(runtime.sessions.list.getSnapshot().byId['draft' as SessionId]?.blank).toBe(false)
+    await runtime.dispose()
+  })
+
   it('disposes a scope without materializing a binding', async () => {
     const runtime = await SlotTestRuntime.create()
     await runtime.sessions.add({ id: 'scope-only' }, { current: false })

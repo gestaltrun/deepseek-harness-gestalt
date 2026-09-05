@@ -198,7 +198,7 @@ export class TestSessions implements ISessions {
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
     method: 'create' | 'open' | 'openSubagent' | 'setSubagentCatalogOpen' | 'refreshSubagents'
-      | 'clear' | 'refresh' | 'search' | 'fork'
+      | 'clear' | 'refresh' | 'search' | 'fork' | 'stageProvisional' | 'openForRender'
     args: unknown[]
   }[] = []
 
@@ -441,6 +441,76 @@ export class TestSessions implements ISessions {
       draft.current = id
       draft.currentAddress = undefined
     })
+  }
+
+  /**
+   * Stage a renderer-only identity with the ordinary ISessions binding/scope
+   * contract. Fixture benches publish through {@link TestSessions.updateSummary}.
+   * @param descriptor - preallocated identity, parent lineage, and display title.
+   * @returns disposer that removes the unpublished row and scope exactly once.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void {
+    this.calls.push({ method: 'stageProvisional', args: [descriptor] })
+    const id = descriptor.sessionId
+    if (this.records.has(id) || this.list.getSnapshot().byId[id] !== undefined) {
+      throw new Error(`test sessions: duplicate provisional identity ${id}`)
+    }
+    const summary: SessionSummary = {
+      id,
+      displayTitle: descriptor.title,
+      title: descriptor.title,
+      parentId: descriptor.parentSessionId,
+      origin: descriptor.origin,
+      running: false,
+      blank: true,
+      updatedAt: Date.now(),
+      provisional: true,
+    }
+    const snapshot = createSnapshotStore<SessionFixtureSnapshot>({
+      ...sessionSnapshot(id),
+      blank: true,
+    })
+    const session = new FixtureSession(id, snapshot, {})
+    this.records.set(id, {
+      summary,
+      snapshot,
+      session,
+      scope: undefined,
+      scopeFiber: undefined,
+      binding: undefined,
+    })
+    this.list.update((draft) => {
+      draft.ids = [id, ...draft.ids.filter(existing => existing !== id)]
+      draft.byId[id] = summary
+    })
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const current = this.list.getSnapshot().byId[id]
+      if (current?.provisional !== true) return
+      const record = this.records.get(id)
+      this.records.delete(id)
+      this.list.update((draft) => {
+        draft.ids = draft.ids.filter(existing => existing !== id)
+        const { [id]: _dead, ...rest } = draft.byId
+        draft.byId = rest
+      })
+      if (record?.scopeFiber !== undefined) void record.scopeFiber.dispose()
+    }
+  }
+
+  /**
+   * Record an explicit-render open. Fixture benches still drive history windows.
+   * @param sessionId - listed or staged Session identity.
+   */
+  openForRender(sessionId: SessionId): void {
+    this.calls.push({ method: 'openForRender', args: [sessionId] })
   }
 
   /** Open an existing fixture through its catalog address. */

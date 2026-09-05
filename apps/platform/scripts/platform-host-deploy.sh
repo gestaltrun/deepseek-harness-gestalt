@@ -168,7 +168,9 @@ case "$action" in
     fi
     docker info >/dev/null || exit 1
     if docker inspect dsh-platform >/dev/null 2>&1; then
-      require_bootstrap_owner || exit 1
+      if ! require_bootstrap_owner; then
+        exit 1
+      fi
       docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
       ensure_container_absent dsh-platform || rollback_failed=1
     fi

@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { delimiter, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { pnpmInvocation } from './pnpm-invocation.ts'
 
@@ -64,8 +64,18 @@ function controlledEnvironment(fixtureRoot: string, environmentClass: Environmen
   const corepack = join(fixtureRoot, 'corepack')
   for (const path of [home, store, cache, global, corepack]) mkdirSync(path, { recursive: true, mode: 0o700 })
   writeFileSync(config, '')
+  const systemPath = process.env.PATH?.split(delimiter).filter(entry => entry !== '') ?? []
+  const windowsEnvironment = process.platform === 'win32'
+    ? {
+      SystemRoot: process.env.SystemRoot,
+      WINDIR: process.env.WINDIR,
+      COMSPEC: process.env.COMSPEC,
+      PATHEXT: process.env.PATHEXT,
+    }
+    : {}
   return {
-    PATH: `${dirname(process.execPath)}:/Users/yishu.cy/.local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
+    ...windowsEnvironment,
+    PATH: [...new Set([dirname(process.execPath), ...systemPath])].join(delimiter),
     HOME: home,
     XDG_CACHE_HOME: cache,
     COREPACK_HOME: corepack,

@@ -1,6 +1,6 @@
 ---
 name: migrate-to-shoehorn
-description: Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.
+description: Migrate test assertions to @total-typescript/shoehorn. Use only when the user explicitly requests shoehorn or an existing project convention requires that library.
 ---
 
 # Migrate to Shoehorn
@@ -19,9 +19,7 @@ Problems with `as` in tests:
 
 ## Install
 
-```bash
-npm i @total-typescript/shoehorn
-```
+Install `@total-typescript/shoehorn` as a development dependency in the workspace that owns the tests, using the repository's package manager. Skip installation when the dependency already exists.
 
 ## Migration patterns
 
@@ -110,8 +108,8 @@ getUser(fromAny({ body: { id: 123 } }));
    - Do they need to pass intentionally wrong data for error testing?
 
 2. **Install and migrate**:
-   - [ ] Install: `npm i @total-typescript/shoehorn`
-   - [ ] Find test files with `as` assertions: `grep -r " as [A-Z]" --include="*.test.ts" --include="*.spec.ts"`
+   - [ ] Install in the owning workspace with the detected package manager when absent
+   - [ ] Search the requested test scope for relevant `as` assertions with the repository's search tool
    - [ ] Replace `as Type` with `fromPartial()`
    - [ ] Replace `as unknown as Type` with `fromAny()`
    - [ ] Add imports from `@total-typescript/shoehorn`

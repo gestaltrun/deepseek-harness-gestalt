@@ -47,7 +47,7 @@ register 调用可以用 `store: defineStore(...)` 声明 store 席位：`init` 
 <details>
 <summary>实现细节——点击展开</summary>
 
-设计就是一张表：声明 = 渲染授权 = 运行时规范。`SlotMap` 在这里声明为空，由消费方通过 `declare module` 增补合并，标准工具包接口（`SessionStandardProps`、`GlobalStandardProps`）也是如此，由 runtime 包以真实成员合并。
+设计就是一张表：声明 = 渲染授权 = 运行时规范。`SlotMap` 在这里声明为空，由消费方通过 `declare module` 增补合并，标准工具包接口（`SessionStandardProps`、`GlobalStandardProps`）也是如此，由 `ui-session` 与各域 UI 适配器以真实成员合并。`SessionSlotKey` 与 `OwnerOf<K>` 为显式 Session 挂载面提供类型。
 
 ### 注册与路由
 
@@ -55,7 +55,7 @@ register 调用可以用 `store: defineStore(...)` 声明 store 席位：`init` 
 
 ### 渲染器约定
 
-`renderer.ts` 携带安装约定（`SlotRenderer`、`SlotRendererHost`）以及 `StaleAuthorizationError`/`SlotOwnershipError`；ui-renderer 同时持有实现及其插件生命周期安装。引擎产物与渲染器宿主约定携带裸快照 source（`getSnapshot`/`subscribe`），绝不携带 React 钩子——钩子绑定属于渲染机制。
+`renderer.ts` 携带安装约定（`SlotRenderer`、`SlotRendererHost`）以及 `StaleAuthorizationError`/`SlotOwnershipError`；ui-renderer 同时持有实现及其插件生命周期安装。`SlotRenderer` 分别提供 root 与显式 Session 渲染入口，而 host 以裸快照 source（`getSnapshot`/`subscribe`）提供当前及按身份解析的 scope binding，绝不携带 React 钩子。
 
 </details>
 

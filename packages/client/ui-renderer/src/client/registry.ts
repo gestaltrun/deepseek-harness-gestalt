@@ -18,7 +18,7 @@ import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import { SlotCore, standardHookPropName } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  HostObservable, LiveSlotNode, LocaleFace, OwnerOf, SlotEntryDef, SlotMap, SlotRenderer, SlotRendererHost,
+  HostObservable, LiveSlotNode, LocaleFace, OwnerOf, SessionSlotKey, SlotEntryDef, SlotMap, SlotRenderer, SlotRendererHost,
   RootStandardSourceContribution, ScopedStandardSourceBinding, SlotScope, SlotScopeAdapter, SlotSpec,
   StandardSourceBinding,
   StoreDecl, StoreFactory, StoredEntry, StoreInstanceLike,
@@ -356,6 +356,44 @@ export class SlotRegistry extends Service {
       throw new Error("'root' has no registration — a layout entry must register into 'root' before the shell renders it")
     }
     return this._renderer.renderRoot(this.hostFace(), owner)
+  }
+
+  /**
+   * Prepare one declared Session-scoped slot and acquire its render lifetime.
+   * @param key - non-root Session or Session-maybe slot key.
+   * @param sessionId - identity resolved by the installed Session adapter.
+   * @param owner - owner share for this slot occurrence.
+   * @returns rendered tree and idempotent scope release.
+   */
+  prepareSessionSlot<K extends SessionSlotKey>(
+    key: K,
+    sessionId: string,
+    owner: OwnerOf<K>,
+  ): { element: ReturnType<SlotRenderer['renderSession']>; release: () => void } {
+    if (key === 'root') throw new Error("explicit Session rendering cannot target 'root'")
+    const spec = this._core.specDynamic(key)
+    if (spec === undefined) throw new Error(`explicit Session slot '${key}' is not declared`)
+    if (spec.scope !== 'session' && spec.scope !== 'session-maybe') {
+      throw new Error(`explicit Session slot '${key}' has non-Session scope '${spec.scope}'`)
+    }
+    if (this._renderer === undefined) {
+      throw new Error(`slot renderer not installed — cannot render explicit Session slot '${key}'`)
+    }
+    const adapter = this._scopes.get('session')
+    if (adapter === undefined) throw new Error(`explicit Session slot '${key}' requires an installed 'session' scope adapter`)
+    if (adapter.resolve(sessionId) === undefined) {
+      throw new Error(`explicit Session slot '${key}' could not resolve Session '${sessionId}'`)
+    }
+    const release = adapter.acquireForRender?.(sessionId) ?? (() => {})
+    try {
+      return {
+        element: this._renderer.renderSession(this.hostFace(), key, sessionId, owner),
+        release,
+      }
+    } catch (error) {
+      release()
+      throw error
+    }
   }
 
   /**

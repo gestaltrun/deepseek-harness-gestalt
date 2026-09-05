@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ToolResultNode, RunningToolCall } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ToolResultNode, RunningToolCall } from '../src/client/contract/snapshot.ts'
 import {
   browserTabIdentityFromTool,
   focusListedBrowserTab,
   listedBrowserTabRevision,
 } from '../src/client/chat/browser-tab-focus.ts'
-import { findToolCall } from '../src/client/chat/tool-node-reader.ts'
+import { findToolCall } from '../src/client/details/tool-node-reader.ts'
 
 const TARGET = {
   profileId: 'profile-1',
@@ -269,12 +269,12 @@ describe('focusListedBrowserTab', () => {
     const focus = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
     const root = navigateResult()
     focusListedBrowserTab({
-      snapshot: { chat: chatSnapshot(root) } as never,
+      snapshot: chatSnapshot(root) as never,
       listing: listing(),
       callId: root.callId,
       focus,
     })
-    expect(findToolCall({ chat: chatSnapshot(root) } as never, root.callId)?.callId).toBe(root.callId)
+    expect(findToolCall(chatSnapshot(root) as never, root.callId)?.callId).toBe(root.callId)
     expect(focus).toHaveBeenCalledTimes(1)
     expect(focus).toHaveBeenCalledWith(TARGET, LISTED_REVISION)
     expect(focus).not.toHaveBeenCalledWith(TARGET, 2)
@@ -283,7 +283,7 @@ describe('focusListedBrowserTab', () => {
   it('does not call focus when the tab is gone', () => {
     const focus = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
     focusListedBrowserTab({
-      snapshot: { chat: chatSnapshot(navigateResult()) } as never,
+      snapshot: chatSnapshot(navigateResult()) as never,
       listing: listing('gone-tab'),
       callId: 'nav-1',
       focus,
@@ -294,19 +294,19 @@ describe('focusListedBrowserTab', () => {
   it('does not call focus for a missing call or absent remote', () => {
     const focus = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
     focusListedBrowserTab({
-      snapshot: { chat: chatSnapshot(navigateResult()) } as never,
+      snapshot: chatSnapshot(navigateResult()) as never,
       listing: listing(),
       callId: undefined,
       focus,
     })
     focusListedBrowserTab({
-      snapshot: { chat: chatSnapshot(navigateResult()) } as never,
+      snapshot: chatSnapshot(navigateResult()) as never,
       listing: listing(),
       callId: 'nav-1',
       focus: undefined,
     })
     focusListedBrowserTab({
-      snapshot: { chat: chatSnapshot(navigateResult()) } as never,
+      snapshot: chatSnapshot(navigateResult()) as never,
       listing: listing(),
       callId: 'missing-call',
       focus,
@@ -317,7 +317,7 @@ describe('focusListedBrowserTab', () => {
   it('swallows a rejected focus after details already opened', async () => {
     const focus = vi.fn(() => Promise.reject(new Error('conflict')))
     focusListedBrowserTab({
-      snapshot: { chat: chatSnapshot(navigateResult()) } as never,
+      snapshot: chatSnapshot(navigateResult()) as never,
       listing: listing(),
       callId: 'nav-1',
       focus,

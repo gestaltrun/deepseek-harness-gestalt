@@ -240,6 +240,10 @@ export class SlotTestRuntime {
         this.host = host
         return renderer.renderRoot(host, ownerProps)
       },
+      renderSession: (host, slotKey, sessionId, ownerProps) => {
+        this.host = host
+        return renderer.renderSession(host, slotKey, sessionId, ownerProps)
+      },
     })
   }
 

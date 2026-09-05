@@ -2,8 +2,8 @@
  * Resolve a `browser_*` tool call's page and focus it from the Session
  * listing revision.
  */
-import type { ConversationSnapshot, ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
-import { findToolCall } from './tool-node-reader.ts'
+import type { ChatSnapshot, ToolCallBlock } from '../contract/snapshot.ts'
+import { findToolCall } from '../details/tool-node-reader.ts'
 
 /** Opaque Browser Runtime identities carried on tool args and results. */
 export interface BrowserTabIdentity {
@@ -93,13 +93,13 @@ export function listedBrowserTabRevision(
  * Focus the listed Browser tab for a selected `browser_*` call when that tab
  * still exists. Does not call focus when the tab is gone, the Remote is
  * absent, or the payload names no target.
- * @param input.snapshot - current Conversation snapshot.
+ * @param input.snapshot - current Chat target snapshot.
  * @param input.listing - `browserWorkspace` projection value.
  * @param input.callId - selected tool call, when the selection names one.
  * @param input.focus - Remote focus closed over the current Session.
  */
 export function focusListedBrowserTab(input: {
-  snapshot: ConversationSnapshot
+  snapshot: ChatSnapshot
   listing: unknown
   callId: string | undefined
   focus: ListedBrowserTabFocus | undefined

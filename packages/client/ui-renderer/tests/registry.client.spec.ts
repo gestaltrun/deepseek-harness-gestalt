@@ -84,6 +84,7 @@ function captureHost(bench: Bench, children?: object): SlotRendererHost {
   let host: SlotRendererHost | undefined
   bench.erased.install({
     renderRoot: (h: SlotRendererHost) => { host = h; return 'rendered' },
+    renderSession: () => null,
   })
   bench.erased.register({ name: 'root', ...(children !== undefined ? { children } : {}) }, C)
   bench.erased.renderSlot('root', {})
@@ -688,6 +689,7 @@ describe('entry-unload cascade', () => {
     let host: SlotRendererHost | undefined
     bench.erased.install({
       renderRoot: (h: SlotRendererHost) => { host = h; return 'rendered' },
+      renderSession: () => null,
     })
     // The declarer here is NOT the root occupant: root stays occupied by a
     // separate entry so disposing the declarer only kills its children.

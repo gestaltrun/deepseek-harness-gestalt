@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import {
@@ -10,7 +10,7 @@ import {
 } from '../src/client/annotation/model.ts'
 import type { TextAnchor } from '../src/client/annotation/model.ts'
 import { AnnotationEditor } from '../src/client/annotation/AnnotationEditor.tsx'
-import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
+import { AssistantMarkdown } from '../src/client/annotation/AssistantMarkdown.tsx'
 import { zh } from '../src/client/locales.ts'
 import {
   removeDraftHighlightOwner, replaceDraftHighlightRanges,
@@ -625,7 +625,7 @@ describe('text annotation mechanics', () => {
   it('submits annotation-only prose through one owned reservation and clears only after admission', () => {
     const sink = vi.fn<SessionInputDeps['defaultSink']>(() => new Promise(() => {}))
     const shell = new SessionInputShell({
-      actx: {} as ClientContext,
+      actx: {} as Context,
       defaultSink: sink,
       annotationLabels: LABELS,
     })
@@ -657,7 +657,7 @@ describe('text annotation mechanics', () => {
     const sink = vi.fn<SessionInputDeps['defaultSink']>()
       .mockImplementationOnce(() => Promise.resolve({ kind: 'error' }))
       .mockImplementation(() => new Promise(() => {}))
-    const shell = new SessionInputShell({ actx: {} as ClientContext, defaultSink: sink, annotationLabels: LABELS })
+    const shell = new SessionInputShell({ actx: {} as Context, defaultSink: sink, annotationLabels: LABELS })
     shell.setDraft('Please revise this.')
     const anchor = createTextAnchor('message-1', 'Exact quotation', 'Exact quotation', 0)
     const id = shell.actions.addTextAnnotation(anchor, 'Original note')
@@ -690,7 +690,7 @@ describe('text annotation mechanics', () => {
 
   it('edits and deletes an unsent annotation through the Composer actions', () => {
     const shell = new SessionInputShell({
-      actx: {} as ClientContext,
+      actx: {} as Context,
       defaultSink: () => Promise.resolve({ kind: 'success' }),
       annotationLabels: LABELS,
     })

@@ -47,7 +47,7 @@ Declaring a slot is claiming it: the registering entry becomes the only entry al
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The design is one table: declaration = render authorization = runtime spec. `SlotMap` is declared empty here and merged by consumers via `declare module` augmentation, exactly like the standard-kit interfaces (`SessionStandardProps`, `GlobalStandardProps`), which the runtime package merges with real members.
+The design is one table: declaration = render authorization = runtime spec. `SlotMap` is declared empty here and merged by consumers via `declare module` augmentation, exactly like the standard-kit interfaces (`SessionStandardProps`, `GlobalStandardProps`), which `ui-session` and domain UI adapters merge with real members. `SessionSlotKey` and `OwnerOf<K>` type the explicit Session mount face.
 
 ### Registration and routing
 
@@ -55,7 +55,7 @@ The design is one table: declaration = render authorization = runtime spec. `Slo
 
 ### The renderer contract
 
-`renderer.ts` carries the installation contract (`SlotRenderer`, `SlotRendererHost`) plus `StaleAuthorizationError`/`SlotOwnershipError`; ui-renderer owns both the implementation and its plugin-lifecycle installation. Engine products and the renderer host contract carry bare snapshot sources (`getSnapshot`/`subscribe`), never React hooks — hook binding belongs to the render machinery.
+`renderer.ts` carries the installation contract (`SlotRenderer`, `SlotRendererHost`) plus `StaleAuthorizationError`/`SlotOwnershipError`; ui-renderer owns both the implementation and its plugin-lifecycle installation. `SlotRenderer` has separate root and explicit Session render entries, while the host supplies current and identity-resolved scope bindings as bare snapshot sources (`getSnapshot`/`subscribe`), never React hooks.
 
 </details>
 

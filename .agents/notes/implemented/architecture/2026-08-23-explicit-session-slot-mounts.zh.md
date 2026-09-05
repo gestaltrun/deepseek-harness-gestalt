@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-运行时以 `renderSessionSlot()`、ui-renderer 以 `mountSession()` 提供框架级入口，用于挂载一个已声明的非 root Session slot。挂载通过 `UiSession.adapter.resolve(sessionId)` 解析指定会话的标配 props；当该身份已发布时，Session Controller 的 `openForRender()` 打开其历史窗口，并在独立 React 根中渲染，同时不改变 `sessions.list.current`。既有声明账本、entry 边界、store、inject 接口与标准钩子绑定仍是该树内的权威。
+Slot 注册表负责准备一个已声明的非 root Session slot，ui-renderer 以 `mountSession()` 提供对应框架级入口。挂载通过 `UiSession.adapter.resolve(sessionId)` 解析指定会话的标配 props 并取得 render lease。首个 lease 调用 Session Controller 的 `openForRender()`；临时身份被 Host 发布升级时会再恰好打开一次，同时不改变 `sessions.list.current`。调用方销毁或 renderer teardown 会先卸载独立 React 根，再释放 lease。既有声明账本、entry 边界、store、inject 接口与标准钩子绑定仍是该树内的权威。
 
 Side Chat 会预先分配子 Session id，并通过 `ctx.sessions.stageProvisional()` 以保留的 `Side: ` 标题将其暂存为仅供 renderer 使用的临时身份，然后以 `{ renderMode: 'sidechat' }` 挂载已声明的 `conversation` slot。该标题会阻止列表分类器与 subagent 自动激活把草稿当成委派任务，临时标记则让它保持在持久后代计数之外。打开标签页不会创建 Host Session 或 Agent。首次提交消息时才会以预分配 id 原子创建二者、捕获父会话历史、安装所选模型并准入提示词；Host 发布会原地升级临时行。better-sidebar 包只持有此子会话创建与生命周期，不提供标签页内的线程切换或提升 chrome。已注册的会话视图与 `conversation.composer.bar` 提供对话/轨迹标签页、transcript、操作项与 InputBar。`ConversationSessionHeader` 使用 Side Chat 形态省略 Session 标题、面包屑导航与 agent preset 标签，同时保留按 child 确定范围的下级目录操作和 Session 操作。继承的 seed 仍保持持久化，但 `owned-suffix` 准入适配器会在子会话 transcript 中隐藏它，并把 prompt、cancel、queue、command、catalog 与 model 操作路由到 Side Chat Agent 生命周期。
 
@@ -36,4 +36,4 @@ Side Chat 删除自有 transcript 映射、轮询、消息行、输入框 CSS �
 
 ## 验证
 
-渲染器测试固定显式 Session 绑定在主选中 Session 变化或消失时保持不变。Session Controller 测试固定临时行存续、发布、释放与冷 `openForRender()`。Side Chat 测试固定延迟 Agent 创建、模型路由所有权、首条消息准入、prompt/cancel 路由和继承 seed 隐藏。组件测试固定准确的 `conversation` slot、子 Session id、sidechat render mode、外层工具栏与 preset 标签缺席、紧凑会话头操作项和标签页、不改变主 Session 选中项的本地下级重定向、根句柄释放、新建标签图标与文案，以及挂载释放。
+渲染器测试固定显式 Session 绑定在主选中 Session 变化或消失时保持不变，并覆盖 typed `mountSession<K extends SessionSlotKey>(..., ownerProps: OwnerOf<K>)`。Session Controller 测试固定临时行存续、发布、释放与冷 `openForRender()`。会话头测试固定紧凑 Side Chat 形态：`renderMode: 'sidechat'` 省略面包屑导航，同时会话头操作项仍接收显式 owner。会话注释测试固定 SessionInput 的文本与图片标注动词、仅注释提交、Markdown 选区映射，以及不导入 `@deepseek-ai/dsh-client-runtime/client` 的 Chat store 草稿持久化。Side Chat 产品测试在 #591 完成前仍依赖 `packages/client/runtime`。组件测试固定准确的 `conversation` slot、子 Session id、sidechat render mode、外层工具栏与 preset 标签缺席、紧凑会话头操作项和标签页、不改变主 Session 选中项的本地下级重定向、根句柄释放、新建标签图标与文案，以及挂载释放。

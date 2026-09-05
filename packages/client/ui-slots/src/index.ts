@@ -177,6 +177,11 @@ export type SlotInjectOf<K extends keyof SlotMap & string> =
 /** Scope axis of a slot key's SlotMap entry. */
 export type ScopeOf<K extends keyof SlotMap & string> = SlotMap[K]['scope']
 
+/** SlotMap keys whose declared scope can bind an explicit Session identity. */
+export type SessionSlotKey = {
+  [K in keyof SlotMap & string]: ScopeOf<K> extends 'session' | 'session-maybe' ? K : never
+}[keyof SlotMap & string]
+
 /**
  * Framework standard kit delivered to every session-scope slot component.
  * Declared empty here (zero-dependency layer): `ui-session` merges the

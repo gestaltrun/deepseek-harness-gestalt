@@ -7,6 +7,8 @@ import { createElement, useLayoutEffect, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot, hydrateRoot, type Root } from 'react-dom/client'
 import type { Context } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { OwnerOf, SessionSlotKey } from '@deepseek-ai/dsh-client-ui-slots'
 import { createSlotRenderer } from './scoped-slots.tsx'
 import { buildRenderApp } from './app.tsx'
 import { SlotRegistry } from './registry.ts'
@@ -28,6 +30,20 @@ export interface UiRendererService {
    * @returns Disposer that unmounts the React root.
    */
   mount: (container: HTMLElement) => () => void
+  /**
+   * Mount one declared Session-scoped slot without changing shell selection.
+   * @param container - independent React mount point.
+   * @param slotKey - declared non-root Session or Session-maybe slot.
+   * @param sessionId - Session identity resolved by the installed adapter.
+   * @param ownerProps - owner props for the slot occurrence.
+   * @returns idempotent disposer that unmounts the independent React root.
+   */
+  mountSession: <K extends SessionSlotKey>(
+    container: HTMLElement,
+    slotKey: K,
+    sessionId: SessionId,
+    ownerProps: OwnerOf<K>,
+  ) => () => void
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -87,11 +103,47 @@ function mountApp(container: HTMLElement, app: () => ReactNode): Root {
  */
 export function apply(ctx: Context): void {
   const slots = new SlotRegistry(ctx)
+  const roots = new Map<Root, () => void>()
   slots.install(createSlotRenderer())
+  ctx.effect(() => () => {
+    for (const [root, release] of [...roots]) {
+      roots.delete(root)
+      root.unmount()
+      release()
+    }
+  }, 'ui-renderer: mounted React roots')
+
+  const ownRoot = (root: Root, release: () => void = () => {}): (() => void) => {
+    roots.set(root, release)
+    let disposed = false
+    return () => {
+      if (disposed) return
+      disposed = true
+      roots.delete(root)
+      root.unmount()
+      release()
+    }
+  }
+
   ctx.reflect.provide('uiRenderer', {
-    mount: (container: HTMLElement): (() => void) => {
-      const root = mountApp(container, buildRenderApp({ ctx }))
-      return () => { root.unmount() }
+    mount: (container: HTMLElement): (() => void) =>
+      ownRoot(mountApp(container, buildRenderApp({ ctx }))),
+    mountSession: <K extends SessionSlotKey>(
+      container: HTMLElement,
+      slotKey: K,
+      sessionId: SessionId,
+      ownerProps: OwnerOf<K>,
+    ): (() => void) => {
+      const prepared = slots.prepareSessionSlot(slotKey, sessionId, ownerProps)
+      const root = createRoot(container)
+      try {
+        flushSync(() => { root.render(prepared.element) })
+      } catch (error) {
+        root.unmount()
+        prepared.release()
+        throw error
+      }
+      return ownRoot(root, prepared.release)
     },
   })
 }

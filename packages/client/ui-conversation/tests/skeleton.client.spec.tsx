@@ -121,6 +121,9 @@ function mount(
     composerBlock?: { reason: string }
     /** Mutable view ledger used by registration-order regressions. */
     viewTabs?: ViewTab[]
+    /** Compact Side Chat owner props forwarded to the Session header. */
+    renderMode?: 'sidechat'
+    openSession?: (sessionId: SessionId) => void
   } = {},
 ) {
   const root = sid('root')
@@ -205,6 +208,7 @@ function mount(
           open={open}
           selectView={(view) => { store.actions.setView(view) }}
           t={t}
+          {...owner}
         />
       )
     }
@@ -299,6 +303,8 @@ function mount(
     renderSlot,
     renderSlotChain,
     selectWorkspace: retargetWorkspace,
+    ...(options.renderMode === undefined ? {} : { renderMode: options.renderMode }),
+    ...(options.openSession === undefined ? {} : { openSession: options.openSession }),
     t,
   }
   const view = render(<ConversationRoot {...props} />)
@@ -401,6 +407,18 @@ describe('ConversationRoot resident composer', () => {
     expect((b.view.getByRole('button', { name: 'Child' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(root)
     expect(b.open).toHaveBeenCalledWith(sid('root'))
+  })
+
+  it('omits breadcrumb navigation in compact Side Chat and forwards owner props to header actions', () => {
+    const openSession = vi.fn()
+    const b = mount(sessionSnapshotOf(), undefined, undefined, {
+      summaryOrigin: 'subagent',
+      renderMode: 'sidechat',
+      openSession,
+    })
+    expect(b.view.queryByRole('navigation')).toBeNull()
+    expect(b.view.queryByRole('button', { name: 'Root' })).toBeNull()
+    expect(b.slotCalls).toContain('conversation.session.header.actions')
   })
 
   it('keeps intermediate subagent breadcrumbs at the compact title size', () => {

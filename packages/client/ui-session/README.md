@@ -8,7 +8,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-React and Slot adapter for Session Controller state. It contributes Session list and pending-interaction hooks at root scope, materializes per-Session hooks and props, and owns the standard `SessionProvider` rendering behavior without taking ownership of Session transport or lifecycle state. Use it when a browser feature needs Session state through standard React props and hooks.
+React and Slot adapter for Session Controller state. It contributes Session list and pending-interaction hooks at root scope, materializes per-Session hooks and props, and owns the standard `SessionProvider` rendering behavior without taking ownership of Session transport or lifecycle state. An explicit mount acquires a reference-counted render lease: the first lease calls `sessions.openForRender()`, and a provisional identity is opened again once when Host publication upgrades it. Use this package when a browser feature needs Session state through standard React props and hooks.
 
 ## Table of Contents
 

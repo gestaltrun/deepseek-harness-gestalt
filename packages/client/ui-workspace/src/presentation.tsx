@@ -1,9 +1,9 @@
 /** Public Session list/row presentation shared by Desktop and narrow Web compositions. */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type {
-  SessionId, SessionListState, WorkspaceView,
-} from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { SessionNodeItem } from './client/rows/Rows.tsx'
 import { deriveGroups, type GroupNode } from './client/tree.ts'
@@ -38,8 +38,8 @@ export function expandedSessionGroups(
   sessions: SessionListState,
   workspaces: readonly WorkspaceView[],
 ): readonly GroupNode[] {
-  const collapsed = deriveGroups(sessions, workspaces, [], { expandedGroups: [] })
-  return deriveGroups(sessions, workspaces, [], { expandedGroups: collapsed.map(group => group.key) })
+  const collapsed = deriveGroups(sessions, workspaces, [], new Map(), { expandedGroups: [] })
+  return deriveGroups(sessions, workspaces, [], new Map(), { expandedGroups: collapsed.map(group => group.key) })
 }
 
 /** Props for the shared Desktop Session row list. */
@@ -67,25 +67,18 @@ export function SessionListPresentation({
   useEffect(() => {
     if (!nodes.some(node => node.id === focusId)) setFocusId(preferred)
   }, [focusId, nodes, preferred])
-  const moveFocus = (index: number, direction: -1 | 1): void => {
-    const target = Math.max(0, Math.min(nodes.length - 1, index + direction))
-    const next = nodes[target] as (typeof nodes)[number]
-    setFocusId(next.id)
-    const rows = tree.current?.querySelectorAll<HTMLElement>('[data-session-row]')
-    rows?.[target]?.focus()
-  }
   return (
     <div role="tree" aria-label={label} ref={tree}>
-      {nodes.map((node, index) => (
+      {nodes.map(node => (
         <SessionNodeItem
           key={node.id}
           node={node}
           currentId={currentId}
           now={now}
           onOpen={onOpen}
-          tabIndex={node.id === focusId ? 0 : -1}
-          onFocus={() => { setFocusId(node.id) }}
-          onMoveFocus={(direction) => { moveFocus(index, direction) }}
+          onRename={() => {}}
+          onFork={() => {}}
+          onArchive={() => {}}
           flat
           t={t}
         />

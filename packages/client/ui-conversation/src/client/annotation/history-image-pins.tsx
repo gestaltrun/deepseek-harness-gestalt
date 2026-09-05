@@ -1,5 +1,5 @@
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { ChatViewSlotProps, MessageImagePinOverlay } from '../contract/slots.ts'
+import type { ComposerBarProps, MessageImagePinOverlay } from '../contract/slots.ts'
 import type { InputActions, InputState } from '../input/contract.ts'
 import { useImagePinOverlay } from './image-pin-overlay.tsx'
 
@@ -13,7 +13,7 @@ import { useImagePinOverlay } from './image-pin-overlay.tsx'
 export function useHistoryImagePinOverlay(
   annotations: InputState['annotations'],
   actions: Pick<InputActions, 'addImagePin' | 'updateImagePin'> | undefined,
-  t: ChatViewSlotProps['t'],
+  t: ComposerBarProps['t'],
 ): {
   pinOverlayFor?: (attachment: ImageAttachmentRef) => MessageImagePinOverlay
 } {

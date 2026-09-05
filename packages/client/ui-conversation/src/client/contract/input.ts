@@ -12,6 +12,9 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { LexicalEditor } from 'lexical'
 import type { QueueRow } from './queue.ts'
 import type { InputSubmitMode } from './composer-submission.ts'
+import type {
+  DraftAnnotation, ImagePinAnnotation, TextAnchor, TextAnnotationId,
+} from './annotation.ts'
 
 /** Pick-time draft span guarded by the input revision. */
 export interface TokenSpan {
@@ -229,6 +232,25 @@ export interface InputActions {
   pruneImages(ids: readonly DraftAttachmentId[]): void
   /** Enter submission (adjudication / claim transaction / default sink inside). */
   submit(): void
+  /** Mint one unsent text annotation. */
+  addTextAnnotation(anchor: TextAnchor, note: string): TextAnnotationId
+  /** Replace the note of one unsent text annotation. */
+  updateTextAnnotation(id: TextAnnotationId, note: string): void
+  /** Drop one unsent text annotation. */
+  removeTextAnnotation(id: TextAnnotationId): void
+  /** Drop every unsent text and image-pin annotation. */
+  discardTextAnnotations(): void
+  /** Mint one unsent image pin. */
+  addImagePin(
+    imageId: string,
+    imageName: string,
+    x: number,
+    y: number,
+    note: string,
+    source?: ImagePinAnnotation['source'],
+  ): TextAnnotationId
+  /** Patch one unsent image pin. */
+  updateImagePin(id: TextAnnotationId, patch: { x?: number; y?: number; note?: string }): void
 }
 
 /** One surfaced notice (command results, adjudication failures). seq keys re-render of repeats. */
@@ -332,6 +354,10 @@ export interface InputState {
   readonly occurrences: readonly Occurrence[]
   /** Read-only transient inbox projection from Session control, including pending steering. */
   readonly queue: readonly QueuedMessage[]
+  /** Unsent text and image-pin annotations in creation order. */
+  readonly annotations: readonly DraftAnnotation[]
+  /** True while an annotation-only or mixed admission is in flight. */
+  readonly annotationSubmitting?: boolean
 }
 
 /**

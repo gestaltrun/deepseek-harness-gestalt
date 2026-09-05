@@ -2,12 +2,12 @@
 /** Annotation Draft persistence: store mirror/restore, last-writer tabs, stale anchors, rejection restoration. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { createTextAnchor, TextAnnotationId } from '../src/client/annotation/model.ts'
 import type { PersistedAnnotationDraft } from '../src/client/annotation/model.ts'
-import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
+import { AssistantMarkdown } from '../src/client/annotation/AssistantMarkdown.tsx'
 import { zh } from '../src/client/locales.ts'
 import { createChatStore } from '../src/client/stores.ts'
 import type { SessionInputDeps } from '../src/client/input/facade.ts'
@@ -27,7 +27,7 @@ const LABELS = {
 
 function makeShell(deps: Partial<SessionInputDeps> = {}): SessionInputShell {
   return new SessionInputShell({
-    actx: {} as ClientContext,
+    actx: {} as Context,
     defaultSink: vi.fn(() => Promise.resolve({ kind: 'success' as const })),
     annotationLabels: LABELS,
     ...deps,
@@ -220,7 +220,6 @@ describe('annotation draft persistence', () => {
       [],
       'queue',
       expect.any(AbortSignal),
-      [],
     )
     // Newer text typed during the attempt must not enter the snapshot.
     shell.setDraft('A later edit must not win.')

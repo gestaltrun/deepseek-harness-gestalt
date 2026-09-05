@@ -29,7 +29,7 @@ This package is infrastructure: the web shell and the boot kernel are its only d
 
 ### What mounting does
 
-`mount(container)` installs the slot renderer, hydrates the existing boot DOM when present, renders the assembled application into the container before the next paint, and returns a disposer that unmounts the React root. The renderer performs the sole context-level `renderSlot('root')` call; the registered root occupant owns product layout and document metadata.
+`mount(container)` hydrates the existing boot DOM when present, renders the assembled application into the container before the next paint, and returns an idempotent disposer that unmounts the React root. `mountSession(container, slotKey, sessionId, ownerProps)` validates and resolves one declared non-root Session or Session-maybe slot before creating its separate React root, and never changes shell selection. Invalid targets acquire no root, render failures unmount before rethrowing, and plugin teardown unmounts every live root even when a caller omitted its disposer.
 
 ### For business plugins
 
@@ -43,7 +43,7 @@ A business plugin registers a component through the slot system; the renderer bi
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The package realizes one boundary: the object layer (runtime, React-free) owns business state; this renderer is the only place ctx-to-React integration happens — slot renderer, `SessionProvider`, and the `useSyncExternalStore` adapter.
+The package realizes one boundary: the React-free object layer owns business state; this renderer is the only place ctx-to-React integration happens — slot outlets, current and explicit Session scope providers, and the `useSyncExternalStore` adapter.
 
 ### Activation and mount
 

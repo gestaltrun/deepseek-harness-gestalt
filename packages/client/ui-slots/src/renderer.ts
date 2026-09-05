@@ -97,6 +97,12 @@ export interface SlotScopeAdapter {
    */
   resolve(key: string): ScopedStandardSourceBinding | undefined
   /**
+   * Acquire one explicit-render lifetime for an available scope identity.
+   * @param key - scope identity.
+   * @returns idempotent release, or `undefined` when the identity is unavailable.
+   */
+  acquireForRender?(key: string): (() => void) | undefined
+  /**
    * Render the scope owner's area seat over the current binding. The renderer
    * binds this function to the standard `SessionProvider` prop without owning
    * Session selection semantics.
@@ -207,12 +213,21 @@ export interface SlotRendererHost {
 /** The installation contract between the `ui-renderer` SlotRegistry and its React renderer. */
 export interface SlotRenderer {
   /**
-   * Render the root slot tree over the host API (the only ctx-level entry).
+   * Render the root slot tree over the host API (the shell entry).
    * @param host - the installing service's host API.
    * @param ownerProps - owner props from the shell's renderSlot('root', ...) call.
    * @returns the rendered tree.
    */
   renderRoot(host: SlotRendererHost, ownerProps: object): ReactNode
+  /**
+   * Render one Session-scoped slot against an explicit Session identity.
+   * @param host - the installing service's host API.
+   * @param slotKey - declared non-root Session or Session-maybe slot.
+   * @param sessionId - Session identity resolved through the installed scope adapter.
+   * @param ownerProps - owner props for this slot occurrence.
+   * @returns the rendered tree.
+   */
+  renderSession(host: SlotRendererHost, slotKey: string, sessionId: string, ownerProps: object): ReactNode
 }
 
 /** Thrown when a retained renderSlot binding is invoked after its declaring entry was disposed. */

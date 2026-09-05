@@ -94,6 +94,8 @@ async function boot(): Promise<Booted> {
       "- name: 'test-ui-answerer'",
       "- name: 'test-delivery-config'",
       "- name: '@deepseek-ai/dsh-member-question-sender'",
+      '  inject:',
+      '    - testDeliveryConfig',
       '  config:',
       '    delivery: !!js ctx.get(\"testDeliveryConfig\").delivery',
       "- name: 'test-tool-ask-user'",
@@ -101,7 +103,7 @@ async function boot(): Promise<Booted> {
       '',
     ].join('\n'))
     const ui = { name: 'test-ui', apply(ctx: Context) { ctx.on('user-questions/request', (request) => { localRequests.push(request); return Promise.resolve({ answers: request.questions.map(question => ({ id: question.id, selected: ['local'] })) }) }) } }
-    const deliveryConfig = { name: 'test-delivery-config', apply(ctx: Context) { ctx.root.provide('testDeliveryConfig', { delivery }) } }
+    const deliveryConfig = { name: 'test-delivery-config', apply(ctx: Context) { ctx.provide('testDeliveryConfig', { delivery }) } }
     const senderModule = { default: Sender }
     const tool = {
       name: 'test-tool-ask-user',
@@ -161,6 +163,11 @@ async function boot(): Promise<Booted> {
     context.loader.internal = { version: 'v2', async import(specifier: string) { if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`); return modules.get(specifier) } } as unknown as NonNullable<typeof context.loader.internal>
     await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
     await context.loader.await()
+    const providerEntry = [...context.loader.entries()].find(entry => entry.options.name === 'test-delivery-config')
+    const senderEntry = [...context.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-member-question-sender')
+    if (providerEntry === undefined || senderEntry === undefined) throw new Error('expected delivery and sender Loader entries')
+    expect(providerEntry.fiber).toBeDefined()
+    expect(senderEntry.fiber).toBeDefined()
     const unloaded = [...context.loader.entries()].filter(entry => !entry.disabled && entry.fiber === undefined)
     if (unloaded.length > 0) throw new Error(`enabled Loader entries did not load: ${unloaded.map(entry => entry.options.name).join(', ')}`)
     if (run === undefined) throw new Error('composition driver did not activate')

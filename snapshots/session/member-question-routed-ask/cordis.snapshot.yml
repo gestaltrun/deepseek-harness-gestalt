@@ -9,7 +9,7 @@
   config:
     currentAccountResolver: !!js "async () => 'acc-demo-owner'"
     boundProjectResolver: !!js "async () => 'proj-demo'"
-    rosterPresenter: !!js "async view => view.members.map((member, index) => ({ presence: index === 0 ? 'online' : 'offline', displayName: index === 0 ? 'Demo Owner' : 'grace' }))"
+    rosterPresenter: !!js "async view => view.members.map((member, index) => ({ presence: 'online', displayName: index === 0 ? 'Demo Owner' : 'grace' }))"
 - id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
   config:

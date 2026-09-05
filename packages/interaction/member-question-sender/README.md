@@ -44,7 +44,7 @@ This package is the Service Definition and the codec-backed Provider for the mem
 
 ## Model Experience
 
-Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `send()` and retains the sender's stable errors as ordinary tool results.
+Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `ctx.userQuestions.ask()` with `memberRoute`; this sender's Host-root answerer claims that request and retains its stable errors as ordinary tool results.
 
 #### KV Cache effect
 

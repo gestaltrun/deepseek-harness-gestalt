@@ -7,7 +7,7 @@
   <p><sub>英文产品名：Gestalt · 中文名与 IP 角色：獭子哥</sub></p>
   <p><strong>獭子哥是 DeepSeek Harness 的产品层。</strong></p>
   <p>
-    <a href="https://www.gestaltrun.com/">网站</a> ·
+    <a href="https://www.beikejiedeliulangmao.top/">网站</a> ·
     <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases/latest">下载</a> ·
     <a href="docs/user/guide/index.zh.md">Web 指南</a> ·
     <a href="docs/architecture.zh.md">架构</a>

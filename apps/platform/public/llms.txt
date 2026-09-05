@@ -8,7 +8,7 @@ Gestalt keeps the DeepSeek Harness plugin model and adds an installable desktop 
 
 ## Links
 
-- Product: https://www.gestaltrun.com/
+- Product: https://www.beikejiedeliulangmao.top/
 - Source: https://github.com/gestaltrun/deepseek-harness-gestalt
 - Documentation: https://gestaltrun.github.io/deepseek-harness-gestalt/
 - Releases: https://github.com/gestaltrun/deepseek-harness-gestalt/releases

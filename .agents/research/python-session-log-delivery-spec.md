@@ -6,7 +6,7 @@ Issue #604 is the independently authorized prerequisite for completing Issue #60
 
 The independent specification branch is `codex/feature-python-session-log`, based on master `6d3b7a9d923f5d1fc7bcd3a2d89bcca942bdb522`. Keep the guidance delivery branch and its reviewed tree unchanged while diagnosing this issue.
 
-Merge-group run `33953482097`, candidate `d247f8529aa365c5399f288c7020cf794a91555d`, failed Python runtime job `101272697419`. The MCP smoke completed the expected final response and discovery/tool-call sequence, then found no `*.jsonl` session log. The assertion is after the `DeepSeekHarness` context exits; the generated MCP configuration explicitly sets compression to `none`. All other selected lanes passed on that candidate. Passing previous runs establish an intermittent observation, not its cause.
+Merge-group run `33953482097`, candidate `d247f8529aa365c5399f288c7020cf794a91555d`, failed Python runtime job `101272697419`. The MCP smoke completed the expected final response and discovery/tool-call sequence, then found no `*.jsonl` session log. The assertion is after the `DeepSeekHarness` context exits; the generated MCP configuration explicitly sets compression to `none`. All other selected lanes passed on that candidate. Passing previous runs establish an intermittent observation, not its cause. A deterministic fake protocol peer reproduced 10/10 cases where immediate `SIGTERM` after a successful shutdown response interrupted a delayed durable marker, while waiting a bounded interval for normal exit preserved it 10/10; the real keyless MCP smoke passed 25/25 and batch-delay probes also passed, so this proves the Python close-order race is possible but does not establish that it caused the single CI occurrence.
 
 ## Diagnostic acceptance
 
@@ -17,7 +17,7 @@ Merge-group run `33953482097`, candidate `d247f8529aa365c5399f288c7020cf794a9155
 
 ## Repair and verification acceptance
 
-- Change only the owner justified by the diagnostic evidence. Preserve the public timeout configuration and bounded terminate/kill fallback; do not introduce an unbounded wait or weaken the JSONL assertion.
+- Change `Python client.close`, the owner justified by the diagnostic evidence, to wait a bounded interval for normal process exit after an acknowledged shutdown before using the existing bounded terminate/kill fallback. Preserve fallback behavior when shutdown is not acknowledged, emit process-exit diagnostics without swallowing errors, and do not introduce an unbounded wait or weaken the JSONL assertion.
 - Add failing-then-passing regression coverage for acknowledged shutdown followed by delayed, bounded persistence/disposal. Preserve coverage for a bridge that never acknowledges shutdown or ignores termination, and ensure processes and reader threads are reaped.
 - Run the relevant Python client/API tests and applicable real-composition keyless runtime smoke. Explain which artifact/source launch is tested; no real-model service or user credential copy is needed for the existing keyless fixture server.
 - Follow repository lifecycle, architecture, Agent Note, documentation, bilingual pairing, and required assembled evidence rules. Keep source/config changes within the accepted repair scope, and retain exact check outcomes rather than replacing failures with generic success claims.

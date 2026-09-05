@@ -20,7 +20,7 @@ function executable(path: string, source: string): void {
   chmodSync(path, 0o700)
 }
 
-function runRenewal(mode: 'validate' | 'renew', options: { failCommit?: boolean; unexpectedDns?: boolean } = {}) {
+function runRenewal(mode: 'validate' | 'renew', options: { failCommit?: boolean; unexpectedDns?: boolean; fingerprintMismatch?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'certificate-renewal-'))
   const bin = join(root, 'bin')
   const log = join(root, 'operations.log')
@@ -32,7 +32,7 @@ function runRenewal(mode: 'validate' | 'renew', options: { failCommit?: boolean;
 "s_client -connect") echo CERT;;
 "x509 -outform") cat;;
 "x509 -in")
- case "$*" in *-enddate*) echo notAfter=Dec\ 4\ 16:29:23\ 2026\ GMT;; *-fingerprint*) echo SHA256\ Fingerprint=NEWFP;; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\n    DNS:example.test, DNS:www.example.test\n';; *-checkend*) exit 0;; esac;;
+ case "$*" in *-enddate*) echo notAfter=Dec\ 4\ 16:29:23\ 2026\ GMT;; *-fingerprint*) [[ "$MOCK_FINGERPRINT_MISMATCH" == 1 && "$*" == *current/www.example.test-192.0.2.2.pem* ]] && echo SHA256\ Fingerprint=OTHER || echo SHA256\ Fingerprint=NEWFP;; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\n    DNS:example.test, DNS:www.example.test\n';; *-checkend*) exit 0;; esac;;
 "pkey -in") echo PUB;;
 esac\n`)
   executable(join(bin, 'cmp'), '#!/bin/bash\nexit 0\n')
@@ -72,6 +72,7 @@ esac
       PATH: `${bin}:/usr/bin:/bin`, MOCK_LOG: log,
       MOCK_NOW: mode === 'renew' ? '2000' : '1000',
       MOCK_FAIL_COMMIT: options.failCommit ? '1' : '0', MOCK_UNEXPECTED_DNS: options.unexpectedDns ? '1' : '0',
+      MOCK_FINGERPRINT_MISMATCH: options.fingerprintMismatch ? '1' : '0',
       PLATFORM_ALIYUN_REGION: 'cn-hangzhou', PLATFORM_CERT_DOMAIN: 'example.test',
       PLATFORM_CERT_WWW_DOMAIN: 'www.example.test', PLATFORM_CERT_ALB_EIPS: '192.0.2.1,192.0.2.2',
       PLATFORM_CERT_ALB_LISTENER_ID: 'lsn-test123', PLATFORM_CERT_OSS_BUCKET: 'private-bucket',
@@ -92,7 +93,14 @@ describe('Platform certificate renewal automation', () => {
     expect(record(renew.permissions)).toEqual({ contents: 'read', 'id-token': 'write' })
     expect(renew.needs).toBe('enabled')
     expect(renew.if).toBe("needs.enabled.outputs.enabled == 'true'")
-    expect(JSON.stringify(enabled)).toContain('PLATFORM_CERT_RENEWAL_ENABLED')
+    const source = JSON.stringify(enabled)
+    expect(source).toContain('PLATFORM_CERT_RENEWAL_ENABLED')
+    expect(source).toContain('refs/heads/master')
+    expect(source).toContain('merge-base --is-ancestor')
+    expect(record(workflow.env)).toEqual({
+      ALIYUN_CLI_VERSION: '3.4.11',
+      ALIYUN_CLI_LINUX_AMD64_SHA256: 'a7e3df497db14c10d4d7587795e9fa7849b0c51dfce02908b9de5a41fe717d5c',
+    })
   })
 
   it('validates current TLS without DNS, CAS, listener, or state writes', () => {
@@ -100,6 +108,12 @@ describe('Platform certificate renewal automation', () => {
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('validation passed')
     expect(result.operations).not.toMatch(/AddDomainRecord|UploadUserCertificate|UpdateListenerAttribute|AES256/)
+  })
+
+  it('rejects a different current leaf even when its expiry matches', () => {
+    const result = runRenewal('validate', { fingerprintMismatch: true })
+    expect(result.status).not.toBe(0)
+    expect(result.stderr).toContain('different certificates')
   })
 
   it('refuses a DNS challenge outside the two exact allowed names', () => {
@@ -117,6 +131,11 @@ describe('Platform certificate renewal automation', () => {
     expect(updates[0]).toContain('new-cert-cn-hangzhou')
     expect(updates[1]).toContain('prior-cn-hangzhou')
   }, 15_000)
+
+  it('maps INT and TERM cleanup handlers to nonzero exits', () => {
+    expect(script).toContain("trap 'trap - EXIT; on_exit 130' INT")
+    expect(script).toContain("trap 'trap - EXIT; on_exit 143' TERM")
+  })
 
   it('pins ACME, uses OSS AES256, and never embeds reusable cloud credentials', () => {
     const source = JSON.stringify(workflow)

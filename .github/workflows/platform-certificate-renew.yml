@@ -21,6 +21,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  ALIYUN_CLI_VERSION: 3.4.11
+  ALIYUN_CLI_LINUX_AMD64_SHA256: a7e3df497db14c10d4d7587795e9fa7849b0c51dfce02908b9de5a41fe717d5c
+
 jobs:
   enabled:
     name: Check certificate automation gate
@@ -28,11 +32,23 @@ jobs:
     outputs:
       enabled: ${{ steps.gate.outputs.enabled }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - id: gate
         env:
           ENABLED: ${{ vars.PLATFORM_CERT_RENEWAL_ENABLED }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
         run: |
-          if [[ "$ENABLED" == true ]]; then echo 'enabled=true' >> "$GITHUB_OUTPUT"; else echo 'enabled=false' >> "$GITHUB_OUTPUT"; fi
+          set -euo pipefail
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          if [[ "$ENABLED" == true && "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] \
+            && git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          fi
 
   renew:
     name: Renew production ALB certificate

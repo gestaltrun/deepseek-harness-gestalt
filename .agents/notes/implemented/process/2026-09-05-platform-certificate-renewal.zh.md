@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-每日 GitHub Actions workflow 检查生产证书，并且仅在配置的续期窗口内续期。无特权 job 要求显式 enable 变量后，Environment `production` OIDC job 才能启动。有特权 job 承担既有阿里云部署角色，不使用阿里云 AccessKey 或工作站状态。
+每日 GitHub Actions workflow 检查生产证书，并且仅在配置的续期窗口内续期。无特权 job 要求显式 enable 变量，且 workflow commit 已包含在 `master` 中，Environment `production` OIDC job 才能启动。有特权 job 承担既有阿里云部署角色，不使用阿里云 AccessKey 或工作站状态。
 
 workflow 下载一个不可变的 acme.sh 源码归档，并在执行前校验其 SHA-256。ACME 账号与域名状态归档在既有私有部署 OSS bucket 的单个精确 key 下。bucket 使用 OSS 托管的 AES256 服务端加密，每次状态上传也会显式请求该加密。临时状态仅属主可访问，并在 job 退出时删除。
 
@@ -30,7 +30,7 @@ ACME DNS hook 通过 workflow 的 OIDC 凭据调用 AliDNS，而不是使用 acm
 
 ## Consequences
 
-续期依赖 GitHub Actions 与 OSS control-plane confidentiality，而阿里云授权仍是短期联合身份。服务端加密保护存储介质与提供方备份，但拥有 object-read authority 的 OSS compromise 可以暴露 ACME 私有状态，因此精确 object IAM 是安全边界的一部分。之前的 CAS 证书继续保留用于显式回滚，生命周期清理属于另一项经审核的操作。
+续期依赖 GitHub Actions 与 OSS control-plane confidentiality，而阿里云授权仍是短期联合身份。服务端加密保护存储介质与提供方备份，但拥有 object-read authority 的 OSS compromise 可以暴露 ACME 私有状态，因此精确 object IAM 是安全边界的一部分。workflow 的 master ancestry 检查防止意外分支启用，但不能防御不受限制的 production Environment 所准入的恶意 workflow。启用时会另行验证 Environment branch restriction 与 OIDC trust。之前的 CAS 证书继续保留用于显式回滚，生命周期清理属于另一项经审核的操作。
 
 ## Verification
 

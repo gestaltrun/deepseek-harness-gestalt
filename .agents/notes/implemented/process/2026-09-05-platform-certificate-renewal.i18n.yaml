@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-05-platform-certificate-renewal.md
-2026-09-05-platform-certificate-renewal.md: a68064770ccab2f5fa0ccc04d7797784d87d4c41
-2026-09-05-platform-certificate-renewal.zh.md: f7c69e44e685ae94480fd2846c355e09d23a2574
+2026-09-05-platform-certificate-renewal.md: 6afaafaedac7caf0246fb3f624c9f421279ea4c6
+2026-09-05-platform-certificate-renewal.zh.md: ae196b6a0411b9b5ffe2b8da89b70240310fce72

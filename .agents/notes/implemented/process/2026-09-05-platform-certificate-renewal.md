@@ -10,7 +10,7 @@ The operated ALB certificate was issued through a local ACME home and local Alib
 
 ## Decision
 
-A daily GitHub Actions workflow checks the active production certificate and renews only inside its configured renewal window. An unprivileged job requires an explicit enable variable before the Environment `production` OIDC job can start. The privileged job assumes the existing Alibaba Cloud deploy role and uses no Alibaba Cloud AccessKey or workstation state.
+A daily GitHub Actions workflow checks the active production certificate and renews only inside its configured renewal window. An unprivileged job requires an explicit enable variable and a workflow commit contained by `master` before the Environment `production` OIDC job can start. The privileged job assumes the existing Alibaba Cloud deploy role and uses no Alibaba Cloud AccessKey or workstation state.
 
 The workflow downloads one immutable acme.sh source archive and verifies its SHA-256 before execution. ACME account and domain state is archived under one exact key in the existing private deployment OSS bucket. The bucket applies OSS-managed AES256 server-side encryption, and each state upload explicitly requests it. Temporary state is owner-only and deleted when the job exits.
 
@@ -30,7 +30,7 @@ Manual execution defaults to validation without issuance or listener mutation. S
 
 ## Consequences
 
-Renewal depends on GitHub Actions and OSS control-plane confidentiality, while Alibaba Cloud authorization remains short-lived and federated. Server-side encryption protects storage media and provider backups, but an OSS compromise with object-read authority can expose ACME private state; exact-object IAM is therefore part of the security boundary. The previous CAS certificate remains available for explicit rollback and lifecycle cleanup is a separate reviewed operation.
+Renewal depends on GitHub Actions and OSS control-plane confidentiality, while Alibaba Cloud authorization remains short-lived and federated. Server-side encryption protects storage media and provider backups, but an OSS compromise with object-read authority can expose ACME private state; exact-object IAM is therefore part of the security boundary. The workflow's master ancestry check prevents accidental branch activation, not a malicious workflow admitted by an unrestricted production Environment. Activation separately verifies Environment branch restrictions and OIDC trust. The previous CAS certificate remains available for explicit rollback and lifecycle cleanup is a separate reviewed operation.
 
 ## Verification
 

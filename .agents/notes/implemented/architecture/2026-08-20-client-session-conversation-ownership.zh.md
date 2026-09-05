@@ -162,6 +162,8 @@ Session Controller 对外提供三个互不替代的读取面：
 
 每个 Session binding 持有自己的 Cordis Context 与 Fiber。Session Controller 创建 binding，也负责释放它。
 
+`ctx.sessions.stageProvisional()` 会列出调用方提供的身份并铸造普通 binding，且不改变 `list.current`。Host 发布会升级同一身份和 binding；`openForRender()` 仅在发布后打开历史。[临时 Session binding 生命周期](2026-09-04-provisional-session-bindings.zh.md) 拥有这些操作。
+
 依赖 Session 的对象把清理注册到 `binding.ctx.effect()`。Binding 释放会触发 Conversation binding、UI materialization 和 scoped Slot store 的清理，不存在额外的 `onBindingRelease` 或 `onRelease` 回调协议。
 
 这种清理方式不要求 Session Controller 了解上层消费者名册。

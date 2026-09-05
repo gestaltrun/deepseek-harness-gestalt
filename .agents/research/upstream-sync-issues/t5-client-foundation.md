@@ -4,7 +4,7 @@ Part of #{{PARENT}}.
 
 ## Starting point
 
-Start from the remote upstream-sync baseline after #{{T1}} merges. This ticket may run in parallel with #587 and #588.
+Start from the remote upstream-sync baseline after #{{T1}} and the provisional Session binding prerequisite merge. The independent renderer slice may be developed in parallel, but provisional/cold acceptance and final merge wait for that controller prerequisite.
 
 ## Outcome
 
@@ -40,4 +40,4 @@ Own `packages/client/store/**`, `packages/client/ui-session/**`, `packages/clien
 
 ## Dependencies
 
-Blocked by: #{{T1}}.
+Blocked by: #{{T1}} and the provisional Session binding prerequisite.

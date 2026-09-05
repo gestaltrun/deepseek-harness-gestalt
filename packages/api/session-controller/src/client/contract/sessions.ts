@@ -17,7 +17,12 @@ import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 
 export type { AgentContext } from '../scope.ts'
 
-/** The sessions-service face injected as `ctx.sessions`. */
+/**
+ * The sessions-service face injected as `ctx.sessions`.
+ * Command methods throw `sessions.<op>: ClientSessions is disposed` after
+ * root disposal; in-flight `search`/`create`/`fork` reject with the same error.
+ * Observational lookups stay undefined; `openForRender` no-ops.
+ */
 export interface ISessions {
   /** The useSessions standard feed (list rows + current selection; read face — writes stay inside the domain). */
   readonly list: ObservableSnapshot<SessionListState>
@@ -63,6 +68,7 @@ export interface ISessions {
    * Refresh one direct-child catalog.
    * @param parentSessionId - catalog owner.
    * @returns completion of the current or newly started refresh.
+   * @throws `sessions.refreshSubagents: ClientSessions is disposed` when called after root disposal.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void>
 
@@ -71,6 +77,7 @@ export interface ISessions {
   /**
    * Refresh the Host-authoritative Session list.
    * @returns completion of the current or newly started Session-list refresh.
+   * @throws `sessions.refresh: ClientSessions is disposed` when called after root disposal.
    */
   refresh(): Promise<void>
   /**
@@ -116,8 +123,33 @@ export interface ISessions {
   sessionOf(ctx: Context): SessionFace | undefined
   /**
    * Resolve the stable session binding (scope-addressed assembly feed).
+   * Render-safe: no Host history or catalog request, and no change to `list.current`.
    * @param id - session id.
    * @returns binding, or undefined for a session neither listed nor already scoped.
    */
   binding(id: SessionId): SessionBinding | undefined
+  /**
+   * Stage a caller-supplied renderer-only Session identity until Host publication.
+   * Does not change `list.current`. The same identity and binding survive a matching
+   * Host `session-added` publication; a later disposer must not remove that published row.
+   * @param descriptor - preallocated identity, parent lineage, and display title.
+   * @returns disposer that removes the unpublished row and its scope exactly once.
+   *   No-op after publication, a prior release, or ClientSessions disposal.
+   * @throws when the identity is already staged or already listed, or when
+   *   ClientSessions is disposed.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void
+  /**
+   * Open one explicitly rendered Session without changing `list.current`.
+   * A provisional identity performs no Host history request. A published
+   * Session opens its history window and refreshes its subagent catalog.
+   * An unknown identity is a no-op (same as the former explicit-render open).
+   * @param sessionId - listed, addressed, or staged Session identity.
+   */
+  openForRender(sessionId: SessionId): void
 }

@@ -4,7 +4,7 @@ Part of #{{PARENT}}.
 
 ## Starting point
 
-Start from the remote upstream-sync baseline after #{{T2}} and #{{T3}} merge.
+Start from the remote upstream-sync baseline after #{{T2}}, #{{T3}}, and the provisional Session binding prerequisite merge.
 
 ## Outcome
 
@@ -42,4 +42,4 @@ Own `packages/host/apiproxy/**`, `packages/api/session-controller/**`, `packages
 
 ## Dependencies
 
-Blocked by: #{{T2}}, #{{T3}}.
+Blocked by: #{{T2}}, #{{T3}}, and the provisional Session binding prerequisite.

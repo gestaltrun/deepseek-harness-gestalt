@@ -204,6 +204,9 @@ case "$action" in
     test ! -e "$candidate_env"
     ;;
   complete-bootstrap)
+    : "${DSH_DEPLOY_CANDIDATE:?}"
+    bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}')
+    [ "$bootstrap_owned" = "$DSH_DEPLOY_CANDIDATE" ]
     ensure_container_absent dsh-platform-candidate
     ! docker inspect dsh-platform-rollback >/dev/null 2>&1
     wait_for_ready 80

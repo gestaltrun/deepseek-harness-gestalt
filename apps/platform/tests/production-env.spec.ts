@@ -316,6 +316,56 @@ function runRecoveryHarness(
   })
 }
 
+function runBootstrapHostRecoveryHarness(
+  action: 'bootstrap-rollback' | 'complete-bootstrap',
+  owner: 'matching' | 'foreign' | 'missing',
+) {
+  const runnableHostDeploy = hostDeploySource
+    .replace('candidate_env=/run/dsh-platform-candidate.env', 'candidate_env="$CANDIDATE_ENV"')
+    .replace('exec 9>/run/dsh-platform-deploy.lock', 'exec 9>"$HOST_LOCK"')
+  const harness = [
+    `set -- ${action}`,
+    'LOG=$(mktemp)',
+    'HOST_LOCK=$(mktemp)',
+    'CANDIDATE_ENV=$(mktemp)',
+    'export LOG HOST_LOCK CANDIDATE_ENV',
+    'flock() { :; }',
+    'curl() { printf \'{"ok":true}\\n\'; }',
+    'sleep() { :; }',
+    'docker() {',
+    '  printf \'%s\\n\' "$*" >> "$LOG"',
+    '  case "$1:${2:-}" in',
+    '    info:*) return 0 ;;',
+    '    inspect:dsh-platform)',
+    '      if [[ "$*" == *bootstrap-candidate* ]]; then',
+    '        case "$BOOTSTRAP_OWNER" in matching) printf \'%s\\n\' "$DSH_DEPLOY_CANDIDATE" ;; foreign) printf \'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\n\' ;; missing) return 1 ;; esac',
+    '      elif [ "$BOOTSTRAP_OWNER" = missing ]; then return 1; fi',
+    '      return 0',
+    '      ;;',
+    '    inspect:dsh-platform-rollback) return 1 ;;',
+    '    ps:*) return 0 ;;',
+    '    rm:*) return 0 ;;',
+    '    stop:*) return 0 ;;',
+    '  esac',
+    '}',
+    'set +e',
+    '(',
+    runnableHostDeploy,
+    ')',
+    'status=$?',
+    'cat "$LOG"',
+    'exit "$status"',
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      BOOTSTRAP_OWNER: owner,
+      DSH_DEPLOY_CANDIDATE: 'a'.repeat(40),
+    },
+  })
+}
+
 function runCommittedCleanupHarness(dockerState: 'absent' | 'rollback-remains' | 'ps-fails') {
   const runnableHostDeploy = hostDeploySource
     .replace('candidate_env=/run/dsh-platform-candidate.env', 'candidate_env="$CANDIDATE_ENV"')
@@ -1075,6 +1125,28 @@ describe('Platform release workflows', () => {
     expect(targetMismatch.stderr).toContain('recovery targets differ from the durable state')
     expect(targetMismatch.stdout).not.toContain('RUN:')
     expect(targetMismatch.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+  })
+
+  it('executes real bootstrap rollback only for the exact candidate owner', () => {
+    const matching = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'matching')
+    expect(matching.status).toBe(0)
+    expect(matching.stdout).toContain('stop --time 60 dsh-platform')
+    expect(matching.stdout).toContain('rm -f dsh-platform')
+
+    const foreign = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'foreign')
+    expect(foreign.status).toBe(1)
+    expect(foreign.stdout).not.toContain('stop --time 60 dsh-platform')
+    expect(foreign.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
+
+    const missing = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'missing')
+    expect(missing.status).toBe(0)
+    expect(missing.stdout).not.toContain('stop --time 60 dsh-platform')
+  })
+
+  it('executes real committed bootstrap recovery only for the exact candidate owner', () => {
+    expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'matching').status).toBe(0)
+    expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'foreign').status).toBe(1)
+    expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'missing').status).toBe(1)
   })
 
   it('rejects committed recovery while a rollback container remains', () => {

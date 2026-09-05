@@ -68,6 +68,19 @@ describe('website source layout', () => {
       'Keep canonical Markdown under docs/ and publish it through website/docs.ts.',
     ).toEqual([])
   })
+
+  it('cleans the owned output before both site build modes', () => {
+    const rootPackage = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>
+    }
+    const websitePackage = JSON.parse(readFileSync(join(repositoryRoot, 'website/package.json'), 'utf8')) as {
+      scripts: Record<string, string>
+    }
+
+    expect(websitePackage.scripts.build).toBe('pnpm run clean:dist && vitepress build .')
+    expect(websitePackage.scripts['build:mpa']).toBe('pnpm run clean:dist && vitepress build . --mpa')
+    expect(rootPackage.scripts['docs:build:mpa']).toMatch(/^pnpm --filter @deepseek-ai\/website run build:mpa(?: |$)/u)
+  })
 })
 
 describe('publishableImage', () => {

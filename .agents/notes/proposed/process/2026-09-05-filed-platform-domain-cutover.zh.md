@@ -18,17 +18,17 @@ Status: proposed
 
 ## 提案
 
-通过下述分阶段序列，将运营 Platform 切换到 `https://www.beikejiedeliulangmao.top` 并支持裸域（`beikejiedeliulangmao.top`）。用户已确认以 www 为规范 origin，且已同时授权域名部署与正式的 Desktop/Mobile 重新发布；这些工作无需每步重新征求整体批准。仍需基于各自的具体证据等待用户显式批准的是：任何报价支出（采购、续费、规格或计费模式变更）、任何破坏性资源变更（释放、删除、数据存储移除），以及任何高可用性取舍（拓扑削减）。本说明与其 PR 不执行任何变更：各阶段是授权执行遵循的持久计划，且在选定成本方案之前所有云上工作保持只读。
+通过下述分阶段序列，将运营 Platform 切换到 `https://www.beikejiedeliulangmao.top` 并支持裸域（`beikejiedeliulangmao.top`）。用户已确认以 www 为规范 origin，且已同时授权域名部署与正式的 Desktop/Mobile 重新发布；这些工作无需每步重新征求整体批准。仍需基于各自具体证据等待用户显式批准的范围更窄：所选 ECS 形态的具体待定报价与采购，以及其他报价支出（续费、计费模式变更）、破坏性资源变更（释放、删除、数据存储移除）和高可用性取舍。用户现已显式选定目标架构——两台按月订阅的 `ecs.e-c1m2.large`（2 vCPU、4 GiB）实例，保留 RDS 与 Redis 并优化其计费，负载均衡以双节点形态保留并优化成本；单节点替代方案经评估未被选择。本说明与其 PR 不执行任何变更：各阶段是授权执行遵循的持久计划，且在确认经过验证的成本方案之前所有云上工作保持只读。
 
 切换后的规范权威：
 
 - Environment `production` 的 `PLATFORM_ORIGIN` 变为 `https://www.beikejiedeliulangmao.top`；`PLATFORM_GITHUB_CALLBACK` 变为 `https://www.beikejiedeliulangmao.top/v1/account/oauth/github/callback`。
 - Environment `desktop-release` 更新同两个名称 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK`——Desktop 配置投影读取的是 `PLATFORM_*` 名称而非 `VITE_*`。Environment `mobile-release` 将 `VITE_PLATFORM_ORIGIN`、`VITE_PLATFORM_CALLBACK_URL` 与 `VITE_REMOTE_RELAY_WSS_URL` 更新为同一 www origin，并保持 `VITE_REMOTE_RELAY_WSS_URL = wss://www.beikejiedeliulangmao.top/v1/remote-access/relay` 与 Desktop 推导的 relay 地址一致。
 - GitHub OAuth App（client id `Ov23lip9LTmnFuFpFeeV`）的回调 URL 重新注册到新回调路径。该 App 区别于仓库的自动化 GitHub Apps，不被替换；经代码验证的过渡不需要第二个 OAuth App。
-- 无条件保留：`PLATFORM_POSTGRES_DATABASE`（数据库身份）、`PLATFORM_IDENTITY_NAMESPACE`、`PLATFORM_TOKEN_SIGNING_KEY`、`PLATFORM_POLLING_SIGNING_KEY` 与全部持久数据。账号、安装、配对与持久状态得以保留，因为为其提供键的身份未变。
+- 无条件保留：`PLATFORM_POSTGRES_DATABASE`（数据库身份）、`PLATFORM_IDENTITY_NAMESPACE`、`PLATFORM_TOKEN_SIGNING_KEY`、`PLATFORM_POLLING_SIGNING_KEY` 与全部持久数据。账号、安装、配对与持久状态得以保留，因为为其提供键的身份未变。RDS 与 Redis 保留；仅优化其计费。
+- 已选拓扑（用户选择，待验证总额）：两台按月订阅的 `ecs.e-c1m2.large`（2 vCPU、4 GiB）ECS 实例替换现有实例——用户目录价每台每月 47.52，而含磁盘的实际总额有待对照含磁盘的 67.52 数字验证；负载均衡保留双节点并优化成本；单节点经评估未选择。待定报价与采购获得显式批准后，迁移按该形态执行。
 - 区域上的三条 TXT 记录及其他所有 DNS 记录逐字保留；仅替换两条旧 A 记录（裸域与 www 的 `120.77.49.2`），并记录变更前的值用于回滚。两个主机名都迁移；规范权威保持为 www origin。此前已停用的 `www.gestaltrun.com` 记录不会被静默重新启用。
 - gestaltrun.com 证书保持挂载，旧主机名在旧客户端过渡证据关闭之前持续服务；origin 切换不会退役旧主机名，为其提供服务的身份命名空间保持不变。
-- 拓扑是评估输入而非保留范围：两台 ECS 实例、ALB 及其服务器组与监听器、以及任何前端，都是成本右尺寸决策的候选对象——议题的成本范围扩展已明确打开该决策；在报价/利用率评估与用户批准选出形态之前，不假设必须保留两台 ECS 或 ALB。
 - 对高可用性的削减（单实例部署、移除负载均衡层）与每一笔计价采购（新实例、升配、预留或包年包月计费）都逐项以用户显式决策为闸门，且决策发生在只读评估报告实际账单、利用率与报价之后。本说明不授权任何下单、续费、规格变更或破坏性变更。
 - 品牌名称、README、历史发布说明及引用 gestaltrun.com 的文档不改名。官网 SEO canonical 默认保持 `https://www.gestaltrun.com/`，等待显式决策，因为 `apps/platform/public/index.html` 及其发现元数据同时服务于两个主机名，过早切换 canonical 会在新域名积累权重之前丢弃已索引的 origin。
 
@@ -38,7 +38,7 @@ Status: proposed
 
 Stage 0 —— 冻结并记录（不改生产）。记录当前裸域/www A 值（`120.77.49.2`，TTL 600 秒）、三条 TXT 记录、ALB 监听器 id 及其当前证书、服务器组、ECS 实例 id，以及当前 GitHub OAuth App 回调 URL。重新拉取 `origin/master` 并确认发布列车状态（PR #584 / 计划 0012 选择 Desktop 0.1.16），使本次切换不与该列车交错。
 
-Stage 0.5 —— 成本右尺寸依赖（只读评估，然后用户决策）。按议题的成本范围评论，用户要求以足够服务运行的最低配置按月订阅 ECS，并降低包括负载均衡在内的其他成本，因此架构决策在本阶段完成前保持开放。一次只读的基础设施评估报告：按产品与资源划分的实际当前账单；可得情况下近期的 CPU/内存/网络利用率；有报价支撑的按月选项（估算明确标注为估算，而非采购报价）；包括带宽、NAT、EIP、存储与日志在内的总经常性成本；单节点与多节点在故障和部署上的取舍；以及各选项的回滚/数据保留。在不削弱 TLS 校验的前提下评估受支持的更低成本证书/续期路径。两份新拉取的账户/账单报告互相矛盾——一份报告 ALB 为 Active，另一份报告财务锁定且余额 −13.48——因此在进行带时间戳的复核使其一致之前，任何结论都不依赖其中任何一份；特别是，不假设负余额会封锁所有 API。随后由用户逐项显式决定购买哪种形态；只有该决策才释放对应的 Stage 1/3 变更——在用户看到并确认具体方案与金额之前，不发生任何计价采购、破坏性资源释放、数据存储删除或可用性削减。若所选形态保留 ALB，Stage 1 在现有监听器上挂载证书；若其替换或去掉 ALB，Stage 1 在任何 DNS 变更之前按所选前端重新规划。
+Stage 0.5 —— 成本方案验证（只读，然后待定采购决策）。架构方向已由用户选定：两台按月订阅的 `ecs.e-c1m2.large`（2 vCPU、4 GiB）ECS 实例，保留 RDS 与 Redis 并优化计费，负载均衡保留双节点并优化成本——单节点经评估未选择。本阶段仍以只读方式验证：47.52 的每台目录价对照含磁盘的 67.52 数字，使用户批准的是确认后的含磁盘总额；2 vCPU/4 GiB 形态相对观测负载的利用率匹配；负载均衡与 NAT 的报价降幅；以及 RDS/Redis 计费优化选项。账单报告的分歧已由带时间戳的更正报告在方向上解决——2026-09-05T16:04Z 时余额 +86.52 且 ALB 无财务锁定——取代此前 FinancialLocked/−13.48 的读数；既定规则仍然成立：任何变更前立即进行当前的带时间戳复核，因为账户状态是时敏输入而非既定事实。随后由用户批准具体的待定报价与采购；只有该批准才释放对应的 Stage 1/3 变更——在用户看到并确认具体方案与金额之前，不发生任何计价采购、破坏性资源释放或数据存储删除。负载均衡保留，因此 Stage 1 按原文在监听器上挂载证书；与最初投影相比仅经验证的成本不同。
 
 Stage 1 —— 证书与 DNS（阿里云控制台，经授权操作者，按 Stage 0.5 选定的架构）。保留 ALB 时：签发一张同时覆盖 `beikejiedeliulangmao.top` 与 `www.beikejiedeliulangmao.top` 的 HTTPS 证书（在现有 DNS 上完成 DCV），将其与当前 gestaltrun.com 证书一并挂到现有 ALB HTTPS 监听器（多证书监听器，而非替换），然后仅替换两条旧 A 记录，使裸域与 www 解析到现有 ALB 前端地址。选择了其他前端时：签发同一张证书，按该架构的方案完成终止，并将两个主机名指向它。两种情况都在记录中保留 TXT 记录与 TTL 值。验证：两个名称的权威与公共 DNS 解析、普通客户端对两个名称的 TLS 握手与主机名校验，以及本阶段期间 gestaltrun.com 服务不中断（旧证书仍挂载）。
 
@@ -46,7 +46,7 @@ Stage 2 —— Platform origin 切换（仅 GitHub Environment `production`；�
 
 gestaltrun.com 上的旧 DNS 记录当前处于 DISABLED 状态 —— 这是本说明之外持有的、未决的刻意状态。本说明不会重新启用它们：对该状态的任何改变都是单独的显式用户决策并有其自身记录。在旧主机名保持停用期间，旧客户端无法直接访问 Platform；Desktop 更新器独立于 Platform origin（它通过 GitHub Releases 更新），因此即使旧 DNS 停用，已安装的旧 origin Desktop 仍可更新到重发布版本并由此采用新 origin。
 
-Stage 3 —— Platform 部署（受保护工作流，显式批准，按所选架构执行）。以候选 SHA 派发 platform-deploy。保留双实例形态时，派发保留工作流已拥有的 ECS 双实例滚动替换、回滚记录与附件存储切换；当用户已显式选择削减 HA 的形态时，部署按适应该形态的工作流恢复与回滚契约运行，并将被接受的 HA 削减记入发布证据。验证新 origin 上的账号登录与新 origin 上的 Relay WSS。旧客户端行为在 Stage 5 验证，不在此处假设：仍指向 gestaltrun.com 的已安装客户端会继续到达双证书前端，但其登录是否完成是 Stage 5 的证据问题，不是 Stage 3 的断言。
+Stage 3 —— Platform 部署（受保护工作流，显式批准，按所选架构执行）。本阶段包含已批准的向两台按月 `ecs.e-c1m2.large` 实例的 ECS 替换：platform-deploy 派发以候选 SHA 对新实例对执行，在新实例加入服务器组后保留工作流已拥有的双实例滚动替换、回滚记录与附件存储切换。验证新 origin 上的账号登录与新 origin 上的 Relay WSS。旧客户端行为在 Stage 5 验证，不在此处假设：仍指向 gestaltrun.com 的已安装客户端会继续到达双证书前端，但其登录是否完成是 Stage 5 的证据问题，不是 Stage 3 的断言。
 
 Stage 4 —— 客户端重发布（从一个经评审候选发布正式 Desktop 与 Mobile）。在 `master` 上通过新的 Product Release Plan 提升 Desktop 与 Mobile 版本；新 origin 在该候选上固化进 Desktop 运营配置与两个 Mobile 构建。Desktop 经 desktop-release 发布（签名、公证、`--latest`）。用户的正式 Mobile 诉求是面向 Mobile 用户的产品分发，工作流将其拆为两个分别取证的渠道：签名 Android APK 作为持久的产品分发，以及 iOS TestFlight 上传作为独立的受闸步骤，仅当请求过 `upload_testflight` 且存在已校验构建号时才报告为已发布。任一渠道单独都不满足正式诉求：仅 GitHub 预发布不构成正式 Mobile 发布，而 TestFlight 上传是独立的产品分发闸门，不是对诉求的降级。任何 Mobile 发布之前，从物理 Android 路径（WebView，而非仅桌面浏览器）验证新域名的 TLS/就绪，因为 #480 的故障正发生在那里。
 
@@ -64,7 +64,7 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 
 **替换而非追加第二张 ALB 证书。** 在保留 ALB 的前提下否决：多证书挂载让 gestaltrun.com 在灰度期间以及旧客户端回调过渡证据未决期间持续服务，回滚计划与旧客户端群体都依赖这一点；旧证书仅在 Stage 5 证据关闭后由显式的后续决策摘除。成本右尺寸仍可能选择没有这张 ALB 的架构；那是 Stage 0.5 的用户决策，不是本条灰度规则。
 
-**把当前双实例/ALB 架构视为固定。** 否决：用户明确要求最便宜且足够的按月 ECS 与负载均衡节省，因此方案将右尺寸作为输入携带，不把自己锁死在保留 ALB 或两台 ECS 上。对应的制衡是无条件的数据库/身份/数据保留，以及对任何 HA 削减或计价采购的显式用户闸门。
+**把当前双实例/ALB 架构视为固定。** 作为规划默认被否决，并已由显式用户选择解决：成本诉求打开了架构决策，单节点替代方案经评估未被选择，用户选定两台更小的按月 `ecs.e-c1m2.large` 实例、保留双节点负载均衡并优化 RDS/Redis 计费。无条件的数据库/身份/数据保留与对待定报价/采购的显式闸门仍是制衡。
 
 **把 `PLATFORM_ORIGIN` 指向裸域。** 否决：www 主机名是签发的规范权威；裸域支持的存在是为了让裸域 HTTPS 不失败，而不是第二个权威。两个 origin 会让 CORS 与回调面翻倍且无收益。
 
@@ -74,7 +74,7 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 
 ## 验收标准
 
-- 一次只读成本评估按形态报告 ECS 与负载均衡层的月度成本、利用率余量、HA 影响与迁移工作量，且 Active 与 FinancialLocked 的账单报告分歧在任何计价决策依赖它之前先经带时间戳的复核解决；实际选定的架构——保留、替换或去掉 ALB——连同选定它的用户决策一并记录，包括任何被显式接受的 HA 削减。
+- 成本方案在变更前经只读验证并记录：对账 47.52 目录价与含磁盘 67.52 数字后的确认含磁盘每台总额、2 vCPU/4 GiB 形态的利用率匹配、双节点负载均衡与 NAT 的报价降幅、RDS/Redis 计费优化；所选双 `ecs.e-c1m2.large` 拓扑连同选定它的用户决策一并记录，且任何变更前立即进行当前的带时间戳账单复核（2026-09-05T16:04Z 的更正报告显示余额 +86.52 且 ALB 无锁定）。
 - 一张同时覆盖裸域与 `www.beikejiedeliulangmao.top` 的有效 HTTPS 证书终止在所选前端上；无论成本决策选择哪种架构，现有 Platform 身份、数据库、签名密钥、命名空间与账号全部保留（不新建身份体系，不更换密钥）。
 - 裸域与 www 通过 Stage 1 选定的阿里云 DNS 机制公共解析；三条 TXT 记录及所有无关 DNS 记录逐字保留；旧 A 记录值已记录用于回滚；两个名称的证书主机名校验通过。
 - Environment `production` 的 `PLATFORM_ORIGIN` 与 `PLATFORM_GITHUB_CALLBACK`、运营 Desktop 配置及 Mobile 构建变量全部指向 `https://www.beikejiedeliulangmao.top` 且回调路径固定；WSS 与 `/pair` 链接由该 origin 推导；OAuth App `Ov23lip9LTmnFuFpFeeV` 的回调与之匹配。
@@ -91,8 +91,9 @@ PR #584 携带选择 Desktop 0.1.16 的 Product Release Plan 0012（分支 `auto
 - 旧客户端登录连续性依赖两个主机名带着同一身份到达同一后端，这是已验证机制的前提；Stage 0.5 中选出的前端或身份变更若破坏该配对，即使旧主机名仍在服务，也会破坏旧客户端的登录完成。切换时刻挂起的登录尝试引用切换前的回调，在客户端重启并重新发起之前可能无法完成；重启是被记录的过渡步骤，而非静默损失。
 - 旧 gestaltrun.com DNS 记录的 DISABLED 状态是本说明之外持有的未决刻意决策：其持续期间，旧客户端没有直接的 Platform 路径，只有独立于 origin 的 Desktop 更新器能把旧安装带到重发布版本。任何阶段都不隐含重新启用，需要其自身的显式决策。
 - 成本诉求下选出的更便宜形态可能把高可用性降到双实例/ALB 基线以下：单实例服务意味着部署期间与实例故障时的停机。本说明不选择这一取舍；它只把决策路由到显式用户闸门，并由部署证据记录放弃了哪些 HA。
-- 互相矛盾的账单报告（Active 对 FinancialLocked，余额 −13.48）意味着账户状态不是已定输入：被锁定或负余额的账户无论选什么形态都可能暂停采购或续费，而在未做带时间戳复核前断言任何一份报告，都有把计划建立在过期或误读状态上的风险。不对任何一份报告单独得出 API 写入可用性的结论。
+- 互相矛盾的账单报告已由带时间戳的更正报告（2026-09-05T16:04Z，余额 +86.52，ALB 无财务锁定）在方向上解决，取代此前 FinancialLocked/−13.48 的读数；持久规则是账户状态属于时敏输入，因此任何变更前立即进行当前的带时间戳复核，而非把任何单一报告当作既定事实。
+- 2 vCPU/4 GiB 的 `e-c1m2.large` 形态小于现有实例，其充分性在 Stage 0.5 对照观测利用率核验之前是待验证假设而非度量；在含磁盘总额确认之前，47.52 的目录价不是采购金额。形态误配会在替换后表现为服务降级，滚动替换可限制但不消除该影响。
 - 物理 Android WebView 路径（#480）可能因不同于旧诊断的原因在新证书上失败；Stage 4 以该路径为发布闸门，因此风险是重发布受阻，而非已发布构建损坏。
 - 两个主机名提供同一产品页会分割 SEO 权重；默认 canonical 保住已索引 origin，代价是新域名积累权重更慢。
-- 保留身份意味着保留影响面：一次失败的 Stage 3 部署触及与旧域名相同的持久状态。所选拓扑的部署契约——保留时为双实例滚动替换，或已批准削减 HA 形态的适配回滚——持有这一点；此处不新增机制。
+- 保留身份意味着保留影响面：一次失败的 Stage 3 部署触及与旧域名相同的持久状态。双实例滚动替换与工作流的回滚记录在实例替换过程中持有这一点；此处不新增机制。
 - 多证书监听器在 ALB 上有配额与匹配顺序行为；Stage 1 验证在切 DNS 之前观察实际监听器状态，计划不假设超出该观察所确认的 SNI 行为。

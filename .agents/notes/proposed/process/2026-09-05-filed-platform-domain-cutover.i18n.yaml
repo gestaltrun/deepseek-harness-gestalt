@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/process/2026-09-05-filed-platform-domain-cutover.md
-2026-09-05-filed-platform-domain-cutover.md: cd4a3a17b02188dbf14dbcd6519817e14eba47d1
-2026-09-05-filed-platform-domain-cutover.zh.md: 74bbda2776e23bbe3c7a8c44420a63a223ca33b2
+2026-09-05-filed-platform-domain-cutover.md: aff1754b19ff45d40680fe7c2b622c2958fa0e55
+2026-09-05-filed-platform-domain-cutover.zh.md: a9b2025b3eaa02f3a36928fb44fc1c36d346a23e

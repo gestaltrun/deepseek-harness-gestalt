@@ -622,6 +622,7 @@ export class SubagentRuntime extends TypertRemoteService {
   private assertCapabilities(provider: SubagentProvider, request: SubagentStartRequest): void {
     const needs: { when: boolean; cap: keyof SubagentCapabilities }[] = [
       { when: request.agentOptions !== undefined, cap: 'agentOptions' },
+      { when: request.prompt.some(block => block.type === 'image'), cap: 'images' },
       { when: request.outputSchema !== undefined, cap: 'outputSchema' },
       { when: request.maxDepth !== undefined, cap: 'depthLimit' },
       { when: request.toolFilter !== undefined, cap: 'toolFilter' },

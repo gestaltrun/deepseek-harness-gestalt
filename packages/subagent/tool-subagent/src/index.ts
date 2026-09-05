@@ -9,12 +9,17 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { basename } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { AttachmentError } from '@deepseek-ai/dsh-attachment'
+import type { ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
+import type {} from '@deepseek-ai/dsh-fs'
+import { imageMediaTypeForPath, resolveRegularReadTarget } from '@deepseek-ai/dsh-tool-fs/src/read-policy.ts'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import {
@@ -281,6 +286,42 @@ function providerWording(inheritsConversation: boolean): { description: string; 
 
 interface DelegationRunRequest {
   readonly run_in_background?: boolean
+  readonly images?: readonly string[]
+}
+
+async function readAttachedImage(
+  ctx: Context,
+  exec: Parameters<NonNullable<ReturnType<typeof defineTool>['execute']>>[1],
+  requestedPath: string,
+  acceptedTypes: readonly ImageMediaType[],
+  byteCap: number,
+): Promise<SaveImageAttachment> {
+  const mediaType = imageMediaTypeForPath(requestedPath)
+  if (mediaType === undefined) throw new Error(`cannot attach "${requestedPath}": images only accepts PNG/JPEG/WebP/GIF paths`)
+  if (!acceptedTypes.includes(mediaType)) throw new Error(`cannot attach "${requestedPath}": ${mediaType} images are not accepted by this deployment`)
+  const fs = ctx.get('fs')
+  if (fs === undefined) throw new Error(`cannot attach "${requestedPath}": no filesystem service is mounted`)
+  const { target } = await resolveRegularReadTarget(ctx, exec, requestedPath, 'attach')
+  const data = await fs.readBytes(target, exec.signal, byteCap)
+  return { data, mediaType, name: basename(target.displayPath) }
+}
+
+async function resolveAttachedImages(
+  ctx: Context,
+  exec: Parameters<NonNullable<ReturnType<typeof defineTool>['execute']>>[1],
+  paths: readonly string[],
+): Promise<Extract<ContentBlock, { type: 'image' }>[]> {
+  const firstPath = paths[0]
+  if (firstPath === undefined) return []
+  const attachments = ctx.get('attachments')
+  if (attachments === undefined) throw new Error(`cannot attach "${firstPath}": no attachment service is mounted`)
+  const { maxImagesPerMessage, maxImageBytes, maxMessageImageBytes, mediaTypes } = attachments.imageLimits
+  if (paths.length > maxImagesPerMessage) throw new AttachmentError('Image batch exceeds the configured image-count limit.', 'TOO_MANY_IMAGES')
+  const byteCap = Math.min(maxImageBytes, maxMessageImageBytes)
+  const refs = await attachments.saveImages(await Promise.all(
+    paths.map(path => readAttachedImage(ctx, exec, path, mediaTypes, byteCap)),
+  ))
+  return refs.map(attachment => ({ type: 'image', attachment }))
 }
 
 interface DelegationRunSpec {
@@ -395,6 +436,13 @@ export function apply(ctx: Context, config: Config): void {
             required: true,
             description: wording.promptDescription,
           },
+          ...subagentProvider.capabilities.images ? {
+            images: {
+              type: 'array' as const,
+              items: { type: 'string' as const },
+              description: 'Optional workspace image file paths attached to the child prompt.',
+            },
+          } : {},
           ...modelSelectionEnabled ? {
             provider: {
               type: 'string' as const,
@@ -473,6 +521,10 @@ export function apply(ctx: Context, config: Config): void {
             throw new Error('subagent tool requires a calling agent (exec.agent was undefined)')
           }
 
+          const delegated = args as typeof args & DelegationRunRequest
+          if (delegated.images !== undefined && !subagentProvider.capabilities.images) {
+            throw new Error('images are disabled for this tool instance (backend cannot carry prompt image blocks)')
+          }
           const modelRequest = args as DelegationModelRequest
           const parentOptions = parentAgentOptionsForDelegation(parent)
           const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
@@ -510,9 +562,8 @@ export function apply(ctx: Context, config: Config): void {
           }
           exec.signal.throwIfAborted()
           const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
-          const request = {
+          const requestBase = {
             label: args.description,
-            prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
             parent,
             ...requestedChildAgentOptions !== undefined ? { agentOptions: requestedChildAgentOptions } : {},
             ...config.persona !== undefined ? { persona: config.persona } : {},
@@ -525,10 +576,11 @@ export function apply(ctx: Context, config: Config): void {
             if (continuable) {
               // Resolves at inbox acceptance: the child owns its own turns from
               // there, so this call neither waits for nor collects a result.
+              const imageBlocks = await resolveAttachedImages(runtimeCtx, exec, delegated.images ?? [])
               const started = await runtimeCtx.subagents.startContinuable({
                 provider: config.provider,
                 label: args.description,
-                request,
+                request: { ...requestBase, prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks] },
                 signal: exec.signal,
               })
               return { kind: 'continuable' as const, subagentId: started.childId }
@@ -545,7 +597,13 @@ export function apply(ctx: Context, config: Config): void {
               owner: parent,
               run: () => {
                 const controller = new AbortController()
-                const start = runtimeCtx.subagents.start(config.provider, { ...request, signal: controller.signal })
+                const jobExec = { ...exec, signal: controller.signal }
+                const start = resolveAttachedImages(runtimeCtx, jobExec, delegated.images ?? [])
+                  .then(imageBlocks => runtimeCtx.subagents.start(config.provider, {
+                    ...requestBase,
+                    prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks],
+                    signal: controller.signal,
+                  }))
                 return {
                   cancel: (reason?: string) => {
                     controller.abort(reason ?? 'background subagent task killed')
@@ -558,8 +616,10 @@ export function apply(ctx: Context, config: Config): void {
             return { kind: 'background' as const, jobId: id }
           }
 
+          const imageBlocks = await resolveAttachedImages(runtimeCtx, exec, delegated.images ?? [])
           const run: SubagentRun = await runtimeCtx.subagents.start(config.provider, {
-            ...request,
+            ...requestBase,
+            prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks],
             signal: exec.signal,
           })
           return settleForegroundRun(run)

@@ -95,9 +95,24 @@ describe('dsh-tool-subagent', () => {
     const props = (schema!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
     expect(Object.keys(props).sort()).toEqual([
       'description',
+      'images',
       'prompt',
     ])
     expect(schema!.description).not.toContain('job_output')
+  })
+
+  it('rejects images on an incapable provider before filesystem access or provider startup', async () => {
+    const ctx = await setup({ provider: 'mock' }, { capabilities: { images: false } })
+    let fsReads = 0
+    ctx.provide('fs', { readBytes: async () => { fsReads++; return new Uint8Array() } } as never)
+    const result = await ctx.tools.execute({
+      callId: ToolCallId('incapable-image'), name: 'subagent',
+      arguments: { description: 'inspect image', prompt: 'inspect', images: ['figure.png'] },
+      agent: fakeAgent(), signal: testToolSignal,
+    })
+    expect(result).toMatchObject({ isError: true })
+    expect(fsReads).toBe(0)
+    expect(result.content).toEqual([{ type: 'text', text: expect.stringContaining('images are disabled') }])
   })
 
   it('refuses a forced run_in_background at execution time when the instance disables it', async () => {

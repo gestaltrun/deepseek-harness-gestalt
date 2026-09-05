@@ -14,12 +14,11 @@ import type {
 
 const DEFAULT_CAPABILITIES: SubagentCapabilities = {
   agentOptions: true,
+  images: true,
   outputSchema: true,
   depthLimit: true,
   toolFilter: true,
   persona: true,
-  agentOptions: true,
-  images: true,
 }
 
 /** Options for one scripted provider fixture. */

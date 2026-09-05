@@ -201,6 +201,7 @@ describe('dsh-subagent-fork-in-process', () => {
     const { ctx } = await setup([])
     expect(ctx.subagents.getProvider('fork')!.capabilities).toEqual({
       agentOptions: true,
+      images: true,
       outputSchema: true,
       depthLimit: true,
       toolFilter: true,

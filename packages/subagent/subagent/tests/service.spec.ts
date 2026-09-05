@@ -25,8 +25,8 @@ function fakeParent(id = 'parent-1'): Agent {
   return { id: SessionId(id) } as unknown as Agent
 }
 
-const ALL_CAPS: SubagentCapabilities = { agentOptions: true, outputSchema: true, depthLimit: true, toolFilter: true, persona: true }
-const NO_CAPS: SubagentCapabilities = { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false }
+const ALL_CAPS: SubagentCapabilities = { agentOptions: true, images: true, outputSchema: true, depthLimit: true, toolFilter: true, persona: true }
+const NO_CAPS: SubagentCapabilities = { agentOptions: false, images: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false }
 
 function baseRequest(overrides: Partial<SubagentStartRequest> = {}): SubagentStartRequest {
   return {
@@ -167,6 +167,7 @@ describe('SubagentRuntime', () => {
 
   it.each([
     ['agentOptions', { agentOptions: { model: 'child-model' } }],
+    ['images', { prompt: [{ type: 'image', attachment: { id: 'image' } }] } as never],
     ['outputSchema', { outputSchema: { type: 'object', properties: {} } }],
     ['depthLimit', { maxDepth: 1 }],
     ['toolFilter', { toolFilter: { deny: ['bash'] } }],

@@ -85,6 +85,8 @@ export interface SubagentRunEndInfo {
  */
 export interface SubagentCapabilities {
   readonly agentOptions: boolean
+  /** Whether `request.prompt` may contain image blocks. */
+  readonly images: boolean
   readonly outputSchema: boolean
   readonly depthLimit: boolean
   readonly toolFilter: boolean

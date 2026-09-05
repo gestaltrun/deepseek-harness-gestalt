@@ -27,6 +27,7 @@
   },
   "files": [
     "lib/index.js",
+    "lib/read-policy.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

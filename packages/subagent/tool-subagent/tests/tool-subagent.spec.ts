@@ -5,6 +5,8 @@ import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { ToolCallId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import AttachmentStore from '@deepseek-ai/dsh-attachment'
+import type { ImageAttachmentLimits, ImageAttachmentRef, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import { assembleContextFor, type Agent } from '@deepseek-ai/dsh-agent'
@@ -143,6 +145,49 @@ describe('dsh-tool-subagent', () => {
       { type: 'image', attachment: expect.objectContaining({ id: 'image-0', name: 'first.png' }) },
       { type: 'image', attachment: expect.objectContaining({ id: 'image-1', name: 'second.png' }) },
     ])
+  })
+
+  it('delegates aggregate image-byte refusal to the attachment store before provider startup', async () => {
+    let starts = 0
+    let saves = 0
+    const ctx = await setup({ provider: 'mock' }, { onStart: () => { starts += 1 } })
+    ctx.provide('fs', {
+      resolve: async (filePath: string) => ({ displayPath: `/workspace/${filePath}` }),
+      stat: async () => ({ type: 'file', size: 3, version: 'v1' }),
+      readBytes: async () => Uint8Array.of(1, 2, 3),
+    } as never)
+    class AggregateBoundStore extends AttachmentStore {
+      readonly imageLimits: ImageAttachmentLimits = {
+        maxImagesPerMessage: 20,
+        maxImageBytes: 4,
+        maxMessageImageBytes: 5,
+        maxImagePixels: 100,
+        maxImageDimension: 10,
+        normalizedImageMaxDimension: 10,
+        mediaTypes: ['image/png'],
+      }
+
+      validateImage(): Promise<void> { return Promise.resolve() }
+
+      saveImage(_input: SaveImageAttachment): Promise<ImageAttachmentRef> {
+        saves += 1
+        throw new Error('aggregate validation must run before saveImage')
+      }
+
+      readImage(): Promise<never> { throw new Error('not used') }
+    }
+    await ctx.plugin(AggregateBoundStore)
+
+    const result = await ctx.tools.execute({
+      callId: ToolCallId('aggregate-images'), name: 'subagent',
+      arguments: { description: 'inspect images', prompt: 'compare', images: ['first.png', 'second.png'] },
+      agent: fakeAgent(), signal: testToolSignal,
+    })
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('aggregate image-byte limit')
+    expect(saves).toBe(0)
+    expect(starts).toBe(0)
   })
 
   it('rejects images on an incapable provider before filesystem access or provider startup', async () => {

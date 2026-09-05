@@ -50,6 +50,7 @@ const contentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() => z.union([
   ),
 ])) as z.ZodType<ContentBlock>
 
+/** Zod schema for a durable teammate lifecycle snapshot. */
 export const teamMemberSnapshotSchema = z.object({
   id: sessionIdSchema,
   name: z.string(),
@@ -60,6 +61,7 @@ export const teamMemberSnapshotSchema = z.object({
   error: z.string().optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
+/** Zod schema for a durable shared-task snapshot. */
 export const teamTaskSnapshotSchema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
@@ -78,6 +80,7 @@ const messageFields = {
   targetId: sessionIdSchema,
   content: z.array(contentBlockSchema),
 }
+/** Zod schema for a current-version queued mailbox message snapshot. */
 export const teamMessageSnapshotSchema = z.object(messageFields).strict() as z.ZodType<TeamMessageSnapshot>
 const teamMessageSnapshotV1Schema = z.object({
   ...messageFields,
@@ -99,9 +102,16 @@ const deliveredV2Schema = z.object({
   messageId: teamMessageIdSchema, targetId: sessionIdSchema,
 }).strict()
 
+/** Durable Agent Teams event names stored in the Team Lead Session. */
 export type TeamEventType = 'team/member' | 'team/task' | 'team/message/queued' | 'team/message/delivered'
+/** Session event whose type is one of the Agent Teams durable records. */
 export type TeamSessionEvent = SessionEvent<TeamEventType>
 
+/**
+ * Narrow a Session event to an Agent Teams durable record.
+ * @param event - any reconstructed Session event.
+ * @returns whether the event is one of the four Team record types.
+ */
 export function isTeamEvent(event: SessionEvent): event is TeamSessionEvent {
   return event.type === 'team/member'
     || event.type === 'team/task'
@@ -134,7 +144,12 @@ function assertNeverEvent(event: never): never {
   throw new Error(`unhandled persisted Agent Teams event type ${String((event as TeamSessionEvent).type)}`)
 }
 
-/** Decode a same-Team v1/v2 record to a current v2 event without decoding foreign nested payloads. */
+/**
+ * Decode a same-Team v1/v2 record to a current v2 event without decoding foreign nested payloads.
+ * @param selectedTeamId - Team identity whose records this decoder owns.
+ * @param event - persisted Team event from the Lead Session log.
+ * @returns the current-version event, or `undefined` when the record belongs to another Team.
+ */
 export function decodePersistedTeamEvent(selectedTeamId: TeamId, event: TeamSessionEvent): TeamSessionEvent | undefined {
   const rawTeamId = ownDataProperty(event.data, 'teamId')
   if (typeof rawTeamId === 'string' && rawTeamId.length > 0 && rawTeamId !== selectedTeamId) return undefined

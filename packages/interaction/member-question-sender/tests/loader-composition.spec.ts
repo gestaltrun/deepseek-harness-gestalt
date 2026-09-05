@@ -61,14 +61,21 @@ class DeferredDelivery implements MemberQuestionDeliveryPort {
   }
 }
 
-function testAgent(cwd: string): Agent {
+async function testAgent(context: Context, cwd: string): Promise<{ agent: Agent; dispose: () => Promise<void> }> {
+  const agentScope = context.plugin(() => undefined)
+  await agentScope
   const id = SessionId('loader-session')
   const session = Session.create(id, undefined, { version: 0, id, createdAt: 0, cwd, isSeeded: false })
-  return {
-    id, options: {}, session, inbox: new Inbox(session, { inserted() {}, discarded() {}, claimed() {} }),
-    status: 'idle', ctx: new Context(), send() {}, followup() {}, steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
-    inject() {}, cancel() {}, runMaintenance: task => task(new AbortController().signal), whenIdle: () => Promise.resolve(),
-  } as Agent
+  const agent: Agent = {
+    id, options: {}, session,
+    inbox: new Inbox(session, { inserted() {}, discarded() {}, claimed() {} }),
+    status: 'idle', ctx: agentScope.ctx, send() {}, followup() {},
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    inject() {}, cancel() {},
+    runMaintenance: task => task(new AbortController().signal),
+    whenIdle: () => Promise.resolve(),
+  }
+  return { agent, dispose: () => agentScope.dispose() }
 }
 
 async function boot(): Promise<Booted> {
@@ -86,12 +93,14 @@ async function boot(): Promise<Booted> {
       "- name: '@deepseek-ai/dsh-user-questions'",
       "- name: 'test-ui-answerer'",
       "- name: '@deepseek-ai/dsh-member-question-sender'",
+      '  config:',
+      '    delivery: !!js ctx.root.get(\"testDeliveryConfig\").delivery',
       "- name: 'test-tool-ask-user'",
       "- name: 'test-driver'",
       '',
     ].join('\n'))
     const ui = { name: 'test-ui', apply(ctx: Context) { ctx.on('user-questions/request', (request) => { localRequests.push(request); return Promise.resolve({ answers: request.questions.map(question => ({ id: question.id, selected: ['local'] })) }) }) } }
-    class TestSender extends Sender { constructor(ctx: Context) { super(ctx, { delivery }) } }
+    const senderModule = { default: Sender }
     const tool = {
       name: 'test-tool-ask-user',
       inject: ['tools', 'userQuestions'],
@@ -110,30 +119,38 @@ async function boot(): Promise<Booted> {
         })
       },
     }
-    const agent = testAgent(root)
+    const { agent, dispose: disposeAgentScope } = await testAgent(context, root)
     const driver = { name: 'test-driver', inject: ['agents', 'tools', 'memberQuestionSender'], apply(ctx: Context) { run = async () => {
+      expect(ctx.memberQuestionSender).toBeInstanceOf(Sender)
       const unregister = ctx.agents.register(agent)
-      const local = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('local'), name: 'ask_user_question', arguments: { questions: [{ id: 'local', question: 'Local?' }] } })
-      const memberPromise = ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('member'), name: 'ask_user_question', agent, arguments: { questions: [{ id: 'member', question: 'Member?' }], to_project_member: 'loader-peer', background: 'Choose the release window.', references: [{ path: 'decision.txt', reason: 'Release evidence.' }] } })
-      const delivered = await Promise.race([
-        delivery.delivered,
-        memberPromise.then((result) => { throw new Error(`member tool settled before delivery: ${JSON.stringify(result)}`) }),
-      ])
-      const questionId = delivered.questionId
-      await ctx.memberQuestionSender.settle(questionId, { outcome: 'declined', settledByInstallationId: parseInstallationId('loader-installation'), settledByDeviceName: 'Loader', settledAt: 1 })
-      const member = await memberPromise
-      const text = (result: typeof local) => result.content.filter(block => block.type === 'text').map(block => block.text).join('')
-      unregister()
-      return { local: text(local), member: text(member) }
+      try {
+        expect(ctx.agents.get(agent.id)).toBe(agent)
+        const local = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('local'), name: 'ask_user_question', arguments: { questions: [{ id: 'local', question: 'Local?' }] } })
+        const memberPromise = ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('member'), name: 'ask_user_question', agent, arguments: { questions: [{ id: 'member', question: 'Member?' }], to_project_member: 'loader-peer', background: 'Choose the release window.', references: [{ path: 'decision.txt', reason: 'Release evidence.' }] } })
+        const delivered = await Promise.race([
+          delivery.delivered,
+          memberPromise.then((result) => { throw new Error(`member tool settled before delivery: ${JSON.stringify(result)}`) }),
+        ])
+        const questionId = delivered.questionId
+        await ctx.memberQuestionSender.settle(questionId, { outcome: 'declined', settledByInstallationId: parseInstallationId('loader-installation'), settledByDeviceName: 'Loader', settledAt: 1 })
+        const member = await memberPromise
+        const text = (result: typeof local) => result.content.filter(block => block.type === 'text').map(block => block.text).join('')
+        return { local: text(local), member: text(member) }
+      } finally {
+        unregister()
+        expect(ctx.agents.get(agent.id)).toBeUndefined()
+        await disposeAgentScope()
+      }
     } } }
     context.baseUrl = `${pathToFileURL(root).href}/`
+    context.provide('testDeliveryConfig', { delivery })
     await writeFile(join(root, 'decision.txt'), 'release evidence\n')
     await context.plugin(Loader)
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['@deepseek-ai/dsh-agent', AgentRegistry], ['@deepseek-ai/dsh-system-prompt', SystemPrompt], ['@deepseek-ai/dsh-tools', ToolRuntime],
       ['@deepseek-ai/dsh-user-questions', UserQuestions], ['test-ui-answerer', ui],
-      ['@deepseek-ai/dsh-member-question-sender', TestSender], ['test-tool-ask-user', tool], ['test-driver', driver],
+      ['@deepseek-ai/dsh-member-question-sender', senderModule], ['test-tool-ask-user', tool], ['test-driver', driver],
     ])
     context.loader.internal = { version: 'v2', async import(specifier: string) { if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`); return modules.get(specifier) } } as unknown as NonNullable<typeof context.loader.internal>
     await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })

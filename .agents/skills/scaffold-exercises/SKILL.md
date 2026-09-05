@@ -1,11 +1,11 @@
 ---
 name: scaffold-exercises
-description: Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.
+description: Scaffold sections, exercises, solutions, and explainers in an ai-hero-cli course repository. Use when the user requests exercise scaffolding and the project provides that course layout and linter.
 ---
 
 # Scaffold Exercises
 
-Create exercise directory structures that pass `pnpm ai-hero-cli internal lint`, then commit with `git commit`.
+First verify that the repository contains the `exercises/` convention and an installed or declared `ai-hero-cli` command. If either owner is absent, report that this skill does not apply instead of adding the dependency implicitly. Create the requested directory structures, run the project-owned exercise lint, and commit only when the user's workflow authorizes it.
 
 ## Directory naming
 

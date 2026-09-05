@@ -37,6 +37,18 @@ describe('PresenceRegistry', () => {
     expect(await registry.onlineAccountIds([OCTOCAT])).toEqual(new Set())
   })
 
+  it('keeps another account online while explicit close removes the target without clock advance', async () => {
+    const now = 1_000
+    const registry = new PresenceRegistry(new InProcessPresenceStore(), 100, () => now)
+    await registry.beat(OCTOCAT, desktop('a'))
+    await registry.beat(MONA, desktop('b'))
+
+    await registry.close(MONA, desktop('b'))
+
+    expect(await registry.onlineAccountIds([OCTOCAT, MONA])).toEqual(new Set([OCTOCAT]))
+    expect(now).toBe(1_000)
+  })
+
   it('marks an installation offline immediately on explicit close without advancing the clock', async () => {
     const now = 1_000
     const registry = new PresenceRegistry(new InProcessPresenceStore(), 90_000, () => now)

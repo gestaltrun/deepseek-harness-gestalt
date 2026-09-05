@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vitepress dev . --host 127.0.0.1 --port 5173",
-    "build": "vitepress build .",
+    "clean:dist": "node -e \"require('node:fs').rmSync('.dist',{recursive:true,force:true})\"",
+    "build": "pnpm run clean:dist && vitepress build .",
+    "build:mpa": "pnpm run clean:dist && vitepress build . --mpa",
     "preview": "vitepress preview . --host 127.0.0.1 --port 4173"
   },
   "devDependencies": {

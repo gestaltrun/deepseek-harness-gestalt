@@ -50,6 +50,7 @@ describe('CI failure classification', () => {
     ['snapshot', {}, 'snapshot'],
     ['module-graph', {}, 'generated-drift'],
     ['constraints', {}, 'workflow-policy'],
+    ['dependency-policy', {}, 'workflow-policy'],
     ['test', {}, 'product-regression'],
     ['test', { signalCode: 'SIGTERM' }, 'runner-contamination'],
     ['test', {

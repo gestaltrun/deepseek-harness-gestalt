@@ -96,7 +96,6 @@ class HarnessClient:
             self._stderr_lines.append(f"shutdown request failed: {exc}")
 
         if shutdown_acknowledged:
-            self._close_stdin(proc)
             try:
                 proc.wait(timeout=self.config.shutdown_timeout_seconds)
             except subprocess.TimeoutExpired:

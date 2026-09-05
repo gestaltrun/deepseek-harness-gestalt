@@ -64,7 +64,10 @@ export interface Config {
    * top-level session and inherit that decision in its child sessions.
    */
   modelSelectionSettings?: boolean
-  /** Include deployment-preauthorized exact routes when snapshotting a fresh top-level Session. */
+  /**
+   * Sample `ctx.subagentRoutePreauthorization` once for each fresh top-level
+   * Session. An absent Provider records an empty list.
+   */
   deploymentRoutePreauthorization?: boolean
   /**
    * Expose `run_in_background` (default true). Disabled instances omit the
@@ -682,7 +685,6 @@ export function apply(ctx: Context, config: Config): void {
 
   const selectForAgent = (
     agent: NonNullable<Context['agent']>,
-    deploymentRoutes: readonly import('@deepseek-ai/dsh-subagent-route-preauthorization').SubagentRoute[] = [],
   ): ModelSelectionPolicy | undefined => {
     const freshSession = agent.session.firstLiveSeq === 0
       && agent.session.eventAt(SessionSeq(0))?.type !== 'session/end-seed'
@@ -692,32 +694,30 @@ export function apply(ctx: Context, config: Config): void {
         ? agent.session.header.parentSession
         : undefined
       if (parentId !== undefined) {
-        const parent = ctx.get('agents')?.get(parentId)
+        const parent = agent.ctx.get('agents')?.get(parentId)
         allowedModels = parent === undefined
           ? undefined
           : subagentModelSelectionPolicy(ctx.sessionProjections, parent.session)
       } else if (freshSession) {
         const current = settings?.current()
         const userRoutes = current?.enabled === true ? current.allowedModels : []
-        const routes = unionModelRoutes(userRoutes, deploymentRoutes)
-        allowedModels = routes.length === 0 ? undefined : routes
+        const deploymentRoutes = config.deploymentRoutePreauthorization === true
+          ? agent.ctx.get('subagentRoutePreauthorization')?.snapshot() ?? []
+          : []
+        allowedModels = unionModelRoutes(userRoutes, deploymentRoutes)
       }
     }
     if (allowedModels !== undefined) {
       recordSubagentModelSelection(ctx.sessionProjections, agent.session, allowedModels)
     }
-    return allowedModels === undefined ? undefined : { routes: allowedModels }
+    return allowedModels === undefined || allowedModels.length === 0
+      ? undefined
+      : { routes: allowedModels }
   }
 
   const agent = ctx.agent
   if (agent !== undefined) {
-    if (config.deploymentRoutePreauthorization === true) {
-      ctx.inject(['subagentRoutePreauthorization'], (runtimeCtx) => {
-        install(runtimeCtx, selectForAgent(agent, runtimeCtx.subagentRoutePreauthorization.snapshot()))
-      })
-    } else {
-      install(ctx, selectForAgent(agent))
-    }
+    install(ctx, selectForAgent(agent))
     return
   }
   const agents = ctx.get('agents')
@@ -728,28 +728,18 @@ export function apply(ctx: Context, config: Config): void {
   const belongsToComposition = (candidate: Agent): boolean =>
     scopeChainOf(scopeOf(candidate.ctx)).includes(compositionScope)
   const installScoped = (candidate: Agent): void => {
-    if (scopedInstalls.has(candidate) || installing.has(candidate)) return
+    if (!belongsToComposition(candidate) || scopedInstalls.has(candidate) || installing.has(candidate)) return
     // Reserve before the injected fiber runs: tool registration emits
     // `tools/change` synchronously, which re-enters the reconciliation below.
     installing.add(candidate)
-    let fiber: ReturnType<Context['inject']>
     try {
-      const dependencies = config.deploymentRoutePreauthorization === true
-        ? ['tools', 'subagents', 'systemPrompt', 'subagentRoutePreauthorization']
-        : ['tools', 'subagents', 'systemPrompt']
-      const policy = config.deploymentRoutePreauthorization === true
-        ? undefined
-        : selectForAgent(candidate)
-      fiber = candidate.ctx.inject(dependencies, (runtimeCtx) => {
-        const deploymentRoutes = config.deploymentRoutePreauthorization === true
-          ? runtimeCtx.subagentRoutePreauthorization.snapshot()
-          : []
-        install(runtimeCtx, policy ?? selectForAgent(candidate, deploymentRoutes))
-      })
+      const policy = selectForAgent(candidate)
+      scopedInstalls.set(candidate, candidate.ctx.inject(['tools', 'subagents', 'systemPrompt'], (runtimeCtx) => {
+        install(runtimeCtx, policy)
+      }))
     } finally {
       installing.delete(candidate)
     }
-    scopedInstalls.set(candidate, fiber)
   }
   const removeScoped = (candidate: Agent): void => {
     const fiber = scopedInstalls.get(candidate)

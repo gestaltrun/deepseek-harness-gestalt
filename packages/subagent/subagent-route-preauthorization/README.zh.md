@@ -13,7 +13,7 @@ kind: "package-reference"
 
 ## 使用本包
 
-挂载一个 Provider，例如 [`dsh-subagent-route-preauthorization-static`](../subagent-route-preauthorization-static/README.zh.md)。Provider 持有服务生命周期；Cordis injection 让可选 Consumer 在服务出现时激活，并在 Provider 离开时移除部署启用的注册。
+挂载一个 Provider，例如 [`dsh-subagent-route-preauthorization-static`](../subagent-route-preauthorization-static/README.zh.md)。Provider 持有服务生命周期。Consumer 只在组合全新顶层 Session 时，从 Agent 或 preset 作用域采样一次 `snapshot()`；它不会 inject 该 Provider，也不会在 detach 或替换后再采样。
 
 `snapshot()` 返回分离不可变的 `{ provider, model }` 记录。Consumer 把部署快照与已启用的用户授权取并集、排序、去重，并在公开路由选择前持久记录。恢复 Session 和子 Session 只读取已记录策略。
 

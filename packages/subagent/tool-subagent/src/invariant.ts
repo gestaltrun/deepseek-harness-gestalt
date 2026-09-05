@@ -26,10 +26,12 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
         && properties['reasoning_effort'] !== undefined
     })
     const discoverable = schemas.some(schema => schema.name === 'list_subagent_models')
+    const policy = subagentModelSelectionPolicy(ctx.sessionProjections, agent.session)
     if (
       (selectable || discoverable)
       && (
-        subagentModelSelectionPolicy(ctx.sessionProjections, agent.session) === undefined
+        policy === undefined
+        || policy.length === 0
         || !selectable
         || !discoverable
       )

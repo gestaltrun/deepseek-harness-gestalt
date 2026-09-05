@@ -15,7 +15,7 @@ kind: "package-reference"
 
 用非空 provider 与 model ID 挂载此默认导出的 Service Provider。直接程序构造与 Loader 配置都会拒绝畸形条目。Provider 在发布不可变服务快照前复制、去重并排序路由。
 
-Consumer 先加载或 Provider 先加载都通过 Consumer 的 Cordis injection 正确收敛。dispose 此 Provider 会移除服务及部署启用的 Consumer 注册；重新安装会发布一份全新快照。
+dispose 此 Provider 会移除服务。已经按缺失快照组合的 Consumer 会保留已记录的空策略；之后出现的 Provider 不能再授权该 Session。重新安装会为之后组合的 Session 发布一份全新快照。
 
 ## 模型体验
 

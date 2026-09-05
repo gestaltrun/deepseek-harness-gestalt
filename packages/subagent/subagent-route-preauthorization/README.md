@@ -13,7 +13,7 @@ This package declares the abstract `ctx.subagentRoutePreauthorization` Service D
 
 ## Use this package
 
-Mount one Provider such as [`dsh-subagent-route-preauthorization-static`](../subagent-route-preauthorization-static/README.md). The Provider owns service lifetime, and Cordis injection lets an optional Consumer activate when the service appears and dispose its deployment-enabled registration when the Provider leaves.
+Mount one Provider such as [`dsh-subagent-route-preauthorization-static`](../subagent-route-preauthorization-static/README.md). The Provider owns service lifetime. A Consumer samples `snapshot()` once from the Agent or preset scope while composing a fresh top-level Session; it does not inject the Provider or resample after detach or replacement.
 
 `snapshot()` returns detached immutable `{ provider, model }` records. A Consumer unions this deployment snapshot with any enabled user authorization, sorts and deduplicates the result, and records it durably before exposing route selection. Resumed and child Sessions read only that recorded policy.
 

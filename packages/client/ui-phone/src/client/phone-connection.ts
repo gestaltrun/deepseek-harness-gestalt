@@ -60,6 +60,13 @@ export interface PhoneActionFailure {
   readonly message: string
 }
 
+/** Why tap/swipe cannot leave this capture. */
+export type PhoneCoordinateUnavailableReason =
+  | 'missing-surface'
+  | 'unknown-platform'
+  | 'missing-logical'
+  | 'orientation-mismatch'
+
 /** Closed connection lifecycle states rendered by the connected phone view. */
 export type PhoneConnectionPhase =
   | { readonly kind: 'idle' }
@@ -148,27 +155,6 @@ const defaultSchedule = (delayMs: number, fn: () => void): (() => void) => {
 }
 
 /**
- * Present and map an H264 surface in Host landscape when the decoder still
- * reports portrait coded size (`VideoFrame.rotation` is 0 on Android
- * screenrecord; MI 8 `logicalFrame` is 2248×1080 while coded size stays
- * 1080×2248).
- * @param width - Post-rotation H264 display width.
- * @param height - Post-rotation H264 display height.
- * @param logicalDisplay - Host `dumpsys display` logicalFrame, when present.
- * @returns swapped size when Host is landscape and the frame is portrait.
- */
-export function h264SurfaceForHost(
-  width: number,
-  height: number,
-  logicalDisplay: PhoneSurfaceSize | undefined,
-): PhoneSurfaceSize {
-  if (logicalDisplay !== undefined && logicalDisplay.width > logicalDisplay.height && width < height) {
-    return { width: height, height: width }
-  }
-  return { width, height }
-}
-
-/**
  * Map one normalized screen point onto integer device pixels.
  * @param point - normalized point; both axes clamp into [0, 1].
  * @param surface - learned device pixel size of the streamed frame.
@@ -217,6 +203,8 @@ export interface PhoneConnectionOptions {
   readonly gateway: PhoneStreamGateway
   /** Device the session addresses (Android serial or iOS UDID). */
   readonly deviceId: string
+  /** Occupying listing platform; Android capture IO requires current `logicalDisplay`. */
+  readonly platform?: 'android' | 'ios'
   /** Retry scheduler; tests inject a manual clock. */
   readonly schedule?: (delayMs: number, fn: () => void) => () => void
   /** Auto-retry budget for one connect cycle. */
@@ -235,6 +223,7 @@ export interface PhoneConnectionOptions {
 export class PhoneConnectionController {
   private readonly gateway: PhoneStreamGateway
   private readonly deviceId: string
+  private platform: 'android' | 'ios' | undefined
   private readonly schedule: (delayMs: number, fn: () => void) => () => void
   private readonly retryLimit: number
   private readonly retryBaseDelayMs: number
@@ -247,6 +236,13 @@ export class PhoneConnectionController {
   private session: PhoneStreamSessionView | undefined
   private surface: PhoneSurfaceSize | undefined
   private surfaceRotation: 0 | 90 | 180 | 270 | undefined
+  /** Current listing `logicalDisplay`; undefined is a dumpsys miss. */
+  private logicalDisplay: PhoneSurfaceSize | undefined
+  private logicalDisplayKnown = false
+  /** Last finite listing size; remint identity, not current availability. */
+  private lastKnownLogicalDisplay: PhoneSurfaceSize | undefined
+  /** Host last-known logicalDisplay snapshotted when the current mint started. */
+  private mintLogicalDisplay: PhoneSurfaceSize | undefined
   private nextFrameId = 1
   private latestSentFrameId = 0
   private readonly outstandingFrameIds = new Set<number>()
@@ -258,6 +254,7 @@ export class PhoneConnectionController {
   constructor(options: PhoneConnectionOptions) {
     this.gateway = options.gateway
     this.deviceId = options.deviceId
+    this.platform = options.platform
     this.schedule = options.schedule ?? defaultSchedule
     this.retryLimit = options.retryLimit ?? RETRY_LIMIT
     this.retryBaseDelayMs = options.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS
@@ -298,6 +295,53 @@ export class PhoneConnectionController {
   refresh(): void {
     this.disconnect()
     this.connect()
+  }
+
+  /**
+   * Follow Host Android `logicalDisplay`. The first finite size seeds and
+   * does not remint. A later numeric width/height change remints through
+   * {@link refresh} only while live H264 so an H264→MJPEG fallback is not
+   * undone. Identical polls are a no-op. Connecting, reconnecting,
+   * suspended, idle, error, and live MJPEG record the size without starting
+   * a new pull. A size recorded while connecting remints once the current
+   * mint opens live H264 if it differs from the mint snapshot.
+   * @param display - Host `dumpsys display` logicalFrame, when present.
+   */
+  noteLogicalDisplay(display: PhoneSurfaceSize | undefined): void {
+    if (display === undefined) {
+      const changed = this.logicalDisplay !== undefined
+      this.logicalDisplay = undefined
+      this.logicalDisplayKnown = true
+      if (changed) this.notify()
+      return
+    }
+    const { width, height } = display
+    const sameKnown = this.lastKnownLogicalDisplay?.width === width
+      && this.lastKnownLogicalDisplay.height === height
+    this.logicalDisplay = { width, height }
+    this.lastKnownLogicalDisplay = { width, height }
+    if (!this.logicalDisplayKnown) {
+      this.logicalDisplayKnown = true
+      this.notify()
+      return
+    }
+    if (sameKnown) {
+      this.notify()
+      return
+    }
+    if (this.phase.kind === 'live' && this.phase.format === 'h264') this.refresh()
+    else this.notify()
+  }
+
+  /**
+   * Occupying listing platform. Android capture IO requires current
+   * `logicalDisplay`; iOS does not.
+   * @param platform - Listing platform of the occupying device.
+   */
+  notePlatform(platform: 'android' | 'ios'): void {
+    if (this.platform === platform) return
+    this.platform = platform
+    this.notify()
   }
 
   /**
@@ -383,6 +427,34 @@ export class PhoneConnectionController {
   }
 
   /**
+   * Whether tap/swipe may leave this capture. Unknown listing platform is
+   * fail-closed and is not treated as iOS. Android requires a current
+   * listing `logicalDisplay` (a dumpsys miss is not the last known size).
+   * Orientation mismatch is unavailable. iOS ignores listing logical size.
+   * Wire x/y and `captureWidth`/`captureHeight` stay the decoded plane.
+   * @returns true when a decoded surface may send tap/swipe.
+   */
+  coordinateIoAvailable(): boolean {
+    return this.coordinateUnavailableReason() === undefined
+  }
+
+  /**
+   * Why coordinate IO is blocked, or undefined when tap/swipe may leave.
+   * @returns the closed unavailable reason, or undefined when tap/swipe may leave.
+   */
+  coordinateUnavailableReason(): PhoneCoordinateUnavailableReason | undefined {
+    if (this.surface === undefined) return 'missing-surface'
+    if (this.platform === undefined) return 'unknown-platform'
+    if (this.platform === 'android') {
+      if (this.logicalDisplay === undefined) return 'missing-logical'
+      const paintedLandscape = this.surface.width > this.surface.height
+      const logicalLandscape = this.logicalDisplay.width > this.logicalDisplay.height
+      if (paintedLandscape !== logicalLandscape) return 'orientation-mismatch'
+    }
+    return undefined
+  }
+
+  /**
    * Latest ordinary action failure while the picture remains live.
    * @returns the structured failure, or undefined before/after a successful action.
    */
@@ -423,14 +495,15 @@ export class PhoneConnectionController {
    * @returns false when the surface is unknown or the phase is not live.
    */
   tap(u: number, v: number): boolean {
-    if (this.surface === undefined || this.phase.kind !== 'live') return false
-    const { x, y } = devicePointOf({ u, v }, this.surface)
+    const painted = this.surface
+    if (painted === undefined || this.phase.kind !== 'live' || this.coordinateUnavailableReason() !== undefined) return false
+    const { x, y } = devicePointOf({ u, v }, painted)
     return this.send({
       method: 'tap',
       x,
       y,
       source: {
-        kind: 'capture', captureWidth: this.surface.width, captureHeight: this.surface.height,
+        kind: 'capture', captureWidth: painted.width, captureHeight: painted.height,
         captureId: this.phase.captureId, captureFormat: this.phase.format,
         ...(this.surfaceRotation === undefined ? {} : { captureRotation: this.surfaceRotation }),
       },
@@ -444,13 +517,13 @@ export class PhoneConnectionController {
    * @returns false when the path is empty, the surface unknown, or not live.
    */
   swipe(points: readonly PhoneScreenPoint[]): boolean {
-    const surface = this.surface
-    if (this.phase.kind !== 'live') return false
+    const painted = this.surface
     const origin = points[0]
     const release = points[points.length - 1]
-    if (surface === undefined || origin === undefined || release === undefined) return false
-    const start = devicePointOf(origin, surface)
-    const end = devicePointOf(release, surface)
+    if (painted === undefined || this.phase.kind !== 'live' || origin === undefined || release === undefined
+      || this.coordinateUnavailableReason() !== undefined) return false
+    const start = devicePointOf(origin, painted)
+    const end = devicePointOf(release, painted)
     return this.send({
       method: 'swipe',
       x1: start.x,
@@ -458,7 +531,7 @@ export class PhoneConnectionController {
       x2: end.x,
       y2: end.y,
       source: {
-        kind: 'capture', captureWidth: surface.width, captureHeight: surface.height,
+        kind: 'capture', captureWidth: painted.width, captureHeight: painted.height,
         captureId: this.phase.captureId, captureFormat: this.phase.format,
         ...(this.surfaceRotation === undefined ? {} : { captureRotation: this.surfaceRotation }),
       },
@@ -500,6 +573,7 @@ export class PhoneConnectionController {
 
   private async startConnect(): Promise<void> {
     this.teardown()
+    this.mintLogicalDisplay = this.lastKnownLogicalDisplay
     this.setPhase({ kind: 'connecting' })
     const epoch = this.epoch
     let session: PhoneStreamSessionView
@@ -527,6 +601,8 @@ export class PhoneConnectionController {
           captureId: session[format].captureId,
           expiresAt: session[format].expiresAt,
         })
+        if (!isCurrent()) return
+        if (format === 'h264' && this.logicalDisplayChangedSinceMint()) this.refresh()
       },
       onClose: () => {
         if (!isCurrent()) return
@@ -636,6 +712,14 @@ export class PhoneConnectionController {
 
   private streamUrlOf(session: PhoneStreamSessionView, format: PhoneCaptureFormat): string {
     return session[format].url
+  }
+
+  private logicalDisplayChangedSinceMint(): boolean {
+    const minted = this.mintLogicalDisplay
+    const known = this.lastKnownLogicalDisplay
+    if (known === undefined) return false
+    if (minted === undefined) return true
+    return minted.width !== known.width || minted.height !== known.height
   }
 
   private send(request: PhoneClientIoRequest): boolean {

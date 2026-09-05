@@ -22,6 +22,26 @@ export const SESSION_A: PhoneStreamSessionView = {
   h264: { url: '/phone/stream/emulator-5554/h264?token=h264-a', captureId: phoneCaptureIdOf('h264-a'), expiresAt: 1000 },
 }
 
+/** Distinct signed capture from SESSION_A; PhoneH264Surface restarts only when `url` changes. */
+export const SESSION_B: PhoneStreamSessionView = {
+  deviceId: 'emulator-5554',
+  ioPath: '/phone/ws/io',
+  agentManaged: false,
+  preferredFormat: 'h264',
+  mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=mjpeg-b', captureId: phoneCaptureIdOf('mjpeg-b'), expiresAt: 2000 },
+  h264: { url: '/phone/stream/emulator-5554/h264?token=h264-b', captureId: phoneCaptureIdOf('h264-b'), expiresAt: 2000 },
+}
+
+/** Third signed capture for a later portrait remint after SESSION_B. */
+export const SESSION_C: PhoneStreamSessionView = {
+  deviceId: 'emulator-5554',
+  ioPath: '/phone/ws/io',
+  agentManaged: false,
+  preferredFormat: 'h264',
+  mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=mjpeg-c', captureId: phoneCaptureIdOf('mjpeg-c'), expiresAt: 3000 },
+  h264: { url: '/phone/stream/emulator-5554/h264?token=h264-c', captureId: phoneCaptureIdOf('h264-c'), expiresAt: 3000 },
+}
+
 /** Drain the microtask queue of one in-flight mint round trip. */
 export const flush = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
 
@@ -197,13 +217,28 @@ export class FakeGateway implements PhoneStreamGateway {
   readonly dialedPaths: string[] = []
   readonly agentStatusDevices: string[] = []
   readonly agentInstallCalls: Array<{ readonly deviceId: string; readonly force: boolean }> = []
-  private readonly mintScript: Array<{ readonly session?: PhoneStreamSessionView; readonly error?: unknown }> = []
+  private readonly mintScript: Array<{
+    readonly session?: PhoneStreamSessionView
+    readonly error?: unknown
+    readonly pending?: Promise<PhoneStreamSessionView>
+  }> = []
   private readonly agentStatusScript: Array<{ readonly installed?: boolean; readonly error?: unknown }> = []
   private readonly agentInstallScript: Array<{ readonly installed?: boolean; readonly error?: unknown }> = []
 
   /** Queue one mint outcome; unqueued mints succeed with SESSION_A. */
   queueMint(outcome: { readonly session?: PhoneStreamSessionView; readonly error?: unknown }): void {
     this.mintScript.push(outcome)
+  }
+
+  /**
+   * Queue one mint that stays pending until the returned resolve runs.
+   * @returns resolver that delivers the session to the waiting mint.
+   */
+  queueDeferredMint(session: PhoneStreamSessionView): () => void {
+    let resolveMint: (value: PhoneStreamSessionView) => void = () => {}
+    const pending = new Promise<PhoneStreamSessionView>((resolve) => { resolveMint = resolve })
+    this.mintScript.push({ pending })
+    return () => { resolveMint(session) }
   }
 
   /** Queue one real-device status outcome; unqueued checks report installed. */
@@ -220,6 +255,7 @@ export class FakeGateway implements PhoneStreamGateway {
     this.mintedDevices.push(deviceId)
     const next = this.mintScript.shift()
     if (next !== undefined && next.error !== undefined) throw next.error
+    if (next?.pending !== undefined) return next.pending
     return next?.session ?? SESSION_A
   }
 

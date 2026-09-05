@@ -17,7 +17,7 @@ import type {
   ReactNode,
   WheelEvent as ReactWheelEvent,
 } from 'react'
-import { h264SurfaceForHost, type PhoneConnectionController, type PhoneStreamFailureKind } from './phone-connection.ts'
+import { type PhoneConnectionController, type PhoneCoordinateUnavailableReason, type PhoneStreamFailureKind } from './phone-connection.ts'
 import { startPhoneListingPoll } from './phone-listing-poll.ts'
 import type { PhoneListingSource } from './registry.ts'
 import { measureMjpegCurrentFrame } from './measure-mjpeg-current-frame.ts'
@@ -207,10 +207,17 @@ export function PhoneConnectedView({
   const surfaceRotation = useSyncExternalStore(subscribe, rotationSnapshot, rotationSnapshot)
   const actionSnapshot = useCallback(() => controller.actionStatus(), [controller])
   const actionFailure = useSyncExternalStore(subscribe, actionSnapshot, actionSnapshot)
+  const coordinateSnapshot = useCallback(() => controller.coordinateUnavailableReason(), [controller])
+  const coordinateUnavailable = useSyncExternalStore(subscribe, coordinateSnapshot, coordinateSnapshot)
   const listSubscribe = useCallback((listener: () => void) => source.subscribe(listener), [source])
   const listSnapshot = useCallback(() => source.snapshot(), [source])
   const listing = useSyncExternalStore(listSubscribe, listSnapshot, listSnapshot)
   const devices = useMemo(() => [...listing.android, ...listing.ios], [listing])
+  const current = devices.find(device => device.id === serial)
+  const androidLogicalDisplay = listing.android.find(device => device.id === serial)?.logicalDisplay
+  const occupyingPlatform = listing.android.some(device => device.id === serial)
+    ? 'android' as const
+    : listing.ios.some(device => device.id === serial) ? 'ios' as const : undefined
   const switchable = useMemo(() => devices.filter(device => device.online), [devices])
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
@@ -230,14 +237,6 @@ export function PhoneConnectedView({
   const mjpegImg = useRef<HTMLImageElement | null>(null)
   /** Drops an in-flight current-frame measurement after a newer one starts or MJPEG leaves live. */
   const mjpegMeasureGeneration = useRef(0)
-  /** Last H264 onSurface size before Host landscape swap. */
-  const h264RawSurface = useRef<{
-    captureId: PhoneCaptureId
-    width: number
-    height: number
-    rotation: 0 | 90 | 180 | 270
-  } | undefined>(undefined)
-
   const releaseDrag = useCallback((): void => {
     const state = drag.current
     drag.current = undefined
@@ -251,6 +250,10 @@ export function PhoneConnectedView({
     wheel.current = undefined
   }, [])
 
+  useEffect(() => {
+    if (occupyingPlatform !== undefined) controller.notePlatform(occupyingPlatform)
+    controller.noteLogicalDisplay(androidLogicalDisplay)
+  }, [androidLogicalDisplay, occupyingPlatform, controller])
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
   useEffect(() => () => {
     releaseDrag()
@@ -273,25 +276,23 @@ export function PhoneConnectedView({
   }, [source])
   useEffect(() => startPhoneListingPoll(source), [source])
 
-  const mjpegCaptureId = phase.kind === 'live' && phase.format === 'mjpeg' ? phase.captureId : undefined
-  const applyMjpegSurface = useCallback((img: HTMLImageElement): void => {
+  const mjpegLive = phase.kind === 'live' && phase.format === 'mjpeg'
+  const applyMjpegSurface = useCallback((img: HTMLImageElement, captureId: PhoneCaptureId): void => {
     const token = ++mjpegMeasureGeneration.current
     void measureMjpegCurrentFrame(img).then((size) => {
       if (token !== mjpegMeasureGeneration.current || size === undefined) return
-      if (mjpegCaptureId !== undefined) {
-        controller.noteSurface('mjpeg', mjpegCaptureId, size.width, size.height)
-      }
+      controller.noteSurface('mjpeg', captureId, size.width, size.height)
     })
-  }, [controller, mjpegCaptureId])
+  }, [controller])
 
-  const mjpegLive = phase.kind === 'live' && phase.format === 'mjpeg'
   useEffect(() => {
     if (!mjpegLive) return
+    const captureId = phase.captureId
     const measure = (): void => {
       // The effect lives only while the live MJPEG phase renders the image;
       // its cleanup clears the interval before the ref can detach.
       const img = mjpegImg.current as HTMLImageElement
-      applyMjpegSurface(img)
+      applyMjpegSurface(img, captureId)
     }
     measure()
     const handle = setInterval(measure, MJPEG_SURFACE_POLL_MS)
@@ -386,22 +387,8 @@ export function PhoneConnectedView({
     }
   }
 
-  const current = devices.find(device => device.id === serial)
   const online = current?.online === true
   const unauthorized = current?.state === 'unauthorized'
-  const logicalDisplay = current?.logicalDisplay
-  const logicalDisplayRef = useRef(logicalDisplay)
-  logicalDisplayRef.current = logicalDisplay
-  useEffect(() => {
-    if (phase.kind !== 'live' || phase.format !== 'h264') {
-      h264RawSurface.current = undefined
-      return
-    }
-    const raw = h264RawSurface.current
-    if (raw === undefined || raw.captureId !== phase.captureId) return
-    const surface = h264SurfaceForHost(raw.width, raw.height, logicalDisplay)
-    controller.noteSurface('h264', phase.captureId, surface.width, surface.height, raw.rotation)
-  }, [controller, logicalDisplay, phase])
 
   const screenContent = (): ReactNode => {
     // A listed-unauthorized handset cannot stream: the design's warn arm
@@ -427,9 +414,7 @@ export function PhoneConnectedView({
             className={css.stream}
             url={phase.streamUrl}
             onSurface={(width, height, rotation) => {
-              h264RawSurface.current = { captureId: phase.captureId, width, height, rotation }
-              const surface = h264SurfaceForHost(width, height, logicalDisplayRef.current)
-              controller.noteSurface('h264', phase.captureId, surface.width, surface.height, rotation)
+              controller.noteSurface('h264', phase.captureId, width, height, rotation)
             }}
             onError={() => { controller.noteCaptureFailure('h264', phase.captureId) }}
           />
@@ -441,7 +426,7 @@ export function PhoneConnectedView({
             alt={`${name} 实时画面`}
             className={css.stream}
             draggable={false}
-            onLoad={(event) => { applyMjpegSurface(event.currentTarget) }}
+            onLoad={(event) => { applyMjpegSurface(event.currentTarget, phase.captureId) }}
             onError={() => { controller.noteCaptureFailure('mjpeg', phase.captureId) }}
           />
         )
@@ -452,18 +437,21 @@ export function PhoneConnectedView({
       const frameStyle = surfaceSize === undefined
         ? undefined
         : { '--phone-surface-ratio': String(surfaceSize.width / surfaceSize.height) } as CSSProperties
+      const coordinateIo = coordinateUnavailable === undefined
       return (
         <div
           role="application"
-          aria-label={`${name} 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本`}
+          aria-label={coordinateIo
+            ? `${name} 画面，点击发送触控，按住拖动或触控板滚动为滑动，键入发送文本`
+            : `${name} 画面，触控坐标平面不可用`}
           tabIndex={0}
           className={css.screenFrame}
           style={frameStyle}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerCancel}
-          onWheel={onWheel}
+          onPointerDown={coordinateIo ? onPointerDown : undefined}
+          onPointerMove={coordinateIo ? onPointerMove : undefined}
+          onPointerUp={coordinateIo ? onPointerUp : undefined}
+          onPointerCancel={coordinateIo ? onPointerCancel : undefined}
+          onWheel={coordinateIo ? onWheel : undefined}
           onKeyDown={onKeyDown}
         >
           {surface}
@@ -471,6 +459,11 @@ export function PhoneConnectedView({
             <span aria-hidden="true" className={css.liveDot} />
             代理中
           </span>
+          {coordinateUnavailable === 'missing-logical'
+            || coordinateUnavailable === 'orientation-mismatch'
+            || coordinateUnavailable === 'unknown-platform'
+            ? <span role="status" className={css.actionError}>{coordinateUnavailableCopy(coordinateUnavailable)}</span>
+            : undefined}
           {actionFailure !== undefined && (
             <span role="status" className={css.actionError}>操作失败：{actionFailure.message}</span>
           )}
@@ -617,4 +610,17 @@ export function PhoneConnectedView({
       <div className={css.hintline}>点击画面即向设备发送触控；按住拖动或触控板滚动为滑动。画面左上角显示当前操作方（你 / Agent）。</div>
     </div>
   )
+}
+
+function coordinateUnavailableCopy(
+  reason: Exclude<PhoneCoordinateUnavailableReason, 'missing-surface'>,
+): string {
+  switch (reason) {
+    case 'missing-logical':
+      return '触控不可用：当前设备逻辑尺寸未知'
+    case 'orientation-mismatch':
+      return '触控不可用：画面与设备逻辑尺寸方向不一致'
+    case 'unknown-platform':
+      return '触控不可用：设备平台未确认'
+  }
 }

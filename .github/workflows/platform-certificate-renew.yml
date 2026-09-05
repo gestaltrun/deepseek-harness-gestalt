@@ -1,0 +1,75 @@
+name: Platform Certificate Renewal
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validate readiness without renewal, or renew only when due
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - renew
+
+concurrency:
+  group: platform-certificate-renewal
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    name: Renew production ALB certificate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure Alibaba Cloud OIDC credentials
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
+        with:
+          oidc-provider-arn: ${{ vars.PLATFORM_ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.PLATFORM_ALIYUN_DEPLOY_ROLE_ARN }}
+          role-session-name: gestalt-platform-certificate-${{ github.run_id }}
+          role-session-expiration: 1800
+          audience: sts.aliyuncs.com
+
+      - name: Install pinned Alibaba Cloud CLI
+        env:
+          ARCHIVE: ${{ runner.temp }}/aliyun-cli.tgz
+          BIN_DIR: ${{ runner.temp }}/aliyun-bin
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/aliyun/aliyun-cli/releases/download/v${ALIYUN_CLI_VERSION}/aliyun-cli-linux-${ALIYUN_CLI_VERSION}-amd64.tgz" -o "$ARCHIVE"
+          printf '%s  %s\n' "$ALIYUN_CLI_LINUX_AMD64_SHA256" "$ARCHIVE" | sha256sum -c -
+          mkdir -p "$BIN_DIR"
+          tar -xzf "$ARCHIVE" -C "$BIN_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+      - name: Validate or renew certificate
+        env:
+          PLATFORM_ALIYUN_REGION: ${{ vars.PLATFORM_ALIYUN_REGION }}
+          PLATFORM_CERT_DOMAIN: ${{ vars.PLATFORM_CERT_DOMAIN }}
+          PLATFORM_CERT_WWW_DOMAIN: ${{ vars.PLATFORM_CERT_WWW_DOMAIN }}
+          PLATFORM_CERT_ALB_EIPS: ${{ vars.PLATFORM_CERT_ALB_EIPS }}
+          PLATFORM_CERT_ALB_LISTENER_ID: ${{ vars.PLATFORM_CERT_ALB_LISTENER_ID }}
+          PLATFORM_CERT_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_CERT_OSS_ENDPOINT: ${{ vars.PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT }}
+          PLATFORM_CERT_STATE_OBJECT: ${{ vars.PLATFORM_CERT_STATE_OBJECT }}
+          PLATFORM_CERT_STATE_KEY: ${{ secrets.PLATFORM_CERT_STATE_KEY }}
+          PLATFORM_CERT_RENEW_BEFORE_DAYS: '30'
+          PLATFORM_CERT_MINIMUM_VALID_DAYS: '60'
+          ACME_ARCHIVE_URL: https://codeload.github.com/acmesh-official/acme.sh/tar.gz/3661fd86b6304115e42f43910e6dd452ab9866d6
+          ACME_ARCHIVE_SHA256: 9af3ad3d775a5782246df4cdd4b4e7b9b3179deb63c509b10e3ba0433093a884
+          REQUESTED_MODE: ${{ github.event_name == 'schedule' && 'renew' || inputs.mode }}
+        run: bash apps/platform/scripts/platform-certificate-renew.sh "$REQUESTED_MODE"

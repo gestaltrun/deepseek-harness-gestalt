@@ -24,6 +24,14 @@ docker build -f apps/platform/Dockerfile -t dsh-platform .
 
 部署会为每台 ECS 提供不同的 `PLATFORM_RELAY_INSTANCE_ID`，并通过 `PLATFORM_RELAY_*` 变量提供正数的容量、确认等待、directory TTL、heartbeat timeout、ciphertext buffer、连接数、待投递数与 attach timeout。PostgreSQL 拥有一次性附件 capability digest、pairing id、publish intent、私有 OSS object key、byte length、expiry、品牌化账号 quota reservation、bridge/OSS 共享 consume claim 与容量；私有 OSS bucket 保存密文字节，但不会收到端点密钥或明文。上传要求正数且精确的 `Content-Length`，在读取 body 前预留 quota，并在写 OSS 前提交 publish intent。finalization 会原子地用 object 元数据替换 intent；crash 后的 expiry reconciliation 会删除孤儿 object 并释放 quota。HTTP consume 会在响应前 claim authority，在响应 body 失败或过早关闭后恢复尚未过期的 claim，并且 bridge/OSS 只接纳一份响应。consume、revoke、expiry 与 pairing revocation 会先提交元数据删除和 quota-release 工作，再清理对象；配置的定期 sweep 只删除明确 inactive 的 candidate，以有界并发排队批量删除，并在 dispose 时等待 active work。限定在 `PLATFORM_OSS_OBJECT_PREFIX` 的一天 lifecycle rule 会回收直接清理失败的对象。每次读取持久行时都会校验 digest 长度、品牌化 pairing id、精确 object-key binding、有界 byte length、安全整数 expiry、claim 与 quota reservation，校验通过后该行才能进入产品 authority；OSS 下载会在分配一个 buffer 前校验 authority length，并在失败时销毁 stream。附件 HTTP 会鉴别当前 Mobile Installation 与确切的已确认 pairing selector；selector 本身没有 authority。
 
+## 证书续期
+
+`.github/workflows/platform-certificate-renew.yml` 支持按需校验实际运行的证书，并每日检查是否进入续期窗口。它通过 GitHub OIDC 承担既有的生产阿里云角色；不使用阿里云 AccessKey 或本地 OAuth 状态。workflow 在执行前校验不可变 acme.sh 源码归档，在仅属主可访问的临时 home 中运行，并把 ACME 账号与证书状态加密为 AES-256 后存入既有私有部署 OSS bucket。加密密钥只存在于受保护的 GitHub Environment secret 中，绝不写入 OSS 或仓库文件。
+
+定时任务在活动 ALB 证书进入三十天续期窗口前不会签发。续期使用原生 OIDC AliDNS hook，并且无论成功或失败都会删除所有挑战记录。只有私钥匹配、SAN 集合严格等于 apex 与 www、且有效期达到最低要求的证书才会上传。随后 workflow 只修改配置的 ALB listener 证书，使用正常 TLS 校验验证两个 ALB 地址，并保留之前的证书用于回滚。`workflow_dispatch` 默认选择 `validate`，在不签发或修改证书的前提下校验固定 client、存在时的加密状态访问、当前证书元数据、TLS endpoint 与云端读取权限。GitHub 会报告定时 job 失败；运维方必须把续期窗口内的失败视为到期告警。
+
+生产环境需要非 secret 变量 `PLATFORM_CERT_DOMAIN`、`PLATFORM_CERT_WWW_DOMAIN`、`PLATFORM_CERT_ALB_EIPS`、`PLATFORM_CERT_ALB_LISTENER_ID` 与 `PLATFORM_CERT_STATE_OBJECT`。`PLATFORM_CERT_STATE_KEY` 是仅用于客户端状态加密的随机受保护 Environment secret。部署角色只增加实际运行域名的 challenge-record 操作、证书上传／读取、指定 listener 的证书更新／读取，以及精确状态对象的 Get/Put；旧 listener 与旧证书继续保留用于回滚。
+
 ## 已知限制与暂缓事项
 
 - 产品配置不能关闭 Redis 与 PostgreSQL 的证书校验。产品入口测试会先校验实际运行的 TLS 配置，再用临时非 TLS store adapter 驱动 `launchOperatedPlatform`；这不构成实际运行验收。

@@ -781,6 +781,91 @@ time.sleep(60)
             raise AssertionError("initialize should time out")
 
 
+def test_client_close_waits_for_acknowledged_shutdown_to_finish(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    durable_marker = tmp_path / "durable.marker"
+    script.write_text(
+        """
+import json
+import os
+import sys
+import time
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif msg.get("method") == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        time.sleep(0.2)
+        open(os.environ["DURABLE_MARKER"], "w", encoding="utf-8").write("durable")
+        raise SystemExit(0)
+""".strip()
+    )
+
+    client = HarnessClient(
+        HarnessConfig(
+            launch_args_override=(sys.executable, str(script)),
+            env={"DURABLE_MARKER": str(durable_marker)},
+            shutdown_timeout_seconds=1,
+        )
+    )
+    client.start()
+    proc = client._proc
+    assert proc is not None
+    client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+
+    def unexpected_signal() -> None:
+        raise AssertionError("acknowledged shutdown must exit without a client signal")
+
+    proc.terminate = unexpected_signal
+    proc.kill = unexpected_signal
+    client.close()
+
+    assert durable_marker.read_text() == "durable"
+    assert proc.returncode == 0
+    assert client._proc is None
+
+
+def test_client_close_forces_reap_when_acknowledged_shutdown_does_not_exit(tmp_path: Path) -> None:
+    script = tmp_path / "fake_bridge.py"
+    script.write_text(
+        """
+import json
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("method") == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {"serverInfo": {"name": "fake-dsh"}}}), flush=True)
+    elif msg.get("method") == "shutdown":
+        print(json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {}}), flush=True)
+        time.sleep(60)
+""".strip()
+    )
+
+    client = HarnessClient(
+        HarnessConfig(
+            launch_args_override=(sys.executable, str(script)),
+            shutdown_timeout_seconds=0.1,
+        )
+    )
+    client.start()
+    proc = client._proc
+    assert proc is not None
+    client.initialize(provider="deepseek-official", cwd="/workspace", model="dsagent")
+    start = time.monotonic()
+    client.close()
+
+    assert time.monotonic() - start < 2
+    assert proc.returncode is not None
+    assert client._proc is None
+
+
 def test_client_close_times_out_when_shutdown_does_not_respond(tmp_path: Path) -> None:
     script = tmp_path / "fake_bridge.py"
     script.write_text(

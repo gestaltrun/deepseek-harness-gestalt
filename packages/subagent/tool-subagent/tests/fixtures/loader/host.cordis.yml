@@ -1,0 +1,19 @@
+# Host-plane rows for the Loader union proof. Settings and the static
+# Provider remain independently authored; the tool itself is not mounted here.
+
+- name: '@deepseek-ai/dsh-session-projection'
+- name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
+  config:
+    enabled: true
+    allowedModels:
+      - provider: alpha
+        model: user
+- name: '@deepseek-ai/dsh-subagent-route-preauthorization-static'
+  config:
+    allowedModels:
+      - provider: beta
+        model: deploy
+- name: '@deepseek-ai/dsh-subagent'
+- name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config:
+    providerName: spawn

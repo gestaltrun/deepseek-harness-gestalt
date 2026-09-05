@@ -43,11 +43,20 @@
           - provider: mock
             model: mock-routed
 
+    - id: subagent-route-preauthorization-static
+      name: '@deepseek-ai/dsh-subagent-route-preauthorization-static'
+      config:
+        allowedModels:
+          - provider: mock
+            model: mock-deploy
+
     - id: tool-subagent-dsh-sdk
       name: '../../../packages/subagent/subagent-dsh-sdk/tests/fixtures/loader/scoped-tool-subagent.ts'
       config:
         provider: dsh-sdk
         toolName: subagent
+        modelSelectionSettings: true
+        deploymentRoutePreauthorization: true
         enableRunInBackground: false
         agentOptions:
           maxTokens: 777

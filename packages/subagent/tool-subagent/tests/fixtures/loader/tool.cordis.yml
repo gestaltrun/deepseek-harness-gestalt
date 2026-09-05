@@ -1,0 +1,8 @@
+# Agent/preset-plane row: the public tool package, sampled once at composition.
+
+- name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: spawn
+    toolName: subagent
+    modelSelectionSettings: true
+    deploymentRoutePreauthorization: true

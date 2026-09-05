@@ -121,6 +121,7 @@ kind: "package-reference"
 - [后台 subagent 任务](../../../.agents/notes/implemented/feature/2026-07-08-background-subagent-tasks.zh.md)——一次性后台路由。
 - [后台优先的可继续委派](../../../.agents/notes/implemented/feature/2026-08-11-background-first-continuable-delegation.zh.md)——可继续工作为何默认在后台运行。
 - [模型选择 subagent 路由](../../../.agents/notes/implemented/feature/2026-08-18-model-selected-subagent-routes.zh.md)——选择策略、继承、发现与 fork 限制。
+- [用户授权的 subagent 模型路由](../../../.agents/notes/implemented/feature/2026-08-24-user-authorized-subagent-model-routes.zh.md)——Host 设置是并集中的一个输入，与部署预授权并列。
 
 -----
 

@@ -121,6 +121,7 @@ Read these pages when the package-level contract is not enough; they move from t
 - [Background subagent tasks](../../../.agents/notes/implemented/feature/2026-07-08-background-subagent-tasks.md) — the one-shot background route.
 - [Background-first continuable delegation](../../../.agents/notes/implemented/feature/2026-08-11-background-first-continuable-delegation.md) — why continuable work defaults to background.
 - [Model-selected subagent routes](../../../.agents/notes/implemented/feature/2026-08-18-model-selected-subagent-routes.md) — selection policy, inheritance, discovery, and the fork restriction.
+- [User-authorized subagent model routes](../../../.agents/notes/implemented/feature/2026-08-24-user-authorized-subagent-model-routes.md) — Host settings as one union input beside deployment preauthorization.
 
 -----
 

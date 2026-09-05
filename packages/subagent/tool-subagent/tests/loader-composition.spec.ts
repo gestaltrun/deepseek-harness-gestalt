@@ -1,7 +1,10 @@
-/** Real Loader composition for deployment-preauthorized child routes. */
+/** YAML/Include composition for deployment-preauthorized child routes. */
 
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -12,11 +15,13 @@ import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import StaticSubagentRoutePreauthorization from '@deepseek-ai/dsh-subagent-route-preauthorization-static'
-import * as tool from '../src/index.ts'
+import * as tool from '@deepseek-ai/dsh-tool-subagent'
 import SubagentModelSelectionConfig, {
   SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE,
-} from '../src/model-selection-settings.ts'
+} from '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 import { subagentModelSelectionPolicy } from '../src/model-selection-state.ts'
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/loader')
 
 /** Writable in-memory settings provider for the Loader composition. */
 class MemorySettings extends SettingsProvider {
@@ -56,7 +61,9 @@ describe('tool-subagent real Loader composition', () => {
   it('unions user and deployment routes without writing Settings', async () => {
     const ctx = new Context()
     contexts.push(ctx)
+    ctx.baseUrl = pathToFileURL(FIXTURES).href + '/'
     await ctx.plugin(Loader)
+    ctx.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
       ['@deepseek-ai/dsh-subagent', SubagentRuntime],
@@ -75,32 +82,17 @@ describe('tool-subagent real Loader composition', () => {
     await ctx.plugin(MemorySettings)
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(AgentLoop, { agents: [] })
-    await ctx.loader.create({ name: '@deepseek-ai/dsh-session-projection' })
     await ctx.loader.create({
-      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings',
-      config: {
-        enabled: true,
-        allowedModels: [{ provider: 'alpha', model: 'user' }],
-      },
-    })
-    await ctx.loader.create({
-      name: '@deepseek-ai/dsh-subagent-route-preauthorization-static',
-      config: { allowedModels: [{ provider: 'beta', model: 'deploy' }] },
-    })
-    await ctx.loader.create({ name: '@deepseek-ai/dsh-subagent' })
-    await ctx.loader.create({
-      name: '@deepseek-ai/dsh-subagent-spawn-in-process',
-      config: { providerName: 'spawn' },
+      name: 'cordis:include',
+      config: { path: pathToFileURL(join(FIXTURES, 'host.cordis.yml')).href },
     })
     await ctx.loader.await()
     const before = structuredClone(ctx.settings.get(SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE))
     const handle = await ctx.agents.create({
       sessionId: SessionId('loader-union'),
       setup: async (agentCtx) => {
-        await agentCtx.plugin(tool, {
-          provider: 'spawn',
-          modelSelectionSettings: true,
-          deploymentRoutePreauthorization: true,
+        await agentCtx.plugin(Include, {
+          path: pathToFileURL(join(FIXTURES, 'tool.cordis.yml')).href,
         })
       },
     })

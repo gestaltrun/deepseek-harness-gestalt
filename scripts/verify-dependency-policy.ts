@@ -48,9 +48,15 @@ type EnvironmentClass = 'local' | 'ci'
 
 export const fixtureWorkspaceSettings = 'packages: []\npackageImportMethod: copy\n'
 
-function unlinkFixtureLinks(path: string): void {
-  if (!existsSync(path)) return
-  const stat = lstatSync(path)
+/** Unlink links within an owned fixture without traversing their targets. */
+export function unlinkFixtureLinks(path: string): void {
+  let stat: ReturnType<typeof lstatSync>
+  try {
+    stat = lstatSync(path)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return
+    throw error
+  }
   if (stat.isSymbolicLink()) {
     unlinkSync(path)
     return

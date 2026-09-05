@@ -1,3 +1,6 @@
+import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -5,7 +8,21 @@ import {
   fixtureScripts,
   fixtureWorkspaceSettings,
   removeFixtureRoot,
+  unlinkFixtureLinks,
 } from './verify-dependency-policy.ts'
+
+function withTemporaryDirectory(run: (path: string) => void): void {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-dependency-policy-test-'))
+  try {
+    run(root)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+function directoryLink(target: string, path: string): void {
+  symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+}
 
 describe('dependency policy fixture commands', () => {
   it('uses PATH-resolved Node with script files instead of shell-quoting an absolute executable', () => {
@@ -70,5 +87,37 @@ describe('dependency policy fixture cleanup', () => {
       expect((error as AggregateError).errors[0]).toBe(primary)
       expect((error as AggregateError).errors[1]).toBe(cleanup)
     }
+  })
+
+  it('removes dangling directory links', () => {
+    withTemporaryDirectory((root) => {
+      const target = join(root, 'removed-target')
+      const link = join(root, 'dangling-link')
+      mkdirSync(target)
+      directoryLink(target, link)
+      rmSync(target, { recursive: true })
+
+      unlinkFixtureLinks(link)
+
+      expect(() => lstatSync(link)).toThrow()
+    })
+  })
+
+  it('unlinks directory links without removing their external targets', () => {
+    withTemporaryDirectory((root) => {
+      const fixture = join(root, 'fixture')
+      const external = join(root, 'external')
+      const marker = join(external, 'marker')
+      const link = join(fixture, 'external-link')
+      mkdirSync(fixture)
+      mkdirSync(external)
+      writeFileSync(marker, 'preserved')
+      directoryLink(external, link)
+
+      unlinkFixtureLinks(fixture)
+
+      expect(() => lstatSync(link)).toThrow()
+      expect(lstatSync(marker).isFile()).toBe(true)
+    })
   })
 })

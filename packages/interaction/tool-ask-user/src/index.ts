@@ -2,9 +2,9 @@
  * Model-facing Consumer of the `ctx.userQuestions` capability seam.
  * The tool pauses until a UI provider returns a human answer, then feeds that
  * answer back into the agent loop as an ordinary tool result. When
- * `to_project_member` is present the call is routed through
- * `ctx.memberQuestionSender` instead of the local provider. Runtime
- * eligibility filtering hides that parameter from unbound workspaces at
+ * `to_project_member` is present, the tool adds a `memberRoute`; the sender's
+ * prepended `ctx.userQuestions` answerer claims it before local UI answerers.
+ * Runtime eligibility filtering hides that parameter from unbound workspaces at
  * prompt assembly; the static schema retains it.
  *
  * @module @deepseek-ai/dsh-tool-ask-user

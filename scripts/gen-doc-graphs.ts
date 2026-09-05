@@ -361,7 +361,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Human question/answer seam',
     mode: 'seam',
     consumers: ['tool-ask-user'],
-    note: 'UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise.',
+    note: 'Composed answerers share one waterfall: Agent-scoped UI answerers handle local asks, while an unscoped Host sender claims member-routed asks before them.',
   },
   {
     key: 'planMode',

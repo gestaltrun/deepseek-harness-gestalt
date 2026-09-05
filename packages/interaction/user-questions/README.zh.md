@@ -26,11 +26,11 @@ kind: "package-reference"
 
 ### 公开 API
 
-- `ctx.userQuestions.ask(request): Promise<AskUserQuestionAnswer>` 派发回答者 waterfall，并等待第一个接受请求的回答。
+- `ctx.userQuestions.ask(request): Promise<AskUserQuestionAnswer>` 派发回答者 waterfall，并等待第一个接受请求的回答。发送方可通过全局前置监听器认领 `memberRoute`，普通本地回答器则通过 `next()` 继续委派。
 
 ### 关键类型
 
-- `AskUserQuestionRequest`：`{ questions: [{ id, question, detail?, header?, options?, multiSelect?, intent? }], agent?, signal? }`；`detail` 提供辅助文本，提供方会将其随问题一起渲染，而不会将其变成选项标签。如提供 `agent`，它必须与注册表中的存活运行时根 agent（智能体）是同一对象。
+- `AskUserQuestionRequest`：`{ questions: [{ id, question, detail?, header?, options?, multiSelect?, intent? }], agent?, signal?, memberRoute? }`；`detail` 提供辅助文本，提供方会将其随问题一起渲染，而不会将其变成选项标签。如提供 `agent`，它必须与注册表中的存活运行时根 agent（智能体）是同一对象。`memberRoute` 携带 Host 路由信息，并由全局前置回答器认领。
 - `AskUserQuestionOption`：`{ label, description? }`。
 - `AskUserQuestionIntent`：`{ kind: 'plan-review', approve }`；即下文的带标签呈现意图。
 - `AskUserQuestionAnswer`：`{ answers: [{ id, selected, custom? }] }`。

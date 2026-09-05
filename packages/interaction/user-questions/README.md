@@ -26,7 +26,7 @@ User-interaction Service Definition. It owns `ctx.userQuestions`, the service a 
 
 ### Public API
 
-- `ctx.userQuestions.ask(request): Promise<AskUserQuestionAnswer>` Dispatch the answerer waterfall and wait for the first accepted answer.
+- `ctx.userQuestions.ask(request): Promise<AskUserQuestionAnswer>` Dispatch the answerer waterfall and wait for the first accepted answer. A sender may claim `memberRoute` through a global prepended listener while ordinary local answerers delegate with `next()`.
 
 ### Key Types
 

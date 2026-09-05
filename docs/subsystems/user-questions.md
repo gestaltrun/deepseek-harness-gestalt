@@ -2,7 +2,7 @@
 
 English | [中文](user-questions.zh.md)
 
-The user-questions seam of [dsh-user-questions](../../packages/interaction/user-questions). It is the provider-neutral vocabulary a tool or permission plugin uses when it needs the human to answer before the agent can continue. UI surfaces provide the active `UserQuestionProvider`; the host runtime relays requests to its connected client. Routed asks with `to_project_member` leave this provider and travel through [`ctx.memberQuestionSender`](#ctxmemberquestionsender--memberquestionsenderservice-abstract-seam) instead.
+The user-questions seam of [dsh-user-questions](../../packages/interaction/user-questions). It is the provider-neutral vocabulary a tool or permission plugin uses when it needs the human to answer before the agent can continue. UI surfaces contribute ordinary answerers; the host runtime relays Agent-scoped requests to its connected client. Routed asks carry `memberRoute` through the same waterfall, where the sender's global prepended answerer claims them before local UI answerers.
 
 Source: [`packages/interaction/user-questions/src/index.ts`](../../packages/interaction/user-questions/src/index.ts)
 

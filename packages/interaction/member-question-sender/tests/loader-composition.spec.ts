@@ -38,12 +38,14 @@ class DeferredDelivery implements MemberQuestionDeliveryPort {
   private resolveDelivered!: (value: Delivered) => void
   private readonly terminals = new Map<MemberQuestionId, CompanionMemberQuestionSettledResult>()
   captured: Delivered | undefined
+  deliveries = 0
 
   constructor() {
     this.delivered = new Promise((resolve) => { this.resolveDelivered = resolve })
   }
 
   deliver(value: Delivered): Promise<void> {
+    this.deliveries += 1
     this.captured = value
     this.resolveDelivered(value)
     return Promise.resolve()
@@ -167,7 +169,18 @@ async function boot(): Promise<Booted> {
     const senderEntry = [...context.loader.entries()].find(entry => entry.options.name === '@deepseek-ai/dsh-member-question-sender')
     if (providerEntry === undefined || senderEntry === undefined) throw new Error('expected delivery and sender Loader entries')
     expect(providerEntry.fiber).toBeDefined()
-    expect(senderEntry.fiber).toBeDefined()
+    const senderFiber = senderEntry.fiber
+    expect(senderFiber).toBeDefined()
+    await providerEntry.update({ disabled: true })
+    await context.loader.await()
+    expect(context.get('testDeliveryConfig')).toBeUndefined()
+    expect(context.get('memberQuestionSender')).toBeUndefined()
+    expect(senderEntry.fiber).toBe(senderFiber)
+    await providerEntry.update({ disabled: false })
+    await context.loader.await()
+    expect(context.get('testDeliveryConfig')).toBeDefined()
+    expect(context.get('memberQuestionSender')).toBeInstanceOf(Sender)
+    expect(senderEntry.fiber).toBe(senderFiber)
     const unloaded = [...context.loader.entries()].filter(entry => !entry.disabled && entry.fiber === undefined)
     if (unloaded.length > 0) throw new Error(`enabled Loader entries did not load: ${unloaded.map(entry => entry.options.name).join(', ')}`)
     if (run === undefined) throw new Error('composition driver did not activate')
@@ -187,6 +200,7 @@ describe('member-question sender real Loader composition', () => {
       expect(result).toEqual({ local: '{"answers":[{"id":"local","selected":["local"]}]}', member: '{"answers":[]}' })
       expect(composed.localRequests).toHaveLength(1)
       expect(composed.localRequests[0]).not.toHaveProperty('memberRoute')
+      expect(composed.delivery.deliveries).toBe(1)
       const delivered = composed.delivery.captured
       expect(delivered?.message.type).toBe('operation')
       if (delivered?.message.type !== 'operation') throw new Error('expected operation delivery')

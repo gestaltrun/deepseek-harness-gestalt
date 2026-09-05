@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
-import { SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
+import { KNOWN_SESSION_EVENT_TYPES, SessionLogOffset, SessionSeq, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -429,6 +429,7 @@ describe('JsonlSessionPersistence: official vocabulary portability', () => {
       return ctx
     }
     const m = meta('official-ignorable-roundtrip', '/work')
+    expect(KNOWN_SESSION_EVENT_TYPES.has('official/unknown-event')).toBe(false)
     const unknown = {
       type: 'official/unknown-event', seq: SessionSeq(6), time: 7007,
       data: { payload: ['retained', 2], nested: { exact: true } }, ignorable: true,

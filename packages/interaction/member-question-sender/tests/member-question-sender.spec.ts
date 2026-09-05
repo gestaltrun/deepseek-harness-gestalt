@@ -485,9 +485,10 @@ describe('member-question sender', () => {
       })
       await vi.advanceTimersByTimeAsync(50)
       await expired
-      expect(asking.snapshotEvents()[1]).toMatchObject({
-        type: 'member-question/outcome', ignorable: true, data: { outcome: 'expired' },
-      })
+      expect(asking.snapshotEvents()).toMatchObject([
+        { type: 'member-question/asked', ignorable: true },
+        { type: 'member-question/outcome', ignorable: true, data: { outcome: 'expired' } },
+      ])
       await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
         questionId,
         outcome: 'expired',

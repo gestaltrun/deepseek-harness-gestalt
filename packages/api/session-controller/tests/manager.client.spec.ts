@@ -521,6 +521,16 @@ describe('subagent catalogs', () => {
     expect(api.callsOf('subagents.list')).toHaveLength(catalogCalls)
   })
 
+  it('does not start a catalog list when dispose races the refresh microtask', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = () => Promise.resolve(ok({ entries: [], parentAvailable: true }))
+    const manager = new SessionManager(fakeRemote(api))
+    const refresh = manager.refreshSubagents(S1)
+    const disposal = manager.dispose()
+    await Promise.all([refresh, disposal])
+    expect(api.callsOf('subagents.list')).toEqual([])
+  })
+
   it('aborts an in-flight catalog list on dispose without a Host response', async () => {
     const api = new FakeApiClient()
     api.onSubagentList = (_payload, signal) => new Promise((_resolve, reject) => {

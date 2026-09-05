@@ -454,18 +454,50 @@ describe('provisional identity lifecycle', () => {
     const release = b.svc.stageProvisional(draft)
     expect(b.svc.binding(sid('draft'))).toBeDefined()
     const listCalls = b.api.callsOf('session.list').length
+    const createCalls = b.api.callsOf('session.create').length
+    const searchCalls = b.api.callsOf('session.search').length
+    const forkCalls = b.api.callsOf('session.fork').length
     const followCalls = b.api.callsOf('session.follow').length
     const catalogCalls = b.api.callsOf('subagents.list').length
+    const current = b.svc.list.getSnapshot().current
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
     await b.ctx.fiber.dispose()
+    notified.mockClear()
 
     expect(b.svc.binding(sid('parent'))).toBeUndefined()
     expect(b.svc.scope(sid('parent'))).toBeUndefined()
-    expect(() => { b.svc.stageProvisional(draft) }).toThrow(/disposed/)
+    expect(b.svc.sessionOf(b.ctx)).toBeUndefined()
+    expect(() => { b.svc.stageProvisional(draft) }).toThrow('sessions.stageProvisional: ClientSessions is disposed')
+    expect(() => { b.svc.open(sid('parent')) }).toThrow('sessions.open: ClientSessions is disposed')
+    expect(() => {
+      b.svc.openSubagent({
+        parentSessionId: sid('parent'), childSessionId: sid('child'), mode: 'continuable',
+      })
+    }).toThrow('sessions.openSubagent: ClientSessions is disposed')
+    expect(() => { b.svc.clear() }).toThrow('sessions.clear: ClientSessions is disposed')
+    expect(() => { b.svc.setSubagentCatalogOpen(sid('parent'), true) })
+      .toThrow('sessions.setSubagentCatalogOpen: ClientSessions is disposed')
+    expect(() => { void b.svc.refresh() }).toThrow('sessions.refresh: ClientSessions is disposed')
+    expect(() => { void b.svc.refreshSubagents(sid('parent')) })
+      .toThrow('sessions.refreshSubagents: ClientSessions is disposed')
+    expect(() => { void b.svc.search('needle', new AbortController().signal) })
+      .toThrow('sessions.search: ClientSessions is disposed')
+    await expect(b.svc.create({ cwd: '/w' }))
+      .rejects.toThrow('sessions.create: ClientSessions is disposed')
+    await expect(b.svc.fork({ sessionId: sid('parent') }))
+      .rejects.toThrow('sessions.fork: ClientSessions is disposed')
     expect(() => { b.svc.openForRender(sid('parent')) }).not.toThrow()
-    expect(() => { b.svc.resolveAgentScope(sid('parent')) }).toThrow(/disposed/)
+    expect(() => { b.svc.resolveAgentScope(sid('parent')) })
+      .toThrow('sessions.resolveAgentScope: ClientSessions is disposed')
     expect(() => { release() }).not.toThrow()
     expect(b.svc.scope(sid('parent'))).toBeUndefined()
+    expect(b.svc.list.getSnapshot().current).toBe(current)
+    expect(notified).not.toHaveBeenCalled()
     expect(b.api.callsOf('session.list')).toHaveLength(listCalls)
+    expect(b.api.callsOf('session.create')).toHaveLength(createCalls)
+    expect(b.api.callsOf('session.search')).toHaveLength(searchCalls)
+    expect(b.api.callsOf('session.fork')).toHaveLength(forkCalls)
     expect(b.api.callsOf('session.follow')).toHaveLength(followCalls)
     expect(b.api.callsOf('subagents.list')).toHaveLength(catalogCalls)
     expect(b.api.followStarts).toEqual([])

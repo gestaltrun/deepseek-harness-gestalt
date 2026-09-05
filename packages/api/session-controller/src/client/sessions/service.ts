@@ -277,6 +277,7 @@ export class ClientSessions implements ISessions {
    * @param id - listed or addressed session id.
    */
   open(id: SessionId): void {
+    this.assertActive('open')
     this.manager.select(id)
   }
 
@@ -285,6 +286,7 @@ export class ClientSessions implements ISessions {
    * @param address - catalog-derived parent and child ids.
    */
   openSubagent(address: SubagentAddress): void {
+    this.assertActive('openSubagent')
     this.manager.selectSubagent(address)
   }
 
@@ -304,6 +306,7 @@ export class ClientSessions implements ISessions {
    * @param open - menu state.
    */
   setSubagentCatalogOpen(parentSessionId: SessionId, open: boolean): void {
+    this.assertActive('setSubagentCatalogOpen')
     this.manager.setSubagentCatalogOpen(parentSessionId, open)
   }
 
@@ -312,6 +315,7 @@ export class ClientSessions implements ISessions {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
+    this.assertActive('refreshSubagents')
     return this.manager.refreshSubagents(parentSessionId)
   }
 
@@ -323,6 +327,7 @@ export class ClientSessions implements ISessions {
    * per the masked-gap contract until the next open() moves the stage.
    */
   clear(): void {
+    this.assertActive('clear')
     this.manager.clearSelection()
   }
 
@@ -331,6 +336,7 @@ export class ClientSessions implements ISessions {
    * @returns completion of the current or newly started baseline pull.
    */
   refresh(): Promise<void> {
+    this.assertActive('refresh')
     return this.manager.refreshList()
   }
 
@@ -345,6 +351,7 @@ export class ClientSessions implements ISessions {
     query: string,
     signal: AbortSignal,
   ): Promise<RemoteResult<{ items: SessionSearchResultItem[]; hasMore: boolean }>> {
+    this.assertActive('search')
     return this.manager.search(query, signal)
   }
 
@@ -413,6 +420,7 @@ export class ClientSessions implements ISessions {
    * @throws {SessionCreateError} with the requested id.
    */
   async create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
+    this.assertActive('create')
     const result = await this.manager.create(opts)
     if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
     this.projectList()
@@ -439,6 +447,7 @@ export class ClientSessions implements ISessions {
     atSeq?: number
     increaseTitle?: boolean
   }): Promise<SessionId> {
+    this.assertActive('fork')
     const sourceTitle = opts.increaseTitle
       ? this.list.getSnapshot().byId[opts.sessionId]?.title
       : undefined
@@ -479,9 +488,7 @@ export class ClientSessions implements ISessions {
    * @returns the identity-stable Agent Context.
    */
   resolveAgentScope(id: SessionId): AgentContext {
-    if (this.disposed) {
-      throw new Error(`sessions.resolveAgentScope: ClientSessions is disposed (${id})`)
-    }
+    this.assertActive('resolveAgentScope')
     return (this.scopes.get(id) ?? this.materializeScope(id)).ctx
   }
 
@@ -535,9 +542,7 @@ export class ClientSessions implements ISessions {
     origin: 'subagent'
     title: string
   }): () => void {
-    if (this.disposed) {
-      throw new Error(`sessions.stageProvisional: ClientSessions is disposed (${descriptor.sessionId})`)
-    }
+    this.assertActive('stageProvisional')
     this.manager.stageProvisional(descriptor)
     this.projectList()
     this.resolve(descriptor.sessionId)
@@ -572,6 +577,14 @@ export class ClientSessions implements ISessions {
    * — and open() is idempotent (an in-flight or completed open no-ops; a
    * failed one retries the next time current is touched).
    */
+  /**
+   * Reject command methods after the root sessions effect starts teardown.
+   * @param operation - public method name for the stable diagnostic.
+   */
+  private assertActive(operation: string): void {
+    if (this.disposed) throw new Error(`sessions.${operation}: ClientSessions is disposed`)
+  }
+
   private followCurrent(): void {
     if (this.disposed) return
     const snapshot = this.list.getSnapshot()

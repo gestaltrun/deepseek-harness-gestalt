@@ -438,6 +438,7 @@ export class SessionManager {
     const inflight: CatalogInflight = {
       promise: Promise.resolve().then(async () => {
         try {
+          if (!this.catalogCurrent(parentSessionId, inflight)) return
           const result = await this.remote.subagents.list(parentSessionId, controller.signal)
           if (!this.catalogCurrent(parentSessionId, inflight)) return
           if (result.ok) {
@@ -732,12 +733,12 @@ export class SessionManager {
     this.recordMutation({ kind: 'upsert', summary })
   }
 
-  /** Apply immediately and retain for replay when a list response is in flight. */
   /** False after {@link dispose}; live Host and list writers must no-op. */
   private accepting(): boolean {
     return !this.disposed
   }
 
+  /** Apply immediately and retain for replay when a list response is in flight. */
   private recordMutation(mutation: SessionListMutation): void {
     if (!this.accepting()) return
     this.listMutations?.push(mutation)

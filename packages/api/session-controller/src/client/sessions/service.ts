@@ -13,8 +13,11 @@
  * state can widen to a multi-pane list later). A session leaving the list
  * tears its scope down immediately unless it is the staged one, whose scope
  * survives frozen (read-only view) until the stage moves on.
+ * `stageProvisional()` lists a caller-supplied identity without moving
+ * `current`; `openForRender()` opens a published Session's history without
+ * selecting it. The package README owns the consumer contract.
  */
-import type { Context, Fiber } from '@deepseek-ai/cordis'
+import { FiberState, type Context, type Fiber } from '@deepseek-ai/cordis'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
@@ -59,6 +62,8 @@ export interface SessionSummary {
   updatedAt: number
   /** Current host-computed projection values retained by the object layer. */
   projectionValues?: Readonly<Partial<SessionProjectionMap>>
+  /** Renderer-only identity that has not published a Host Session yet. */
+  provisional?: true
 }
 
 /**
@@ -213,6 +218,12 @@ export class ClientSessions implements ISessions {
   private watched: SessionId | undefined
   /** Removed-while-staged sessions whose teardown waits for the stage to move away. */
   private readonly deferredRemovals = new Set<SessionId>()
+  /** True after the root sessions effect starts teardown; lifecycle writers must not rematerialize. */
+  private disposed = false
+  /** Fused into search; aborted at the start of root disposal. */
+  private readonly commandAbort = new AbortController()
+  /** In-flight public async commands root disposal awaits before the final list projection. */
+  private readonly commandOps = new Set<Promise<unknown>>()
 
   /**
    * @param ctx - client root context (scope fibers mount under it).
@@ -250,6 +261,8 @@ export class ClientSessions implements ISessions {
       this.followCurrent()
     })
     rootCtx.effect(() => async () => {
+      this.disposed = true
+      this.commandAbort.abort()
       disposeStageFollower()
       disposeManagerProjection()
       const scopes = [...this.scopes]
@@ -257,8 +270,10 @@ export class ClientSessions implements ISessions {
       this.deferredRemovals.clear()
       this.watched = undefined
       for (const [id, record] of scopes) this.startScopeDrop(id, record)
-      await this.drainScopeDrops()
       await this.manager.dispose()
+      await Promise.allSettled(this.commandOps)
+      this.projectList()
+      await this.drainScopeDrops()
     }, 'session-controller.client.sessions')
     rootCtx.reflect.provide('sessions', this, undefined)
   }
@@ -268,6 +283,7 @@ export class ClientSessions implements ISessions {
    * @param id - listed or addressed session id.
    */
   open(id: SessionId): void {
+    this.assertActive('open')
     this.manager.select(id)
   }
 
@@ -276,6 +292,7 @@ export class ClientSessions implements ISessions {
    * @param address - catalog-derived parent and child ids.
    */
   openSubagent(address: SubagentAddress): void {
+    this.assertActive('openSubagent')
     this.manager.selectSubagent(address)
   }
 
@@ -295,6 +312,7 @@ export class ClientSessions implements ISessions {
    * @param open - menu state.
    */
   setSubagentCatalogOpen(parentSessionId: SessionId, open: boolean): void {
+    this.assertActive('setSubagentCatalogOpen')
     this.manager.setSubagentCatalogOpen(parentSessionId, open)
   }
 
@@ -303,6 +321,7 @@ export class ClientSessions implements ISessions {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
+    this.assertActive('refreshSubagents')
     return this.manager.refreshSubagents(parentSessionId)
   }
 
@@ -314,6 +333,7 @@ export class ClientSessions implements ISessions {
    * per the masked-gap contract until the next open() moves the stage.
    */
   clear(): void {
+    this.assertActive('clear')
     this.manager.clearSelection()
   }
 
@@ -322,6 +342,7 @@ export class ClientSessions implements ISessions {
    * @returns completion of the current or newly started baseline pull.
    */
   refresh(): Promise<void> {
+    this.assertActive('refresh')
     return this.manager.refreshList()
   }
 
@@ -336,7 +357,14 @@ export class ClientSessions implements ISessions {
     query: string,
     signal: AbortSignal,
   ): Promise<RemoteResult<{ items: SessionSearchResultItem[]; hasMore: boolean }>> {
-    return this.manager.search(query, signal)
+    return this.trackCommand('search', async () => {
+      const result = await this.manager.search(
+        query,
+        AbortSignal.any([signal, this.commandAbort.signal]),
+      )
+      this.assertActive('search')
+      return result
+    })
   }
 
   /**
@@ -403,11 +431,14 @@ export class ClientSessions implements ISessions {
    * @returns the new session id.
    * @throws {SessionCreateError} with the requested id.
    */
-  async create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
-    const result = await this.manager.create(opts)
-    if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
-    this.projectList()
-    return result.value.sessionId
+  create(opts: { workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId } = {}): Promise<SessionId> {
+    return this.trackCommand('create', async () => {
+      const result = await this.manager.create(opts)
+      this.assertActive('create')
+      if (!result.ok) throw new SessionCreateError(result.error, opts.sessionId)
+      this.projectList()
+      return result.value.sessionId
+    })
   }
 
   /**
@@ -425,7 +456,7 @@ export class ClientSessions implements ISessions {
    * @throws {SessionForkError} with the source id.
    * @throws {Error} when a requested child-title rename fails after creation.
    */
-  async fork(opts: {
+  fork(opts: {
     sessionId: SessionId
     atSeq?: number
     increaseTitle?: boolean
@@ -433,23 +464,27 @@ export class ClientSessions implements ISessions {
     const sourceTitle = opts.increaseTitle
       ? this.list.getSnapshot().byId[opts.sessionId]?.title
       : undefined
-    const result = await this.manager.fork({
-      sessionId: opts.sessionId,
-      // Flooring lands inside the anchor's own turn (every turn opens with a
-      // turn/start), so the host's first-turn/end-at-or-after cut still ends
-      // on that turn — never clipped back to the previous one.
-      ...(opts.atSeq === undefined ? {} : { atSeq: SessionSeq(Math.floor(opts.atSeq)) }),
+    return this.trackCommand('fork', async () => {
+      const result = await this.manager.fork({
+        sessionId: opts.sessionId,
+        // Flooring lands inside the anchor's own turn (every turn opens with a
+        // turn/start), so the host's first-turn/end-at-or-after cut still ends
+        // on that turn — never clipped back to the previous one.
+        ...(opts.atSeq === undefined ? {} : { atSeq: SessionSeq(Math.floor(opts.atSeq)) }),
+      })
+      this.assertActive('fork')
+      if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
+      this.projectList()
+      const childId = result.value.sessionId
+      if (sourceTitle !== undefined) {
+        const child = this.binding(childId)?.session
+        if (child === undefined) throw new Error(`fork child "${childId}" is not locally addressable`)
+        const renamed = await child.rename(increasedForkTitle(sourceTitle))
+        this.assertActive('fork')
+        if (!renamed.ok) throw new Error(`fork child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
+      }
+      return childId
     })
-    if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
-    this.projectList()
-    const childId = result.value.sessionId
-    if (sourceTitle !== undefined) {
-      const child = this.binding(childId)?.session
-      if (child === undefined) throw new Error(`fork child "${childId}" is not locally addressable`)
-      const renamed = await child.rename(increasedForkTitle(sourceTitle))
-      if (!renamed.ok) throw new Error(`fork child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
-    }
-    return childId
   }
 
   /**
@@ -470,6 +505,7 @@ export class ClientSessions implements ISessions {
    * @returns the identity-stable Agent Context.
    */
   resolveAgentScope(id: SessionId): AgentContext {
+    this.assertActive('resolveAgentScope')
     return (this.scopes.get(id) ?? this.materializeScope(id)).ctx
   }
 
@@ -502,7 +538,7 @@ export class ClientSessions implements ISessions {
 
   /**
    * Resolve the stable session binding (scope-addressed assembly feed). Pure
-   * resolution — no staging, no window side effects.
+   * resolution — no Host history or catalog request, no change to `list.current`.
    * @param id - session id.
    * @returns binding, or undefined for a session neither listed nor already scoped.
    */
@@ -511,13 +547,105 @@ export class ClientSessions implements ISessions {
   }
 
   /**
-   * Move the stage to the list's current session: sweep teardowns deferred
-   * behind the previous occupant and pull the new occupant's history window.
-   * Staging IS the open signal — the window opens ⟺ the session is on stage
-   * — and open() is idempotent (an in-flight or completed open no-ops; a
-   * failed one retries the next time current is touched).
+   * Stage a caller-supplied renderer-only Session identity until Host publication.
+   * Extends list eligibility and mints the ordinary binding without selecting it.
+   * @param descriptor - preallocated identity, parent lineage, and display title.
+   * @returns disposer that removes the unpublished row and its scope exactly once.
+   * @throws when ClientSessions is disposed.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void {
+    this.assertActive('stageProvisional')
+    this.manager.stageProvisional(descriptor)
+    this.projectList()
+    this.resolve(descriptor.sessionId)
+    return () => {
+      if (this.disposed) return
+      this.manager.dropProvisional(descriptor.sessionId)
+      this.projectList()
+      this.dropReleasedProvisional(descriptor.sessionId)
+    }
+  }
+
+  /**
+   * Open one explicitly rendered Session without changing `list.current`.
+   * Published identities request Host history and refresh the subagent catalog;
+   * provisional identities do neither. An unknown identity is a no-op: former
+   * `openForRender()` skipped missing resolves rather than failing loud.
+   * @param sessionId - listed, addressed, or staged Session identity.
+   */
+  openForRender(sessionId: SessionId): void {
+    if (this.disposed) return
+    if (this.manager.isProvisional(sessionId)) return
+    const record = this.resolve(sessionId)
+    if (record === undefined) return
+    void record.session.open()
+    void this.manager.refreshSubagents(sessionId)
+  }
+
+  /**
+   * Reject command methods after the root sessions effect starts teardown.
+   * @param operation - public method name for the stable diagnostic.
+   */
+  private assertActive(operation: string): void {
+    if (this.disposed) throw this.disposedError(operation)
+  }
+
+  /**
+   * Own one public command before its next-microtask execution. Root disposal
+   * can suppress unstarted Host work and awaits every command that did start.
+   * @param operation - public method name for the stable diagnostic.
+   * @param run - command body; must re-assert activity after every await.
+   * @returns the tracked command promise.
+   */
+  private trackCommand<T>(operation: string, run: () => Promise<T>): Promise<T> {
+    if (this.disposed) return Promise.reject(this.disposedError(operation))
+    const op = new Promise<T>((resolve, reject) => {
+      queueMicrotask(() => {
+        if (this.disposed || this.rootCtx.fiber.state !== FiberState.ACTIVE) {
+          reject(this.disposedError(operation))
+          return
+        }
+        let running: Promise<T>
+        try {
+          running = run()
+        } catch (error: unknown) {
+          reject(error)
+          return
+        }
+        void running.then(resolve, (error: unknown) => {
+          reject(this.disposed ? this.disposedError(operation) : error)
+        })
+      })
+    })
+    this.commandOps.add(op)
+    void op.then(
+      () => { this.commandOps.delete(op) },
+      () => { this.commandOps.delete(op) },
+    )
+    return op
+  }
+
+  /**
+   * Stable diagnostic for a command that raced or followed ClientSessions disposal.
+   * @param operation - public method name.
+   * @returns the error thrown to the command caller.
+   */
+  private disposedError(operation: string): Error {
+    return new Error(`sessions.${operation}: ClientSessions is disposed`)
+  }
+
+  /**
+   * Follow a valid current selection by sweeping deferred scope drops and
+   * opening that Session's history and direct-child catalog once per stage.
+   * A masked missing selection retains the prior stage and its frozen scope.
    */
   private followCurrent(): void {
+    if (this.disposed) return
     const snapshot = this.list.getSnapshot()
     const current = snapshot.current
     // A masked gap (current blanked while the selection's session is
@@ -538,14 +666,15 @@ export class ClientSessions implements ISessions {
 
   /**
    * Lazily mint the scope + binding for an eligible session. Eligibility and
-   * prune share one predicate: listed on the host or selected
-   * through a retained subagent address. Breadcrumb-only ancestors remain
-   * summary data and do not keep scopes alive.
+   * prune share one predicate: listed (Host or unpublished provisional) or
+   * selected through a retained subagent address. Breadcrumb-only ancestors
+   * remain summary data and do not keep scopes alive. Resolution is render-safe:
+   * it never opens Host history or refreshes a catalog.
    */
   private resolve(id: SessionId): ScopeRecord | undefined {
     const existing = this.scopes.get(id)
     if (existing !== undefined) return existing
-    if (!this.eligible(id)) return undefined
+    if (this.disposed || !this.eligible(id)) return undefined
     return this.materializeScope(id)
   }
 
@@ -567,7 +696,7 @@ export class ClientSessions implements ISessions {
     return record
   }
 
-  /** The one aliveness predicate shared by scope mint and prune: host-listed or currently addressed. */
+  /** The one aliveness predicate shared by scope mint and prune: listed (Host or provisional) or currently addressed. */
   private eligible(id: SessionId): boolean {
     const { ids, current } = this.list.getSnapshot()
     return current === id || ids.includes(id)
@@ -596,6 +725,7 @@ export class ClientSessions implements ISessions {
         ...(entry.cwd !== undefined ? { cwd: entry.cwd } : {}),
         ...(entry.parentSessionId !== undefined ? { parentId: entry.parentSessionId } : {}),
         ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
+        ...(this.manager.isProvisional(entry.sessionId) ? { provisional: true } : {}),
       }
     }
     if (current !== undefined && currentAddress !== undefined) {
@@ -644,6 +774,21 @@ export class ClientSessions implements ISessions {
     }
     this.list.set({ ids, byId, current, phase, subagentsByParent, jobsBySession, currentAddress })
     this.pruneScopes()
+  }
+
+  /**
+   * Finish an unpublished provisional release even while the Host list is still
+   * pending. Ordinary prune defers Host-addressed scopes until the first
+   * baseline; a Client-owned draft must not survive its disposer.
+   */
+  private dropReleasedProvisional(id: SessionId): void {
+    if (this.eligible(id)) return
+    const record = this.scopes.get(id)
+    if (record === undefined) return
+    this.scopes.delete(id)
+    this.deferredRemovals.delete(id)
+    if (this.watched === id) this.watched = undefined
+    this.startScopeDrop(id, record)
   }
 
   /** Tear down scope + instance for no-longer-eligible sessions off stage; the staged one defers until the stage moves. */

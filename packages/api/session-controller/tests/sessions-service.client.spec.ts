@@ -3,8 +3,8 @@
  * with derived titles), the current-selection account (open validation and
  * persisted mask semantics), scope-tree
  * lifecycle (lazy mint / frozen survival / removed teardown with staged
- * deferral — the stage follows list.current), binding identity, breadcrumb
- * projection, create.
+ * deferral — the stage follows list.current), provisional identity
+ * publication and cold open, binding identity, breadcrumb projection, create.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -107,40 +107,558 @@ describe('list store projection', () => {
     expect(b.svc.list.getSnapshot().ids).toContain('s2')
   })
 
-  it('keeps a provisional feature Session renderer-only until Host publication', async () => {
+})
+
+describe('provisional identity lifecycle', () => {
+  const draft = {
+    sessionId: sid('draft'),
+    parentSessionId: sid('parent'),
+    origin: 'subagent' as const,
+    title: 'Side: New thread',
+  }
+
+  it('stages a caller-supplied identity without selecting it or opening Host history', async () => {
     const b = bench()
     await feedList(b, [{ id: 'parent' }])
-    const release = b.svc.stageProvisional({
-      sessionId: sid('draft'),
-      parentSessionId: sid('parent'),
-      origin: 'subagent',
-      title: 'Side: New thread',
-    })
-    await Promise.resolve()
+    b.svc.open(sid('parent'))
+    const before = b.svc.list.getSnapshot().current
+    const binding = (() => {
+      b.svc.stageProvisional(draft)
+      return b.svc.binding(sid('draft'))
+    })()
 
+    expect(binding?.sessionId).toBe(sid('draft'))
+    expect(b.svc.scope(sid('draft'))).toBe(binding?.ctx)
+    expect(b.svc.sessionOf(binding!.ctx)).toBe(binding?.session)
+    expect(b.svc.list.getSnapshot().current).toBe(before)
     expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
       id: 'draft', parentId: 'parent', origin: 'subagent',
       displayTitle: 'Side: New thread', blank: true, provisional: true,
     })
-    expect(b.svc.provideInfoFor(sid('draft')).sessionId).toBe(sid('draft'))
     b.svc.openForRender(sid('draft'))
-    expect(b.api.callsOf('session.history')).toEqual([])
+    expect(b.api.followStarts).toEqual([sid('parent')])
+    expect(b.api.callsOf('session.follow')).toHaveLength(1)
+  })
 
+  it('keeps binding() free of Host I/O for staged and published-cold identities', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }, { id: 'child', parentId: 'parent', origin: 'subagent' }])
+    b.svc.stageProvisional(draft)
+    const staged = b.svc.binding(sid('draft'))
+    const cold = b.svc.binding(sid('child'))
+    expect(staged).toBeDefined()
+    expect(cold).toBeDefined()
+    expect(b.svc.binding(sid('draft'))).toBe(staged)
+    expect(b.svc.binding(sid('child'))).toBe(cold)
+    expect(b.svc.list.getSnapshot().current).toBeUndefined()
+    expect(b.api.followStarts).toEqual([])
+    expect(b.api.callsOf('subagents.list')).toEqual([])
+  })
+
+  it('preserves an unpublished row across Host list refresh and releases it exactly once', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
     await feedList(b, [{ id: 'parent' }])
     expect(b.svc.list.getSnapshot().ids).toContain(sid('draft'))
+    expect(b.svc.scope(sid('draft'))).toBeDefined()
 
-    b.svc.handleHostEnvelope({
-      rpcId: 'published' as never,
-      payload: {
-        type: 'host/session-added', sessionId: sid('draft'), blank: false,
-        parentSessionId: sid('parent'), origin: 'subagent',
-      } as never,
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toBeUndefined()
+    expect(b.svc.scope(sid('draft'))).toBeUndefined()
+    release()
+    expect(b.svc.list.getSnapshot().ids).toEqual([sid('parent')])
+  })
+
+  it('upgrades the same binding on Host publication and ignores a later provisional release', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
+    const binding = b.svc.binding(sid('draft'))
+    expect(binding).toBeDefined()
+
+    b.svc.handleSessionAdded({
+      sessionId: sid('draft'), updatedAt: 2, running: false, blank: false,
+      parentSessionId: sid('parent'), origin: 'subagent',
     })
     await Promise.resolve()
+    expect(b.svc.binding(sid('draft'))).toBe(binding)
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ blank: false })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+
     release()
     await Promise.resolve()
     expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ blank: false })
+    expect(b.svc.scope(sid('draft'))).toBe(binding?.ctx)
+  })
+
+  it('opens a published cold Session for render without changing list.current', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }, { id: 'child', parentId: 'parent', origin: 'subagent' }])
+    b.svc.open(sid('parent'))
+    await vi.waitFor(() => { expect(b.api.followStarts).toEqual([sid('parent')]) })
+    const current = b.svc.list.getSnapshot().current
+
+    b.svc.openForRender(sid('child'))
+    expect(b.svc.list.getSnapshot().current).toBe(current)
+    await vi.waitFor(() => {
+      expect(b.api.followStarts).toEqual([sid('parent'), sid('child')])
+    })
+    expect(b.api.callsOf('subagents.list')).toContain(sid('child'))
+  })
+
+  it('fails loud on duplicate staging of the same identity', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
+    expect(() => { b.svc.stageProvisional(draft) }).toThrow(/duplicate provisional identity draft/)
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toBeUndefined()
+    expect(() => {
+      b.svc.stageProvisional({
+        sessionId: sid('parent'),
+        parentSessionId: sid('parent'),
+        origin: 'subagent',
+        title: 'already listed',
+      })
+    }).toThrow(/duplicate provisional identity parent/)
+  })
+
+  it('does not remove a Host-published row when release races publication', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
+    b.svc.handleSessionAdded({
+      sessionId: sid('draft'), updatedAt: 2, running: false, blank: false,
+      parentSessionId: sid('parent'), origin: 'subagent',
+    })
+    release()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ blank: false })
+  })
+
+  it('keeps a Host publication that lands after the provisional stage was released', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
+    release()
+    b.svc.handleSessionAdded({
+      sessionId: sid('draft'), updatedAt: 2, running: false, blank: false,
+      parentSessionId: sid('parent'), origin: 'subagent',
+    })
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      id: 'draft', blank: false,
+    })
     expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+  })
+
+  it('preserves an unpublished identity across an in-flight list refresh', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    b.svc.stageProvisional(draft)
+    gate.resolve(ok({
+      items: [{ sessionId: sid('parent'), updatedAt: 1, running: false, blank: false }],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().ids).toContain(sid('draft'))
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBe(true)
+  })
+
+  it('releases row and scope before the first successful Host list baseline', async () => {
+    const b = bench()
+    const release = b.svc.stageProvisional(draft)
+    const scoped = b.svc.scope(sid('draft'))
+    expect(scoped).toBeDefined()
+    expect(b.svc.list.getSnapshot().phase).toBe('pending')
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toBeUndefined()
+    expect(b.svc.binding(sid('draft'))).toBeUndefined()
+    expect(b.svc.scope(sid('draft'))).toBeUndefined()
+    expect(b.svc.sessionOf(scoped as never) === undefined).toBe(true)
+    await feedList(b, [{ id: 'parent' }])
+    expect(b.svc.scope(sid('draft'))).toBeUndefined()
+  })
+
+  it('keeps the same binding when Host list refresh publishes the identity', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    b.svc.stageProvisional(draft)
+    const binding = b.svc.binding(sid('draft'))
+    expect(binding).toBeDefined()
+    await feedList(b, [
+      { id: 'parent' },
+      { id: 'draft', parentId: 'parent', origin: 'subagent' },
+    ])
+    expect(b.svc.binding(sid('draft'))).toBe(binding)
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      id: 'draft', parentId: 'parent', origin: 'subagent',
+    })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+  })
+
+  it('replays an ordinary create upsert while dropping a provisional upsert for a Host-published id', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    const release = b.svc.stageProvisional(draft)
+    const binding = b.svc.binding(sid('draft'))
+    b.api.onCreate = () => Promise.resolve(ok({ sessionId: sid('born') }))
+    const born = await b.svc.create({ cwd: '/w', sessionId: sid('born') })
+    gate.resolve(ok({
+      items: [
+        { sessionId: sid('parent'), updatedAt: 1, running: false, blank: false },
+        {
+          sessionId: sid('draft'), updatedAt: 9, running: false, blank: false,
+          parentSessionId: sid('parent'), origin: 'subagent', cwd: '/host/draft',
+        },
+      ],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(born).toBe('born')
+    expect(b.svc.list.getSnapshot().byId[sid('born')]).toMatchObject({ id: 'born', cwd: '/w', blank: true })
+    expect(b.svc.binding(sid('draft'))).toBe(binding)
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      blank: false, cwd: '/host/draft', displayTitle: 'draft',
+    })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ cwd: '/host/draft' })
+  })
+
+  it('keeps Host summary and binding when stage races a gated refresh that publishes the same id', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    const release = b.svc.stageProvisional(draft)
+    const binding = b.svc.binding(sid('draft'))
+    gate.resolve(ok({
+      items: [
+        { sessionId: sid('parent'), updatedAt: 1, running: false, blank: false },
+        {
+          sessionId: sid('draft'), updatedAt: 9, running: false, blank: false,
+          parentSessionId: sid('parent'), origin: 'subagent', cwd: '/host/draft',
+        },
+      ],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(b.svc.binding(sid('draft'))).toBe(binding)
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      id: 'draft', blank: false, cwd: '/host/draft', parentId: 'parent', origin: 'subagent',
+      displayTitle: 'draft',
+    })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+    release()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ cwd: '/host/draft', blank: false })
+    b.svc.openForRender(sid('draft'))
+    await vi.waitFor(() => { expect(b.api.followStarts).toEqual([sid('draft')]) })
+  })
+
+  it('does not replay a pre-publication release over a Host baseline that publishes the same id', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    const release = b.svc.stageProvisional(draft)
+    release()
+    gate.resolve(ok({
+      items: [
+        { sessionId: sid('parent'), updatedAt: 1, running: false, blank: false },
+        {
+          sessionId: sid('draft'), updatedAt: 9, running: false, blank: false,
+          parentSessionId: sid('parent'), origin: 'subagent', cwd: '/host/draft',
+        },
+      ],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      id: 'draft', blank: false, cwd: '/host/draft', parentId: 'parent', origin: 'subagent',
+      displayTitle: 'draft',
+    })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
+    expect(b.svc.binding(sid('draft'))).toBeDefined()
+    b.svc.openForRender(sid('draft'))
+    await vi.waitFor(() => { expect(b.api.followStarts).toEqual([sid('draft')]) })
+  })
+
+  it('does not let an in-flight Host baseline resurrect a still-unpublished released identity', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onList']>>>()
+    b.api.onList = () => gate.promise
+    const refresh = b.svc.refresh()
+    const release = b.svc.stageProvisional(draft)
+    release()
+    gate.resolve(ok({
+      items: [{ sessionId: sid('parent'), updatedAt: 1, running: false, blank: false }],
+    }) as never)
+    await refresh
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toBeUndefined()
+    expect(b.svc.scope(sid('draft'))).toBeUndefined()
+  })
+
+  it('leaves unknown openForRender identities as a documented no-op', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    b.svc.open(sid('parent'))
+    await Promise.resolve()
+    const current = b.svc.list.getSnapshot().current
+    expect(() => { b.svc.openForRender(sid('ghost')) }).not.toThrow()
+    expect(b.svc.list.getSnapshot().current).toBe(current)
+    expect(b.api.followStarts).toEqual([sid('parent')])
+    expect(b.api.callsOf('subagents.list')).toEqual([sid('parent')])
+  })
+
+  it('aborts an openForRender catalog on dispose without a Host response', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [
+      { id: 'parent' },
+      { id: 'child', parentId: 'parent', origin: 'subagent' },
+    ])
+    b.api.onSubagentList = (_payload, signal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+      }, { once: true })
+    })
+    b.svc.openForRender(sid('child'))
+    await Promise.resolve()
+    expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
+    expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]?.state).toBe('loading')
+
+    await b.ctx.fiber.dispose()
+    expect(b.api.lastSubagentListSignal?.aborted).toBe(true)
+    expect(b.svc.list.getSnapshot().subagentsByParent[sid('child')]).toBeUndefined()
+    expect(b.api.callsOf('subagents.list')).toEqual([sid('child')])
+  })
+
+  it('does not rematerialize scopes or start Host I/O on a retained service after disposal', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional(draft)
+    expect(b.svc.binding(sid('draft'))).toBeDefined()
+    const listCalls = b.api.callsOf('session.list').length
+    const createCalls = b.api.callsOf('session.create').length
+    const searchCalls = b.api.callsOf('session.search').length
+    const forkCalls = b.api.callsOf('session.fork').length
+    const followCalls = b.api.callsOf('session.follow').length
+    const catalogCalls = b.api.callsOf('subagents.list').length
+    const current = b.svc.list.getSnapshot().current
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    await b.ctx.fiber.dispose()
+    notified.mockClear()
+
+    expect(b.svc.binding(sid('parent'))).toBeUndefined()
+    expect(b.svc.scope(sid('parent'))).toBeUndefined()
+    expect(b.svc.sessionOf(b.ctx)).toBeUndefined()
+    expect(() => { b.svc.stageProvisional(draft) }).toThrow('sessions.stageProvisional: ClientSessions is disposed')
+    expect(() => { b.svc.open(sid('parent')) }).toThrow('sessions.open: ClientSessions is disposed')
+    expect(() => {
+      b.svc.openSubagent({
+        parentSessionId: sid('parent'), childSessionId: sid('child'), mode: 'continuable',
+      })
+    }).toThrow('sessions.openSubagent: ClientSessions is disposed')
+    expect(() => { b.svc.clear() }).toThrow('sessions.clear: ClientSessions is disposed')
+    expect(() => { b.svc.setSubagentCatalogOpen(sid('parent'), true) })
+      .toThrow('sessions.setSubagentCatalogOpen: ClientSessions is disposed')
+    expect(() => b.svc.refresh()).toThrow('sessions.refresh: ClientSessions is disposed')
+    expect(() => b.svc.refreshSubagents(sid('parent')))
+      .toThrow('sessions.refreshSubagents: ClientSessions is disposed')
+    await expect(b.svc.search('needle', new AbortController().signal))
+      .rejects.toThrow('sessions.search: ClientSessions is disposed')
+    await expect(b.svc.create({ cwd: '/w' }))
+      .rejects.toThrow('sessions.create: ClientSessions is disposed')
+    await expect(b.svc.fork({ sessionId: sid('parent') }))
+      .rejects.toThrow('sessions.fork: ClientSessions is disposed')
+    expect(() => { b.svc.openForRender(sid('parent')) }).not.toThrow()
+    expect(() => { b.svc.resolveAgentScope(sid('parent')) })
+      .toThrow('sessions.resolveAgentScope: ClientSessions is disposed')
+    expect(() => { release() }).not.toThrow()
+    expect(b.svc.scope(sid('parent'))).toBeUndefined()
+    expect(b.svc.list.getSnapshot().current).toBe(current)
+    expect(notified).not.toHaveBeenCalled()
+    expect(b.api.callsOf('session.list')).toHaveLength(listCalls)
+    expect(b.api.callsOf('session.create')).toHaveLength(createCalls)
+    expect(b.api.callsOf('session.search')).toHaveLength(searchCalls)
+    expect(b.api.callsOf('session.fork')).toHaveLength(forkCalls)
+    expect(b.api.callsOf('session.follow')).toHaveLength(followCalls)
+    expect(b.api.callsOf('subagents.list')).toHaveLength(catalogCalls)
+    expect(b.api.followStarts).toEqual([])
+  })
+
+  it('rejects an in-flight create after disposal without listing or binding the child', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onCreate']>>>()
+    b.api.onCreate = () => gate.promise
+    const created = b.svc.create({ cwd: '/w' })
+    await Promise.resolve()
+    expect(b.api.callsOf('session.create')).toEqual([{ cwd: '/w' }])
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    gate.resolve(ok({ sessionId: sid('born') }))
+    await expect(created).rejects.toThrow('sessions.create: ClientSessions is disposed')
+    const notifyCount = notified.mock.calls.length
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.svc.binding(sid('born'))).toBeUndefined()
+    expect(b.svc.scope(sid('born'))).toBeUndefined()
+    expect(b.svc.list.getSnapshot().byId[sid('born')]).toBeUndefined()
+    expect(notified.mock.calls.length).toBe(notifyCount)
+    notified.mockClear()
+    await Promise.resolve()
+    expect(notified).not.toHaveBeenCalled()
+    expect(b.api.callsOf('session.rename')).toEqual([])
+  })
+
+  it('does not start create Host I/O when same-stack disposal owns the command', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const created = b.svc.create({ cwd: '/w' })
+    const disposal = b.ctx.fiber.dispose()
+    await expect(created).rejects.toThrow('sessions.create: ClientSessions is disposed')
+    await disposal
+    expect(b.api.callsOf('session.create')).toEqual([])
+  })
+
+  it('does not start fork Host I/O when same-stack disposal owns the command', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'source' }])
+    const forked = b.svc.fork({ sessionId: sid('source') })
+    const disposal = b.ctx.fiber.dispose()
+    await expect(forked).rejects.toThrow('sessions.fork: ClientSessions is disposed')
+    await disposal
+    expect(b.api.callsOf('session.fork')).toEqual([])
+  })
+
+  it('does not start search Host I/O when same-stack disposal owns the command', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const searching = b.svc.search('needle', new AbortController().signal)
+    const disposal = b.ctx.fiber.dispose()
+    await expect(searching).rejects.toThrow('sessions.search: ClientSessions is disposed')
+    await disposal
+    expect(b.api.callsOf('session.search')).toEqual([])
+  })
+
+  it('propagates a live synchronous Remote rejection without retaining command ownership', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const rejectCreate = vi.fn(() => { throw new Error('create transport failed') })
+    b.api.onCreate = rejectCreate
+    await expect(b.svc.create({ cwd: '/w' })).rejects.toThrow('create transport failed')
+    expect(rejectCreate).toHaveBeenCalledOnce()
+    await expect(b.ctx.fiber.dispose()).resolves.toBeUndefined()
+  })
+
+  it('rejects an in-flight titled fork after disposal without rename or a child binding', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    b.svc.handleControlFrame({
+      type: 'projection', sessionId: sid('source'), key: 'title', value: 'Roadmap', seq: 2,
+    })
+    await feedList(b, [{ id: 'source', cwd: '/work' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onFork']>>>()
+    b.api.onFork = () => gate.promise
+    const forked = b.svc.fork({ sessionId: sid('source'), increaseTitle: true })
+    await Promise.resolve()
+    expect(b.api.callsOf('session.fork')).toEqual([{ sessionId: 'source' }])
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    await Promise.resolve()
+    expect(settled).not.toHaveBeenCalled()
+    gate.resolve(ok({ sessionId: sid('child') }))
+    await expect(forked).rejects.toThrow('sessions.fork: ClientSessions is disposed')
+    const notifyCount = notified.mock.calls.length
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.svc.binding(sid('child'))).toBeUndefined()
+    expect(b.svc.scope(sid('child'))).toBeUndefined()
+    expect(b.svc.list.getSnapshot().byId[sid('child')]).toBeUndefined()
+    expect(b.api.callsOf('session.rename')).toEqual([])
+    expect(notified.mock.calls.length).toBe(notifyCount)
+    notified.mockClear()
+    await Promise.resolve()
+    expect(notified).not.toHaveBeenCalled()
+  })
+
+  it('aborts in-flight search on disposal without a Host response', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    const gate = deferred<Awaited<ReturnType<FakeApiClient['onSearch']>>>()
+    b.api.onSearch = (_payload, signal) => new Promise((resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+      }, { once: true })
+      void gate.promise.then(resolve, reject)
+    })
+    const searching = b.svc.search('needle', new AbortController().signal)
+    await Promise.resolve()
+    expect(b.api.callsOf('session.search')).toEqual([{ query: 'needle' }])
+    expect(b.api.lastSearchSignal?.aborted).toBe(false)
+    const notified = vi.fn()
+    b.svc.list.subscribe(notified)
+    const settled = vi.fn()
+    const disposal = b.ctx.fiber.dispose().then(settled)
+    expect(settled).not.toHaveBeenCalled()
+    await expect(searching).rejects.toThrow('sessions.search: ClientSessions is disposed')
+    const notifyCount = notified.mock.calls.length
+    await disposal
+    expect(settled).toHaveBeenCalledOnce()
+    expect(b.api.lastSearchSignal?.aborted).toBe(true)
+    expect(notified.mock.calls.length).toBe(notifyCount)
+    notified.mockClear()
+    await Promise.resolve()
+    expect(notified).not.toHaveBeenCalled()
+    expect(b.api.callsOf('session.search')).toHaveLength(1)
+  })
+
+  it('drops a provisional scope when the Client Sessions plugin unloads', async () => {
+    const b = bench()
+    const readiness = b.ctx.plugin(() => undefined)
+    await readiness
+    await feedList(b, [{ id: 'parent' }])
+    b.svc.stageProvisional(draft)
+    const scoped = b.svc.scope(sid('draft'))
+    expect(scoped).toBeDefined()
+    await b.ctx.fiber.dispose()
+    expect(b.svc.sessionOf(scoped as never)).toBeUndefined()
   })
 })
 
@@ -162,7 +680,8 @@ describe('search', () => {
         hasMore: false,
       },
     })
-    expect(b.api.lastSearchSignal).toBe(signal)
+    expect(b.api.lastSearchSignal).not.toBe(signal)
+    expect(b.api.lastSearchSignal?.aborted).toBe(false)
     expect(b.svc.list.getSnapshot()).toBe(before)
   })
 })
@@ -640,28 +1159,6 @@ describe('catalog-addressed navigation', () => {
     })
   })
 
-  it('keeps a model route for an addressed continuable child', async () => {
-    const b = bench()
-    b.api.onSubagentList = () => Promise.resolve(ok({
-      entries: [{
-        kind: 'child', id: sid('child'), mode: 'continuable', label: 'Child',
-        activity: 'inactive', hasChildren: false,
-      }] as never[],
-      parentAvailable: true,
-    }))
-    await feedList(b, [{ id: 'root' }])
-    await b.svc.refreshSubagents(sid('root'))
-    b.svc.openSubagent({
-      parentSessionId: sid('root'), childSessionId: sid('child'), mode: 'continuable',
-    })
-
-    expect(b.svc.subagentAddress(sid('child'))).toEqual({
-      parentSessionId: sid('root'), childSessionId: sid('child'), mode: 'continuable',
-    })
-    expect(b.svc.modelRoute(sid('child'))).toBeDefined()
-    expect(b.svc.commandCatalogSessionId(sid('child'))).toBeUndefined()
-    expect(b.svc.skillCatalogSessionId(sid('child'))).toBeUndefined()
-  })
 })
 
 describe('create', () => {

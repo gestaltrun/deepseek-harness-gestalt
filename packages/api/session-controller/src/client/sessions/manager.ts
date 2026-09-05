@@ -77,6 +77,8 @@ function catalogAvailability(parentAvailable: boolean | undefined): {
 
 interface CatalogInflight {
   readonly promise: Promise<void>
+  readonly controller: AbortController
+  readonly generation: number
   readonly expandableRows: Set<SessionId>
   readonly activityRows: Map<SessionId, 'running' | 'inactive'>
   /** Removal-time invalidation replayed over the response this request predates. */
@@ -84,8 +86,8 @@ interface CatalogInflight {
 }
 
 type SessionListMutation =
-  | { kind: 'upsert'; summary: SessionSummary }
-  | { kind: 'remove'; sessionId: SessionId }
+  | { kind: 'upsert'; summary: SessionSummary; provisional?: true }
+  | { kind: 'remove'; sessionId: SessionId; provisional?: true }
   | { kind: 'status'; sessionId: SessionId; running: boolean }
   | { kind: 'activity'; sessionId: SessionId; updatedAt: number }
   /** Local first-send flip: the sender clears blank without waiting for a host frame. */
@@ -96,6 +98,10 @@ export class SessionManager {
   private readonly sessions = new Map<SessionId, Session>()
   /** In-flight Session disposals remain here after instances leave `sessions`, so manager disposal can await quiescence. */
   private readonly sessionDisposals = new Set<Promise<void>>()
+  /** Once true, catalog and list writers must not publish or start trailing work. */
+  private disposed = false
+  /** Bumped at dispose so in-flight catalog work can ignore a later generation. */
+  private catalogGeneration = 0
   /** Latest transient queues, retained independently of Session object materialization. */
   private readonly queues = new Map<SessionId, readonly SessionQueuedItem[]>()
   /**
@@ -112,6 +118,8 @@ export class SessionManager {
    *  same store so history-baseline seeding and frames converge on one row set. */
   private readonly projectionStores = new Map<SessionId, ProjectionValueStore>()
   private summaries: SessionSummary[] = []
+  /** Renderer-only rows retained across list refreshes until Host publication. */
+  private readonly provisionalSummaries = new Map<SessionId, TitledSessionSummary>()
   private listState: 'idle' | 'loading' | 'error' = 'idle'
   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
   private listPhase: SessionListPhase = 'pending'
@@ -250,13 +258,24 @@ export class SessionManager {
 
   /**
    * Stop owned timers and every remaining Session instance.
+   * After this returns, list refresh, reconnect, catalog refresh, and live
+   * Host sinks are no-ops.
    * @returns when every Session Remote iterator has completed teardown.
    */
   async dispose(): Promise<void> {
+    this.disposed = true
+    this.catalogGeneration++
     for (const timer of this.catalogDebounce.values()) clearTimeout(timer)
     this.catalogDebounce.clear()
     this.catalogStale.clear()
     this.openCatalogs.clear()
+    const inflight = [...this.catalogInflight.values()]
+    for (const item of inflight) item.controller.abort()
+    await Promise.allSettled(inflight.map(item => item.promise))
+    this.catalogInflight.clear()
+    this.catalogs.clear()
+    this.provisionalSummaries.clear()
+    this.listSnapshotCache = this.buildListSnapshot()
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
     for (const session of sessions) void this.startSessionDisposal(session)
@@ -335,6 +354,52 @@ export class SessionManager {
     })
   }
 
+  /**
+   * Project a feature-owned draft identity without creating a Host Session.
+   * @param descriptor - provisional identity and its parent lineage.
+   * @throws when the identity is already staged or already listed.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): void {
+    if (this.provisionalSummaries.has(descriptor.sessionId)
+      || this.summaries.some(summary => summary.sessionId === descriptor.sessionId)) {
+      throw new Error(`sessions.stageProvisional: duplicate provisional identity ${descriptor.sessionId}`)
+    }
+    const summary: TitledSessionSummary = {
+      sessionId: descriptor.sessionId,
+      parentSessionId: descriptor.parentSessionId,
+      origin: descriptor.origin,
+      title: descriptor.title,
+      updatedAt: Date.now(),
+      running: false,
+      blank: true,
+    }
+    this.provisionalSummaries.set(descriptor.sessionId, summary)
+    this.recordMutation({ kind: 'upsert', summary, provisional: true })
+  }
+
+  /**
+   * Remove a renderer-only identity; published Host Sessions are untouched.
+   * @param sessionId - provisional identity to remove.
+   */
+  dropProvisional(sessionId: SessionId): void {
+    if (!this.provisionalSummaries.delete(sessionId)) return
+    this.recordMutation({ kind: 'remove', sessionId, provisional: true })
+  }
+
+  /**
+   * Whether explicit rendering must avoid a Host history request for this identity.
+   * @param sessionId - possible provisional identity.
+   * @returns true while the identity has no published Host Session.
+   */
+  isProvisional(sessionId: SessionId): boolean {
+    return this.provisionalSummaries.has(sessionId)
+  }
+
   /** Resident per-session projection store (create-on-demand; outlives instantiation). */
   private projectionStore(sessionId: SessionId): ProjectionValueStore {
     let store = this.projectionStores.get(sessionId)
@@ -353,8 +418,11 @@ export class SessionManager {
    * @param parentSessionId - catalog owner.
    */
   refreshSubagents(parentSessionId: SessionId): Promise<void> {
+    if (!this.accepting()) return Promise.resolve()
     const existing = this.catalogInflight.get(parentSessionId)
     if (existing !== undefined) return existing.promise
+    const controller = new AbortController()
+    const generation = this.catalogGeneration
     const previous = this.catalogs.get(parentSessionId)
     const expandableRows = new Set<SessionId>()
     const activityRows = new Map<SessionId, 'running' | 'inactive'>()
@@ -367,65 +435,82 @@ export class SessionManager {
       error: null,
     })
     this.notifier.markDirty()
-    const operation = (async () => {
-      try {
-        const result = await this.remote.subagents.list(parentSessionId)
-        if (result.ok) {
-          const parentAvailable = this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
-            ?? result.value.parentAvailable
-          this.catalogs.set(parentSessionId, {
-            ...result.value,
-            entries: this.withCatalogMutations(result.value.entries, expandableRows, activityRows),
-            parentAvailable,
-            state: 'ready',
-            error: null,
-          })
-          for (const [childId, address] of this.addresses) {
-            if (address.parentSessionId !== parentSessionId) continue
-            this.sessions.get(childId)?.handleSubagentParentAvailable(parentAvailable)
+    const inflight: CatalogInflight = {
+      promise: Promise.resolve().then(async () => {
+        try {
+          if (!this.catalogCurrent(parentSessionId, inflight)) return
+          const result = await this.remote.subagents.list(parentSessionId, controller.signal)
+          if (!this.catalogCurrent(parentSessionId, inflight)) return
+          if (result.ok) {
+            const parentAvailable = inflight.parentAvailableOverride
+              ?? result.value.parentAvailable
+            this.catalogs.set(parentSessionId, {
+              ...result.value,
+              entries: this.withCatalogMutations(result.value.entries, expandableRows, activityRows),
+              parentAvailable,
+              state: 'ready',
+              error: null,
+            })
+            for (const [childId, address] of this.addresses) {
+              if (address.parentSessionId !== parentSessionId) continue
+              this.sessions.get(childId)?.handleSubagentParentAvailable(parentAvailable)
+            }
+          } else {
+            this.catalogs.set(parentSessionId, {
+              entries: this.withCatalogMutations(
+                previous?.entries ?? [], expandableRows, activityRows,
+              ),
+              ...catalogAvailability(
+                inflight.parentAvailableOverride ?? previous?.parentAvailable,
+              ),
+              state: 'error',
+              error: result.error,
+            })
           }
-        } else {
+        } catch (error: unknown) {
+          if (!this.catalogCurrent(parentSessionId, inflight)
+            || this.disposed
+            || controller.signal.aborted) return
+          if (!isRemoteFailure(error)) throw error
           this.catalogs.set(parentSessionId, {
             entries: this.withCatalogMutations(
               previous?.entries ?? [], expandableRows, activityRows,
             ),
             ...catalogAvailability(
-              this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
-                ?? previous?.parentAvailable,
+              inflight.parentAvailableOverride ?? previous?.parentAvailable,
             ),
             state: 'error',
-            error: result.error,
+            error,
           })
+        } finally {
+          const current = this.catalogCurrent(parentSessionId, inflight)
+          if (this.catalogInflight.get(parentSessionId) === inflight) {
+            this.catalogInflight.delete(parentSessionId)
+          }
+          if (!current) return
+          // Re-arm the trailing pull before the dirty notify: the response the
+          // caller observed predates the stale-marking change, so the follow-up
+          // refresh is the only carrier of that change.
+          if (this.catalogStale.delete(parentSessionId)) void this.refreshSubagents(parentSessionId)
+          this.notifier.markDirty()
         }
-      } catch (error: unknown) {
-        if (!isRemoteFailure(error)) throw error
-        this.catalogs.set(parentSessionId, {
-          entries: this.withCatalogMutations(
-            previous?.entries ?? [], expandableRows, activityRows,
-          ),
-          ...catalogAvailability(
-            this.catalogInflight.get(parentSessionId)?.parentAvailableOverride
-              ?? previous?.parentAvailable,
-          ),
-          state: 'error',
-          error,
-        })
-      } finally {
-        this.catalogInflight.delete(parentSessionId)
-        // Re-arm the trailing pull before the dirty notify: the response the
-        // caller observed predates the stale-marking change, so the follow-up
-        // refresh is the only carrier of that change.
-        if (this.catalogStale.delete(parentSessionId)) void this.refreshSubagents(parentSessionId)
-        this.notifier.markDirty()
-      }
-    })()
-    this.catalogInflight.set(parentSessionId, {
-      promise: operation,
+      }),
+      controller,
+      generation,
       expandableRows,
       activityRows,
       parentAvailableOverride: undefined,
-    })
-    return operation
+    }
+    this.catalogInflight.set(parentSessionId, inflight)
+    return inflight.promise
+  }
+
+  /** True while this catalog request is still the live owner and the manager is not disposed. */
+  private catalogCurrent(parentSessionId: SessionId, inflight: CatalogInflight): boolean {
+    return this.accepting()
+      && inflight.generation === this.catalogGeneration
+      && !inflight.controller.signal.aborted
+      && this.catalogInflight.get(parentSessionId) === inflight
   }
 
   /**
@@ -434,6 +519,7 @@ export class SessionManager {
    * @param open - current menu state.
    */
   setSubagentCatalogOpen(parentSessionId: SessionId, open: boolean): void {
+    if (!this.accepting()) return
     if (open) {
       this.openCatalogs.add(parentSessionId)
       void this.refreshSubagents(parentSessionId)
@@ -451,6 +537,7 @@ export class SessionManager {
 
   /** Full refresh via session.list (single-flight: an in-flight call is reused). */
   refreshList(): Promise<void> {
+    if (!this.accepting()) return Promise.resolve()
     if (this.listInflight !== null) return this.listInflight
     this.listState = 'loading'
     this.listError = null
@@ -461,10 +548,31 @@ export class SessionManager {
     this.listInflight = (async () => {
       try {
         const result = await this.remote.session.list({})
+        if (this.disposed) return
         if (result.ok) {
-          const baseline: SessionSummary[] = this.listPhase === 'pending'
+          for (const summary of result.value.items) {
+            this.provisionalSummaries.delete(summary.sessionId)
+          }
+          const hostBaseline: SessionSummary[] = this.listPhase === 'pending'
             ? [...result.value.items]
             : mergeOrderedBaseline(established, result.value.items, summary => summary.sessionId)
+          const provisional = [...this.provisionalSummaries.values()]
+          const baseline: SessionSummary[] = [
+            ...provisional,
+            ...hostBaseline.filter(summary => !this.provisionalSummaries.has(summary.sessionId)),
+          ]
+          const publishedIds = new Set(result.value.items.map(summary => summary.sessionId))
+          // Only provisional-owner upsert/remove may be dropped for a Host-published
+          // id. Ordinary create/status mutations still replay.
+          const replay = mutations.filter((mutation) => {
+            if (mutation.kind === 'remove' && mutation.provisional === true) {
+              return !publishedIds.has(mutation.sessionId)
+            }
+            if (mutation.kind === 'upsert' && mutation.provisional === true) {
+              return !publishedIds.has(mutation.summary.sessionId)
+            }
+            return true
+          })
           // Seed first observations from the pull-time baseline BEFORE replaying
           // in-flight mutations, then reconcile the reminders after EVERY
           // replayed mutation: an edge that happens entirely between mutations
@@ -474,7 +582,7 @@ export class SessionManager {
             if (!this.prevRunning.has(s.sessionId)) this.prevRunning.set(s.sessionId, s.running)
           }
           let summaries = baseline
-          for (const mutation of mutations) {
+          for (const mutation of replay) {
             summaries = applyMutation(summaries, mutation)
             this.summaries = summaries
             this.syncCompletedNotifications()
@@ -509,13 +617,14 @@ export class SessionManager {
           this.listError = result.error
         }
       } catch (error) {
+        if (this.disposed) return
         if (!isRemoteFailure(error)) throw error
         this.listState = 'error'
         this.listError = error
       } finally {
         this.listMutations = null
         this.listInflight = null
-        this.notifier.markDirty()
+        if (!this.disposed) this.notifier.markDirty()
       }
     })()
     return this.listInflight
@@ -624,8 +733,14 @@ export class SessionManager {
     this.recordMutation({ kind: 'upsert', summary })
   }
 
+  /** False after {@link dispose}; live Host and list writers must no-op. */
+  private accepting(): boolean {
+    return !this.disposed
+  }
+
   /** Apply immediately and retain for replay when a list response is in flight. */
   private recordMutation(mutation: SessionListMutation): void {
+    if (!this.accepting()) return
     this.listMutations?.push(mutation)
     this.summaries = applyMutation(this.summaries, mutation)
     // Eager edge reconciliation — a snapshot-build-time pass would miss consecutive status frames.
@@ -660,6 +775,7 @@ export class SessionManager {
    * @param frame - baseline or live control replacement from Session Controller.
    */
   handleControlFrame(frame: SessionControlFrame): void {
+    if (!this.accepting()) return
     if (frame.type === 'baseline') {
       this.replaceControlBaseline(frame.value)
       return
@@ -707,6 +823,8 @@ export class SessionManager {
    * @param summary - current Host summary for the added Session.
    */
   handleSessionAdded(summary: SessionSummary): void {
+    if (!this.accepting()) return
+    this.provisionalSummaries.delete(summary.sessionId)
     this.mergeSummary(summary)
     this.sessions.get(summary.sessionId)?.handleBlank(summary.blank)
     const projections = summary.projections
@@ -730,6 +848,7 @@ export class SessionManager {
    * @param sessionId - removed Session identity.
    */
   handleSessionRemoved(sessionId: SessionId): void {
+    if (!this.accepting()) return
     const summary = this.summaries.find(candidate => candidate.sessionId === sessionId)
     const durableSubagent = summary?.origin === 'subagent' || this.addresses.has(sessionId)
     this.recordMutation(durableSubagent
@@ -763,6 +882,7 @@ export class SessionManager {
    * @param running - current Agent running state.
    */
   handleSessionStatus(sessionId: SessionId, running: boolean): void {
+    if (!this.accepting()) return
     this.recordMutation({ kind: 'status', sessionId, running })
     this.sessions.get(sessionId)?.handleRunning(running)
     this.updateCatalogActivity(sessionId, running)
@@ -774,6 +894,7 @@ export class SessionManager {
    * @param updatedAt - durable message timestamp.
    */
   handleSessionActivity(sessionId: SessionId, updatedAt: number): void {
+    if (!this.accepting()) return
     this.recordMutation({ kind: 'activity', sessionId, updatedAt })
   }
 
@@ -783,6 +904,7 @@ export class SessionManager {
    * @param message - caller-visible failure description.
    */
   handleSessionError(sessionId: SessionId, message: string): void {
+    if (!this.accepting()) return
     this.sessions.get(sessionId)?.handleAgentError(message)
   }
 
@@ -791,6 +913,7 @@ export class SessionManager {
    * Opened Session follow streams resume independently through API Gateway.
    */
   handleConnected(): void {
+    if (!this.accepting()) return
     void this.refreshList()
     const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
@@ -800,7 +923,7 @@ export class SessionManager {
 
   /** Debounce membership refetches while one parent catalog is selected or open. */
   private scheduleCatalogRefresh(parentSessionId: SessionId): void {
-    if (this.catalogDebounce.has(parentSessionId)) return
+    if (!this.accepting() || this.catalogDebounce.has(parentSessionId)) return
     const timer = setTimeout(() => {
       this.catalogDebounce.delete(parentSessionId)
       // The in-flight response predates the membership frame that scheduled

@@ -484,6 +484,97 @@ describe('subagent catalogs', () => {
     ])
   })
 
+  it('ignores list refresh, reconnect, and control sinks after disposal', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1)] as never[] }))
+    const manager = new SessionManager(fakeRemote(api))
+    await manager.refreshList()
+    const notified = vi.fn()
+    manager.subscribe(notified)
+    const snapshot = manager.getListSnapshot()
+    await manager.dispose()
+    notified.mockClear()
+    const listCalls = api.callsOf('session.list').length
+    const catalogCalls = api.callsOf('subagents.list').length
+
+    await manager.refreshList()
+    manager.handleConnected()
+    manager.handleSessionAdded(summary(S2, { blank: true }))
+    manager.handleSessionRemoved(S1)
+    manager.handleSessionStatus(S1, true)
+    manager.handleSessionActivity(S1, 999)
+    manager.handleControlFrame({
+      type: 'projection', sessionId: S1, key: 'title', value: 'After dispose', seq: 9,
+    })
+    manager.handleControlFrame({
+      type: 'jobs', sessionId: S1, jobs: [{ id: 'job-1', name: 'x', state: 'running' }] as never,
+    })
+    manager.handleControlFrame({
+      type: 'queue', sessionId: S1, items: [{ id: 'q1' }] as never,
+    })
+    await Promise.resolve()
+
+    expect(manager.getListSnapshot()).toEqual(snapshot)
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+    expect(notified).not.toHaveBeenCalled()
+    expect(api.callsOf('session.list')).toHaveLength(listCalls)
+    expect(api.callsOf('subagents.list')).toHaveLength(catalogCalls)
+  })
+
+  it('does not start a catalog list when dispose races the refresh microtask', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = () => Promise.resolve(ok({ entries: [], parentAvailable: true }))
+    const manager = new SessionManager(fakeRemote(api))
+    const refresh = manager.refreshSubagents(S1)
+    const disposal = manager.dispose()
+    await Promise.all([refresh, disposal])
+    expect(api.callsOf('subagents.list')).toEqual([])
+  })
+
+  it('aborts an in-flight catalog list on dispose without a Host response', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = (_payload, signal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
+      }, { once: true })
+    })
+    const manager = new SessionManager(fakeRemote(api))
+    const notified = vi.fn()
+    manager.subscribe(notified)
+    const refresh = manager.refreshSubagents(S1)
+    await Promise.resolve()
+    expect(api.callsOf('subagents.list')).toEqual([S1])
+    expect(api.lastSubagentListSignal?.aborted).toBe(false)
+    notified.mockClear()
+
+    await manager.dispose()
+    await expect(refresh).resolves.toBeUndefined()
+    expect(api.lastSubagentListSignal?.aborted).toBe(true)
+    expect(manager.getListSnapshot().subagentsByParent[S1]).toBeUndefined()
+    expect(notified).not.toHaveBeenCalled()
+    expect(api.callsOf('subagents.list')).toEqual([S1])
+    await expect(manager.refreshSubagents(S1)).resolves.toBeUndefined()
+    expect(api.callsOf('subagents.list')).toEqual([S1])
+  })
+
+  it('still throws a non-abort catalog failure while the manager is live', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = () => Promise.reject(new Error('catalog exploded'))
+    const manager = new SessionManager(fakeRemote(api))
+    await expect(manager.refreshSubagents(S1)).rejects.toThrow('catalog exploded')
+    expect(manager.getListSnapshot().subagentsByParent[S1]?.state).toBe('loading')
+  })
+
+  it('rejects a synchronous catalog throw while the manager is live', async () => {
+    const api = new FakeApiClient()
+    api.onSubagentList = () => {
+      throw new Error('catalog exploded now')
+    }
+    const manager = new SessionManager(fakeRemote(api))
+    await expect(manager.refreshSubagents(S1)).rejects.toThrow('catalog exploded now')
+    expect(manager.getListSnapshot().subagentsByParent[S1]?.state).toBe('loading')
+  })
+
   it('coalesces overlapping catalog reads without scheduling a trailing pull', async () => {
     const api = new FakeApiClient()
     const root = 'fk-root' as SessionId
@@ -575,6 +666,7 @@ describe('subagent catalogs', () => {
     const mid = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
     api.onSubagentList = () => mid.promise
     const midRefresh = manager.refreshSubagents(root)
+    await Promise.resolve()
     manager.handleSessionRemoved(root)
     const trailing = deferred<Awaited<ReturnType<FakeApiClient['onSubagentList']>>>()
     api.onSubagentList = () => trailing.promise

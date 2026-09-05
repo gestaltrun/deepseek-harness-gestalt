@@ -121,7 +121,7 @@ export class FakeApiClient {
 
   // Programmable slots (defaults answer OK-empty); reassign per case.
   onList: (payload: unknown) => Promise<RemoteResult<{ items: never[] }>> = () => Promise.resolve(ok({ items: [] }))
-  onSearch: (payload: unknown) => Promise<RemoteResult<{ items: SessionSearchItem[]; hasMore: boolean }>> =
+  onSearch: (payload: unknown, signal?: AbortSignal) => Promise<RemoteResult<{ items: SessionSearchItem[]; hasMore: boolean }>> =
     () => Promise.resolve(ok({ items: [], hasMore: false }))
   onCreate: (payload: unknown) => Promise<RemoteResult<{ sessionId: SessionId }>> = () => Promise.resolve(ok({ sessionId: 'fk-new' as SessionId }))
   onSelectModel: (payload: SessionSelectModelRequest) => Promise<RemoteResult<SessionSelectModelValue>> =
@@ -163,8 +163,9 @@ export class FakeApiClient {
     archivedSessionIds: [],
   }
   lastSearchSignal: AbortSignal | undefined
+  lastSubagentListSignal: AbortSignal | undefined
 
-  onSubagentList: (payload: unknown) => Promise<RemoteResult<SubagentCatalog>>
+  onSubagentList: (payload: unknown, signal?: AbortSignal) => Promise<RemoteResult<SubagentCatalog>>
     = () => Promise.resolve(ok({ entries: [], parentAvailable: true }))
   onSubagentPrompt: (payload: unknown) => Promise<RemoteResult<SubagentPromptReceipt>>
     = () => Promise.resolve(ok({ messageId: 'fake-message' as MessageId }))
@@ -213,7 +214,7 @@ export class FakeApiClient {
         }),
         search: (payload, signal) => {
           this.lastSearchSignal = signal
-          return this.record('session.search', payload, this.onSearch(payload))
+          return this.record('session.search', payload, this.onSearch(payload, signal))
         },
         create: payload => this.record('session.create', payload, this.onCreate(payload)),
         selectModel: payload => this.record(
@@ -237,11 +238,14 @@ export class FakeApiClient {
         control: signal => this.openControl(signal),
       },
       subagents: {
-        list: parentSessionId => this.record(
-          'subagents.list',
-          parentSessionId,
-          this.onSubagentList(parentSessionId),
-        ),
+        list: (parentSessionId, signal) => {
+          this.lastSubagentListSignal = signal
+          return this.record(
+            'subagents.list',
+            parentSessionId,
+            this.onSubagentList(parentSessionId, signal),
+          )
+        },
         prompt: request => this.record('subagents.prompt', request, this.onSubagentPrompt(request)),
         interruptByParent: (childSessionId, parentSessionId, mode) => this.record(
           'subagents.interruptByParent',

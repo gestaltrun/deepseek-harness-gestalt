@@ -162,6 +162,8 @@ Initial open, reconnect, gap repair, and updates whose continuity cannot be prov
 
 Each Session binding owns a Cordis Context and Fiber. The Session Controller creates and releases the binding.
 
+`ctx.sessions.stageProvisional()` lists a caller-supplied identity and mints the ordinary binding without changing `list.current`. Host publication upgrades that same identity and binding; `openForRender()` opens history only after publication. The [provisional Session binding lifecycle](2026-09-04-provisional-session-bindings.md) owns those operations.
+
 Objects that depend on a Session register cleanup through `binding.ctx.effect()`. Releasing a binding cleans up Conversation bindings, UI materializations, and scoped Slot stores without a dedicated `onBindingRelease` or `onRelease` callback protocol.
 
 This cleanup does not require the Session Controller to know the roster of upper-layer consumers.

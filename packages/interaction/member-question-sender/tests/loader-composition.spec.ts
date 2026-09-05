@@ -12,11 +12,11 @@ import UserQuestions from '@deepseek-ai/dsh-user-questions'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account/src/parsers.ts'
+import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { parseCompanionSessionId, parseMemberQuestionProjectId } from '@deepseek-ai/dsh-remote-protocol'
 import * as toolAskUser from '@deepseek-ai/dsh-tool-ask-user'
-import Sender from '@deepseek-ai/dsh-member-question-sender/src/index.ts'
-import type { EncodedMemberQuestion, EncodedMemberQuestionDocument, MemberQuestionDeliveryPort, MemberQuestionTerminalClaim } from '@deepseek-ai/dsh-member-question-sender/src/index.ts'
+import Sender from '@deepseek-ai/dsh-member-question-sender'
+import type { EncodedMemberQuestion, EncodedMemberQuestionDocument, MemberQuestionDeliveryPort, MemberQuestionTerminalClaim } from '@deepseek-ai/dsh-member-question-sender'
 import type { CompanionMemberQuestionSettledResult, MemberQuestionId } from '@deepseek-ai/dsh-remote-protocol'
 
 interface Booted {
@@ -85,7 +85,7 @@ async function boot(): Promise<Booted> {
       "- name: '@deepseek-ai/dsh-tools'",
       "- name: '@deepseek-ai/dsh-user-questions'",
       "- name: 'test-ui-answerer'",
-      "- name: 'test-member-question-sender'",
+      "- name: '@deepseek-ai/dsh-member-question-sender'",
       "- name: 'test-tool-ask-user'",
       "- name: 'test-driver'",
       '',
@@ -112,7 +112,7 @@ async function boot(): Promise<Booted> {
     }
     const agent = testAgent(root)
     const driver = { name: 'test-driver', inject: ['agents', 'tools', 'memberQuestionSender'], apply(ctx: Context) { run = async () => {
-      ctx.agents.enter(agent, undefined)
+      const unregister = ctx.agents.register(agent)
       const local = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('local'), name: 'ask_user_question', arguments: { questions: [{ id: 'local', question: 'Local?' }] } })
       const memberPromise = ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('member'), name: 'ask_user_question', agent, arguments: { questions: [{ id: 'member', question: 'Member?' }], to_project_member: 'loader-peer', background: 'Choose the release window.', references: [{ path: 'decision.txt', reason: 'Release evidence.' }] } })
       const delivered = await Promise.race([
@@ -123,6 +123,7 @@ async function boot(): Promise<Booted> {
       await ctx.memberQuestionSender.settle(questionId, { outcome: 'declined', settledByInstallationId: parseInstallationId('loader-installation'), settledByDeviceName: 'Loader', settledAt: 1 })
       const member = await memberPromise
       const text = (result: typeof local) => result.content.filter(block => block.type === 'text').map(block => block.text).join('')
+      unregister()
       return { local: text(local), member: text(member) }
     } } }
     context.baseUrl = `${pathToFileURL(root).href}/`
@@ -132,11 +133,13 @@ async function boot(): Promise<Booted> {
     const modules = new Map<string, unknown>([
       ['@deepseek-ai/dsh-agent', AgentRegistry], ['@deepseek-ai/dsh-system-prompt', SystemPrompt], ['@deepseek-ai/dsh-tools', ToolRuntime],
       ['@deepseek-ai/dsh-user-questions', UserQuestions], ['test-ui-answerer', ui],
-      ['test-member-question-sender', TestSender], ['test-tool-ask-user', tool], ['test-driver', driver],
+      ['@deepseek-ai/dsh-member-question-sender', TestSender], ['test-tool-ask-user', tool], ['test-driver', driver],
     ])
     context.loader.internal = { version: 'v2', async import(specifier: string) { if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`); return modules.get(specifier) } } as unknown as NonNullable<typeof context.loader.internal>
     await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
     await context.loader.await()
+    const unloaded = [...context.loader.entries()].filter(entry => !entry.disabled && entry.fiber === undefined)
+    if (unloaded.length > 0) throw new Error(`enabled Loader entries did not load: ${unloaded.map(entry => entry.options.name).join(', ')}`)
     if (run === undefined) throw new Error('composition driver did not activate')
     return { context, root, delivery, localRequests, run }
   } catch (error) {

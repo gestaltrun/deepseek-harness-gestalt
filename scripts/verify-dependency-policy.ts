@@ -1,234 +1,372 @@
 #!/usr/bin/env node
-/**
- * Gate for the repository's explicit pre-run dependency policy.
- *
- * `pnpm-workspace.yaml` sets `verifyDepsBeforeRun: error` so a `pnpm run` or
- * `pnpm exec` with cold or stale installed state fails loudly instead of
- * silently reinstalling (replaying a prior production-only install's flags)
- * and running install lifecycle before the requested script. This gate proves
- * the policy three ways: the repository declares it, the pinned pnpm honors
- * it for `run` and `exec` in an offline file-dependency fixture, and the
- * fixture without the policy still exhibits the implicit install the policy
- * exists to reject (the negative control — a YAML-only assertion could not).
- * A deliberate environment override still wins by pnpm's documented
- * precedence; the gate demonstrates that instead of claiming otherwise.
- * @module scripts/verify-dependency-policy
- */
+/** Verify that repository checks reject unprepared dependencies without mutation. */
 
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { pnpmInvocation } from './pnpm-invocation.ts'
 
 const root = resolve(import.meta.dirname, '..')
+const timeoutMs = 45_000
+const maxBuffer = 4 * 1024 * 1024
 
-/** pnpm entrypoint this gate re-invokes; the launcher env names the real one. */
-function pnpmCommand(): { command: string; args: string[] } {
-  const entrypoint = process.env.npm_execpath
-  if (entrypoint === undefined || entrypoint === '') {
-    throw new Error('verify-dependency-policy: npm_execpath is unavailable; invoke through pnpm run.')
-  }
-  if (/\.[cm]?js$/iu.test(entrypoint)) return { command: process.execPath, args: [entrypoint] }
-  return { command: entrypoint, args: [] }
-}
-
-/** One observed pnpm behavior sample from the fixture. */
-interface RunOutcome {
+interface Outcome {
   exitCode: number | null
+  signal: NodeJS.Signals | null
   stdout: string
   stderr: string
+  error: Error | undefined
 }
 
-/**
- * Environment variable names pnpm's script launcher injects to stop recursive
- * pre-run checks (`pnpm_config_verify_deps_before_run: "false"`) and their
- * uppercase spelling. The fixture must be governed by its own workspace
- * configuration, so every invocation strips them unless a scenario sets the
- * override explicitly.
- */
-const VERIFY_DEPS_ENV_KEYS = ['pnpm_config_verify_deps_before_run', 'PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN']
-
-function runPnpm(cwd: string, args: readonly string[], env: Record<string, string> = {}): RunOutcome {
-  const { command, args: prefix } = pnpmCommand()
-  const childEnv: NodeJS.ProcessEnv = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !VERIFY_DEPS_ENV_KEYS.includes(key)) childEnv[key] = value
-  }
-  Object.assign(childEnv, env)
-  const result = spawnSync(command, [...prefix, ...args], {
-    cwd,
-    encoding: 'utf8',
-    env: childEnv,
-    // Noninteractive: the policy's contract is that no TTY is required to fail.
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  return { exitCode: result.status, stdout: result.stdout, stderr: result.stderr }
-}
-
-/** The offline fixture: one local file dependency plus a check script. */
 interface Fixture {
-  dir: string
-  /** Absolute path of the workspace manifest, for in-place policy edits. */
-  workspacePath: string
+  root: string
+  repo: string
+  lockfile: string
+  lifecycleMarker: string
+  runMarker: string
+  baseSentinel: string
+  extraSentinel: string
+  env: NodeJS.ProcessEnv
 }
 
-function createFixture(parent: string, policy: 'error' | 'absent'): Fixture {
-  const depDir = join(parent, 'dep')
-  mkdirSync(depDir, { recursive: true })
-  writeFileSync(join(depDir, 'package.json'), JSON.stringify({
-    name: 'fixture-dep',
-    version: '1.0.0',
-    type: 'module',
-    main: 'index.js',
-  }))
-  writeFileSync(join(depDir, 'index.js'), 'export const marker = "fixture-dep"\n')
+type Policy = 'error' | 'absent'
+type Entry = 'run' | 'exec'
+type EnvironmentClass = 'local' | 'ci'
 
-  const repoDir = join(parent, 'repo')
-  mkdirSync(repoDir, { recursive: true })
-  writeFileSync(join(repoDir, 'package.json'), JSON.stringify({
-    name: 'fixture-repo',
+function hashBytes(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+function readBytes(path: string): Buffer {
+  return readFileSync(path)
+}
+
+function sameBytes(left: Buffer, right: Buffer): boolean {
+  return left.equals(right)
+}
+
+function controlledEnvironment(fixtureRoot: string, environmentClass: EnvironmentClass): NodeJS.ProcessEnv {
+  const home = join(fixtureRoot, 'home')
+  const store = join(fixtureRoot, 'store')
+  const cache = join(fixtureRoot, 'cache')
+  const config = join(fixtureRoot, 'userconfig')
+  const global = join(fixtureRoot, 'global')
+  const corepack = join(fixtureRoot, 'corepack')
+  for (const path of [home, store, cache, global, corepack]) mkdirSync(path, { recursive: true, mode: 0o700 })
+  writeFileSync(config, '')
+  return {
+    PATH: `${dirname(process.execPath)}:/Users/yishu.cy/.local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
+    HOME: home,
+    XDG_CACHE_HOME: cache,
+    COREPACK_HOME: corepack,
+    npm_config_cache: cache,
+    npm_config_userconfig: config,
+    pnpm_config_store_dir: store,
+    pnpm_config_global_dir: global,
+    pnpm_config_global_bin_dir: join(global, 'bin'),
+    pnpm_config_enable_global_virtual_store: 'false',
+    pnpm_config_offline: 'true',
+    pnpm_config_verify_deps_before_run: undefined,
+    PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: undefined,
+    CI: environmentClass === 'ci' ? 'true' : undefined,
+    NO_COLOR: '1',
+    FORCE_COLOR: '0',
+  }
+}
+
+function runPnpm(
+  fixture: Fixture,
+  args: readonly string[],
+  overrides: NodeJS.ProcessEnv = {},
+): Outcome {
+  const invocation = pnpmInvocation(args)
+  const env = Object.fromEntries(
+    Object.entries({ ...fixture.env, ...overrides }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  )
+  const result = spawnSync(invocation.command, invocation.args, {
+    cwd: fixture.repo,
+    encoding: 'utf8',
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: timeoutMs,
+    maxBuffer,
+    killSignal: 'SIGKILL',
+  })
+  return {
+    exitCode: result.status,
+    signal: result.signal,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    error: result.error,
+  }
+}
+
+function describeOutcome(outcome: Outcome): string {
+  const output = `${outcome.stdout}${outcome.stderr}`.trim().slice(0, 800)
+  const error = outcome.error === undefined ? '' : ` error=${outcome.error.message}`
+  return `exit=${String(outcome.exitCode)} signal=${String(outcome.signal)}${error} output=${JSON.stringify(output)}`
+}
+
+function requireSuccess(label: string, outcome: Outcome): void {
+  if (outcome.error !== undefined || outcome.signal !== null || outcome.exitCode !== 0) {
+    throw new Error(`${label}: ${describeOutcome(outcome)}`)
+  }
+}
+
+function createFixture(policy: Policy, environmentClass: EnvironmentClass): Fixture {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'dsh-dependency-policy-'))
+  const depRoot = join(fixtureRoot, 'deps')
+  const repo = join(fixtureRoot, 'repo')
+  mkdirSync(depRoot, { recursive: true })
+  mkdirSync(repo, { recursive: true })
+
+  for (const name of ['fixture-base', 'fixture-extra']) {
+    const dep = join(depRoot, name)
+    mkdirSync(dep)
+    writeFileSync(join(dep, 'package.json'), `${JSON.stringify({ name, version: '1.0.0', main: 'index.js' }, null, 2)}\n`)
+    writeFileSync(join(dep, 'index.js'), `module.exports = ${JSON.stringify(name)}\n`)
+  }
+
+  const lifecycleMarker = join(repo, 'postinstall-ran.txt')
+  const runMarker = join(repo, 'requested-script-ran.txt')
+  writeFileSync(join(repo, 'package.json'), `${JSON.stringify({
+    name: 'dependency-policy-fixture',
     version: '1.0.0',
     private: true,
-    type: 'module',
     scripts: {
-      check: 'node -e "console.log(\'SCRIPT-RAN\')"',
-      // Install-lifecycle sentinel: any implicit install executes this.
-      postinstall: 'node -e "require(\'node:fs\').writeFileSync(\'postinstall-ran.txt\', \'1\')"',
+      check: `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync('requested-script-ran.txt','run')"`,
+      postinstall: `${JSON.stringify(process.execPath)} -e "require('node:fs').writeFileSync('postinstall-ran.txt','install')"`,
     },
-    devDependencies: { 'fixture-dep': 'file:../dep' },
-  }, null, 2) + '\n')
-  const workspacePath = join(repoDir, 'pnpm-workspace.yaml')
-  writeFileSync(workspacePath, policy === 'error' ? 'packages: []\nverifyDepsBeforeRun: error\n' : 'packages: []\n')
-  return { dir: repoDir, workspacePath }
+    devDependencies: {
+      'fixture-base': 'file:../deps/fixture-base',
+    },
+  }, null, 2)}\n`)
+  writeFileSync(
+    join(repo, 'pnpm-workspace.yaml'),
+    policy === 'error' ? 'packages: []\nverifyDepsBeforeRun: error\n' : 'packages: []\n',
+  )
+
+  return {
+    root: fixtureRoot,
+    repo,
+    lockfile: join(repo, 'pnpm-lock.yaml'),
+    lifecycleMarker,
+    runMarker,
+    baseSentinel: join(repo, 'node_modules', 'fixture-base', 'index.js'),
+    extraSentinel: join(repo, 'node_modules', 'fixture-extra', 'index.js'),
+    env: controlledEnvironment(fixtureRoot, environmentClass),
+  }
 }
 
-/** Deterministically stale state: manifest gains a dependency the lockfile knows but node_modules does not. */
-function makeStale(fixture: Fixture): void {
-  const manifestPath = join(fixture.dir, 'package.json')
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown as {
+function entryArgs(entry: Entry): string[] {
+  return entry === 'run'
+    ? ['run', 'check']
+    : ['exec', process.execPath, '-e', "require('node:fs').writeFileSync('requested-script-ran.txt','exec')"]
+}
+
+function clearMarkers(fixture: Fixture): void {
+  rmSync(fixture.lifecycleMarker, { force: true })
+  rmSync(fixture.runMarker, { force: true })
+}
+
+function addLockedExtraDependency(fixture: Fixture): void {
+  const manifestPath = join(fixture.repo, 'package.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
     devDependencies: Record<string, string>
   }
-  manifest.devDependencies['fixture-extra'] = 'file:../dep'
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-  const add = runPnpm(fixture.dir, ['install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts'])
-  if (add.exitCode !== 0) throw new Error(`fixture lockfile update failed: ${add.stderr}`)
+  manifest.devDependencies['fixture-extra'] = 'file:../deps/fixture-extra'
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  requireSuccess(
+    'create stale lockfile',
+    runPnpm(fixture, ['install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts']),
+  )
+  clearMarkers(fixture)
 }
 
-/** Cheap content fingerprint for before/after equality; not cryptographic. */
-function contentFingerprint(path: string): string {
-  const content = readFileSync(path, 'utf8')
-  return `${String(content.length)}:${String(content.replace(/\s/g, '').length)}`
+function prepareWarmStale(fixture: Fixture): void {
+  requireSuccess(
+    'create warm lockfile',
+    runPnpm(fixture, ['install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts']),
+  )
+  requireSuccess('prepare warm fixture', runPnpm(fixture, ['install', '--frozen-lockfile']))
+  if (!existsSync(fixture.baseSentinel)) throw new Error('warm prepare did not install the dev dependency sentinel')
+  clearMarkers(fixture)
+  addLockedExtraDependency(fixture)
+  if (existsSync(fixture.extraSentinel)) throw new Error('stale fixture unexpectedly installed the added dependency')
 }
 
-/**
- * Assert the policy-governed fixture behaves as specified.
- * @param fixture - offline fixture with the error policy installed and warm.
- * @returns violation messages; empty means the policy holds.
- */
-function checkPolicyBehavior(fixture: Fixture): string[] {
-  const failures: string[] = []
-  const lockfile = join(fixture.dir, 'pnpm-lock.yaml')
-  const postinstallMarker = join(fixture.dir, 'postinstall-ran.txt')
+function prepareCold(fixture: Fixture): void {
+  requireSuccess(
+    'prepare cold lockfile',
+    runPnpm(fixture, ['install', '--lockfile-only', '--no-frozen-lockfile', '--ignore-scripts']),
+  )
+  rmSync(join(fixture.repo, 'node_modules'), { recursive: true, force: true })
+  clearMarkers(fixture)
+}
 
-  // Stale state, noninteractive, both entrypoints: fail loudly, mutate nothing.
-  makeStale(fixture)
-  const before = contentFingerprint(lockfile)
-  for (const [label, args] of [['run', ['run', 'check']], ['exec', ['exec', 'node', '-e', 'console.log("SCRIPT-RAN")']]] as const) {
-    for (const [envLabel, env] of [['default env', {}], ['CI=true', { CI: 'true' }]] as const) {
-      rmSync(postinstallMarker, { force: true })
-      const outcome = runPnpm(fixture.dir, args, env)
-      const combined = outcome.stdout + outcome.stderr
-      if (outcome.exitCode === 0) failures.push(`${label} ${envLabel}: stale state must fail, got exit 0`)
-      if (!combined.includes('ERR_PNPM_VERIFY_DEPS_BEFORE_RUN')) {
-        failures.push(`${label} ${envLabel}: expected ERR_PNPM_VERIFY_DEPS_BEFORE_RUN, got: ${combined.slice(0, 200)}`)
-      }
-      if (combined.includes('Packages:')) failures.push(`${label} ${envLabel}: implicit install ran`)
-      if (existsSync(postinstallMarker)) failures.push(`${label} ${envLabel}: install lifecycle ran implicitly`)
+function assertRejectedWithoutMutation(
+  failures: string[],
+  label: string,
+  fixture: Fixture,
+  entry: Entry,
+): void {
+  const lockBefore = readBytes(fixture.lockfile)
+  const manifestBefore = readBytes(join(fixture.repo, 'package.json'))
+  const outcome = runPnpm(fixture, entryArgs(entry))
+  const output = `${outcome.stdout}${outcome.stderr}`
+  if (outcome.error !== undefined || outcome.signal !== null) {
+    failures.push(`${label}: pnpm did not exit normally: ${describeOutcome(outcome)}`)
+  }
+  if (outcome.exitCode === 0) failures.push(`${label}: unprepared ${entry} exited successfully`)
+  if (!output.includes('ERR_PNPM_VERIFY_DEPS_BEFORE_RUN')) {
+    failures.push(`${label}: missing ERR_PNPM_VERIFY_DEPS_BEFORE_RUN: ${describeOutcome(outcome)}`)
+  }
+  if (existsSync(fixture.runMarker)) failures.push(`${label}: requested ${entry} command ran`)
+  if (existsSync(fixture.lifecycleMarker)) failures.push(`${label}: install lifecycle ran`)
+  if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push(`${label}: lockfile bytes changed`)
+  if (!sameBytes(readBytes(join(fixture.repo, 'package.json')), manifestBefore)) failures.push(`${label}: manifest bytes changed`)
+}
+
+function verifyPolicyRejection(
+  failures: string[],
+  state: 'stale' | 'cold',
+  entry: Entry,
+  environmentClass: EnvironmentClass,
+): void {
+  const fixture = createFixture('error', environmentClass)
+  try {
+    if (state === 'stale') prepareWarmStale(fixture)
+    else prepareCold(fixture)
+    assertRejectedWithoutMutation(failures, `${state} ${entry} ${environmentClass}`, fixture, entry)
+    if (state === 'stale') {
+      if (!existsSync(fixture.baseSentinel)) failures.push(`${state} ${entry} ${environmentClass}: dev dependency was pruned`)
+      if (existsSync(fixture.extraSentinel)) failures.push(`${state} ${entry} ${environmentClass}: stale dependency was implicitly installed`)
+    } else if (existsSync(join(fixture.repo, 'node_modules'))) {
+      failures.push(`${state} ${entry} ${environmentClass}: cold rejection created node_modules`)
     }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true })
   }
-  if (contentFingerprint(lockfile) !== before) failures.push('stale-state rejection must leave the lockfile unchanged')
-  const sentinel = join(fixture.dir, 'node_modules', 'fixture-dep', 'index.js')
-  if (!existsSync(sentinel)) failures.push('existing dev dependency was pruned by the rejection')
-
-  // A deliberate environment override wins — documented precedence, not a defect.
-  rmSync(postinstallMarker, { force: true })
-  const overridden = runPnpm(fixture.dir, ['run', 'check'], { pnpm_config_verify_deps_before_run: 'install' })
-  if (overridden.exitCode !== 0 || !existsSync(postinstallMarker)) {
-    failures.push('environment override pnpm_config_verify_deps_before_run=install must win by pnpm precedence and implicitly install')
-  }
-
-  // Explicit preparation with a frozen-lockfile install restores the same check.
-  const repair = runPnpm(fixture.dir, ['install', '--frozen-lockfile', '--ignore-scripts'])
-  if (repair.exitCode !== 0) failures.push(`frozen prepare failed: ${repair.stderr.slice(0, 200)}`)
-  const afterRepair = runPnpm(fixture.dir, ['run', 'check'])
-  if (afterRepair.exitCode !== 0 || !afterRepair.stdout.includes('SCRIPT-RAN')) {
-    failures.push('check must succeed after explicit frozen prepare')
-  }
-
-  // Cold worktree: fail loudly with no implicit install, then prepare and pass.
-  rmSync(join(fixture.dir, 'node_modules'), { recursive: true, force: true })
-  const cold = runPnpm(fixture.dir, ['run', 'check'])
-  if (cold.exitCode === 0) failures.push('cold state must fail, got exit 0')
-  if (!existsSync(lockfile)) failures.push('cold rejection must not consume the lockfile')
-  const coldRepair = runPnpm(fixture.dir, ['install', '--frozen-lockfile', '--ignore-scripts'])
-  if (coldRepair.exitCode !== 0) failures.push(`cold frozen prepare failed: ${coldRepair.stderr.slice(0, 200)}`)
-  const afterCold = runPnpm(fixture.dir, ['run', 'check'])
-  if (afterCold.exitCode !== 0) failures.push('check must succeed after cold frozen prepare')
-  return failures
 }
 
-/**
- * Negative control: the same fixture without the policy silently installs.
- * @param fixture - offline fixture whose policy line will be removed.
- * @returns true when pnpm's default policy exhibits the implicit install.
- */
-function exhibitsDefaultInstall(fixture: Fixture): boolean {
-  writeFileSync(fixture.workspacePath, 'packages: []\n')
-  const baseline = runPnpm(fixture.dir, ['install', '--frozen-lockfile', '--ignore-scripts'])
-  if (baseline.exitCode !== 0) throw new Error(`negative-control prepare failed: ${baseline.stderr}`)
-  makeStale(fixture)
-  const postinstallMarker = join(fixture.dir, 'postinstall-ran.txt')
-  rmSync(postinstallMarker, { force: true })
-  const outcome = runPnpm(fixture.dir, ['run', 'check'])
-  return outcome.exitCode === 0 && existsSync(postinstallMarker)
+function verifyExplicitRecovery(
+  failures: string[],
+  state: 'stale' | 'cold',
+  entry: Entry,
+  environmentClass: EnvironmentClass,
+): void {
+  const fixture = createFixture('error', environmentClass)
+  try {
+    if (state === 'stale') prepareWarmStale(fixture)
+    else prepareCold(fixture)
+    assertRejectedWithoutMutation(failures, `recovery ${state} ${entry} ${environmentClass}`, fixture, entry)
+    const lockBefore = readBytes(fixture.lockfile)
+    const prepare = runPnpm(fixture, ['install', '--frozen-lockfile'])
+    if (prepare.error !== undefined || prepare.signal !== null || prepare.exitCode !== 0) {
+      failures.push(`recovery ${state} ${entry} ${environmentClass}: frozen install failed: ${describeOutcome(prepare)}`)
+      return
+    }
+    if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push(`recovery ${state} ${entry} ${environmentClass}: frozen install changed lockfile bytes`)
+    if (!existsSync(fixture.baseSentinel)) failures.push(`recovery ${state} ${entry} ${environmentClass}: dev dependency sentinel missing after install`)
+    if (state === 'stale' && !existsSync(fixture.extraSentinel)) failures.push(`recovery ${state} ${entry} ${environmentClass}: added dependency missing after install`)
+    if (!existsSync(fixture.lifecycleMarker)) failures.push(`recovery ${state} ${entry} ${environmentClass}: explicit install did not run lifecycle evidence`)
+    clearMarkers(fixture)
+    const run = runPnpm(fixture, entryArgs(entry))
+    if (run.error !== undefined || run.signal !== null || run.exitCode !== 0 || !existsSync(fixture.runMarker)) {
+      failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command failed: ${describeOutcome(run)}`)
+    }
+    if (existsSync(fixture.lifecycleMarker)) failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command reran install lifecycle`)
+    if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command changed lockfile bytes`)
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true })
+  }
+}
+
+function verifyDefaultNegativeControl(failures: string[]): void {
+  const fixture = createFixture('absent', 'local')
+  try {
+    prepareWarmStale(fixture)
+    const lockBefore = readBytes(fixture.lockfile)
+    const outcome = runPnpm(fixture, entryArgs('run'))
+    if (outcome.error !== undefined || outcome.signal !== null || outcome.exitCode !== 0) {
+      failures.push(`default-install negative control did not complete: ${describeOutcome(outcome)}`)
+    }
+    if (!existsSync(fixture.runMarker)) failures.push('default-install negative control did not run the requested script')
+    if (!existsSync(fixture.lifecycleMarker)) failures.push('default-install negative control did not run postinstall')
+    if (!existsSync(fixture.extraSentinel)) failures.push('default-install negative control did not install the stale dependency')
+    if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push('default-install negative control changed the prepared lockfile')
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true })
+  }
+}
+
+function verifyOverride(
+  failures: string[],
+  kind: 'environment' | 'cli',
+): void {
+  const fixture = createFixture('error', 'local')
+  try {
+    prepareWarmStale(fixture)
+    const outcome = kind === 'environment'
+      ? runPnpm(fixture, entryArgs('run'), { pnpm_config_verify_deps_before_run: 'install' })
+      : runPnpm(fixture, ['--config.verify-deps-before-run=install', ...entryArgs('run')])
+    if (outcome.error !== undefined || outcome.signal !== null || outcome.exitCode !== 0) {
+      failures.push(`${kind} override did not supersede workspace policy: ${describeOutcome(outcome)}`)
+    }
+    if (!existsSync(fixture.lifecycleMarker) || !existsSync(fixture.runMarker) || !existsSync(fixture.extraSentinel)) {
+      failures.push(`${kind} override did not exhibit explicit install precedence`)
+    }
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true })
+  }
+}
+
+function verifySameLengthHashNegativeCase(failures: string[]): void {
+  const left = Buffer.from('lock-A')
+  const right = Buffer.from('lock-B')
+  if (left.length !== right.length) throw new Error('same-length hash fixture is malformed')
+  if (hashBytes(left) === hashBytes(right)) failures.push('byte hashing failed to distinguish same-length content')
 }
 
 function main(): void {
   const failures: string[] = []
-  const declared = /(^|\n)verifyDepsBeforeRun:\s*error\s*(\n|$)/.test(
-    readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8'),
-  )
-  if (!declared) failures.push('pnpm-workspace.yaml must declare verifyDepsBeforeRun: error')
-
-  const policyDir = mkdtempSync(join(tmpdir(), 'dsh-dep-policy-'))
-  const controlDir = mkdtempSync(join(tmpdir(), 'dsh-dep-policy-control-'))
-  try {
-    const policyFixture = createFixture(policyDir, 'error')
-    const prepare = runPnpm(policyFixture.dir, ['install', '--ignore-scripts'])
-    if (prepare.exitCode !== 0) throw new Error(`fixture prepare failed: ${prepare.stderr}`)
-    failures.push(...checkPolicyBehavior(policyFixture))
-
-    const controlFixture = createFixture(controlDir, 'absent')
-    const controlPrepare = runPnpm(controlFixture.dir, ['install', '--ignore-scripts'])
-    if (controlPrepare.exitCode !== 0) throw new Error(`control prepare failed: ${controlPrepare.stderr}`)
-    if (!exhibitsDefaultInstall(controlFixture)) {
-      failures.push('negative control: pnpm default no longer implicitly installs; this gate is not observing real behavior')
-    }
-  } finally {
-    rmSync(policyDir, { recursive: true, force: true })
-    rmSync(controlDir, { recursive: true, force: true })
+  const workspace = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8')
+  if (!/(^|\n)verifyDepsBeforeRun:\s*error\s*(\n|$)/u.test(workspace)) {
+    failures.push('pnpm-workspace.yaml must declare verifyDepsBeforeRun: error')
   }
+
+  verifySameLengthHashNegativeCase(failures)
+  for (const state of ['stale', 'cold'] as const) {
+    for (const entry of ['run', 'exec'] as const) {
+      for (const environmentClass of ['local', 'ci'] as const) {
+        verifyPolicyRejection(failures, state, entry, environmentClass)
+      }
+    }
+  }
+  verifyExplicitRecovery(failures, 'stale', 'run', 'local')
+  verifyExplicitRecovery(failures, 'cold', 'exec', 'ci')
+  verifyDefaultNegativeControl(failures)
+  verifyOverride(failures, 'environment')
+  verifyOverride(failures, 'cli')
 
   if (failures.length > 0) {
     process.stderr.write('verify-dependency-policy: violations:\n')
     for (const failure of failures) process.stderr.write(`  ${failure}\n`)
-    process.exit(1)
+    process.exitCode = 1
+    return
   }
-  process.stdout.write('verify-dependency-policy: error policy declared, honored by run/exec offline, negative control confirmed.\n')
+  process.stdout.write('verify-dependency-policy: run/exec reject stale and cold state without mutation; frozen recovery, default install, and overrides confirmed.\n')
 }
 
 const scriptPath = fileURLToPath(import.meta.url)
-if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
-  main()
-}
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === scriptPath) main()

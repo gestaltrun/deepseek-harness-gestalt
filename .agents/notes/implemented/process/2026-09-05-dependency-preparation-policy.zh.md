@@ -6,11 +6,11 @@ Status: implemented
 
 ## 问题
 
-pnpm 11 默认 `verify-deps-before-run` 为 `install`。任何已安装状态过冷或过旧的 `pnpm run`/`pnpm exec` 都会先隐式执行一次完整的 `pnpm install`：它会运行根 `postinstall`（`install-lefthook`），并重放上次安装的参数——上次以 `--prod`/`pnpm_config_production=true` 安装过的检出会得到 `pnpm install --production`，裁掉检查所需的 dev 依赖。设置漂移（例如 `publicHoistPattern`）会把隐式安装引向 modules 清除，而清除在没有 TTY 时无法确认，以 `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 失败；`verifyDepsBeforeRun: prompt` 则以 `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` 失败。这是两条不同的非交互失败路径。`CI=true` 本身不是其中任何一个：它只默认 `frozen-lockfile` 并禁用清除确认提示。
+pnpm 11 默认 `verify-deps-before-run` 为 `install`。顶层 `pnpm run` 或 `pnpm exec` 遇到过冷或过旧的已安装状态时，可能会在请求的命令之前隐式执行 `pnpm install`，包括安装生命周期。重放的安装设置还可能裁掉检查所需的 dev 依赖。非交互失败有不同原因：`ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` 表示依赖校验拒绝，`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` 表示安装需要确认清除 `node_modules`。`CI=true` 会影响安装默认值和确认行为；它本身既不选择生产依赖，也不修复过旧状态。
 
 ## 决策
 
-`pnpm-workspace.yaml` 声明 `verifyDepsBeforeRun: error`。仓库检查保留依赖一致性检查，在已安装状态过冷或过旧时响亮失败；准备永远是同一环境类的显式 `pnpm install --frozen-lockfile`（CI 下安装的状态携带 `enableGlobalVirtualStore: false`，非 CI 运行会将其报告为已更改的设置）。`scripts/verify-dependency-policy.ts` 是被执行的门：它在默认、`CI=true` 和冷状态下用离线 `file:` 依赖 fixture 走 `pnpm run` 与 `pnpm exec`，断言错误码、保留的 dev 依赖哨兵、未变的 lockfile 和零隐式安装生命周期，再证明负控——去掉该策略的同一 fixture 会静默安装。门会剥离继承的 `pnpm_config_verify_deps_before_run`（pnpm 的脚本启动器为子脚本将其设为 `false`），使 fixture 由自己的 workspace 配置治理，并单独演示故意环境覆盖依然生效。
+`pnpm-workspace.yaml` 声明 `verifyDepsBeforeRun: error`。仓库检查保留 pnpm 的一致性校验，在已安装状态过冷或过旧时失败；贡献者使用同一环境类中的 `pnpm install --frozen-lockfile` 准备依赖。`scripts/verify-dependency-policy.ts` 以相互独立的离线 `file:` fixture，在本地与 `CI=true` 环境中执行顶层 `pnpm run` 和 `pnpm exec`。它隔离 home、store、cache、用户配置和 global 目录，限制每个进程时长，比较 lockfile 字节，并验证过旧与过冷拒绝、dev 依赖保留、请求命令与生命周期未运行、frozen 安装恢复、默认隐式安装，以及刻意的环境和 CLI 优先级。门还证明等长内容得到不同 hash，避免仅比较大小形成伪证据。
 
 ## 备选方案
 

@@ -45,13 +45,13 @@ Setup is complete when `pnpm run typecheck` exits successfully.
 
 ### Dependency preparation policy
 
-Checks never install dependencies. `pnpm-workspace.yaml` sets `verifyDepsBeforeRun: error`, so `pnpm run` and `pnpm exec` fail with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` when the installed state is cold or stale instead of silently reinstalling. Prepare explicitly from the repo root, in the same environment class the checks will run in:
+Checks do not repair dependencies. `pnpm-workspace.yaml` sets `verifyDepsBeforeRun: error`, so a top-level `pnpm run` or `pnpm exec` fails with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` when the installed state is cold or stale. Prepare from the repo root in the same environment class as the checks:
 
 ```sh
 pnpm install --frozen-lockfile
 ```
 
-The same command recovers a stale checkout after switching branches or editing manifests; state installed under `CI=true` reports a changed `enableGlobalVirtualStore` setting to a non-CI run, so reinstall without the variable for local checks. Two distinct noninteractive errors exist: the policy's `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` asks for the install above, while an install that must purge `node_modules` without a TTY fails with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` — `CI=true` only silences that purge confirmation and is not a universal workaround. A deliberate CLI flag or `pnpm_config_verify_deps_before_run` export overrides the repository default by pnpm precedence. The [dependency preparation policy Agent Note](../.agents/notes/implemented/process/2026-09-05-dependency-preparation-policy.md) owns the rationale; `pnpm run verify-dependency-policy` executes the offline regression fixture.
+Use the same command after switching branches or editing manifests. Keep the environment class consistent: for example, state prepared with `CI=true` records `enableGlobalVirtualStore: false`, so prepare again without `CI` before local checks. `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN` requests explicit preparation; `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` means an explicit or overridden install needs to purge `node_modules` without a terminal. `CI=true` affects the latter confirmation but does not repair dependency state. A deliberate pnpm CLI or `pnpm_config_verify_deps_before_run` override still takes precedence over the workspace default. The [dependency preparation policy Agent Note](../.agents/notes/implemented/process/2026-09-05-dependency-preparation-policy.md) owns the rationale; `pnpm run verify-dependency-policy` executes the offline regression fixture.
 
 ### TypeScript project layout
 

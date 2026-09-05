@@ -52,7 +52,7 @@ Python SDK 位于 [`python/`](../../../../python/README.zh.md)：`python/sdk` �
 
 [`scripts/build-python-release.py`](../../../../scripts/build-python-release.py) 从仓库根目录的 `package.json` 读取权威的 `X.Y.Z` 或预发布版本，把预发布版本转换为 PEP 440 写法，并以该 wheel 包版本暂存两个包，让 `deepseek-harness-sdk` 精确依赖匹配版本的 `deepseek-harness-runtime-bin`。可选的 `python-v<repository-version>` 发布标签只是一项一致性断言，与仓库版本不同时会被拒绝；源码 `pyproject.toml` 中的开发占位版本从不决定发布版本。暂存过程还会把仓库许可证放入两个 wheel 包，并把第三方声明放入内置运行时 wheel 包。SDK 是 `py3-none-any` wheel 包；每个只提供 wheel 包的运行时包都包含一个 exe 及其架构匹配的 `-rg` 伴随文件，macOS wheel 包还包含与其架构匹配的 spawn helper。运行时 wheel 包使用 `py3-none-manylinux_2_28_x86_64`、`py3-none-manylinux_2_28_aarch64`，或针对 Node 24 可执行文件 macOS 13.5 部署目标而保守选择的 `py3-none-macosx_14_0_arm64` 标签；Hatch 钩子拒绝 sdist、通用标签、混合平台载荷、伴随文件缺失或多余，以及不支持的平台。
 
-exe「必须显式配置」的硬语义不变；零配置体验由包装层恢复：调用方没有提供 `cordis`、没有显式指定运行时，且环境中没有 `DSH_CORDIS_CONFIG` 时，客户端将检入的默认 `cordis.yml`（`agent-core` + 预载的 `llm-deepseek` + JSONL 持久化 + `bash-local` + `dsh-sdk-jsonrpc-server` 对外服务条目，并通过 `!!js` 使用环境变量兜底）显式注入 `DSH_CORDIS_CONFIG`。关闭时，协议确认成功后，客户端会在配置的有界时间内让服务器 dispose（资源释放）根运行时、排空持久化并正常退出；未收到确认或等待进程退出超时时，客户端进入 terminate 后再 kill 的兜底流程。客户端不会仅因 shutdown 响应早于根资源释放完成而向运行时发送信号。
+exe「必须显式配置」的硬语义不变；零配置体验由包装层恢复：调用方没有提供 `cordis`、没有显式指定运行时，且环境中没有 `DSH_CORDIS_CONFIG` 时，客户端将检入的默认 `cordis.yml`（`agent-core` + 预载的 `llm-deepseek` + JSONL 持久化 + `bash-local` + `dsh-sdk-jsonrpc-server` 对外服务条目，并通过 `!!js` 使用环境变量兜底）显式注入 `DSH_CORDIS_CONFIG`。关闭时，协议确认成功后，客户端会先让服务器 dispose（资源释放）根运行时、排空持久化并正常退出，再向进程发送信号。`shutdown_timeout_seconds` 为有限值时，该值分别约束 shutdown 请求、正常退出等待和 terminate 后等待；未收到确认或等待进程退出超时时，客户端进入 terminate 后再 kill 的兜底流程，而 `None` 保留这些阶段的无界等待语义。客户端不会仅因 shutdown 响应早于根资源释放完成而向运行时发送信号。
 
 ### 命名血统
 

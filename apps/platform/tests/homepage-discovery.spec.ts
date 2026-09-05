@@ -8,12 +8,14 @@ describe('Platform homepage discovery', () => {
     const html = publicFile('index.html')
     expect(html).toContain('<title>Gestalt · 獭子哥</title>')
     expect(html).toContain('<meta name="description"')
-    expect(html).toContain('<link rel="canonical" href="https://www.gestaltrun.com/"')
+    expect(html).toContain('<link rel="canonical" href="https://www.beikejiedeliulangmao.top/"')
     expect(html).toContain('<meta property="og:type" content="website"')
-    expect(html).toContain('<meta property="og:image" content="https://www.gestaltrun.com/images/hero-bg.png"')
+    expect(html).toContain('<meta property="og:image" content="https://www.beikejiedeliulangmao.top/images/hero-bg.png"')
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image"')
     expect(html).toContain('https://github.com/gestaltrun/deepseek-harness-gestalt')
     expect(html).toContain('https://github.com/deepseek-ai/deepseek-harness')
+    expect(html).toContain('<a class="ds-text-caption text-ds-description" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">辽ICP备19017854号-1</a>')
+    expect(html).not.toContain('https://www.gestaltrun.com/')
     expect(html).not.toContain('BeiKeJieDeLiuLangMao')
 
     const jsonLdSource = html.match(/<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/)?.[1]
@@ -24,7 +26,7 @@ describe('Platform homepage discovery', () => {
     }
     expect(jsonLd['@context']).toBe('https://schema.org')
     const website = jsonLd['@graph'].find(item => item['@type'] === 'WebSite')
-    expect(website).toMatchObject({ name: 'Gestalt', url: 'https://www.gestaltrun.com/' })
+    expect(website).toMatchObject({ name: 'Gestalt', url: 'https://www.beikejiedeliulangmao.top/' })
     expect(website?.alternateName).toEqual(['獭子哥', 'DeepSeek Gestalt'])
     const software = jsonLd['@graph'].find(item => item['@type'] === 'SoftwareApplication')
     expect(software).toMatchObject({
@@ -38,13 +40,13 @@ describe('Platform homepage discovery', () => {
     expect(publicFile('robots.txt')).toBe([
       'User-agent: *',
       'Allow: /',
-      'Sitemap: https://www.gestaltrun.com/sitemap.xml',
+      'Sitemap: https://www.beikejiedeliulangmao.top/sitemap.xml',
       '',
     ].join('\n'))
-    expect(publicFile('sitemap.xml')).toContain('<loc>https://www.gestaltrun.com/</loc>')
+    expect(publicFile('sitemap.xml')).toContain('<loc>https://www.beikejiedeliulangmao.top/</loc>')
     const llms = publicFile('llms.txt')
     expect(llms).toContain('# Gestalt · 獭子哥')
-    expect(llms).toContain('https://www.gestaltrun.com/')
+    expect(llms).toContain('https://www.beikejiedeliulangmao.top/')
     expect(llms).toContain('https://github.com/gestaltrun/deepseek-harness-gestalt')
     expect(llms).toContain('https://github.com/deepseek-ai/deepseek-harness')
 

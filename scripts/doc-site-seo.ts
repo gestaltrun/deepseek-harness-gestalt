@@ -15,7 +15,7 @@ export const GESTALT_REPOSITORY_URL = 'https://github.com/gestaltrun/deepseek-ha
 export const DSH_REPOSITORY_URL = 'https://github.com/deepseek-ai/deepseek-harness'
 
 /** Product website linked from search metadata and structured data. */
-export const GESTALT_PRODUCT_URL = 'https://www.gestaltrun.com/'
+export const GESTALT_PRODUCT_URL = 'https://www.beikejiedeliulangmao.top/'
 
 /** Product artwork used by search and social previews. */
 const GESTALT_SOCIAL_IMAGE_URL = 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/master/docs/assets/brand/tazige-ip.png'

@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
-import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import UserQuestionService, {
   UserQuestionError,
+  type AskUserQuestionItem,
   type AskUserQuestionRequest,
 } from '@deepseek-ai/dsh-user-questions'
 import {
@@ -50,7 +51,7 @@ function answeredSettlement(
 
 function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQuestionSendPayload {
   return {
-    toProjectMember: 'account-peer' as PlatformAccountId,
+    toProjectMember: parsePlatformAccountId('account-peer'),
     projectId: parseMemberQuestionProjectId('project-atlas'),
     background: 'The ingest pipeline fails under load; pick a rollback window.',
     questions: [
@@ -69,7 +70,7 @@ function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQues
     origin: {
       projectName: 'Atlas',
       originSessionTitle: 'Refactor the ingest pipeline',
-      askerAccountId: 'account-asker' as PlatformAccountId,
+      askerAccountId: parsePlatformAccountId('account-asker'),
       askerRole: 'admin',
       askerDisplayName: 'Ada',
       askerAvatarUrl: 'https://example.test/ada.png',
@@ -106,7 +107,7 @@ function stubAgent(id: string): Agent {
 function memberRoute() {
   return {
     projectId: parseMemberQuestionProjectId('project-atlas'),
-    toProjectMember: 'account-peer' as PlatformAccountId,
+    toProjectMember: parsePlatformAccountId('account-peer'),
     background: payload().background,
     references: [],
     origin: payload().origin,
@@ -154,8 +155,11 @@ describe('member-question sender', () => {
     ctx.agents.enter(agent, undefined)
 
     const answer = ctx.userQuestions.ask({
-      questions: payload().questions.map(question => ({
-        ...question,
+      questions: payload().questions.map((question): AskUserQuestionItem => ({
+        id: question.id,
+        question: question.question,
+        ...question.header === undefined ? {} : { header: question.header },
+        ...question.multiSelect === undefined ? {} : { multiSelect: question.multiSelect },
         ...question.options === undefined ? {} : { options: question.options.map(option => ({ ...option })) },
       })),
       agent,
@@ -249,8 +253,11 @@ describe('member-question sender', () => {
     await ctx.plugin(Sender)
 
     const failure = await ctx.userQuestions.ask({
-      questions: payload().questions.map(question => ({
-        ...question,
+      questions: payload().questions.map((question): AskUserQuestionItem => ({
+        id: question.id,
+        question: question.question,
+        ...question.header === undefined ? {} : { header: question.header },
+        ...question.multiSelect === undefined ? {} : { multiSelect: question.multiSelect },
         ...question.options === undefined ? {} : { options: question.options.map(option => ({ ...option })) },
       })),
       memberRoute: memberRoute(),
@@ -308,7 +315,7 @@ describe('member-question sender', () => {
     expect(events.map(event => event.ignorable)).toEqual([true, true])
     expect(events[0]?.data).toMatchObject({
       questionId,
-      toProjectMember: 'account-peer' as PlatformAccountId,
+      toProjectMember: parsePlatformAccountId('account-peer'),
       projectId: parseMemberQuestionProjectId('project-atlas'),
       background: payload().background,
       originSessionId: parseCompanionSessionId('session-origin'),
@@ -700,7 +707,7 @@ describe('member-question sender', () => {
     await ctx.plugin(Sender, { delivery })
     const { pending: first } = await startSend(ctx)
     const { pending: second } = await startSend(ctx, payload({
-      toProjectMember: 'account-other' as PlatformAccountId,
+      toProjectMember: parsePlatformAccountId('account-other'),
       originSessionId: parseCompanionSessionId('session-other'),
     }))
     expect(delivery.delivered).toHaveLength(2)

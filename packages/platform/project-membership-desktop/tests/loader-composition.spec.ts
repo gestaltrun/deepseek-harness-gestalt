@@ -13,8 +13,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import { CallId } from '@deepseek-ai/dsh-llm'
-import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import AgentRegistry, { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
@@ -33,11 +34,26 @@ afterEach(async () => {
   root = undefined
 })
 
-function stubAgent(cwd: string): Agent {
-  return {
-    id: 'session-atlas',
-    session: { id: 'session-atlas', header: { cwd } },
-  } as unknown as Agent
+function liveAgent(ctx: Context, cwd: string): Agent {
+  const id = SessionId('session-atlas')
+  const session = Session.create(id, undefined, { version: 0, id, createdAt: 0, cwd, isSeeded: false })
+  const agent: Agent = {
+    id,
+    options: {},
+    session,
+    inbox: new Inbox(session, { inserted() {}, discarded() {}, claimed() {} }),
+    status: 'idle',
+    ctx,
+    send() {},
+    followup() {},
+    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
+    inject() {},
+    cancel() {},
+    runMaintenance: task => task(new AbortController().signal),
+    whenIdle: () => Promise.resolve(),
+  }
+  ctx.agents.register(agent)
+  return agent
 }
 
 describe('bound Desktop routed-ask Loader composition', () => {
@@ -109,10 +125,10 @@ describe('bound Desktop routed-ask Loader composition', () => {
     await ctx.loader.await()
 
     expect(ctx.get('memberQuestionSender')).toBeDefined()
-    const agent = stubAgent('/workspace/atlas')
+    const agent = liveAgent(ctx, '/workspace/atlas')
     const result = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('ask-bound-desktop'),
+      callId: ToolCallId('ask-bound-desktop'),
       name: 'ask_user_question',
       arguments: {
         questions: [{ id: 'rollout', question: 'Ship it?' }],

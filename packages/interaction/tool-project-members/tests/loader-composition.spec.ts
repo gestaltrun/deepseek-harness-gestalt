@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -189,7 +189,7 @@ describe('tool-project-members real Loader composition through cordis.yml', () =
     expect(ctx.tools.get('project_members')).toBeDefined()
     const result = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('pm-loader'),
+      callId: ToolCallId('pm-loader'),
       name: 'project_members',
       arguments: {},
     })
@@ -205,7 +205,7 @@ describe('tool-project-members real Loader composition through cordis.yml', () =
 
     const result = await ctx.tools.execute({
       signal: new AbortController().signal,
-      callId: CallId('pm-loader-no-account'),
+      callId: ToolCallId('pm-loader-no-account'),
       name: 'project_members',
       arguments: {},
     })

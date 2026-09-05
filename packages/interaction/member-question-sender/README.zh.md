@@ -42,14 +42,14 @@
 
 本包是成员提问发送器 seam 的 Service Definition 与基于 codec 的 Provider。编码由 [`dsh-remote-protocol`](../../platform/remote-protocol/README.zh.md) 拥有；授权记录由 [`dsh-remote-access`](../../platform/remote-access/README.zh.md) 拥有。面向模型的 Consumer 是 [`dsh-tool-ask-user`](../tool-ask-user/README.zh.md)。
 
-## Model Experience
+## 模型体验
 
 间接地，通过 `dsh-tool-ask-user`：它把 `to_project_member` 路由到带 `memberRoute` 的 `ctx.userQuestions.ask()`；本发送器的 Host 根 answerer 认领该请求，并将其稳定错误作为普通工具结果保留。
 
-#### KV Cache effect
+#### KV Cache 影响
 
 不会直接产生 token 开销，也不会使 KV Cache 失效。`dsh-tool-ask-user` 拥有 `to_project_member`、`background` 与 `references` 的 schema 增长，以及已回答批次与发送器生命周期错误作为工具结果保留的 token。
 
-## Known Limitations and Deferred Work
+## 已知限制与暂缓事项
 
 - **跨机投递依赖被推迟的项目注册表传输**：编码、分块帧与投递接口已经定义；无密钥测试注入内存实现，缺少生产 port 的组合则失败关闭。在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。生产密封仍受那里记录的独立加密评审约束。本包不发明新协议。

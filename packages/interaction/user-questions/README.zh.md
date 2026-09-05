@@ -30,7 +30,7 @@ kind: "package-reference"
 
 ### 关键类型
 
-- `AskUserQuestionRequest`：`{ questions: [{ id, question, detail?, header?, options?, multiSelect?, intent? }], agent?, signal?, memberRoute? }`；`detail` 提供辅助文本，提供方会将其随问题一起渲染，而不会将其变成选项标签。如提供 `agent`，它必须与注册表中的存活运行时根 agent（智能体）是同一对象。`memberRoute` 携带 Host 路由信息，并由全局前置回答器认领。
+- `AskUserQuestionRequest`：`{ questions: [{ id, question, detail?, header?, options?, multiSelect?, intent? }], agent?, signal?, memberRoute? }`；`detail` 提供辅助文本，提供方会将其随问题一起渲染，而不会将其变成选项标签。如提供 `agent`，它必须与注册表中的存活运行时根 agent（智能体）是同一对象。`memberRoute` 是最小的 Host-only 提问方输入。它复用仅类型的 remote-protocol origin/reference 类型，并保留品牌化的 Project、Account 与 Companion Session identity，而不依赖发送器包；本地回答器通过 `next()` 继续委派。
 - `AskUserQuestionOption`：`{ label, description? }`。
 - `AskUserQuestionIntent`：`{ kind: 'plan-review', approve } | { kind: 'member-question', questionId, originSessionId, toProjectMember, origin, background, references, expiresAt }`；即下文的带标签呈现意图。
 - `AskUserQuestionAnswer`：`{ answers: [{ id, selected, custom? }] }`。

@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-#345 的组装证据是一个本地可运行、无 SHA-256 握手的 AES-256-GCM 开发 broker，加上真实的 Account 与 Project Membership TCP 组合。`apps/desktop/tests/member-question-e2e/assembled-project-members.spec.ts` 启动一个本地 Platform、两个账号（`ada`、`grace`）和三个 Installation endpoint。它走查创建、按登录名邀请、不完整 accept-with-link 仍保持 pending、完整 accept-with-link、由实时心跳产生的花名册 Online、最后窗口 `/v1/projects/presence/close` 的 Offline、一次携带 background 以及 markdown/html/任意分块字节的路由提问、receiver 所有的 Files-sidebar 缓存路径（`.dsh/member-questions/<questionId>/`）且没有本地 composer 卡片、B1/B2 并发首个 claim 结算（含 answered-elsewhere 元数据）、到期、发起方撤回、同路线取代，以及无排队投递的 `MEMBER_OFFLINE`。时钟与密钥是唯一注入的非确定性。broker 审计与 Platform membership 文档只含密文与权限行。
+#345 的组装证据是一个本地可运行、无 SHA-256 握手的 AES-256-GCM 开发 broker，加上真实的 Account 与 Project Membership TCP 组合。`apps/desktop/tests/member-question-e2e/assembled-project-members.spec.ts` 启动一个本地 Platform、两个账号（`ada`、`grace`）和三个 Installation endpoint。它走查创建、按登录名邀请、不完整 accept-with-link 仍保持 pending、完整 accept-with-link、由实时心跳产生的花名册 Online、最后窗口 `/v1/projects/presence/close` 的 Offline、一次携带 background 以及 markdown/html/任意分块字节的路由提问、receiver 所有的 Files-sidebar 缓存路径（`.dsh/member-questions/<questionId>/`）且没有本地 composer 卡片、B1/B2 并发首个 claim 结算（含 answered-elsewhere 元数据）、到期、发起方撤回、同路线取代，以及无排队投递的 `MEMBER_OFFLINE`。关闭断言在轮询真实 HTTP 花名册时只续约期望保持 Online 的 Installation lease，绝不续约刚关闭的 Installation。注入时钟的 registry 测试证明 close 在时钟不推进时删除目标，TCP HTTP consumer 测试证明该路由调用这一行为；组装走查覆盖多 Installation 花名册组合，不依赖小于 TTL 的时序窗口。单独的 125 毫秒等待仍验证自然 TTL 到期。时钟与密钥是唯一注入的非确定性。broker 审计与 Platform membership 文档只含密文与权限行。
 
 可见 Desktop 覆盖是 `pnpm run test:e2e-project-members-electron`。它重建当前源码，对着同一本地 Platform 启动三个隔离 Electron 进程，并在 Linux 上要求可见 `DISPLAY`。`--dsh-e2e-profile` 只被显式的未打包 `DSH_DESKTOP_E2E=1` 运行接受。生产密封仍受常设独立加密评审约束。
 

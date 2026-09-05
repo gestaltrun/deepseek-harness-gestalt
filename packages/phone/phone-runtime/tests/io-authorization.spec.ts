@@ -5,7 +5,7 @@ function none(): IoDispatchCapture {
   return { kind: 'none' }
 }
 
-function granted(store: { capture?: object }, admitted: object): IoDispatchCapture {
+function granted(store: { capture: object | undefined }, admitted: object): IoDispatchCapture {
   return {
     kind: 'capture',
     admitted,
@@ -16,7 +16,7 @@ function granted(store: { capture?: object }, admitted: object): IoDispatchCaptu
 describe('assertIoDispatchAuthority', () => {
   it('accepts a live incarnation match for non-capture io', () => {
     const incarnation = {}
-    const store: { incarnation?: object } = { incarnation }
+    const store: { incarnation: object | undefined } = { incarnation }
     expect(() => {
       assertIoDispatchAuthority({
         admittedIncarnation: incarnation,
@@ -30,7 +30,10 @@ describe('assertIoDispatchAuthority', () => {
     const incarnation = {}
     const first = {}
     const second = {}
-    const store: { incarnation?: object; capture?: object } = { incarnation, capture: first }
+    const store: { incarnation: object | undefined; capture: object | undefined } = {
+      incarnation,
+      capture: first,
+    }
     const capture = granted(store, first)
     store.capture = second
     expect(() => {
@@ -47,7 +50,7 @@ describe('assertIoDispatchAuthority', () => {
 
   it('refuses a replaced or removed incarnation', () => {
     const admitted = {}
-    const store: { incarnation?: object } = { incarnation: admitted }
+    const store: { incarnation: object | undefined } = { incarnation: admitted }
     const options = {
       admittedIncarnation: admitted,
       getCurrentIncarnation: () => store.incarnation,
@@ -72,7 +75,7 @@ describe('assertIoDispatchAuthority', () => {
   it('refuses a removed admitted capture grant', () => {
     const incarnation = {}
     const capture = {}
-    const store: { capture?: object } = { capture }
+    const store: { capture: object | undefined } = { capture }
     const arm = granted(store, capture)
     store.capture = undefined
     expect(() => {

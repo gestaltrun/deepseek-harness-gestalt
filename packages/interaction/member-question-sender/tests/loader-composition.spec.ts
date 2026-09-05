@@ -87,7 +87,10 @@ describe('member-question sender real Loader composition', () => {
       expect(result).toEqual({ local: '{"answers":[{"id":"local","selected":["local"]}]}', member: '{"answers":[]}' })
       expect(composed.localRequests).toHaveLength(1)
       expect(composed.delivery.delivered).toHaveLength(1)
-      expect(composed.delivery.delivered[0]?.message.operation).toMatchObject({
+      const delivered = composed.delivery.delivered[0]
+      expect(delivered?.message.type).toBe('operation')
+      if (delivered?.message.type !== 'operation') throw new Error('expected operation delivery')
+      expect(delivered.message.operation).toMatchObject({
         projectId: parseMemberQuestionProjectId('loader-project'),
         originSessionId: parseCompanionSessionId('unbound-origin'),
         background: 'Choose the release window.',

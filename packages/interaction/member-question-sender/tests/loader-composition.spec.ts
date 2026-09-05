@@ -92,14 +92,16 @@ async function boot(): Promise<Booted> {
       "- name: '@deepseek-ai/dsh-tools'",
       "- name: '@deepseek-ai/dsh-user-questions'",
       "- name: 'test-ui-answerer'",
+      "- name: 'test-delivery-config'",
       "- name: '@deepseek-ai/dsh-member-question-sender'",
       '  config:',
-      '    delivery: !!js ctx.root.get(\"testDeliveryConfig\").delivery',
+      '    delivery: !!js ctx.get(\"testDeliveryConfig\").delivery',
       "- name: 'test-tool-ask-user'",
       "- name: 'test-driver'",
       '',
     ].join('\n'))
     const ui = { name: 'test-ui', apply(ctx: Context) { ctx.on('user-questions/request', (request) => { localRequests.push(request); return Promise.resolve({ answers: request.questions.map(question => ({ id: question.id, selected: ['local'] })) }) }) } }
+    const deliveryConfig = { name: 'test-delivery-config', apply(ctx: Context) { ctx.root.provide('testDeliveryConfig', { delivery }) } }
     const senderModule = { default: Sender }
     const tool = {
       name: 'test-tool-ask-user',
@@ -123,6 +125,7 @@ async function boot(): Promise<Booted> {
     const driver = { name: 'test-driver', inject: ['agents', 'tools', 'memberQuestionSender'], apply(ctx: Context) { run = async () => {
       expect(ctx.memberQuestionSender).toBeInstanceOf(Sender)
       const unregister = ctx.agents.register(agent)
+      let result: { local: string; member: string }
       try {
         expect(ctx.agents.get(agent.id)).toBe(agent)
         const local = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('local'), name: 'ask_user_question', arguments: { questions: [{ id: 'local', question: 'Local?' }] } })
@@ -135,21 +138,24 @@ async function boot(): Promise<Booted> {
         await ctx.memberQuestionSender.settle(questionId, { outcome: 'declined', settledByInstallationId: parseInstallationId('loader-installation'), settledByDeviceName: 'Loader', settledAt: 1 })
         const member = await memberPromise
         const text = (result: typeof local) => result.content.filter(block => block.type === 'text').map(block => block.text).join('')
-        return { local: text(local), member: text(member) }
+        result = { local: text(local), member: text(member) }
       } finally {
-        unregister()
-        expect(ctx.agents.get(agent.id)).toBeUndefined()
-        await disposeAgentScope()
+        try {
+          unregister()
+        } finally {
+          await disposeAgentScope()
+        }
       }
+      expect(ctx.agents.get(agent.id)).toBeUndefined()
+      return result
     } } }
     context.baseUrl = `${pathToFileURL(root).href}/`
-    context.provide('testDeliveryConfig', { delivery })
     await writeFile(join(root, 'decision.txt'), 'release evidence\n')
     await context.plugin(Loader)
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['@deepseek-ai/dsh-agent', AgentRegistry], ['@deepseek-ai/dsh-system-prompt', SystemPrompt], ['@deepseek-ai/dsh-tools', ToolRuntime],
-      ['@deepseek-ai/dsh-user-questions', UserQuestions], ['test-ui-answerer', ui],
+      ['@deepseek-ai/dsh-user-questions', UserQuestions], ['test-ui-answerer', ui], ['test-delivery-config', deliveryConfig],
       ['@deepseek-ai/dsh-member-question-sender', senderModule], ['test-tool-ask-user', tool], ['test-driver', driver],
     ])
     context.loader.internal = { version: 'v2', async import(specifier: string) { if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`); return modules.get(specifier) } } as unknown as NonNullable<typeof context.loader.internal>
@@ -183,7 +189,7 @@ describe('member-question sender real Loader composition', () => {
         background: 'Choose the release window.',
         questions: [{ id: 'member', question: 'Member?' }],
         references: [{ path: 'decision.txt', reason: 'Release evidence.' }],
-        origin: { projectName: 'Loader', originSessionTitle: 'Composition', askerAccountId: 'loader-asker' as PlatformAccountId, askerRole: 'member', askerDisplayName: 'Ask', askerAvatarUrl: 'https://example.test/ask.png' },
+        origin: { projectName: 'Loader', originSessionTitle: 'Composition', askerAccountId: parsePlatformAccountId('loader-asker'), askerRole: 'member', askerDisplayName: 'Ask', askerAvatarUrl: 'https://example.test/ask.png' },
       })
       expect(delivered.toProjectMember).toBe('loader-peer')
       expect(delivered.projectId).toBe(parseMemberQuestionProjectId('loader-project'))

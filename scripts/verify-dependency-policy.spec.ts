@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { removeFixtureRoot } from './verify-dependency-policy.ts'
+import { fixtureScripts, removeFixtureRoot } from './verify-dependency-policy.ts'
+
+describe('dependency policy fixture commands', () => {
+  it('uses PATH-resolved Node with script files instead of shell-quoting an absolute executable', () => {
+    expect(fixtureScripts()).toEqual({ check: 'node check.cjs', postinstall: 'node postinstall.cjs' })
+  })
+})
 
 describe('dependency policy fixture cleanup', () => {
   it('uses bounded recursive retries for transient Windows removal failures', () => {

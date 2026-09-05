@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "nextSequence": 12,
+  "nextSequence": 13,
   "consumedIntentIds": [
     "226-sidebar-browser",
     "414-desktop-recovery-version",
@@ -14,6 +14,7 @@
     "502-windows-coverage-retry",
     "507-windows-atomic-replace",
     "554-desktop-cancel-github-login",
-    "555-platform-membership-http"
+    "555-platform-membership-http",
+    "desktop-updater-available-recheck"
   ]
 }

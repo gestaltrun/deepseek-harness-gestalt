@@ -1,0 +1,34 @@
+{
+  "version": "0.1.16",
+  "tag": "gestalt-v0.1.16",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "501528e92ac765f08e620d64496dd9c72f951dd4"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.16 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "产品变更",
+          "items": [
+            "在仍显示「下载」时刷新 Desktop 提供的更新版本，使后续 GitHub Release 替换过期目标。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.16 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Product changes",
+          "items": [
+            "Refresh the offered Desktop update version while Download is still showing, so a later GitHub Release replaces a stale target."
+          ]
+        }
+      ]
+    }
+  }
+}

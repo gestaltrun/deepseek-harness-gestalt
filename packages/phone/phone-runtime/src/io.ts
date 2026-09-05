@@ -125,30 +125,44 @@ export function upstreamIo(
   const point = (x: number, y: number) => iosPortraitEventPoint(
     x, y, captureWidth, captureHeight, screen, rotation,
   )
-  if (rotation === 0) {
-    if (request.method === 'tap') {
+  return iosPortraitGesture(request, point, rotation)
+}
+
+/**
+ * Project one iOS tap or swipe into portrait event space. Upright taps stay
+ * taps; non-upright taps are a zero-length swipe at the same point. Swipes
+ * remain swipes at both projected endpoints.
+ * @param request - Semantic tap or swipe after capture extents are resolved.
+ * @param point - Portrait event-space projector for one displayed coordinate.
+ * @param rotation - Exact clockwise display rotation.
+ * @returns one upstream tap or swipe call.
+ */
+function iosPortraitGesture(
+  request: Extract<PhoneIoRequest, { method: 'tap' | 'swipe' }>,
+  point: (x: number, y: number) => { readonly x: number; readonly y: number },
+  rotation: PhoneRotation,
+): PhoneUpstreamIo {
+  switch (request.method) {
+    case 'tap': {
       const target = point(request.x, request.y)
-      return { method: 'device.io.tap', params: { deviceId: request.deviceId, x: target.x, y: target.y } }
+      if (rotation === 0) {
+        return { method: 'device.io.tap', params: { deviceId: request.deviceId, x: target.x, y: target.y } }
+      }
+      return {
+        method: 'device.io.swipe',
+        params: { deviceId: request.deviceId, x1: target.x, y1: target.y, x2: target.x, y2: target.y },
+      }
     }
-    const start = point(request.x1, request.y1)
-    const end = point(request.x2, request.y2)
-    return {
-      method: 'device.io.swipe',
-      params: { deviceId: request.deviceId, x1: start.x, y1: start.y, x2: end.x, y2: end.y },
+    case 'swipe': {
+      const start = point(request.x1, request.y1)
+      const end = point(request.x2, request.y2)
+      return {
+        method: 'device.io.swipe',
+        params: { deviceId: request.deviceId, x1: start.x, y1: start.y, x2: end.x, y2: end.y },
+      }
     }
-  }
-  if (request.method === 'tap') {
-    const target = point(request.x, request.y)
-    return {
-      method: 'device.io.swipe',
-      params: { deviceId: request.deviceId, x1: target.x, y1: target.y, x2: target.x, y2: target.y },
-    }
-  }
-  const start = point(request.x1, request.y1)
-  const end = point(request.x2, request.y2)
-  return {
-    method: 'device.io.swipe',
-    params: { deviceId: request.deviceId, x1: start.x, y1: start.y, x2: end.x, y2: end.y },
+    default:
+      return assertNever(request)
   }
 }
 

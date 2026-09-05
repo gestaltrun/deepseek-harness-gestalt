@@ -1,14 +1,19 @@
-import { request as httpRequest } from 'node:http'
+import { IncomingMessage, request as httpRequest, ServerResponse } from 'node:http'
+import { Socket } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
 import type { RawData } from 'ws'
-import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
+import PhoneStream, { PHONE_IO_PATH, PHONE_SESSION_PATH } from '../src/index.ts'
 import { CaptureGrantLedger } from '../src/capture-grant-ledger.ts'
 import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 import { readAndroidLogicalDisplay } from '../../phone-runtime/src/android-display.ts'
+
+const wsHarness = vi.hoisted(() => ({
+  failNextUpgrade: false,
+}))
 
 vi.mock('../../phone-runtime/src/android-display.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../phone-runtime/src/android-display.ts')>()
@@ -16,6 +21,25 @@ vi.mock('../../phone-runtime/src/android-display.ts', async (importOriginal) => 
     ...actual,
     readAndroidLogicalDisplay: vi.fn(() => undefined),
   }
+})
+
+vi.mock('ws', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ws')>()
+  class InstrumentedServer extends actual.WebSocketServer {
+    override handleUpgrade(
+      req: import('node:http').IncomingMessage,
+      socket: import('node:stream').Duplex,
+      head: Buffer,
+      callback: (client: import('ws').WebSocket, request: import('node:http').IncomingMessage) => void,
+    ): void {
+      if (wsHarness.failNextUpgrade) {
+        wsHarness.failNextUpgrade = false
+        throw new Error('upgrade boom')
+      }
+      super.handleUpgrade(req, socket, head, callback)
+    }
+  }
+  return { ...actual, WebSocketServer: InstrumentedServer }
 })
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
@@ -28,13 +52,26 @@ function parseWebSocketJson(data: RawData): unknown {
     : data instanceof ArrayBuffer
       ? Buffer.from(new Uint8Array(data))
       : data
-  return JSON.parse(bytes.toString('utf8')) as unknown
+  return parseHttpJson(bytes)
+}
+
+function parseHttpJson(body: Buffer): unknown {
+  return JSON.parse(body.toString('utf8')) as unknown
+}
+
+function jsonObject(body: Buffer): Record<string, unknown> {
+  const parsed = parseHttpJson(body)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('expected a JSON object body')
+  }
+  return parsed as Record<string, unknown>
 }
 
 const contexts: Context[] = []
 const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
 
 afterEach(async () => {
+  wsHarness.failNextUpgrade = false
   vi.mocked(readAndroidLogicalDisplay).mockReturnValue(undefined)
   await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
@@ -43,7 +80,12 @@ afterEach(async () => {
 async function mount(
   devices: Array<Record<string, unknown>> = [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
   fakeKnobs: Record<string, unknown> = {},
-): Promise<{ context: Context; origin: string; phoneStreamFiber: Fiber }> {
+): Promise<{
+  context: Context
+  origin: string
+  phoneStreamFiber: Fiber
+  sessionHandler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+}> {
   const fake = await stageFake({ devices, ...fakeKnobs })
   fakes.push(fake)
   await fake.claim()
@@ -58,9 +100,20 @@ async function mount(
     requestTimeoutMs: 1_500,
     bootTimeoutMs: 2_000,
   }).await()
-  const phoneStreamFiber = context.plugin(PhoneStream, {})
-  await phoneStreamFiber.await()
-  return { context, origin: `http://127.0.0.1:${String(context.webServer.port)}`, phoneStreamFiber }
+  let sessionHandler: ((req: IncomingMessage, res: ServerResponse) => void | Promise<void>) | undefined
+  const originalRegister = context.webServer.register.bind(context.webServer)
+  context.webServer.register = (route) => {
+    if (route.path === PHONE_SESSION_PATH) sessionHandler = route.handler
+    return originalRegister(route)
+  }
+  try {
+    const phoneStreamFiber = context.plugin(PhoneStream, {})
+    await phoneStreamFiber.await()
+    if (sessionHandler === undefined) throw new Error('phone session route was not registered')
+    return { context, origin: `http://127.0.0.1:${String(context.webServer.port)}`, phoneStreamFiber, sessionHandler }
+  } finally {
+    context.webServer.register = originalRegister
+  }
 }
 
 async function mint(origin: string, id = 'emulator-5554'): Promise<{
@@ -340,7 +393,7 @@ describe('phone stream Host routes', () => {
       expect({ name: testCase.name, status: response.status }).toEqual({
         name: testCase.name, status: testCase.status,
       })
-      expect({ name: testCase.name, body: JSON.parse(response.body.toString('utf8')) }).toEqual({
+      expect({ name: testCase.name, body: parseHttpJson(response.body) }).toEqual({
         name: testCase.name, body: testCase.body,
       })
     }
@@ -571,7 +624,9 @@ describe('phone stream Host routes', () => {
     ])
     const host = new URL(origin).host
     const response = await rawRequest({ origin, path: '/phone/devices', host })
-    expect(JSON.parse(response.body.toString('utf8')).android[0]).toMatchObject({
+    const android = jsonObject(response.body).android
+    if (!Array.isArray(android)) throw new Error('expected android listing array')
+    expect(android[0]).toMatchObject({
       id: 'emulator-5554',
       logicalDisplay: { width: 2248, height: 1080 },
     })
@@ -986,6 +1041,38 @@ describe('phone stream Host routes', () => {
     socket.close()
   })
 
+  it('rejects incomplete, malformed, and MJPEG-supplied capture evidence on the io socket', async () => {
+    const { origin } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.h264.url)
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => { resolve() })
+      socket.once('error', reject)
+    })
+    const send = async (params: Record<string, unknown>): Promise<unknown> => {
+      const reply = new Promise<unknown>((resolve) => {
+        socket.once('message', (data) => { resolve(parseWebSocketJson(data)) })
+      })
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'tap', params: { deviceId: ANDROID, x: 1, y: 1, ...params } }))
+      return await reply
+    }
+    for (const [params, message] of [
+      [{}, 'coordinate input kind must be capture'],
+      [{ kind: 'capture', captureWidth: 100 }, 'captureWidth and captureHeight must be sent together'],
+      [{ kind: 'capture', captureWidth: 100, captureHeight: 100, captureId: '', captureFormat: 'h264' }, 'captureId is required'],
+      [{ kind: 'capture', captureWidth: 100, captureHeight: 100, captureId: session.h264.captureId, captureFormat: 'avc' }, 'captureFormat must be mjpeg or h264'],
+      [{ kind: 'capture', captureWidth: 100, captureHeight: 100, captureId: session.h264.captureId, captureFormat: 'mjpeg', captureRotation: 90 }, 'MJPEG coordinate input cannot supply captureRotation'],
+      [{ kind: 'capture', captureWidth: 100, captureHeight: 100, captureId: session.h264.captureId, captureFormat: 'h264', captureRotation: 45 }, 'captureRotation must be 0, 90, 180, or 270'],
+      [{ kind: 'capture', captureWidth: 0, captureHeight: 100, captureId: session.h264.captureId, captureFormat: 'h264' }, 'captureWidth must be a positive integer'],
+    ] as const) {
+      expect(await send(params)).toMatchObject({ error: { code: -32000, message } })
+    }
+    socket.close()
+    await capture.body?.cancel()
+  })
+
   it('refuses to mint URLs for an unknown device and an untrusted Host', async () => {
     const { origin } = await mount()
     const host = new URL(origin).host
@@ -1017,6 +1104,57 @@ describe('phone stream Host routes', () => {
     }
   })
 
+  it('logs a capture cleanup timeout under a 1ms transport ceiling', async () => {
+    const fake = await stageFake({ devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')], streamFrameCount: 20 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(WebServer, { host: '127.0.0.1', port: 0 }).await()
+    await context.plugin(PhoneDevices, {
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+      pollIntervalMs: 20,
+      readyTimeoutMs: 6_000,
+      requestTimeoutMs: 1_500,
+      bootTimeoutMs: 2_000,
+    }).await()
+    const warnings: unknown[] = []
+    vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    await context.plugin(PhoneStream, { transportCleanupTimeoutMs: 1 }).await()
+    const origin = `http://127.0.0.1:${String(context.webServer.port)}`
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const original = context.phoneDevices.startCapture.bind(context.phoneDevices)
+    context.phoneDevices.startCapture = async (request) => {
+      const capture = await original(request)
+      return {
+        ...capture,
+        body: new ReadableStream<Uint8Array>({
+          start(controller) { controller.enqueue(Uint8Array.of(1)) },
+          cancel() { return new Promise(() => {}) },
+        }, { highWaterMark: 0 }),
+      }
+    }
+    const url = new URL(origin)
+    await new Promise<void>((resolve, reject) => {
+      const req = httpRequest({
+        hostname: url.hostname, port: url.port, method: 'GET', path: session.h264.url, headers: { host },
+      }, (res) => {
+        res.once('data', () => { res.destroy(); resolve() })
+        res.once('error', (error) => {
+          if ((error as NodeJS.ErrnoException).code === 'ECONNRESET') resolve()
+          else reject(error)
+        })
+      })
+      req.once('error', reject)
+      req.end()
+    })
+    await vi.waitFor(() => {
+      expect(warnings.some(value => typeof value === 'string' && value.includes('cleanup timed out'))).toBe(true)
+    })
+  })
+
   it('refuses a zero token lifetime at plugin load', async () => {
     const context = new Context()
     contexts.push(context)
@@ -1043,6 +1181,7 @@ describe('phone stream Host routes', () => {
     const host = new URL(origin).host
     expect((await rawRequest({ origin, method: 'POST', path: '/phone/stream/x/mjpeg', host })).status).toBe(405)
     expect((await rawRequest({ origin, path: '/phone/stream/', host })).status).toBe(404)
+    expect((await rawRequest({ origin, path: '/phone/stream/%E0%A4%A/h264', host })).status).toBe(404)
     expect((await rawRequest({ origin, path: '/phone/stream/%E0%A4%A/mjpeg', host })).status).toBe(404)
     expect((await rawRequest({ origin, path: '/phone/stream/a%2Fb/mjpeg', host })).status).toBe(404)
     expect((await rawRequest({ origin, path: '/phone/stream/emulator-5554/mjpeg', host })).status).toBe(403)
@@ -1178,9 +1317,38 @@ describe('phone stream Host routes', () => {
   })
 
   it('refuses in-process session minting after the synchronous owner fence', async () => {
-    const { context, phoneStreamFiber } = await mount()
+    const { origin, context, phoneStreamFiber, sessionHandler } = await mount()
+    const host = new URL(origin).host
+    const listDevices = vi.spyOn(context.phoneDevices, 'listDevices')
+    const agentStatus = vi.spyOn(context.phoneDevices, 'agentStatus')
+    const socket = new Socket()
+    const req = new IncomingMessage(socket)
+    req.method = 'POST'
+    req.url = PHONE_SESSION_PATH
+    req.headers.host = host
+    req.headers['content-type'] = 'application/json'
+    const res = new ServerResponse(req)
+    let responseBody = ''
+    res.writeHead = (status: number) => {
+      res.statusCode = status
+      return res
+    }
+    res.end = (chunk?: unknown) => {
+      if (typeof chunk === 'string') responseBody = chunk
+      else if (Buffer.isBuffer(chunk)) responseBody = chunk.toString('utf8')
+      return res
+    }
     const disposal = phoneStreamFiber.dispose()
     expect(() => context.phoneStream.sessionFor(ANDROID)).toThrow(expect.objectContaining({ code: 'PHONE_ABORTED' }))
+    const pending = sessionHandler(req, res)
+    expect(listDevices).not.toHaveBeenCalled()
+    expect(agentStatus).not.toHaveBeenCalled()
+    await pending
+    expect(res.statusCode).toBe(503)
+    expect(responseBody).toContain('phone-stream is closing')
+    expect(listDevices).not.toHaveBeenCalled()
+    expect(agentStatus).not.toHaveBeenCalled()
+    socket.destroy()
     await disposal
   })
 
@@ -1193,6 +1361,233 @@ describe('phone stream Host routes', () => {
     expect(responses.every(response => response.status !== 200)).toBe(true)
     await disposal
     await expect(fetch(`${origin}/phone/devices`, { headers: { host } })).resolves.toMatchObject({ status: 404 })
+  })
+
+  it('logs a transport failure when handleUpgrade throws before the peer opens', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const warnings: unknown[] = []
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    wsHarness.failNextUpgrade = true
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    try {
+      await new Promise<undefined>((resolve) => {
+        socket.once('unexpected-response', () => { resolve(undefined) })
+        socket.once('error', () => { resolve(undefined) })
+        socket.once('close', () => { resolve(undefined) })
+      })
+      await vi.waitFor(() => {
+        expect(warnings.some(value => typeof value === 'string' && value.includes('transport failed'))).toBe(true)
+      })
+    } finally {
+      wsHarness.failNextUpgrade = false
+      warn.mockRestore()
+      socket.close()
+    }
+  })
+
+  it('prevents iOS mint after listing returns and the first agentStatus recrosses disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount([wireDevice('ios-real', 'ios', 'real', 'online')])
+    const originalStatus = context.phoneDevices.agentStatus.bind(context.phoneDevices)
+    const originalInstall = context.phoneDevices.installAgent.bind(context.phoneDevices)
+    let statuses = 0
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.agentStatus = async (id) => {
+      statuses += 1
+      entered()
+      await gate
+      return { deviceId: id, installed: true }
+    }
+    const install = vi.fn(async () => ({ deviceId: deviceId('ios-real'), installed: true, reinstalled: false }))
+    context.phoneDevices.installAgent = install
+    const request = fetch(`${origin}/phone/session`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'ios-real' }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      expect(install).not.toHaveBeenCalled()
+      expect(statuses).toBe(1)
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.agentStatus = originalStatus
+      context.phoneDevices.installAgent = originalInstall
+    }
+  })
+
+  it('prevents iOS mint after install returns and before the follow-up status', async () => {
+    const { origin, context, phoneStreamFiber } = await mount([wireDevice('ios-real', 'ios', 'real', 'online')])
+    const originalStatus = context.phoneDevices.agentStatus.bind(context.phoneDevices)
+    const originalInstall = context.phoneDevices.installAgent.bind(context.phoneDevices)
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: false })
+    context.phoneDevices.installAgent = async (id) => {
+      entered()
+      await gate
+      return { deviceId: id, installed: true, reinstalled: false }
+    }
+    const request = fetch(`${origin}/phone/session`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'ios-real' }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.agentStatus = originalStatus
+      context.phoneDevices.installAgent = originalInstall
+    }
+  })
+
+  it('prevents a forced agent install after listing returns and force is valid', async () => {
+    const { origin, context, phoneStreamFiber } = await mount()
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    const original = context.phoneDevices.listDevices.bind(context.phoneDevices)
+    const originalInstall = context.phoneDevices.installAgent.bind(context.phoneDevices)
+    context.phoneDevices.listDevices = async () => {
+      entered()
+      await gate
+      return await original()
+    }
+    const install = vi.fn(async () => ({ deviceId: ANDROID, installed: true, reinstalled: true }))
+    context.phoneDevices.installAgent = install
+    const request = fetch(`${origin}/phone/agent/install`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'emulator-5554', force: true }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      expect(install).not.toHaveBeenCalled()
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.listDevices = original
+      context.phoneDevices.installAgent = originalInstall
+    }
+  })
+
+  it('does not send an io success reply after the connection is cancelled mid-dispatch', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.h264.url)
+    let entered!: () => void
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    let aborted!: () => void
+    const hang = new Promise<void>((resolve) => { aborted = resolve })
+    const originalIo = context.phoneDevices.io.bind(context.phoneDevices)
+    context.phoneDevices.io = async (_request, signal: AbortSignal) => {
+      entered()
+      await new Promise<undefined>((resolve) => {
+        if (signal.aborted) {
+          aborted()
+          resolve(undefined)
+          return
+        }
+        signal.addEventListener('abort', () => { aborted(); resolve(undefined) }, { once: true })
+      })
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    const messages: unknown[] = []
+    const onMessage = (data: RawData): void => { messages.push(parseWebSocketJson(data)) }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => { resolve() })
+        socket.once('error', reject)
+      })
+      socket.on('message', onMessage)
+      socket.send(JSON.stringify({
+        jsonrpc: '2.0', id: 23, method: 'button', params: { deviceId: ANDROID, button: 'HOME' },
+      }))
+      await admission
+      socket.close()
+      await hang
+      expect(messages).toEqual([])
+    } finally {
+      socket.off('message', onMessage)
+      aborted()
+      context.phoneDevices.io = originalIo
+      socket.close()
+      await capture.body?.cancel()
+    }
+  })
+
+  it('drops an io success reply when the WebSocket is no longer OPEN', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.h264.url)
+    let entered!: () => void
+    const admission = new Promise<undefined>((resolve) => { entered = () => { resolve(undefined) } })
+    let releaseHang!: () => void
+    const hang = new Promise<undefined>((resolve) => { releaseHang = () => { resolve(undefined) } })
+    const originalIo = context.phoneDevices.io.bind(context.phoneDevices)
+    context.phoneDevices.io = async (_request, _signal) => {
+      entered()
+      await hang
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    const messages: unknown[] = []
+    const onMessage = (data: RawData): void => { messages.push(parseWebSocketJson(data)) }
+    try {
+      await new Promise<undefined>((resolve, reject) => {
+        socket.once('open', () => { resolve(undefined) })
+        socket.once('error', reject)
+      })
+      socket.on('message', onMessage)
+      socket.send(JSON.stringify({
+        jsonrpc: '2.0', id: 24, method: 'button', params: { deviceId: ANDROID, button: 'HOME' },
+      }))
+      await admission
+      socket.close()
+      await new Promise<undefined>((resolve) => { socket.once('close', () => { resolve(undefined) }) })
+      expect(socket.readyState).not.toBe(WebSocket.OPEN)
+      releaseHang()
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(messages).toEqual([])
+    } finally {
+      socket.off('message', onMessage)
+      releaseHang()
+      context.phoneDevices.io = originalIo
+      socket.close()
+      await capture.body?.cancel()
+    }
+  })
+
+  it('answers 502 when listing fails with a non-Error value', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const original = context.phoneDevices.listDevices.bind(context.phoneDevices)
+    context.phoneDevices.listDevices = async () => {
+      throw 19
+    }
+    try {
+      const response = await rawRequest({ origin, path: '/phone/devices', host })
+      expect(response.status).toBe(502)
+      expect(response.body.toString('utf8')).toContain('19')
+    } finally {
+      context.phoneDevices.listDevices = original
+    }
   })
 
   it('answers 502 when capture start fails upstream after a valid token', async () => {
@@ -1255,6 +1650,249 @@ describe('phone stream Host routes', () => {
     expect((await reply).error?.message).toBe('io failed')
     socket.close()
     await capture.body?.cancel()
+  })
+
+  it('answers PHONE_DEVICE_NOT_FOUND as JSON-RPC -32010 on the io socket', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.h264.url)
+    context.phoneDevices.io = async () => {
+      throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', 'device vanished')
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => { resolve() })
+      socket.once('error', reject)
+    })
+    const reply = new Promise<{ error?: { code?: number } }>((resolve) => {
+      socket.once('message', (data) => {
+        resolve(parseWebSocketJson(data) as { error?: { code?: number } })
+      })
+    })
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0', id: 16, method: 'button', params: { deviceId: ANDROID, button: 'HOME' },
+    }))
+    expect((await reply).error?.code).toBe(-32010)
+    socket.close()
+    await capture.body?.cancel()
+  })
+
+  it('does not send an io reply after the connection is cancelled', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.h264.url)
+    const originalIo = context.phoneDevices.io.bind(context.phoneDevices)
+    let entered!: () => void
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    let aborted!: () => void
+    const sawAbort = new Promise<void>((resolve) => { aborted = resolve })
+    let releaseGate!: () => void
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve })
+    const messages: unknown[] = []
+    const onMessage = (data: RawData): void => { messages.push(parseWebSocketJson(data)) }
+    const onAbort = (): void => { aborted() }
+    context.phoneDevices.io = async (_request, signal: AbortSignal) => {
+      entered()
+      await new Promise<undefined>((resolve) => {
+        if (signal.aborted) {
+          onAbort()
+          void gate.then(() => { resolve(undefined) })
+          return
+        }
+        signal.addEventListener('abort', () => {
+          onAbort()
+          void gate.then(() => { resolve(undefined) })
+        }, { once: true })
+      })
+    }
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => { resolve() })
+        socket.once('error', reject)
+      })
+      socket.on('message', onMessage)
+      socket.send(JSON.stringify({
+        jsonrpc: '2.0', id: 17, method: 'button', params: { deviceId: ANDROID, button: 'HOME' },
+      }))
+      await admission
+      socket.close()
+      await sawAbort
+      expect(messages).toEqual([])
+    } finally {
+      socket.off('message', onMessage)
+      context.phoneDevices.io = originalIo
+      releaseGate()
+      socket.close()
+      await capture.body?.cancel()
+    }
+  })
+
+  it('logs a transport cleanup timeout when an io dispatcher hangs past the ceiling', async () => {
+    const fake = await stageFake({ devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')] })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(WebServer, { host: '127.0.0.1', port: 0 }).await()
+    await context.plugin(PhoneDevices, {
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+      pollIntervalMs: 20,
+      readyTimeoutMs: 6_000,
+      requestTimeoutMs: 1_500,
+      bootTimeoutMs: 2_000,
+    }).await()
+    const warnings: unknown[] = []
+    vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const phoneStreamFiber = context.plugin(PhoneStream, { transportCleanupTimeoutMs: 1 })
+    await phoneStreamFiber.await()
+    const origin = `http://127.0.0.1:${String(context.webServer.port)}`
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.h264.url)
+    let entered!: () => void
+    const admission = new Promise<undefined>((resolve) => { entered = () => { resolve(undefined) } })
+    let releaseHang!: () => void
+    const hang = new Promise<undefined>((resolve) => { releaseHang = () => { resolve(undefined) } })
+    const originalIo = context.phoneDevices.io.bind(context.phoneDevices)
+    context.phoneDevices.io = async (request, signal) => {
+      entered()
+      await hang
+      await originalIo(request, signal)
+    }
+    const warn = vi.mocked(context.logger.warn)
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => { resolve() })
+        socket.once('error', reject)
+      })
+      socket.send(JSON.stringify({
+        jsonrpc: '2.0', id: 18, method: 'button', params: { deviceId: ANDROID, button: 'HOME' },
+      }))
+      await admission
+      await phoneStreamFiber.dispose()
+      expect(warnings.some(value => typeof value === 'string' && value.includes('transport cleanup timed out'))).toBe(true)
+    } finally {
+      releaseHang()
+      warn.mockRestore()
+      context.phoneDevices.io = originalIo
+      socket.close()
+      await capture.body?.cancel()
+    }
+  })
+
+  it('prevents mint after listing returns across disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount()
+    const original = context.phoneDevices.listDevices.bind(context.phoneDevices)
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.listDevices = async () => { entered(); await gate; return await original() }
+    const request = fetch(`${origin}/phone/session`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'emulator-5554' }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.listDevices = original
+    }
+  })
+
+  it('prevents agent status commit after the status call crosses disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount()
+    const originalStatus = context.phoneDevices.agentStatus.bind(context.phoneDevices)
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.agentStatus = async () => { entered(); await gate; return { deviceId: ANDROID, installed: true } }
+    const request = fetch(`${origin}/phone/agent/status`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'emulator-5554' }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.agentStatus = originalStatus
+    }
+  })
+
+  it('prevents agent install commit after install returns across disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount()
+    const originalInstall = context.phoneDevices.installAgent.bind(context.phoneDevices)
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.installAgent = async () => {
+      entered()
+      await gate
+      return { deviceId: ANDROID, installed: true, reinstalled: false }
+    }
+    const request = fetch(`${origin}/phone/agent/install`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'emulator-5554' }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.installAgent = originalInstall
+    }
+  })
+
+  it('prevents iOS mint after a successful install recrosses disposal on the follow-up status', async () => {
+    const { origin, context, phoneStreamFiber } = await mount([wireDevice('ios-real', 'ios', 'real', 'online')])
+    const originalStatus = context.phoneDevices.agentStatus.bind(context.phoneDevices)
+    const originalInstall = context.phoneDevices.installAgent.bind(context.phoneDevices)
+    let statuses = 0
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.agentStatus = async (id) => {
+      statuses += 1
+      if (statuses === 1) return { deviceId: id, installed: false }
+      entered()
+      await gate
+      return { deviceId: id, installed: true }
+    }
+    context.phoneDevices.installAgent = async id => ({ deviceId: id, installed: true, reinstalled: false })
+    const request = fetch(`${origin}/phone/session`, {
+      method: 'POST',
+      headers: { host: new URL(origin).host, 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'ios-real' }),
+    })
+    try {
+      await admission
+      const disposal = phoneStreamFiber.dispose()
+      release()
+      expect((await request).status).toBe(503)
+      await disposal
+    } finally {
+      release()
+      context.phoneDevices.agentStatus = originalStatus
+      context.phoneDevices.installAgent = originalInstall
+    }
   })
 
   it('destroys an untrusted IO upgrade before protocol negotiation', async () => {

@@ -12,7 +12,7 @@ import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import { realDeviceIssueError } from './classify.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
 import { normalizeOperationError } from './rpc.ts'
-import { MobilecliProcessTree, retainTail } from './server-process.ts'
+import { awaitMobilecliTreeExit, MobilecliProcessTree, retainTail } from './server-process.ts'
 import type { PhoneAgentInfo } from './types.ts'
 
 /** One parsed upstream agent command answer. */
@@ -73,22 +73,12 @@ export async function runMobilecliAgent(options: MobilecliAgentRunOptions): Prom
   child.stderr?.on('data', (chunk: Buffer) => {
     stderrTail = retainTailWith(stderrTail, chunk)
   })
-  const stopped = Promise.withResolvers<void>()
-  const onAbort = (): void => {
-    void tree.stop().then(stopped.resolve, stopped.reject)
-  }
-  // The pre-abort rejection above guarantees the budget cannot be aborted
-  // before this listener attaches: there is no await between the two lines.
-  budget.signal.addEventListener('abort', onAbort, { once: true })
   try {
-    const exit = await Promise.race([
-      tree.exit,
-      stopped.promise.then(() => tree.exit),
-    ])
-    if (budget.signal.aborted) {
-      await tree.stop()
-      throw agentHalt(budget.signal.reason, label, options.timeoutMs)
-    }
+    const exit = await awaitMobilecliTreeExit(
+      tree,
+      budget.signal,
+      () => agentHalt(budget.signal.reason, label, options.timeoutMs),
+    )
     if (tree.error !== undefined) {
       throw new PhoneDevicesError(
         'PHONE_UNAVAILABLE',
@@ -127,7 +117,6 @@ export async function runMobilecliAgent(options: MobilecliAgentRunOptions): Prom
     )
     /* v8 ignore stop */
   } finally {
-    budget.signal.removeEventListener('abort', onAbort)
     budget[Symbol.dispose]()
   }
 }

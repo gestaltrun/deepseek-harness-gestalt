@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { PhoneHttpTransactions } from '../src/phone-http-transactions.ts'
 import { PhoneStreamOwner } from '../src/phone-stream-owner.ts'
 
 function gate() { let resolve!: () => void; return { promise: new Promise<void>((r) => { resolve = r }), resolve } }
@@ -66,6 +67,33 @@ describe('PhoneStreamOwner', () => {
     const closing = owner.beginClosing(); expect(owner.beginClosing()).toBe(closing)
     await expect(closing.transport).rejects.toBe(transportError)
     await Promise.resolve(); expect(relay).toHaveBeenCalledOnce()
+  })
+
+  it('admits HTTP work after the owner fence and before HTTP close', async () => {
+    let closing = false
+    const tx = new PhoneHttpTransactions(async (task) => {
+      await task
+      return 'settled'
+    })
+    const owner = new PhoneStreamOwner({ uid: 1 }, () => () => {}, [], () => { closing = true }, {
+      http: () => tx.close(new Error('stop')),
+      transport: async () => {},
+      relay: async () => {},
+    })
+    owner.beginClosing()
+    let handlerEntered = false
+    let backendCalled = false
+    const reject = vi.fn()
+    const work = tx.run(async () => {
+      handlerEntered = true
+      if (closing) return
+      backendCalled = true
+    }, reject)
+    expect({ closing, handlerEntered }).toEqual({ closing: true, handlerEntered: true })
+    expect(backendCalled).toBe(false)
+    expect(reject).not.toHaveBeenCalled()
+    await owner.dispose()
+    await work
   })
 
   it('keeps registrations live and starts each close lane only after its predecessor', async () => {

@@ -6,8 +6,8 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
-import type {
-  PhoneTabDescriptor, PhoneTabEnvironment, PhoneTabOptions,
+import {
+  PHONE_TAB_TITLE, type PhoneTabDescriptor, type PhoneTabEnvironment, type PhoneTabOptions,
 } from '../src/client/registry.ts'
 import * as PhoneInvariant from '../src/invariant.ts'
 
@@ -50,6 +50,7 @@ describe('ui-phone invariant wiring', () => {
     }
     expect(options.view.icon(16)).toBeNull()
     expect(options.view.component({ tab: { id: 'phone' }, visible: false }, environment)).toBeNull()
+    expect(options.title()).toBe(PHONE_TAB_TITLE)
     expect(options.isEnabled()).toBe(false)
     expect(options.gate.snapshot()).toBe(false)
     const stopGate = options.gate.subscribe(() => {})

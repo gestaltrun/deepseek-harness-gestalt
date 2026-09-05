@@ -1600,6 +1600,97 @@ describe('PhoneEnvironment', () => {
     expect(failure).toBe('owner stopped')
   })
 
+  it('times out an online Android H264 capture that never yields a frame', async () => {
+    vi.useFakeTimers()
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => ({
+        android: [{
+          id: deviceId('emulator-5554'), name: 'Pixel', kind: 'emulator', platform: 'android',
+          state: 'online', online: true,
+        }],
+        ios: { simulators: [], reals: [] },
+      }),
+      startCapture: async (request: { signal?: AbortSignal }) => await new Promise((_resolve, reject) => {
+        request.signal?.addEventListener('abort', () => {
+          reject(request.signal?.reason instanceof Error ? request.signal.reason : new Error(String(request.signal?.reason)))
+        }, { once: true })
+      }),
+    }, { executablePath: path })
+    const timed = internals(service).verifyAndroidRuntime(
+      deviceId('emulator-5554'), new AbortController().signal,
+    ).catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(15_000)
+    const timedError = await timed
+    expect(timedError).toBeInstanceOf(PhoneEnvironmentError)
+    expect((timedError as PhoneEnvironmentError).code).toBe('PHONE_ANDROID_RUNTIME_VERIFY')
+    expect((timedError as PhoneEnvironmentError).message).toMatch(/H264 frame/)
+  })
+
+  it('rejects an online Android capture that is not H264', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => ({
+        android: [{
+          id: deviceId('emulator-5554'), name: 'Pixel', kind: 'emulator', platform: 'android',
+          state: 'online', online: true,
+        }],
+        ios: { simulators: [], reals: [] },
+      }),
+      startCapture: async () => ({
+        contentType: 'video/mp4',
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.close() } }),
+      }),
+    }, { executablePath: path })
+    const wrongType = await internals(service).verifyAndroidRuntime(
+      deviceId('emulator-5554'), new AbortController().signal,
+    ).catch((error: unknown) => error)
+    expect(wrongType).toBeInstanceOf(PhoneEnvironmentError)
+    expect((wrongType as PhoneEnvironmentError).code).toBe('PHONE_ANDROID_RUNTIME_VERIFY')
+    expect((wrongType as PhoneEnvironmentError).message).toMatch(/video\/mp4/)
+  })
+
+  it('rethrows a listed-device timeout that already carries PHONE_ANDROID_RUNTIME_VERIFY', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const timeout = new PhoneEnvironmentError(
+      'PHONE_ANDROID_RUNTIME_VERIFY',
+      'mobilecli did not list the prepared Android device emulator-5554 online within 1ms',
+    )
+    const { service } = await mountEnvironment(context, {
+      listDevices: async () => { throw timeout },
+    }, { executablePath: path, androidRuntimeVerifyTimeoutMs: 1 })
+    await expect(internals(service).verifyAndroidRuntime(
+      deviceId('emulator-5554'), new AbortController().signal,
+    )).rejects.toBe(timeout)
+  })
+
+  it.each([new Error('capture failed'), 'capture string failure'])(
+    'wraps an unexpected Android H264 capture failure %#', async (failure) => {
+      const path = await executable()
+      const context = new Context()
+      contexts.push(context)
+      const { service } = await mountEnvironment(context, {
+        listDevices: async () => ({
+          android: [{
+            id: deviceId('emulator-5554'), name: 'Pixel', kind: 'emulator', platform: 'android',
+            state: 'online', online: true,
+          }],
+          ios: { simulators: [], reals: [] },
+        }),
+        startCapture: async () => { throw failure },
+      }, { executablePath: path })
+      await expect(internals(service).verifyAndroidRuntime(
+        deviceId('emulator-5554'), new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'PHONE_ANDROID_RUNTIME_VERIFY' })
+    },
+  )
+
   it.each([new Error('capture failed'), 'capture string failure'])(
     'wraps an unexpected Android verification failure %#', async (failure) => {
       const path = await executable()

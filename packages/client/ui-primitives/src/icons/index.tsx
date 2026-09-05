@@ -7,6 +7,14 @@ import type { IconProps } from './props.ts'
 
 export type { IconProps } from './props.ts'
 
+/** 16-grid handset used by the Phone tab strip, + menu, and Desktop overlay. */
+export const IconPhoneOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" strokeWidth="1.3" />
+    <circle cx="8" cy="12" r=".95" fill="currentColor" />
+  </svg>
+)
+
 /** ic_ds_new_chat_outline_16 */
 export const IconNewChatOutline16 = ({ size = 16, className }: IconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">

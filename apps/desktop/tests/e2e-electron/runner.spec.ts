@@ -122,7 +122,16 @@ describe('Desktop Electron runner ownership', () => {
     expect(sourceE2E.compilerOptions?.noEmit).toBe(true)
     expect(sourceE2E.compilerOptions?.strict).toBe(true)
     expect(sourceE2E.compilerOptions?.rewriteRelativeImportExtensions).toBe(false)
-    expect(sourceE2E.include).toEqual(['../src/e2e-profile.ts', './e2e-profile.spec.ts'])
+    expect(sourceE2E.include).toEqual([
+      '../src/e2e-profile.ts',
+      './e2e-profile.spec.ts',
+      '../scripts/hidden-window-smoke.ts',
+      './helpers/hidden-window-smoke-owner.ts',
+      './helpers/hidden-window-smoke-result.ts',
+      './helpers/hidden-window-smoke-run.ts',
+      './helpers/hidden-window-smoke-launch.ts',
+      './hidden-window-smoke.spec.ts',
+    ])
   })
 
   it('arms a source-only hidden window profile and does not treat CI as presentation', async () => {

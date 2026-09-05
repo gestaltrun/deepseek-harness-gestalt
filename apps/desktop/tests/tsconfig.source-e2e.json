@@ -9,10 +9,16 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "electron", "vitest/globals"]
   },
   "include": [
     "../src/e2e-profile.ts",
-    "./e2e-profile.spec.ts"
+    "./e2e-profile.spec.ts",
+    "../scripts/hidden-window-smoke.ts",
+    "./helpers/hidden-window-smoke-owner.ts",
+    "./helpers/hidden-window-smoke-result.ts",
+    "./helpers/hidden-window-smoke-run.ts",
+    "./helpers/hidden-window-smoke-launch.ts",
+    "./hidden-window-smoke.spec.ts"
   ]
 }

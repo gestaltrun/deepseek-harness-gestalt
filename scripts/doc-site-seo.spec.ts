@@ -5,9 +5,16 @@ import { docsPages } from '../website/docs.ts'
 import {
   docsPageHead,
   docsRouteUrl,
+  GESTALT_PRODUCT_URL,
   resolveDocsSiteBaseUrl,
   robotsTxt,
 } from './doc-site-seo.ts'
+
+describe('Gestalt product URL', () => {
+  it('links current documentation metadata to the canonical Platform homepage', () => {
+    expect(GESTALT_PRODUCT_URL).toBe('https://www.beikejiedeliulangmao.top/')
+  })
+})
 
 describe('resolveDocsSiteBaseUrl', () => {
   it('uses the public project Pages URL outside deployment', () => {

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/process/2026-09-05-filed-platform-domain-cutover.md
+2026-09-05-filed-platform-domain-cutover.md: 8fb23a1868aca62390caa566e0aa485ff38e71e4
+2026-09-05-filed-platform-domain-cutover.zh.md: f24e1265f5a0fc43cab4d28102dd73931fda28e2

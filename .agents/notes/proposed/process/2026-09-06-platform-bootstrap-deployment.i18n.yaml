@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/process/2026-09-06-platform-bootstrap-deployment.md
-2026-09-06-platform-bootstrap-deployment.md: 0ec0ab16cbad4d765f4ede17a4b8448f8498a70a
-2026-09-06-platform-bootstrap-deployment.zh.md: d3426b629f36c7bbc55723e05707061b6da6778f
+2026-09-06-platform-bootstrap-deployment.md: 96046d2b5c1be6a11f5867c04dad92108083343e
+2026-09-06-platform-bootstrap-deployment.zh.md: 9cbc2d732dc05414672999ec6e5481ba7d2c8eb1

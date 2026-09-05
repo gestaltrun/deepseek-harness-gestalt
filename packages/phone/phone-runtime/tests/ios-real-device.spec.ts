@@ -83,7 +83,7 @@ describe('phone runtime iOS real-device link', () => {
     })
     fakes.push(fake)
     const context = await mountWith(fake)
-    const locked = await errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 1, y: 2 }))
+    const locked = await errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1, y: 2 }))
     expect(locked.code).toBe('PHONE_REAL_DEVICE_ISSUE')
     expect(locked.issue).toBe('device-locked')
   })
@@ -107,7 +107,7 @@ describe('phone runtime iOS real-device link', () => {
     })
     fakes.push(fake)
     const context = await mountWith(fake)
-    const gone = await errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 1, y: 2 }))
+    const gone = await errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1, y: 2 }))
     expect(gone.code).toBe('PHONE_DEVICE_NOT_FOUND')
   })
 

@@ -161,20 +161,14 @@ describe('Desktop phone tab live chain', () => {
     const afterSwipe = await waitForFakeIo(counters => counters.io.length === beforeSwipe + 1)
     const swipe = afterSwipe.io.at(-1)
     expect(swipe).toMatchObject({
-      method: 'device.io.gesture',
-      params: { deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD' },
+      method: 'device.io.swipe',
+      params: {
+        deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD',
+        x1: expect.any(Number), y1: expect.any(Number), x2: expect.any(Number), y2: expect.any(Number),
+      },
     })
-    const actions = swipe?.params?.actions ?? []
-    expect(actions).toEqual([
-      { type: 'pointerMove', x: expect.any(Number), y: expect.any(Number) },
-      { type: 'pointerDown' },
-      { type: 'pointerMove', x: expect.any(Number), y: expect.any(Number) },
-      { type: 'pause', duration: 150 },
-      { type: 'pointerUp' },
-    ])
-    const origin = actions[0] as { readonly y: number }
-    const destination = actions[2] as { readonly y: number }
-    expect(origin.y).not.toBe(destination.y)
+    const swipeParams = swipe?.params as { readonly y1?: unknown; readonly y2?: unknown } | undefined
+    expect(swipeParams?.y1).not.toBe(swipeParams?.y2)
     const afterOffset = afterSwipe.scroll['8294A429-4C99-411F-A46D-0AD9499B7FDD'] ?? 0
     expect(afterOffset).not.toBe(beforeOffset)
 

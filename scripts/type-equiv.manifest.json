@@ -2032,6 +2032,16 @@
     },
     {
       "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneRotation",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneCoordinateSource",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/phone-runtime.md",
       "symbol": "PhoneIoRequest",
       "source": "packages/phone/phone-runtime/src/types.ts"
     },

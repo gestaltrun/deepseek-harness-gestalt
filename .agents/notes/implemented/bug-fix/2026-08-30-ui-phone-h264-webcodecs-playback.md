@@ -30,4 +30,4 @@ The package tests cover network-chunk splits, three- and four-byte start codes, 
 
 ## Consequences
 
-The connected view prefers H264 and adds no npm dependency. It requires a secure-context browser with WebCodecs AVC support for that path; unsupported runtimes use the same-session MJPEG fallback. Decoded H264 dimensions or MJPEG natural dimensions, rather than CSS or container dimensions, are authoritative for device tap and gesture coordinates.
+The connected view prefers H264 and adds no npm dependency. It requires a secure-context browser with WebCodecs AVC support for that path; unsupported runtimes use the same-session MJPEG fallback. Decoded H264 dimensions or MJPEG natural dimensions, rather than CSS or container dimensions, are authoritative for device tap and swipe coordinates.

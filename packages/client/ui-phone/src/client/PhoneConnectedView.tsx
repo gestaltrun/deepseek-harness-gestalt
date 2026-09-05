@@ -8,6 +8,7 @@
  * `PhoneConnectionController`; the component only mirrors its snapshot.
  */
 import clsx from 'clsx'
+import type { PhoneCaptureId } from '@deepseek-ai/dsh-phone-runtime'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type {
   CSSProperties,
@@ -202,6 +203,10 @@ export function PhoneConnectedView({
   const phase = useSyncExternalStore(subscribe, snapshot, snapshot)
   const surfaceSnapshot = useCallback(() => controller.surfaceSize(), [controller])
   const surfaceSize = useSyncExternalStore(subscribe, surfaceSnapshot, surfaceSnapshot)
+  const rotationSnapshot = useCallback(() => controller.surfaceOrientation(), [controller])
+  const surfaceRotation = useSyncExternalStore(subscribe, rotationSnapshot, rotationSnapshot)
+  const actionSnapshot = useCallback(() => controller.actionStatus(), [controller])
+  const actionFailure = useSyncExternalStore(subscribe, actionSnapshot, actionSnapshot)
   const listSubscribe = useCallback((listener: () => void) => source.subscribe(listener), [source])
   const listSnapshot = useCallback(() => source.snapshot(), [source])
   const listing = useSyncExternalStore(listSubscribe, listSnapshot, listSnapshot)
@@ -226,7 +231,12 @@ export function PhoneConnectedView({
   /** Drops an in-flight current-frame measurement after a newer one starts or MJPEG leaves live. */
   const mjpegMeasureGeneration = useRef(0)
   /** Last H264 onSurface size before Host landscape swap. */
-  const h264RawSurface = useRef<{ width: number; height: number } | undefined>(undefined)
+  const h264RawSurface = useRef<{
+    captureId: PhoneCaptureId
+    width: number
+    height: number
+    rotation: 0 | 90 | 180 | 270
+  } | undefined>(undefined)
 
   const releaseDrag = useCallback((): void => {
     const state = drag.current
@@ -248,10 +258,13 @@ export function PhoneConnectedView({
     controller.dispose()
   }, [controller, releaseDrag, releaseWheel])
   const liveStreamUrl = phase.kind === 'live' ? phase.streamUrl : undefined
+  const surfaceIdentity = phase.kind === 'live' && surfaceSize !== undefined
+    ? `${phase.captureId}:${String(surfaceSize.width)}:${String(surfaceSize.height)}:${String(surfaceRotation)}`
+    : undefined
   useEffect(() => () => {
     releaseDrag()
     releaseWheel()
-  }, [liveStreamUrl, releaseDrag, releaseWheel, visible])
+  }, [liveStreamUrl, releaseDrag, releaseWheel, surfaceIdentity, visible])
   useEffect(() => {
     // The dropdown needs the fleet even when this tab restored from layout
     // without the picker having pulled first; a failed pull keeps the
@@ -260,13 +273,16 @@ export function PhoneConnectedView({
   }, [source])
   useEffect(() => startPhoneListingPoll(source), [source])
 
+  const mjpegCaptureId = phase.kind === 'live' && phase.format === 'mjpeg' ? phase.captureId : undefined
   const applyMjpegSurface = useCallback((img: HTMLImageElement): void => {
     const token = ++mjpegMeasureGeneration.current
     void measureMjpegCurrentFrame(img).then((size) => {
       if (token !== mjpegMeasureGeneration.current || size === undefined) return
-      controller.noteSurface('mjpeg', size.width, size.height)
+      if (mjpegCaptureId !== undefined) {
+        controller.noteSurface('mjpeg', mjpegCaptureId, size.width, size.height)
+      }
     })
-  }, [controller])
+  }, [controller, mjpegCaptureId])
 
   const mjpegLive = phase.kind === 'live' && phase.format === 'mjpeg'
   useEffect(() => {
@@ -374,15 +390,17 @@ export function PhoneConnectedView({
   const online = current?.online === true
   const unauthorized = current?.state === 'unauthorized'
   const logicalDisplay = current?.logicalDisplay
+  const logicalDisplayRef = useRef(logicalDisplay)
+  logicalDisplayRef.current = logicalDisplay
   useEffect(() => {
     if (phase.kind !== 'live' || phase.format !== 'h264') {
       h264RawSurface.current = undefined
       return
     }
     const raw = h264RawSurface.current
-    if (raw === undefined) return
+    if (raw === undefined || raw.captureId !== phase.captureId) return
     const surface = h264SurfaceForHost(raw.width, raw.height, logicalDisplay)
-    controller.noteSurface('h264', surface.width, surface.height)
+    controller.noteSurface('h264', phase.captureId, surface.width, surface.height, raw.rotation)
   }, [controller, logicalDisplay, phase])
 
   const screenContent = (): ReactNode => {
@@ -408,12 +426,12 @@ export function PhoneConnectedView({
             label={`${name} 实时画面`}
             className={css.stream}
             url={phase.streamUrl}
-            onSurface={(width, height) => {
-              h264RawSurface.current = { width, height }
-              const surface = h264SurfaceForHost(width, height, logicalDisplay)
-              controller.noteSurface('h264', surface.width, surface.height)
+            onSurface={(width, height, rotation) => {
+              h264RawSurface.current = { captureId: phase.captureId, width, height, rotation }
+              const surface = h264SurfaceForHost(width, height, logicalDisplayRef.current)
+              controller.noteSurface('h264', phase.captureId, surface.width, surface.height, rotation)
             }}
-            onError={() => { controller.noteCaptureFailure('h264') }}
+            onError={() => { controller.noteCaptureFailure('h264', phase.captureId) }}
           />
         )
         : (
@@ -424,7 +442,7 @@ export function PhoneConnectedView({
             className={css.stream}
             draggable={false}
             onLoad={(event) => { applyMjpegSurface(event.currentTarget) }}
-            onError={() => { controller.noteCaptureFailure('mjpeg') }}
+            onError={() => { controller.noteCaptureFailure('mjpeg', phase.captureId) }}
           />
         )
       // The box follows the measured surface aspect; before the first
@@ -453,6 +471,9 @@ export function PhoneConnectedView({
             <span aria-hidden="true" className={css.liveDot} />
             代理中
           </span>
+          {actionFailure !== undefined && (
+            <span role="status" className={css.actionError}>操作失败：{actionFailure.message}</span>
+          )}
         </div>
       )
     }

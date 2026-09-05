@@ -1,11 +1,12 @@
 import { request as httpRequest } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
+import { Context, type Fiber } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
 import type { RawData } from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
+import { CaptureGrantLedger } from '../src/capture-grant-ledger.ts'
 import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 import { readAndroidLogicalDisplay } from '../../phone-runtime/src/android-display.ts'
 
@@ -42,7 +43,7 @@ afterEach(async () => {
 async function mount(
   devices: Array<Record<string, unknown>> = [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
   fakeKnobs: Record<string, unknown> = {},
-): Promise<{ context: Context; origin: string }> {
+): Promise<{ context: Context; origin: string; phoneStreamFiber: Fiber }> {
   const fake = await stageFake({ devices, ...fakeKnobs })
   fakes.push(fake)
   await fake.claim()
@@ -57,15 +58,16 @@ async function mount(
     requestTimeoutMs: 1_500,
     bootTimeoutMs: 2_000,
   }).await()
-  await context.plugin(PhoneStream, {}).await()
-  return { context, origin: `http://127.0.0.1:${String(context.webServer.port)}` }
+  const phoneStreamFiber = context.plugin(PhoneStream, {})
+  await phoneStreamFiber.await()
+  return { context, origin: `http://127.0.0.1:${String(context.webServer.port)}`, phoneStreamFiber }
 }
 
 async function mint(origin: string, id = 'emulator-5554'): Promise<{
   ioPath: string
   preferredFormat: 'h264' | 'mjpeg'
-  mjpeg: { url: string; expiresAt: number }
-  h264: { url: string; expiresAt: number }
+  mjpeg: { url: string; captureId: string; expiresAt: number }
+  h264: { url: string; captureId: string; expiresAt: number }
 }> {
   const response = await fetch(`${origin}/phone/session`, {
     method: 'POST',
@@ -76,9 +78,15 @@ async function mint(origin: string, id = 'emulator-5554'): Promise<{
   return await response.json() as {
     ioPath: string
     preferredFormat: 'h264' | 'mjpeg'
-    mjpeg: { url: string; expiresAt: number }
-    h264: { url: string; expiresAt: number }
+    mjpeg: { url: string; captureId: string; expiresAt: number }
+    h264: { url: string; captureId: string; expiresAt: number }
   }
+}
+
+async function openCapture(origin: string, url: string): Promise<Response> {
+  const response = await fetch(`${origin}${url}`, { headers: { host: new URL(origin).host } })
+  expect(response.status).toBe(200)
+  return response
 }
 
 async function rawRequest(options: {
@@ -168,6 +176,27 @@ function readFrame(origin: string, path: string, host: string): Promise<{
 }
 
 describe('phone stream Host routes', () => {
+  it('rolls back earlier route registrations when upgrade registration fails', async () => {
+    const context = new Context(); contexts.push(context)
+    await context.plugin(WebServer, { host: '127.0.0.1', port: 0 }).await()
+    const fake = await stageFake({ devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')] }); fakes.push(fake)
+    await fake.claim()
+    await context.plugin(PhoneDevices, {
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+      pollIntervalMs: 20,
+      readyTimeoutMs: 6_000,
+      requestTimeoutMs: 1_500,
+      bootTimeoutMs: 2_000,
+    }).await()
+    const disposeCollision = context.webServer.registerUpgrade({ path: PHONE_IO_PATH, handler: () => {} })
+    await expect(context.plugin(PhoneStream, {})).rejects.toThrow('duplicate upgrade route')
+    const origin = `http://127.0.0.1:${String(context.webServer.port)}`; const host = new URL(origin).host
+    for (const path of ['/phone/session', '/phone/agent', '/phone/devices', '/phone/stream/x/h264']) {
+      expect((await rawRequest({ origin, path, host })).status).toBe(404)
+    }
+    disposeCollision()
+  })
   it('prefers MJPEG only for the iOS simulator that mobilecli cannot encode as AVC', async () => {
     const { origin, context } = await mount([
       wireDevice('android-real', 'android', 'real', 'online'),
@@ -581,6 +610,66 @@ describe('phone stream Host routes', () => {
     expect(body.error?.message).toContain('npm install -g mobilecli@latest')
   })
 
+  it('mints four unique capture identities even when the clock does not move', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+    try {
+      const { origin } = await mount()
+      const first = await mint(origin)
+      const second = await mint(origin)
+      const ids = [first.mjpeg.captureId, first.h264.captureId, second.mjpeg.captureId, second.h264.captureId]
+      expect(new Set(ids).size).toBe(4)
+      expect(new Set([first.mjpeg.url, first.h264.url, second.mjpeg.url, second.h264.url]).size).toBe(4)
+    } finally {
+      now.mockRestore()
+    }
+  })
+
+  it('consumes an exact signed capture URL once under concurrent replay', async () => {
+    const { origin, context } = await mount()
+    const session = await mint(origin)
+    const host = new URL(origin).host
+    let starts = 0
+    context.phoneDevices.startCapture = async () => {
+      starts += 1
+      return { contentType: 'video/h264', body: new ReadableStream({ start(controller) { controller.enqueue(Uint8Array.of(1)) } }) }
+    }
+    const [first, second] = await Promise.all([
+      fetch(`${origin}${session.h264.url}`, { headers: { host } }),
+      fetch(`${origin}${session.h264.url}`, { headers: { host } }),
+    ])
+    expect([first.status, second.status].sort()).toEqual([200, 403])
+    expect(starts).toBe(1)
+    await first.body?.cancel()
+    await second.body?.cancel()
+  })
+
+  it('cancels a delayed capture start when the request closes before headers', async () => {
+    const { origin, context } = await mount()
+    const session = await mint(origin)
+    const host = new URL(origin).host
+    let releaseStart!: () => void
+    const startGate = new Promise<void>((resolve) => { releaseStart = resolve })
+    let startEntered!: () => void
+    const entered = new Promise<void>((resolve) => { startEntered = resolve })
+    let cancelled = 0
+    let starts = 0
+    context.phoneDevices.startCapture = async () => {
+      starts += 1
+      startEntered()
+      await startGate
+      return { contentType: 'video/h264', body: new ReadableStream({ cancel() { cancelled += 1 } }) }
+    }
+    const abort = new AbortController()
+    const request = fetch(`${origin}${session.h264.url}`, { headers: { host }, signal: abort.signal })
+    await entered
+    abort.abort()
+    releaseStart()
+    await request.catch(() => {})
+    await vi.waitFor(() => { expect(cancelled).toBe(1) })
+    expect((await rawRequest({ origin, path: session.h264.url, host })).status).toBe(403)
+    expect(starts).toBe(1)
+  })
+
   it('refuses a signed capture URL that is expired, forged, or not loopback', async () => {
     const { origin } = await mount()
     const host = new URL(origin).host
@@ -715,10 +804,11 @@ describe('phone stream Host routes', () => {
   })
 
   it('forwards tap JSON-RPC over the trusted WebSocket upgrade', async () => {
-    const { origin } = await mount()
+    const { origin } = await mount(undefined, { streamFrameCount: 20 })
     const host = new URL(origin).host
     const session = await mint(origin)
     expect(session.ioPath).toBe(PHONE_IO_PATH)
+    const capture = await openCapture(origin, session.mjpeg.url)
     const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
     await new Promise<void>((resolve, reject) => {
       socket.once('open', () => { resolve() })
@@ -731,16 +821,21 @@ describe('phone stream Host routes', () => {
       jsonrpc: '2.0',
       id: 7,
       method: 'tap',
-      params: { deviceId: ANDROID, x: 9, y: 10 },
+      params: {
+        deviceId: ANDROID, x: 9, y: 10, kind: 'capture', captureWidth: 100, captureHeight: 200,
+        captureId: session.mjpeg.captureId, captureFormat: 'mjpeg',
+      },
     }))
     expect(await reply).toEqual({ jsonrpc: '2.0', id: 7, result: { status: 'ok' } })
     socket.close()
+    await capture.body?.cancel()
   })
 
   it('forwards live capture size from a tap frame onto Host io', async () => {
-    const { origin, context } = await mount()
+    const { origin, context } = await mount(undefined, { streamFrameCount: 20 })
     const host = new URL(origin).host
-    await mint(origin)
+    const session = await mint(origin)
+    const capture = await openCapture(origin, session.mjpeg.url)
     const seen: unknown[] = []
     const original = context.phoneDevices.io.bind(context.phoneDevices)
     context.phoneDevices.io = async (request, signal) => {
@@ -760,18 +855,134 @@ describe('phone stream Host routes', () => {
       id: 8,
       method: 'tap',
       params: {
-        deviceId: ANDROID, x: 99, y: 660, captureWidth: 2_868, captureHeight: 1_320,
+        deviceId: ANDROID, x: 99, y: 660, kind: 'capture', captureWidth: 2_868, captureHeight: 1_320,
+        captureId: session.mjpeg.captureId, captureFormat: 'mjpeg',
       },
     }))
     expect(await reply).toEqual({ jsonrpc: '2.0', id: 8, result: { status: 'ok' } })
     expect(seen).toEqual([{
-      deviceId: ANDROID,
-      method: 'tap',
-      x: 99,
-      y: 660,
-      captureWidth: 2_868,
-      captureHeight: 1_320,
+      deviceId: ANDROID, method: 'tap', x: 99, y: 660,
+      source: {
+        kind: 'capture', captureWidth: 2_868, captureHeight: 1_320,
+        captureId: session.mjpeg.captureId, captureFormat: 'mjpeg',
+      },
     }])
+    socket.close()
+    await capture.body?.cancel()
+  })
+
+  it('revokes one capture before gated cancellation settles and leaves a parallel capture active', async () => {
+    const { origin, context } = await mount(undefined, { streamFrameCount: 20 })
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    let releaseFirst!: () => void
+    const firstCancelled = new Promise<void>((resolve) => { releaseFirst = resolve })
+    let firstCancelEntered!: () => void
+    const cancelEntered = new Promise<void>((resolve) => { firstCancelEntered = resolve })
+    const originalStart = context.phoneDevices.startCapture.bind(context.phoneDevices)
+    let underlyingCancellation: Promise<{ readonly ok: true } | { readonly ok: false; readonly error: unknown }> | undefined
+    let releasePull!: () => void
+    const pullGate = new Promise<void>((resolve) => { releasePull = resolve })
+    let enterPull!: () => void
+    const pullEntered = new Promise<void>((resolve) => { enterPull = resolve })
+    let captures = 0
+    context.phoneDevices.startCapture = async (request) => {
+      captures += 1
+      const capture = await originalStart(request)
+      if (captures !== 1) {
+        return {
+          ...capture,
+          body: new ReadableStream<Uint8Array>({
+            start(controller) { controller.enqueue(Uint8Array.of(2)) },
+            pull() { return new Promise(() => {}) },
+            async cancel(reason) { await capture.body.cancel(reason) },
+          }, { highWaterMark: 0 }),
+        }
+      }
+      let pulls = 0
+      return {
+        ...capture,
+        body: new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            pulls += 1
+            if (pulls === 1) { controller.enqueue(Uint8Array.of(1)); return }
+            enterPull()
+            await pullGate
+          },
+          async cancel(reason) {
+            underlyingCancellation = Promise.resolve(capture.body.cancel(reason)).then(
+              () => ({ ok: true as const }), (error: unknown) => ({ ok: false as const, error }),
+            )
+            firstCancelEntered()
+            releasePull()
+            await firstCancelled
+            const outcome = await underlyingCancellation
+            if (!outcome.ok) throw outcome.error
+          },
+        }, { highWaterMark: 0 }),
+      }
+    }
+    const firstAbort = new AbortController()
+    const firstRequest = fetch(`${origin}${session.h264.url}`, { headers: { host }, signal: firstAbort.signal })
+      .then(response => ({ ok: true as const, response }), (error: unknown) => ({ ok: false as const, error }))
+    await vi.waitFor(() => { expect(captures).toBe(1) })
+    await pullEntered
+    const secondSession = await mint(origin)
+    const second = await openCapture(origin, secondSession.h264.url)
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+    const send = async (captureId: string): Promise<unknown> => {
+      const reply = new Promise((resolve) => {
+        socket.once('message', (data) => { resolve(parseWebSocketJson(data)) })
+      })
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 40, method: 'tap', params: {
+        deviceId: ANDROID, x: 1, y: 2, kind: 'capture', captureWidth: 100, captureHeight: 200,
+        captureId, captureFormat: 'h264', captureRotation: 0,
+      } }))
+      return await reply
+    }
+    firstAbort.abort()
+    await cancelEntered
+    await expect(send(session.h264.captureId)).resolves.toMatchObject({ error: { code: -32000 } })
+    await expect(send(secondSession.h264.captureId)).resolves.toMatchObject({ result: { status: 'ok' } })
+    releaseFirst()
+    await firstRequest
+    await underlyingCancellation
+    await second.body?.cancel()
+    socket.close()
+  })
+
+  it('rejects missing, forged, stale, cross-device, and wrong-format capture evidence', async () => {
+    const { origin, context } = await mount([
+      wireDevice('emulator-5554', 'android', 'emulator', 'online'),
+      wireDevice('emulator-5556', 'android', 'emulator', 'online'),
+    ])
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    context.phoneDevices.startCapture = async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(Uint8Array.of(1)) } }),
+    })
+    const capture = await openCapture(origin, session.h264.url)
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
+    await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+    const send = async (params: Record<string, unknown>): Promise<unknown> => {
+      const reply = new Promise((resolve) => {
+        socket.once('message', (data) => { resolve(parseWebSocketJson(data)) })
+      })
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: 30, method: 'tap', params: { x: 1, y: 2, captureWidth: 100, captureHeight: 200, captureRotation: 0, ...params } }))
+      return await reply
+    }
+    for (const params of [
+      { deviceId: ANDROID },
+      { deviceId: ANDROID, captureId: `${session.h264.captureId}x`, captureFormat: 'h264' },
+      { deviceId: 'emulator-5556', captureId: session.h264.captureId, captureFormat: 'h264' },
+      { deviceId: ANDROID, captureId: session.h264.captureId, captureFormat: 'mjpeg' },
+    ]) expect(await send(params)).toMatchObject({ error: { code: -32000 } })
+    await capture.body?.cancel()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(await send({ deviceId: ANDROID, captureId: session.h264.captureId, captureFormat: 'h264' }))
+      .toMatchObject({ error: { code: -32000 } })
     socket.close()
   })
 
@@ -794,6 +1005,16 @@ describe('phone stream Host routes', () => {
       body: JSON.stringify({ deviceId: 'emulator-5554' }),
     })
     expect(untrusted.status).toBe(403)
+  })
+
+  it('refuses an unsafe absolute token expiry at session mint', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Number.MAX_SAFE_INTEGER)
+    try {
+      const { context } = await mount()
+      expect(() => context.phoneStream.sessionFor(ANDROID)).toThrow('capture token expiry exceeds the safe integer range')
+    } finally {
+      now.mockRestore()
+    }
   })
 
   it('refuses a zero token lifetime at plugin load', async () => {
@@ -827,7 +1048,7 @@ describe('phone stream Host routes', () => {
     expect((await rawRequest({ origin, path: '/phone/stream/emulator-5554/mjpeg', host })).status).toBe(403)
   })
 
-  it('forwards gesture, text, and button JSON-RPC and reports malformed frames', async () => {
+  it('forwards semantic swipe, text, and button JSON-RPC and rejects old gesture frames', async () => {
     const { origin } = await mount()
     const host = new URL(origin).host
     const socket = new WebSocket(`ws://127.0.0.1:${new URL(origin).port}${PHONE_IO_PATH}`, { headers: { host } })
@@ -853,37 +1074,139 @@ describe('phone stream Host routes', () => {
       params: { deviceId: 'emulator-5554', x: 1, y: 2, captureWidth: 2_868 },
     }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
-    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'gesture', params: { deviceId: 'emulator-5554', actions: [{ type: 'move' }] } }))
-    expect(await next()).toEqual({ jsonrpc: '2.0', id: 3, result: { status: 'ok' } })
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0', id: 3, method: 'swipe',
+      params: { deviceId: 'emulator-5554', x1: 1, y1: 2, x2: 3, y2: 4 },
+    }))
+    expect(await next()).toMatchObject({ jsonrpc: '2.0', id: 3, error: { code: -32000 } })
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0', id: 15, method: 'gesture',
+      params: { deviceId: 'emulator-5554', actions: [{ type: 'move' }] },
+    }))
+    expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'text', params: { deviceId: 'emulator-5554', text: 'hi' } }))
     expect(await next()).toEqual({ jsonrpc: '2.0', id: 4, result: { status: 'ok' } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'button', params: { deviceId: 'emulator-5554', button: 'HOME' } }))
     expect(await next()).toEqual({ jsonrpc: '2.0', id: 5, result: { status: 'ok' } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'tap', params: { deviceId: 'emulator-5554', x: 1, y: 2 } }))
-    expect(await next()).toMatchObject({ jsonrpc: '2.0', result: { status: 'ok' } })
+    expect(await next()).toMatchObject({ jsonrpc: '2.0', id: null, error: { code: -32600 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 6, method: 'tap', params: null }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'tap', params: { x: 1, y: 2 } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
-    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 8, method: 'gesture', params: { deviceId: 'emulator-5554', actions: 'nope' } }))
+    socket.send(JSON.stringify({
+      jsonrpc: '2.0', id: 8, method: 'swipe',
+      params: { deviceId: 'emulator-5554', x1: 1, y1: 2, x2: 'nope', y2: 4 },
+    }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'text', params: { deviceId: 'emulator-5554' } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'button', params: { deviceId: 'emulator-5554', button: '' } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'tap', params: { deviceId: 'missing', x: 1, y: 2 } }))
-    expect(await next()).toMatchObject({ error: { code: -32010 } })
+    expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.close()
+  })
+
+  it('prevents iOS real session install and mint after an admitted status crosses disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount([wireDevice('ios-real', 'ios', 'real', 'online')])
+    let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.agentStatus = async () => { entered(); await gate; throw new Error('late status failure') }
+    const install = vi.fn(async (id: ReturnType<typeof deviceId> = deviceId('ios-real')) => ({
+      deviceId: id,
+      installed: true,
+      reinstalled: false,
+    }))
+    context.phoneDevices.installAgent = install
+    const request = fetch(`${origin}/phone/session`, { method: 'POST', headers: { host: new URL(origin).host, 'content-type': 'application/json' }, body: JSON.stringify({ deviceId: 'ios-real' }) })
+    await admission; const disposal = phoneStreamFiber.dispose()
+    expect((await rawRequest({ origin, path: '/phone/devices', host: new URL(origin).host })).status).toBe(503)
+    release(); const response = await request; expect(response.status).toBe(503)
+    expect(await response.text()).not.toContain('/phone/stream/')
+    expect(install).not.toHaveBeenCalled(); await disposal
+    expect((await rawRequest({ origin, path: '/phone/session', host: new URL(origin).host, method: 'POST' })).status).toBe(404)
+  })
+
+  it('prevents agent install after managed-device listing crosses disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount()
+    const original = context.phoneDevices.listDevices.bind(context.phoneDevices); let release!: () => void; let entered!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.listDevices = async () => { entered(); await gate; return await original() }
+    const install = vi.fn(async () => ({} as never)); context.phoneDevices.installAgent = install
+    const request = fetch(`${origin}/phone/agent/install`, { method: 'POST', headers: { host: new URL(origin).host, 'content-type': 'application/json' }, body: JSON.stringify({ deviceId: 'emulator-5554' }) })
+    await admission; const disposal = phoneStreamFiber.dispose(); release(); const response = await request
+    expect(response.status).toBe(503); expect(install).not.toHaveBeenCalled(); await disposal
+    expect((await rawRequest({ origin, path: '/phone/agent/install', host: new URL(origin).host, method: 'POST' })).status).toBe(404)
+  })
+
+  it('prevents a device listing commit after its acquisition crosses disposal', async () => {
+    const { origin, context, phoneStreamFiber } = await mount()
+    const original = context.phoneDevices.listDevices.bind(context.phoneDevices)
+    let release!: () => void; let entered!: () => void; const gate = new Promise<void>((resolve) => { release = resolve })
+    const admission = new Promise<void>((resolve) => { entered = resolve })
+    context.phoneDevices.listDevices = async () => { entered(); await gate; return await original() }
+    const request = fetch(`${origin}/phone/devices`, { headers: { host: new URL(origin).host } }); await admission
+    const disposal = phoneStreamFiber.dispose(); release(); const response = await request
+    expect(response.status).toBe(503); expect(await response.text()).not.toContain('emulator-5554'); await disposal
+    expect((await rawRequest({ origin, path: '/phone/devices', host: new URL(origin).host })).status).toBe(404)
+  })
+
+  it('spends but never starts capture when disposal wins after grant consumption', async () => {
+    const { origin, context, phoneStreamFiber } = await mount(); const session = await mint(origin); const host = new URL(origin).host
+    const start = vi.fn(context.phoneDevices.startCapture.bind(context.phoneDevices)); context.phoneDevices.startCapture = start
+    const ledger = CaptureGrantLedger.prototype
+    const original = Reflect.get(ledger, 'consume')
+    const consume = vi.spyOn(ledger, 'consume')
+    let disposal!: Promise<void>; let triggered = false
+    consume.mockImplementation(function (this: CaptureGrantLedger, ...args) {
+      const result = original.apply(this, args)
+      if (!triggered) { triggered = true; disposal = phoneStreamFiber.dispose() }
+      return result
+    })
+    try {
+      const response = await rawRequest({ origin, path: session.h264.url, host })
+      expect(response.status).not.toBe(200); expect(start).not.toHaveBeenCalled()
+      expect((await rawRequest({ origin, path: session.h264.url, host })).status).not.toBe(200)
+      await disposal
+      expect((await rawRequest({ origin, path: session.h264.url, host })).status).not.toBe(200)
+    } finally {
+      consume.mockRestore()
+    }
+  })
+
+  it('refuses in-process session minting after the synchronous owner fence', async () => {
+    const { context, phoneStreamFiber } = await mount()
+    const disposal = phoneStreamFiber.dispose()
+    expect(() => context.phoneStream.sessionFor(ANDROID)).toThrow(expect.objectContaining({ code: 'PHONE_ABORTED' }))
+    await disposal
+  })
+
+  it('fences every admission synchronously when the public plugin fiber begins disposal', async () => {
+    const { origin, phoneStreamFiber } = await mount()
+    const host = new URL(origin).host
+    const disposal = phoneStreamFiber.dispose()
+    const paths = ['/phone/session', '/phone/agent/status', '/phone/devices', '/phone/stream/emulator-5554/h264?token=x']
+    const responses = await Promise.all(paths.map(path => rawRequest({ origin, path, host, method: path === '/phone/session' ? 'POST' : 'GET' })))
+    expect(responses.every(response => response.status !== 200)).toBe(true)
+    await disposal
+    await expect(fetch(`${origin}/phone/devices`, { headers: { host } })).resolves.toMatchObject({ status: 404 })
   })
 
   it('answers 502 when capture start fails upstream after a valid token', async () => {
     const { origin, context } = await mount()
     const host = new URL(origin).host
     const session = await mint(origin)
+    let starts = 0
     context.phoneDevices.startCapture = async () => {
+      starts += 1
       throw new Error('capture backend down')
     }
     expect((await rawRequest({ origin, path: session.mjpeg.url, host })).status).toBe(502)
+    expect((await rawRequest({ origin, path: session.mjpeg.url, host })).status).toBe(403)
+    expect(starts).toBe(1)
   })
 
   it('normalizes a non-Error capture failure at the Host boundary', async () => {
@@ -901,6 +1224,12 @@ describe('phone stream Host routes', () => {
   it('normalizes a non-Error IO failure at the WebSocket boundary', async () => {
     const { origin, context } = await mount()
     const host = new URL(origin).host
+    const session = await mint(origin)
+    context.phoneDevices.startCapture = async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(Uint8Array.of(1)) } }),
+    })
+    const capture = await openCapture(origin, session.h264.url)
     context.phoneDevices.io = async () => {
       throw 'io failed'
     }
@@ -918,10 +1247,14 @@ describe('phone stream Host routes', () => {
       jsonrpc: '2.0',
       id: 12,
       method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 1, y: 2 },
+      params: {
+        deviceId: 'emulator-5554', x: 1, y: 2, kind: 'capture', captureWidth: 100, captureHeight: 200,
+        captureId: session.h264.captureId, captureFormat: 'h264', captureRotation: 0,
+      },
     }))
     expect((await reply).error?.message).toBe('io failed')
     socket.close()
+    await capture.body?.cancel()
   })
 
   it('destroys an untrusted IO upgrade before protocol negotiation', async () => {

@@ -48,7 +48,7 @@ export interface PhoneH264SurfaceProps {
   /** CSS class applied to the canvas. */
   readonly className: string | undefined
   /** Receives post-rotation display dimensions for touch-coordinate mapping. */
-  readonly onSurface: (width: number, height: number) => void
+  readonly onSurface: (width: number, height: number, rotation: 0 | 90 | 180 | 270) => void
   /** Receives one terminal playback failure. */
   readonly onError: (error: unknown) => void
 }
@@ -60,18 +60,13 @@ export interface PhoneH264SurfaceProps {
  */
 export function PhoneH264Surface(props: PhoneH264SurfaceProps): ReactNode {
   const canvas = useRef<HTMLCanvasElement>(null)
-  const onSurface = useRef(props.onSurface)
-  const onError = useRef(props.onError)
-  onSurface.current = props.onSurface
-  onError.current = props.onError
-
   useEffect(() => {
     const target = canvas.current as HTMLCanvasElement
     return props.owner.start({
       url: props.url,
       canvas: target,
-      onSurface: (width, height) => { onSurface.current(width, height) },
-      onError: (error) => { onError.current(error) },
+      onSurface: props.onSurface,
+      onError: props.onError,
     })
   }, [props.owner, props.url])
 

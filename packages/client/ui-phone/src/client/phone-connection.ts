@@ -9,7 +9,7 @@
  * without a browser.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
-import { phoneSwipeActions } from '@deepseek-ai/dsh-phone-runtime/swipe'
+import type { PhoneCaptureId } from '@deepseek-ai/dsh-phone-runtime'
 import {
   encodePhoneIoFrame, isUnauthorizedMessage, parsePhoneIoReply, PhoneStreamHttpError,
   type PhoneAgentStatusView, type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
@@ -54,6 +54,13 @@ export interface PhoneStreamFailure {
 }
 
 /** Closed phase union the connected view renders from. */
+/** Latest ordinary device action failure; it never replaces a healthy live phase. */
+export interface PhoneActionFailure {
+  readonly code?: number
+  readonly message: string
+}
+
+/** Closed connection lifecycle states rendered by the connected phone view. */
 export type PhoneConnectionPhase =
   | { readonly kind: 'idle' }
   | { readonly kind: 'connecting' }
@@ -63,6 +70,8 @@ export type PhoneConnectionPhase =
     readonly streamUrl: string
     /** Encoding of {@link PhoneConnectionPhase.streamUrl}. */
     readonly format: PhoneCaptureFormat
+    /** Opaque identity of the capture currently rendered by the browser. */
+    readonly captureId: PhoneCaptureId
     /** Unix epoch milliseconds after which the Host refuses the URL. */
     readonly expiresAt: number
   }
@@ -92,8 +101,8 @@ export interface PhoneIoHandlers {
 
 /** One live io socket the controller owns. */
 export interface PhoneIoSocket {
-  /** Send one text frame to the Host. */
-  send(data: string): void
+  /** Admit one text frame to the Host transport. */
+  send(data: string): boolean
   /** Close the socket; no reconnect follows a controller-initiated close. */
   close(): void
 }
@@ -237,7 +246,11 @@ export class PhoneConnectionController {
   private epoch = 0
   private session: PhoneStreamSessionView | undefined
   private surface: PhoneSurfaceSize | undefined
+  private surfaceRotation: 0 | 90 | 180 | 270 | undefined
   private nextFrameId = 1
+  private latestSentFrameId = 0
+  private readonly outstandingFrameIds = new Set<number>()
+  private actionFailure: PhoneActionFailure | undefined
   private retryAttempt = 0
   private lastTransient: Extract<PhoneStreamFailureKind, 'interrupted' | 'unavailable'> = 'interrupted'
   private cancelRetry: (() => void) | undefined
@@ -332,15 +345,17 @@ export class PhoneConnectionController {
    * Report a failed capture. H264 switches to MJPEG from the already-minted
    * session without replacing its io socket; MJPEG spends the retry budget.
    * @param format - Encoding whose current renderer failed.
+   * @param captureId - Exact capture identity owned by that renderer.
    */
-  noteCaptureFailure(format: PhoneCaptureFormat): void {
-    if (this.phase.kind !== 'live' || this.phase.format !== format) return
+  noteCaptureFailure(format: PhoneCaptureFormat, captureId: PhoneCaptureId): void {
+    if (this.phase.kind !== 'live' || this.phase.format !== format || this.phase.captureId !== captureId) return
     if (format === 'h264' && this.session !== undefined) {
       this.surface = undefined
       this.setPhase({
         kind: 'live',
         streamUrl: this.session.mjpeg.url,
         format: 'mjpeg',
+        captureId: this.session.mjpeg.captureId,
         expiresAt: this.session.mjpeg.expiresAt,
       })
       return
@@ -360,20 +375,44 @@ export class PhoneConnectionController {
     return this.surface
   }
 
+  /** Exact rotation associated with the current measured surface.
+   * @returns current display rotation, or undefined before measurement or for unrotated MJPEG.
+   */
+  surfaceOrientation(): 0 | 90 | 180 | 270 | undefined {
+    return this.surfaceRotation
+  }
+
+  /**
+   * Latest ordinary action failure while the picture remains live.
+   * @returns the structured failure, or undefined before/after a successful action.
+   */
+  actionStatus(): PhoneActionFailure | undefined {
+    return this.actionFailure
+  }
+
   /**
    * Learn the streamed frame's device pixel size from the capture element.
    * A repeated identical measurement is a no-op; a real change (device
    * rotation flips width and height) notifies subscribers so the frame box
    * follows the new aspect.
    * @param format - Encoding whose renderer measured the surface.
+   * @param captureId - Exact active capture whose renderer measured the surface.
    * @param width - Frame width in device pixels.
    * @param height - Frame height in device pixels.
+   * @param rotation - exact H264 display rotation; MJPEG omits it.
    */
-  noteSurface(format: PhoneCaptureFormat, width: number, height: number): void {
-    if (this.phase.kind !== 'live' || this.phase.format !== format) return
+  noteSurface(
+    format: PhoneCaptureFormat,
+    captureId: PhoneCaptureId,
+    width: number,
+    height: number,
+    rotation?: 0 | 90 | 180 | 270,
+  ): void {
+    if (this.phase.kind !== 'live' || this.phase.format !== format || this.phase.captureId !== captureId) return
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
-    if (this.surface?.width === width && this.surface.height === height) return
+    if (this.surface?.width === width && this.surface.height === height && this.surfaceRotation === rotation) return
     this.surface = { width, height }
+    this.surfaceRotation = rotation
     this.notify()
   }
 
@@ -384,35 +423,45 @@ export class PhoneConnectionController {
    * @returns false when the surface is unknown or the phase is not live.
    */
   tap(u: number, v: number): boolean {
-    if (this.surface === undefined) return false
+    if (this.surface === undefined || this.phase.kind !== 'live') return false
     const { x, y } = devicePointOf({ u, v }, this.surface)
     return this.send({
       method: 'tap',
       x,
       y,
-      captureWidth: this.surface.width,
-      captureHeight: this.surface.height,
+      source: {
+        kind: 'capture', captureWidth: this.surface.width, captureHeight: this.surface.height,
+        captureId: this.phase.captureId, captureFormat: this.phase.format,
+        ...(this.surfaceRotation === undefined ? {} : { captureRotation: this.surfaceRotation }),
+      },
     })
   }
 
   /**
-   * Send a drag as the WDA gesture mobilecli's iOS converter consumes.
-   * Positioning `pointerMove` precedes `pointerDown`; pauses supply drag duration.
+   * Send a normalized drag as one semantic swipe from press origin to release.
+   * The action carries current capture identity, format, dimensions, and H264 rotation.
    * @param points - the drag path in normalized screen points.
    * @returns false when the path is empty, the surface unknown, or not live.
    */
   swipe(points: readonly PhoneScreenPoint[]): boolean {
     const surface = this.surface
+    if (this.phase.kind !== 'live') return false
     const origin = points[0]
     const release = points[points.length - 1]
     if (surface === undefined || origin === undefined || release === undefined) return false
     const start = devicePointOf(origin, surface)
     const end = devicePointOf(release, surface)
     return this.send({
-      method: 'gesture',
-      actions: phoneSwipeActions([start, end]),
-      captureWidth: surface.width,
-      captureHeight: surface.height,
+      method: 'swipe',
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
+      source: {
+        kind: 'capture', captureWidth: surface.width, captureHeight: surface.height,
+        captureId: this.phase.captureId, captureFormat: this.phase.format,
+        ...(this.surfaceRotation === undefined ? {} : { captureRotation: this.surfaceRotation }),
+      },
     })
   }
 
@@ -475,6 +524,7 @@ export class PhoneConnectionController {
           kind: 'live',
           streamUrl: this.streamUrlOf(session, format),
           format,
+          captureId: session[format].captureId,
           expiresAt: session[format].expiresAt,
         })
       },
@@ -517,10 +567,18 @@ export class PhoneConnectionController {
   }
 
   private handleFrame(data: string): void {
-    // Only error replies carry actionable state; junk frames and ok results
-    // change nothing — the connection lifecycle owns the rest.
     const reply = parsePhoneIoReply(data)
-    if (reply === undefined || reply.ok) return
+    if (reply === undefined || !this.outstandingFrameIds.delete(reply.id)) return
+    const terminal = !reply.ok && (reply.code === -32010
+      || (reply.message !== undefined && isUnauthorizedMessage(reply.message)))
+    if (!terminal && reply.id !== this.latestSentFrameId) return
+    if (reply.ok) {
+      if (this.actionFailure !== undefined) {
+        this.actionFailure = undefined
+        this.notify()
+      }
+      return
+    }
     if (reply.code === -32010) {
       this.teardown()
       this.setPhase({ kind: 'error', failure: { kind: 'device-offline' } })
@@ -531,8 +589,11 @@ export class PhoneConnectionController {
       this.setPhase({ kind: 'error', failure: { kind: 'unauthorized' } })
       return
     }
-    // Tap/gesture JSON-RPC errors stay on the live picture. Agent recovery
-    // is for mint, picture, and socket death — not a single out-of-bounds tap.
+    this.actionFailure = {
+      ...(reply.code === undefined ? {} : { code: reply.code }),
+      message: reply.message ?? '设备操作失败',
+    }
+    this.notify()
   }
 
   private scheduleRetry(): void {
@@ -580,14 +641,42 @@ export class PhoneConnectionController {
   private send(request: PhoneClientIoRequest): boolean {
     if (this.phase.kind !== 'live') return false
     const socket = this.socket as PhoneIoSocket
-    socket.send(encodePhoneIoFrame(this.nextFrameId, this.deviceId, request))
+    const id = this.nextFrameId
+    const previousLatest = this.latestSentFrameId
     this.nextFrameId += 1
-    return true
+    this.latestSentFrameId = id
+    this.outstandingFrameIds.add(id)
+    let admitted: boolean
+    try {
+      admitted = socket.send(encodePhoneIoFrame(id, this.deviceId, request))
+    } catch (sendFailure) {
+      // Foreign WebSocket send threw instead of returning false; both mean the frame was not admitted.
+      void sendFailure
+      admitted = false
+    }
+    if (admitted) return true
+    this.rollbackSend(id, previousLatest)
+    if (this.socket === socket) {
+      this.teardown()
+      this.lastTransient = 'interrupted'
+      this.scheduleRetry()
+    }
+    return false
+  }
+
+  private rollbackSend(id: number, previousLatest: number): void {
+    if (!this.outstandingFrameIds.delete(id)) return
+    if (this.nextFrameId === id + 1) this.nextFrameId = id
+    if (this.latestSentFrameId === id) this.latestSentFrameId = previousLatest
   }
 
   private teardown(): void {
     this.epoch += 1
     this.surface = undefined
+    this.surfaceRotation = undefined
+    this.latestSentFrameId = 0
+    this.outstandingFrameIds.clear()
+    this.actionFailure = undefined
     this.cancelRetry?.()
     this.cancelRetry = undefined
     this.socket?.close()

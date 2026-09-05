@@ -1,236 +1,114 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { Context } from '@deepseek-ai/cordis'
-import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import {
-  ioParams,
-  iosScreenScale,
-  iosScreenSize,
-} from '../src/io.ts'
-import { phoneSwipeActions } from '../src/swipe.ts'
-import { stageFake, wireDevice } from './helpers.ts'
+import { describe, expect, it } from 'vitest'
+import { deviceId, phoneCaptureId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
+import { iosPortraitEventPoint, iosScreenSize, upstreamIo } from '../src/io.ts'
+import type { PhoneIoRequest, PhoneRotation } from '../src/types.ts'
 
-const contexts: Context[] = []
-const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
+const SCREEN = { width: 402, height: 874, scale: 3 }
 
-afterEach(async () => {
-  await Promise.all(contexts.splice(0).map(context => context.fiber.dispose()))
-  await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
-})
+function tap(rotation: PhoneRotation): Extract<PhoneIoRequest, { method: 'tap' }> {
+  return {
+    deviceId: deviceId('ios'),
+    method: 'tap',
+    x: rotation === 90 || rotation === 270 ? 1_590 : 603,
+    y: rotation === 90 || rotation === 270 ? 1_080 : 1_311,
+    source: {
+      kind: 'capture', captureId: phoneCaptureId('capture'), captureFormat: 'mjpeg',
+      captureWidth: rotation === 90 || rotation === 270 ? 2_622 : 1_206,
+      captureHeight: rotation === 90 || rotation === 270 ? 1_206 : 2_622,
+    },
+  }
+}
 
-describe('iOS input coordinate normalization', () => {
-  it('parses the official mobilecli 1.0.5 device.info screen size', () => {
-    expect(iosScreenScale({
-      device: { screenSize: { width: 402, height: 874, scale: 3 } },
-    })).toBe(3)
-    expect(iosScreenSize({
-      device: { screenSize: { width: 440, height: 956, scale: 3 } },
-    })).toEqual({ width: 440, height: 956, scale: 3 })
+describe('exact iOS input rotation', () => {
+  it('parses the official mobilecli screen size and rejects every malformed layer and field', () => {
+    expect(iosScreenSize({ device: { screenSize: SCREEN } })).toEqual(SCREEN)
+    for (const value of [undefined, null, 1, 'x', [], {}]) {
+      expect(() => iosScreenSize(value)).toThrow(PhoneDevicesError)
+    }
+    for (const device of [undefined, null, 1, 'x', []]) {
+      expect(() => iosScreenSize({ device })).toThrow(PhoneDevicesError)
+    }
+    for (const screenSize of [undefined, null, 1, 'x', []]) {
+      expect(() => iosScreenSize({ device: { screenSize } })).toThrow(PhoneDevicesError)
+    }
+    for (const field of ['width', 'height', 'scale'] as const) {
+      for (const value of [undefined, null, '3', Number.NaN, Infinity, 0, -1]) {
+        expect(() => iosScreenSize({ device: { screenSize: { ...SCREEN, [field]: value } } }))
+          .toThrow(PhoneDevicesError)
+      }
+    }
   })
 
   it.each([
-    null,
-    {},
-    { device: null },
-    { device: {} },
-    { device: { screenSize: { width: 0, height: 874, scale: 3 } } },
-    { device: { screenSize: { width: 402, height: Number.NaN, scale: 3 } } },
-    { device: { screenSize: { width: 402, height: 874, scale: '3' } } },
-  ])('rejects malformed device.info result %#', (result) => {
-    expect(() => iosScreenSize(result)).toThrow(PhoneDevicesError)
+    [0, [0, 0], [402, 874], [201, 437], [201, 874]],
+    [90, [0, 874], [402, 0], [201, 437], [402, 437]],
+    [180, [402, 874], [0, 0], [201, 437], [201, 0]],
+    [270, [402, 0], [0, 874], [201, 437], [0, 437]],
+  ] as const)('inverse-transforms corners, center, and an edge at %i°', (rotation, topLeft, bottomRight, center, edge) => {
+    const width = rotation === 90 || rotation === 270 ? 874 : 402
+    const height = rotation === 90 || rotation === 270 ? 402 : 874
+    const point = (x: number, y: number) => iosPortraitEventPoint(x, y, width, height, SCREEN, rotation)
+    expect(Object.values(point(0, 0))).toEqual(topLeft)
+    expect(Object.values(point(width, height))).toEqual(bottomRight)
+    expect(Object.values(point(width / 2, height / 2))).toEqual(center)
+    expect(Object.values(point(width / 2, height))).toEqual(edge)
   })
 
-  it('scales tap and gesture coordinates while preserving other action fields', () => {
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 984, y: 1_228 }, 3)).toEqual({
-      deviceId: 'ios', x: 328, y: 409,
+  it('forwards text and button without coordinate metadata', () => {
+    expect(upstreamIo({ deviceId: deviceId('ios'), method: 'text', text: 'hello' }, 'ios')).toEqual({
+      method: 'device.io.text', params: { deviceId: 'ios', text: 'hello' },
     })
-    expect(ioParams(
-      { deviceId: deviceId('ios'), method: 'tap', x: 984, y: 1_228 },
-      { width: 402, height: 874, scale: 3 },
-    )).toEqual({
-      deviceId: 'ios', x: 328, y: 409,
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'),
-      method: 'gesture',
-      actions: [
-        { type: 'pointerDown', x: 3, y: 6, pressure: 0.5 },
-        { type: 'pause', duration: 100 },
-        { type: 'pointerUp', x: 'upstream-validates', y: null },
-      ],
-    }, 3)).toEqual({
-      deviceId: 'ios',
-      actions: [
-        { type: 'pointerDown', x: 1, y: 2, pressure: 0.5 },
-        { type: 'pause', duration: 100 },
-        { type: 'pointerUp', x: 'upstream-validates', y: null },
-      ],
+    expect(upstreamIo({ deviceId: deviceId('ios'), method: 'button', button: 'HOME' }, 'ios')).toEqual({
+      method: 'device.io.button', params: { deviceId: 'ios', button: 'HOME' },
     })
   })
 
-  it('maps landscape capture pixels onto swapped WDA logical bounds', () => {
-    const beibei = { width: 440, height: 956, scale: 3 }
-    const landscape = { captureWidth: 2_868, captureHeight: 1_320 }
-    expect(ioParams({
-      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 660, ...landscape,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 33, y: 220,
+  it('dispatches Android semantic actions directly', () => {
+    expect(upstreamIo(tap(0), 'android')).toEqual({
+      method: 'device.io.tap', params: { deviceId: 'ios', x: 603, y: 1311 },
     })
-    expect(ioParams({
-      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 2_000, ...landscape,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 33, y: 440,
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'), method: 'tap', x: 2_868, y: 660, ...landscape,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 956, y: 220,
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'), method: 'tap', x: 3_000, y: 1_400, ...landscape,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 956, y: 440,
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'),
-      method: 'gesture',
-      ...landscape,
-      actions: [
-        { type: 'pointerMove', x: 99, y: 660 },
-        { type: 'pointerDown' },
-        { type: 'pointerMove', x: 2_868, y: 1_320 },
-      ],
-    }, beibei)).toEqual({
-      deviceId: 'ios',
-      actions: [
-        { type: 'pointerMove', x: 33, y: 220 },
-        { type: 'pointerDown' },
-        { type: 'pointerMove', x: 956, y: 440 },
-      ],
+    expect(upstreamIo({ deviceId: deviceId('android'), method: 'swipe', source: { kind: 'fresh-probe' }, x1: 1, y1: 2, x2: 3, y2: 4 }, 'android')).toEqual({
+      method: 'device.io.swipe', params: { deviceId: 'android', x1: 1, y1: 2, x2: 3, y2: 4 },
     })
   })
 
-  it('keeps portrait capture pixels on unswapped WDA bounds', () => {
-    const beibei = { width: 440, height: 956, scale: 3 }
-    const portrait = { captureWidth: 1_320, captureHeight: 2_868 }
-    expect(ioParams({
-      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 660, ...portrait,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 33, y: 220,
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'), method: 'tap', x: 99, y: 2_000, ...portrait,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 33, y: 667,
-    })
+  it.each([0, 90, 180, 270] as const)('dispatches iOS tap and swipe at %i°', (rotation) => {
+    const request = tap(rotation)
+    const tapCall = upstreamIo(request, 'ios', rotation, SCREEN)
+    const swipeCall = upstreamIo({
+      deviceId: request.deviceId,
+      method: 'swipe',
+      x1: request.x,
+      y1: request.y,
+      x2: 300,
+      y2: 600,
+      source: request.source,
+    }, 'ios', rotation, SCREEN)
+    expect(tapCall.method).toBe(rotation === 0 ? 'device.io.tap' : 'device.io.swipe')
+    expect(swipeCall.method).toBe('device.io.swipe')
+    if (rotation === 0) expect(tapCall.params).toMatchObject({ x: 201, y: 437 })
+    if (rotation === 90) expect(tapCall.params).toMatchObject({ x1: 360, y1: 344, x2: 360, y2: 344 })
+    if (rotation === 270) expect(tapCall.params).toMatchObject({ x1: 42, y1: 530, x2: 42, y2: 530 })
   })
 
-  it('falls back to overflow of one scaled point when capture size is omitted', () => {
-    const beibei = { width: 440, height: 956, scale: 3 }
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 99, y: 2_000 }, beibei)).toEqual({
-      deviceId: 'ios', x: 33, y: 667,
-    })
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'tap', x: 2_868, y: 660 }, beibei)).toEqual({
-      deviceId: 'ios', x: 956, y: 220,
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'),
-      method: 'tap',
-      x: 99,
-      y: 2_000,
-      captureWidth: Number.NaN,
-      captureHeight: 1_320,
-    }, beibei)).toEqual({
-      deviceId: 'ios', x: 33, y: 667,
-    })
+  it('maps full-resolution and arbitrary scaled captures, clamps edges, and validates extents', () => {
+    expect(iosPortraitEventPoint(603, 1_311, 1_206, 2_622, SCREEN, 0)).toEqual({ x: 201, y: 437 })
+    expect(iosPortraitEventPoint(201, 437, 402, 874, SCREEN, 0)).toEqual({ x: 201, y: 437 })
+    expect(iosPortraitEventPoint(500, 250, 1_000, 500, SCREEN, 0)).toEqual({ x: 201, y: 437 })
+    expect(iosPortraitEventPoint(-10, 9_999, 402, 874, SCREEN, 0)).toEqual({ x: 0, y: 874 })
+    expect(() => iosPortraitEventPoint(1, 2, 0, 10, SCREEN, 0)).toThrow(/capture dimensions/u)
+    expect(() => iosPortraitEventPoint(1, 2, 10, Number.NaN, SCREEN, 0)).toThrow(/capture dimensions/u)
   })
 
-  it('encodes a swipe as WDA positioning, destination move, and travel pause', () => {
-    expect(phoneSwipeActions([])).toEqual([])
-    expect(phoneSwipeActions([{ x: 10, y: 20 }, { x: 11, y: 21 }, { x: 30, y: 80 }])).toEqual([
-      { type: 'pointerMove', x: 10, y: 20 },
-      { type: 'pointerDown' },
-      { type: 'pointerMove', x: 30, y: 80 },
-      { type: 'pause', duration: 150 },
-      { type: 'pointerUp' },
-    ])
-  })
-
-  it('records destination-move swipe offset and leaves Speak Selection at 0', async () => {
-    const fake = await stageFake({
-      devices: [wireDevice('SIM-UDID', 'ios', 'simulator', 'online')],
-    })
-    fakes.push(fake)
-    await fake.claim()
-    const context = new Context()
-    contexts.push(context)
-    await context.plugin(PhoneDevices, {
-      executablePath: fake.executablePath,
-      serverPort: fake.port,
-      pollIntervalMs: 20,
-      readyTimeoutMs: 6_000,
-      requestTimeoutMs: 1_500,
-    }).await()
-
-    const tapShaped = [
-      { type: 'pointerDown', x: 100, y: 400 },
-      { type: 'pause', duration: 16 },
-      { type: 'pointerUp' },
-    ]
-    await context.phoneDevices.io({
-      deviceId: deviceId('SIM-UDID'),
-      method: 'gesture',
-      actions: tapShaped,
-    })
-    const afterTap = await fake.counters()
-    expect(afterTap.io).toHaveLength(1)
-    expect(afterTap.scroll['SIM-UDID'] ?? 0).toBe(0)
-
-    await context.phoneDevices.io({
-      deviceId: deviceId('SIM-UDID'),
-      method: 'gesture',
-      actions: [
-        { type: 'pointerMove', x: 100, y: 400 },
-        { type: 'pointerDown' },
-        { type: 'pause', duration: 500 },
-        { type: 'pointerMove', x: 100, y: 100 },
-        { type: 'pointerUp' },
-      ],
-    })
-    const afterSpeakSelection = await fake.counters()
-    expect(afterSpeakSelection.io).toHaveLength(2)
-    expect(afterSpeakSelection.scroll['SIM-UDID'] ?? 0).toBe(0)
-
-    await context.phoneDevices.io({
-      deviceId: deviceId('SIM-UDID'),
-      method: 'gesture',
-      actions: phoneSwipeActions([{ x: 100, y: 400 }, { x: 100, y: 100 }]),
-    })
-    const afterSwipe = await fake.counters()
-    expect(afterSwipe.io).toHaveLength(3)
-    expect(afterSwipe.scroll['SIM-UDID']).toBe(100)
-  })
-
-  it('forwards text and button requests without coordinate fields', () => {
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'text', text: 'hello' }, 3)).toEqual({
-      deviceId: 'ios', text: 'hello',
-    })
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'button', button: 'HOME' }, 3)).toEqual({
-      deviceId: 'ios', button: 'HOME',
-    })
-    const beibei = { width: 440, height: 956, scale: 3 }
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'text', text: 'hello' }, beibei)).toEqual({
-      deviceId: 'ios', text: 'hello',
-    })
-    expect(ioParams({ deviceId: deviceId('ios'), method: 'button', button: 'HOME' }, beibei)).toEqual({
-      deviceId: 'ios', button: 'HOME',
-    })
-    expect(ioParams({
-      deviceId: deviceId('ios'),
-      method: 'gesture',
-      actions: [{ type: 'pointerDown' }, { type: 'pause', duration: 16 }],
-    }, beibei)).toEqual({
-      deviceId: 'ios',
-      actions: [{ type: 'pointerDown' }, { type: 'pause', duration: 16 }],
-    })
+  it('refuses unknown rotation and derives the model screenshot extent when dimensions are omitted', () => {
+    expect(() => upstreamIo(tap(90), 'ios')).toThrow(/exact iOS capture rotation is unknown/u)
+    expect(upstreamIo({ deviceId: deviceId('ios'), method: 'tap', source: { kind: 'fresh-probe' }, x: 603, y: 1_311 }, 'ios', 0, SCREEN))
+      .toEqual({ method: 'device.io.tap', params: { deviceId: 'ios', x: 201, y: 437 } })
+    expect(upstreamIo({ deviceId: deviceId('ios'), method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 }, 'ios', 90, SCREEN))
+      .toEqual({ method: 'device.io.swipe', params: { deviceId: 'ios', x1: 360, y1: 344, x2: 360, y2: 344 } })
+    expect(upstreamIo({ deviceId: deviceId('ios'), method: 'tap', source: { kind: 'fresh-probe' }, x: 603, y: 1_311 }, 'ios', 180, SCREEN))
+      .toEqual({ method: 'device.io.swipe', params: { deviceId: 'ios', x1: 201, y1: 437, x2: 201, y2: 437 } })
+    expect(upstreamIo({ deviceId: deviceId('ios'), method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 }, 'ios', 270, SCREEN))
+      .toEqual({ method: 'device.io.swipe', params: { deviceId: 'ios', x1: 42, y1: 530, x2: 42, y2: 530 } })
   })
 })

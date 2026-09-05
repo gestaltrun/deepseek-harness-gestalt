@@ -2128,6 +2128,8 @@ export interface Config {
   requestTimeoutMs?: number
   /** Ceiling for recognizing one H264 key access unit from each Android source. */
   h264ProbeTimeoutMs?: number
+  /** Maximum milliseconds spent joining foreign capture reader cleanup. */
+  captureCleanupTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -2159,10 +2161,12 @@ Requires: `phoneDevices` · `webServer`
 export interface Config {
   /** Milliseconds a minted capture URL remains valid. */
   tokenTtlMs?: number
+  /** Maximum milliseconds spent joining foreign capture cleanup during shutdown. */
+  transportCleanupTimeoutMs?: number
 }
 ```
 
-Source: [`packages/phone/phone-stream/src/index.ts:59`](../packages/phone/phone-stream/src/index.ts)
+Source: [`packages/phone/phone-stream/src/index.ts:65`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -3699,7 +3703,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/tool-phone/src/index.ts:24`](../packages/phone/tool-phone/src/index.ts)
+Source: [`packages/phone/tool-phone/src/index.ts:23`](../packages/phone/tool-phone/src/index.ts)
 
 <a id="deepseek-aidsh-tool-project-members"></a>
 

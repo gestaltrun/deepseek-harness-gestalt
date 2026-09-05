@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
+import PhoneDevices, { deviceId, phoneCaptureId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import type { Config } from '@deepseek-ai/dsh-phone-runtime'
-import type { DeviceId, PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
+import type { PhoneDeviceChange, PhoneDeviceList } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
 import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, pngDimensions, PNG_SIGNATURE, stageFake, wireDevice } from './helpers.ts'
@@ -341,7 +341,7 @@ describe('phone runtime service lifecycle', () => {
     expect(capture.code).toBe('PHONE_UNRESOLVED')
     expect((await errorOf(() => context.phoneDevices.boot(missing))).code).toBe('PHONE_UNRESOLVED')
     expect((await errorOf(() => context.phoneDevices.shutdown(missing))).code).toBe('PHONE_UNRESOLVED')
-    expect((await errorOf(() => context.phoneDevices.io({ method: 'tap', deviceId: missing, x: 1, y: 1 }))).code)
+    expect((await errorOf(() => context.phoneDevices.io({ method: 'tap', deviceId: missing, source: { kind: 'fresh-probe' }, x: 1, y: 1 }))).code)
       .toBe('PHONE_UNRESOLVED')
   })
 
@@ -446,20 +446,25 @@ describe('phone runtime service lifecycle', () => {
     expect(unknown.code).toBe('PHONE_DEVICE_NOT_FOUND')
   })
 
-  it('forwards io tap, gesture, text, and button to the loopback JSON-RPC server', async () => {
+  it('forwards semantic tap, swipe, text, and button to the loopback JSON-RPC server', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
     const context = await mountWith(fake)
     await context.phoneDevices.io({
       deviceId: ANDROID_EMULATOR,
       method: 'tap',
+      source: { kind: 'fresh-probe' },
       x: 12,
       y: 34,
     })
     await context.phoneDevices.io({
       deviceId: ANDROID_EMULATOR,
-      method: 'gesture',
-      actions: [{ type: 'pointerDown', x: 1, y: 2 }],
+      method: 'swipe',
+      source: { kind: 'fresh-probe' },
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
     })
     await context.phoneDevices.io({
       deviceId: ANDROID_EMULATOR,
@@ -474,15 +479,15 @@ describe('phone runtime service lifecycle', () => {
     expect((await fake.counters()).io).toEqual([
       { method: 'device.io.tap', params: { deviceId: 'emulator-5554', x: 12, y: 34 } },
       {
-        method: 'device.io.gesture',
-        params: { deviceId: 'emulator-5554', actions: [{ type: 'pointerDown', x: 1, y: 2 }] },
+        method: 'device.io.swipe',
+        params: { deviceId: 'emulator-5554', x1: 1, y1: 2, x2: 3, y2: 4 },
       },
       { method: 'device.io.text', params: { deviceId: 'emulator-5554', text: 'hello' } },
       { method: 'device.io.button', params: { deviceId: 'emulator-5554', button: 'HOME' } },
     ])
   })
 
-  it('maps landscape iOS capture pixels onto swapped WDA bounds from sticky portrait screenSize', async () => {
+  it('uses fresh probing when the caller chooses the model coordinate source', async () => {
     const fake = await stageFake({
       devices: [{
         ...wireDevice('REAL-UDID', 'ios', 'real', 'online'),
@@ -492,25 +497,101 @@ describe('phone runtime service lifecycle', () => {
     fakes.push(fake)
     const context = await mountWith(fake)
     await context.phoneDevices.io({
-      deviceId: IOS_REAL,
-      method: 'tap',
-      x: 99,
-      y: 660,
-      captureWidth: 2_868,
-      captureHeight: 1_320,
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 99, y: 660,
     })
+    const counters = await fake.counters()
+    expect(counters.captures).toContainEqual({ deviceId: 'REAL-UDID', format: 'mjpeg' })
+    expect(counters.io).toHaveLength(1)
+  })
+
+  it('uses runtime-owned H264 evidence for exact landscape projection', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captureId = phoneCaptureId('h264-current')
+    const capture = await context.phoneDevices.startCapture({ deviceId: IOS_REAL, format: 'h264', captureId })
+    const reader = capture.body.getReader()
     await context.phoneDevices.io({
-      deviceId: IOS_REAL,
-      method: 'tap',
-      x: 2_868,
-      y: 660,
-      captureWidth: 2_868,
-      captureHeight: 1_320,
+      deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+      source: { kind: 'capture', captureWidth: 2_622, captureHeight: 1_206, captureId, captureFormat: 'h264', captureRotation: 90 },
+    })
+    expect((await fake.counters()).io).toEqual([{
+      method: 'device.io.swipe', params: { deviceId: 'REAL-UDID', x1: 360, y1: 344, x2: 360, y2: 344 },
+    }])
+    await reader.cancel()
+  })
+
+  it('keeps unique MJPEG capture observations isolated on one device', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, streamFrameCount: 2, mjpegOrientations: [8, 6] })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const leftId = phoneCaptureId('mjpeg-left')
+    const rightId = phoneCaptureId('mjpeg-right')
+    const left = await context.phoneDevices.startCapture({ deviceId: IOS_REAL, format: 'mjpeg', captureId: leftId })
+    const right = await context.phoneDevices.startCapture({ deviceId: IOS_REAL, format: 'mjpeg', captureId: rightId })
+    const leftReader = left.body.getReader()
+    const rightReader = right.body.getReader()
+    await leftReader.read()
+    await rightReader.read()
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+      source: { kind: 'capture', captureWidth: 2_622, captureHeight: 1_206, captureId: leftId, captureFormat: 'mjpeg' },
+    })
+    await leftReader.cancel()
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', x: 1_590, y: 1_080,
+      source: { kind: 'capture', captureWidth: 2_622, captureHeight: 1_206, captureId: rightId, captureFormat: 'mjpeg' },
     })
     expect((await fake.counters()).io).toEqual([
-      { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 33, y: 220 } },
-      { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 956, y: 220 } },
+      { method: 'device.io.swipe', params: { deviceId: 'REAL-UDID', x1: 42, y1: 530, x2: 42, y2: 530 } },
+      { method: 'device.io.swipe', params: { deviceId: 'REAL-UDID', x1: 360, y1: 344, x2: 360, y2: 344 } },
     ])
+    await rightReader.cancel()
+  })
+
+  it('single-flights a model rotation probe while caller cancellation remains independent', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, screencaptureDelayMs: 100, mjpegOrientations: [8] })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const cancelled = new AbortController()
+    const first = context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 }, cancelled.signal)
+    const second = context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 })
+    cancelled.abort()
+    await expect(first).rejects.toBeInstanceOf(Error)
+    await expect(second).resolves.toBeUndefined()
+    const counters = await fake.counters()
+    expect(counters.captures.filter(capture => capture.deviceId === 'REAL-UDID' && capture.format === 'mjpeg')).toHaveLength(1)
+    expect(counters.io).toEqual([{
+      method: 'device.io.swipe',
+      params: { deviceId: 'REAL-UDID', x1: 42, y1: 530, x2: 42, y2: 530 },
+    }])
+  })
+
+  it('removes a settled probe before a direct continuation starts the next model action', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 }).then(async () => {
+      await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1_590, y: 1_080 })
+    })
+    const counters = await fake.counters()
+    expect(counters.captures.filter(capture => capture.deviceId === 'REAL-UDID' && capture.format === 'mjpeg')).toHaveLength(2)
+    expect(counters.io).toHaveLength(2)
+  })
+
+  it('aborts and joins model probes on generation replacement and disposal', async () => {
+    for (const stop of ['replace', 'dispose'] as const) {
+      const fake = await stageFake({ devices: BASE_DEVICES, screencaptureDelayMs: 5_000 })
+      fakes.push(fake)
+      const context = await mountWith(fake)
+      const pending = context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1, y: 2 })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const stopping = stop === 'replace'
+        ? context.phoneDevices.deactivate()
+        : context.fiber.dispose()
+      await expect(pending).rejects.toMatchObject({ code: stop === 'replace' ? 'PHONE_ABORTED' : 'PHONE_DISPOSED' })
+      await expect(stopping).resolves.toBeUndefined()
+    }
   })
 
   it('normalizes iOS screenshot pixels onto device logical points and caches the scale', async () => {
@@ -520,16 +601,18 @@ describe('phone runtime service lifecycle', () => {
     await context.phoneDevices.io({
       deviceId: IOS_REAL,
       method: 'tap',
+      source: { kind: 'fresh-probe' },
       x: 984,
       y: 1_228,
     })
     await context.phoneDevices.io({
       deviceId: IOS_REAL,
-      method: 'gesture',
-      actions: [
-        { type: 'pointerDown', x: 3, y: 6, pressure: 0.5 },
-        { type: 'pointerUp', x: 984, y: 1_228 },
-      ],
+      method: 'swipe',
+      source: { kind: 'fresh-probe' },
+      x1: 3,
+      y1: 6,
+      x2: 984,
+      y2: 1_228,
     })
     await context.phoneDevices.io({
       deviceId: IOS_REAL,
@@ -541,14 +624,8 @@ describe('phone runtime service lifecycle', () => {
       io: [
         { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 328, y: 409 } },
         {
-          method: 'device.io.gesture',
-          params: {
-            deviceId: 'REAL-UDID',
-            actions: [
-              { type: 'pointerDown', x: 1, y: 2, pressure: 0.5 },
-              { type: 'pointerUp', x: 328, y: 409 },
-            ],
-          },
+          method: 'device.io.swipe',
+          params: { deviceId: 'REAL-UDID', x1: 1, y1: 2, x2: 328, y2: 409 },
         },
         { method: 'device.io.button', params: { deviceId: 'REAL-UDID', button: 'HOME' } },
       ],
@@ -564,6 +641,7 @@ describe('phone runtime service lifecycle', () => {
     const failure = await errorOf(() => context.phoneDevices.io({
       deviceId: IOS_REAL,
       method: 'tap',
+      source: { kind: 'fresh-probe' },
       x: 12,
       y: 34,
     }))
@@ -579,7 +657,9 @@ describe('phone runtime service lifecycle', () => {
     })
     fakes.push(fake)
     const context = await mountWith(fake)
-    const staleFailure = errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 }))
+    const staleFailure = errorOf(() => context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 12, y: 18,
+    }))
     await waitFor(async () => (await fake.counters()).infoCount === 1)
     await fake.setLaunchDevices([
       { ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 2 } },
@@ -587,7 +667,9 @@ describe('phone runtime service lifecycle', () => {
     await context.phoneDevices.activateExecutable(fake.executablePath)
     await expect(staleFailure).resolves.toMatchObject({ code: 'PHONE_ABORTED' })
 
-    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 })
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 12, y: 18,
+    })
     expect((await fake.counters())).toMatchObject({
       infoCount: 1,
       io: [{ method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 6, y: 9 } }],
@@ -601,6 +683,7 @@ describe('phone runtime service lifecycle', () => {
     const unknownIo = await errorOf(() => context.phoneDevices.io({
       deviceId: deviceId('emulator-nope'),
       method: 'tap',
+      source: { kind: 'fresh-probe' },
       x: 0,
       y: 0,
     }))
@@ -838,11 +921,6 @@ describe('phone runtime service lifecycle', () => {
     const mobilecliCancel = vi.fn(async () => { throw new Error('mobilecli cleanup refusal') })
     const nativeCancel = vi.fn(async () => {})
     const captured = context.phoneDevices as unknown as {
-      preferAndroidH264(
-        capture: { contentType: string; body: ReadableStream<Uint8Array> },
-        id: DeviceId,
-        signal: AbortSignal,
-      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
       inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
         recognizable: boolean
         body: ReadableStream<Uint8Array>
@@ -860,10 +938,11 @@ describe('phone runtime service lifecycle', () => {
       })
     vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
 
-    const cancelled = await errorOf(() => captured.preferAndroidH264({
-      contentType: 'video/h264',
-      body: new ReadableStream<Uint8Array>(),
-    }, ANDROID_EMULATOR, controller.signal))
+    const cancelled = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+      signal: controller.signal,
+    }))
     expect(cancelled.code).toBe('PHONE_ABORTED')
     expect(nativeCancel).toHaveBeenCalledOnce()
     expect(mobilecliCancel).toHaveBeenCalledOnce()
@@ -875,11 +954,6 @@ describe('phone runtime service lifecycle', () => {
     const context = await mountWith(fake)
     const controller = new AbortController()
     const captured = context.phoneDevices as unknown as {
-      preferAndroidH264(
-        capture: { contentType: string; body: ReadableStream<Uint8Array> },
-        id: DeviceId,
-        signal: AbortSignal,
-      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
       inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<never>
     }
     vi.spyOn(captured, 'inspectAndroidH264').mockImplementation(async () => {
@@ -887,10 +961,11 @@ describe('phone runtime service lifecycle', () => {
       throw controller.signal.reason
     })
 
-    const cancelled = await errorOf(() => captured.preferAndroidH264({
-      contentType: 'video/h264',
-      body: new ReadableStream<Uint8Array>(),
-    }, ANDROID_EMULATOR, controller.signal))
+    const cancelled = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+      signal: controller.signal,
+    }))
     expect(cancelled.code).toBe('PHONE_ABORTED')
   })
 
@@ -922,11 +997,6 @@ describe('phone runtime service lifecycle', () => {
     const context = await mountWith(fake)
     const controller = new AbortController()
     const captured = context.phoneDevices as unknown as {
-      preferAndroidH264(
-        capture: { contentType: string; body: ReadableStream<Uint8Array> },
-        id: DeviceId,
-        signal: AbortSignal,
-      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
       inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
         recognizable: boolean
         body: ReadableStream<Uint8Array>
@@ -942,10 +1012,11 @@ describe('phone runtime service lifecycle', () => {
       }
     })
 
-    const cancelled = await errorOf(() => captured.preferAndroidH264({
-      contentType: 'video/h264',
-      body: new ReadableStream<Uint8Array>(),
-    }, ANDROID_EMULATOR, controller.signal))
+    const cancelled = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+      signal: controller.signal,
+    }))
     expect(cancelled.code).toBe('PHONE_ABORTED')
   })
 
@@ -1072,6 +1143,91 @@ describe('phone runtime service lifecycle', () => {
     expect(timedOut.message).toContain('device.screencapture')
   })
 
+  /**
+   * Headers already arrived; disable the current generation so the post-header
+   * stale check runs bounded capture-body cancel. `stream` is mocked because
+   * a real RPC would abort before returning a body.
+   */
+  function mockStaleAfterHeaders(
+    context: CordisContext,
+    body: ReadableStream<Uint8Array>,
+  ): { mockRestore(): void } {
+    const captured = context.phoneDevices as unknown as {
+      rpcClient: { stream(...args: unknown[]): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }> }
+    }
+    return vi.spyOn(captured.rpcClient, 'stream').mockImplementation(async () => {
+      void context.phoneDevices.deactivate()
+      await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
+      return { contentType: 'multipart/x-mixed-replace', body }
+    })
+  }
+
+  it('surfaces a prompt stale-capture cancel rejection and does not log later', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake, { captureCleanupTimeoutMs: 20, pollIntervalMs: 60_000 })
+    const cancel = vi.fn(() => { throw new Error('cancel refused') })
+    const warnings: unknown[] = []
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const stream = mockStaleAfterHeaders(context, new ReadableStream<Uint8Array>({ cancel }))
+    try {
+      await expect(context.phoneDevices.startCapture({
+        deviceId: ANDROID_EMULATOR, format: 'mjpeg',
+      })).rejects.toThrow('cancel refused')
+      await new Promise<void>((resolve) => { setImmediate(resolve) })
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(warnings).toEqual([])
+    } finally {
+      stream.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('bounds a forever-hung stale-capture cancel within captureCleanupTimeoutMs', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake, { captureCleanupTimeoutMs: 20, pollIntervalMs: 60_000 })
+    const stream = mockStaleAfterHeaders(context, new ReadableStream<Uint8Array>({
+      cancel() { return new Promise<void>(() => {}) },
+    }))
+    try {
+      const started = Date.now()
+      const stale = await errorOf(() => context.phoneDevices.startCapture({
+        deviceId: ANDROID_EMULATOR, format: 'mjpeg',
+      }))
+      expect(stale.code).toBe('PHONE_ABORTED')
+      expect(stale.message).toMatch(/generation changed before publication/u)
+      expect(Date.now() - started).toBeLessThan(500)
+    } finally {
+      stream.mockRestore()
+    }
+  })
+
+  it('logs a stale-capture cancel rejection once after bounded abandonment', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake, { captureCleanupTimeoutMs: 20, pollIntervalMs: 60_000 })
+    let rejectCancel!: (error: unknown) => void
+    const cancel = new Promise<void>((_resolve, reject) => { rejectCancel = reject })
+    const warnings: unknown[] = []
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
+    const stream = mockStaleAfterHeaders(context, new ReadableStream<Uint8Array>({ cancel() { return cancel } }))
+    try {
+      const stale = await errorOf(() => context.phoneDevices.startCapture({
+        deviceId: ANDROID_EMULATOR, format: 'mjpeg',
+      }))
+      expect(stale.code).toBe('PHONE_ABORTED')
+      const failure = new Error('late cancel failure')
+      rejectCancel(failure)
+      await vi.waitFor(() => { expect(warnings).toEqual([failure]) })
+      await new Promise<void>((resolve) => { setImmediate(resolve) })
+      expect(warnings).toEqual([failure])
+    } finally {
+      stream.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
   it('preserves a non-timeout screencapture failure', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
@@ -1151,16 +1307,17 @@ describe('phone runtime service lifecycle', () => {
     const captured = context.phoneDevices as unknown as {
       enqueuePoll(options: { refreshOnly: boolean }): void
       markLost(reason: PhoneDevicesError): void
-      teardown(): void | Promise<void>
+      teardown(): Promise<void>
     }
+    const firstTeardown = captured.teardown()
+    expect(captured.teardown()).toBe(firstTeardown)
+    await firstTeardown
     await context.fiber.dispose()
-    // Re-entering the private lifecycle entrypoints after disposal must be a
-    // silence-preserving no-op for each guard.
+    expect(captured.teardown()).toBe(firstTeardown)
     captured.enqueuePoll({ refreshOnly: false })
     captured.markLost(new PhoneDevicesError('PHONE_UNAVAILABLE', 'synthetic second loss'))
     captured.markLost(new PhoneDevicesError('PHONE_UPSTREAM', 'synthetic third loss'))
-    const secondTeardown = captured.teardown()
-    expect(secondTeardown).toBeUndefined()
+    expect(captured.teardown()).toBe(firstTeardown)
     await new Promise(resolveSettle => setTimeout(resolveSettle, 30))
   })
 
@@ -1255,14 +1412,24 @@ describe('phone runtime service lifecycle', () => {
     })
   })
 
+  it('disposes an unclaimed holder after a bounded identity probe', async () => {
+    const fake = await stageFake()
+    expect(await fake.answersAt(fake.baseUrl)).toBe(false)
+    const first = fake.dispose()
+    expect(fake.dispose()).toBe(first)
+    await first
+  })
+
   it('cancels a replacement while its child is waiting for readiness', async () => {
     const initial = await stageFake({ devices: BASE_DEVICES })
     const hanging = await stageFake({ hang: true })
     fakes.push(initial, hanging)
     const context = await mountWith(initial)
     const controller = new AbortController()
-    const startedAt = Date.now()
     const activating = context.phoneDevices.activateExecutable(hanging.executablePath, controller.signal)
+    void activating.catch(() => {})
+    await hanging.awaitOwnedOnlineAt(initial.baseUrl)
+    const startedAt = Date.now()
     controller.abort()
     await expect(activating).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
     expect(Date.now() - startedAt).toBeLessThan(500)
@@ -1392,10 +1559,11 @@ describe('phone runtime service lifecycle', () => {
     const warnings: unknown[] = []
     vi.spyOn(context.logger, 'warn').mockImplementation((value: unknown) => { warnings.push(value) })
     const captured = context.phoneDevices as unknown as {
-      roundTrip(): Promise<unknown>
+      acquireAndPublishDevicesNow(): Promise<PhoneDeviceList>
       pollAttempt(required?: boolean, signal?: AbortSignal): Promise<void>
     }
-    captured.roundTrip = async () => { throw new PhoneDevicesError('PHONE_TIMEOUT', 'temporary miss') }
+    vi.spyOn(captured, 'acquireAndPublishDevicesNow')
+      .mockRejectedValueOnce(new PhoneDevicesError('PHONE_TIMEOUT', 'temporary miss'))
     await captured.pollAttempt()
     expect(context.phoneDevices.isReady()).toBe(true)
     expect(warnings).toContain('phone-runtime: device poll missed (PHONE_TIMEOUT); keeping the last listing')
@@ -1438,14 +1606,21 @@ describe('phone runtime service lifecycle', () => {
       child?: { stop(): Promise<void> }
       markLost(reason: PhoneDevicesError): void
     }
-    if (captured.child === undefined) throw new Error('ready runtime did not retain its child')
-    captured.child.stop = vi.fn(async () => { throw new Error('stop failed') })
+    const child = captured.child
+    if (child === undefined) throw new Error('ready runtime did not retain its child')
+    const originalStop = child.stop.bind(child)
+    const stop = vi.fn()
+      .mockRejectedValueOnce(new Error('stop failed'))
+      .mockImplementationOnce(originalStop)
+    child.stop = stop
     captured.markLost(new PhoneDevicesError('PHONE_UNAVAILABLE', 'synthetic loss'))
     await vi.waitFor(() => {
       expect(warnings).toContain('phone-runtime: failed to stop the lost mobilecli child')
     })
     expect(warnings).toContain('phone-runtime: a readiness observer failed')
     expect(survivor).toHaveBeenCalledWith(false)
+    await context.fiber.dispose()
+    expect(stop).toHaveBeenCalledTimes(2)
   })
 
   it('records teardown stop failure on the activation tail', async () => {

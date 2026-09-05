@@ -9,6 +9,9 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 /** Opaque mobilecli device identifier — an Android serial or an iOS UDID. */
 export type DeviceId = Branded<'DeviceId'>
 
+/** Opaque identity of one Host-minted phone capture. */
+export type PhoneCaptureId = Branded<'PhoneCaptureId'>
+
 /** Device execution class as reported by the mobilecli `type` field. */
 export type PhoneDeviceKind = 'emulator' | 'simulator' | 'real'
 
@@ -57,29 +60,35 @@ export interface PhoneDeviceChange {
   readonly removed: readonly DeviceId[]
 }
 
-/** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
-export type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
+/** Exact clockwise rotation required to display a captured frame. */
+export type PhoneRotation = 0 | 90 | 180 | 270
 
-/** One JSON-RPC `device.io.*` request addressed by branded device id. */
-export type PhoneIoRequest =
+/** Closed semantic actions accepted by the phone fleet Service. */
+export type PhoneIoMethod = 'tap' | 'swipe' | 'text' | 'button'
+
+/** Trusted coordinate-plane source for one semantic coordinate action. */
+export type PhoneCoordinateSource =
+  | { readonly kind: 'fresh-probe' }
   | {
-    readonly deviceId: DeviceId
-    readonly method: 'tap'
-    readonly x: number
-    readonly y: number
-    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
-    readonly captureHeight?: number
+    readonly kind: 'capture'
+    readonly captureId: PhoneCaptureId
+    readonly captureFormat: PhoneCaptureFormat
+    readonly captureWidth: number
+    readonly captureHeight: number
+    readonly captureRotation?: PhoneRotation
   }
+
+/** One semantic phone action addressed by branded device id. */
+export type PhoneIoRequest =
+  | { readonly deviceId: DeviceId; readonly method: 'tap'; readonly x: number; readonly y: number; readonly source: PhoneCoordinateSource }
   | {
     readonly deviceId: DeviceId
-    readonly method: 'gesture'
-    readonly actions: readonly Record<string, unknown>[]
-    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
-    readonly captureHeight?: number
+    readonly method: 'swipe'
+    readonly x1: number
+    readonly y1: number
+    readonly x2: number
+    readonly y2: number
+    readonly source: PhoneCoordinateSource
   }
   | { readonly deviceId: DeviceId; readonly method: 'text'; readonly text: string }
   | { readonly deviceId: DeviceId; readonly method: 'button'; readonly button: string }
@@ -93,6 +102,8 @@ export interface PhoneCaptureRequest {
   readonly deviceId: DeviceId
   /** `mjpeg` for both platforms; `h264` maps onto upstream `avc` (Android). */
   readonly format: PhoneCaptureFormat
+  /** Runtime-owned identity binding active observation and later coordinate projection when the caller needs coordinate evidence. */
+  readonly captureId?: PhoneCaptureId
   /** Optional caller cancellation fused with the request ceiling until headers arrive. */
   readonly signal?: AbortSignal
 }

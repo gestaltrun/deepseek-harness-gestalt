@@ -4,7 +4,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import { phoneSwipeActions } from '@deepseek-ai/dsh-phone-runtime/swipe'
 import type { DeviceId, PhoneDeviceList, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
@@ -46,8 +45,6 @@ const DEVICE_REF_SCHEMA = {
     kind: { type: 'string' as const, required: true as const, enum: ['emulator', 'simulator', 'real'] },
     state: { type: 'string' as const, required: true as const },
     online: { type: 'boolean' as const, required: true as const },
-    // Runtime listing refs carry the upstream platform even though the public
-    // PhoneDeviceRef type omits it, so the declared output must accept it.
     platform: { type: 'string' as const, required: true as const, enum: ['ios', 'android'] },
     logicalDisplay: {
       type: 'object' as const,
@@ -100,8 +97,8 @@ const TAP_ACTION = {
   additionalProperties: false,
   properties: {
     kind: { type: 'string' as const, required: true as const, const: 'tap' },
-    x: { type: 'integer' as const, required: true as const, description: 'Horizontal pixel coordinate.' },
-    y: { type: 'integer' as const, required: true as const, description: 'Vertical pixel coordinate.' },
+    x: { type: 'integer' as const, required: true as const, description: 'Horizontal pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch.' },
+    y: { type: 'integer' as const, required: true as const, description: 'Vertical pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch.' },
   },
 } as const
 
@@ -110,10 +107,10 @@ const SWIPE_ACTION = {
   additionalProperties: false,
   properties: {
     kind: { type: 'string' as const, required: true as const, const: 'swipe' },
-    x1: { type: 'integer' as const, required: true as const, description: 'Start horizontal pixel coordinate.' },
-    y1: { type: 'integer' as const, required: true as const, description: 'Start vertical pixel coordinate.' },
-    x2: { type: 'integer' as const, required: true as const, description: 'End horizontal pixel coordinate.' },
-    y2: { type: 'integer' as const, required: true as const, description: 'End vertical pixel coordinate.' },
+    x1: { type: 'integer' as const, required: true as const, description: 'Start horizontal pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch.' },
+    y1: { type: 'integer' as const, required: true as const, description: 'Start vertical pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch.' },
+    x2: { type: 'integer' as const, required: true as const, description: 'End horizontal pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch.' },
+    y2: { type: 'integer' as const, required: true as const, description: 'End vertical pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch.' },
   },
 } as const
 
@@ -274,19 +271,20 @@ function wrapFleetError(error: unknown): never {
  * @returns the closed action forwarded to the fleet.
  */
 function parseAction(raw: DeviceAction): DeviceAction {
-  if (raw.kind === 'tap') return { kind: 'tap', x: raw.x, y: raw.y }
-  if (raw.kind === 'swipe') {
-    return { kind: 'swipe', x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2 }
-  }
-  if (raw.kind === 'type') {
-    const text = raw.text.trim()
-    if (text.length === 0) {
-      throw new HarnessError('device_act type text must be non-empty', 'PHONE_UNSUPPORTED')
+  switch (raw.kind) {
+    case 'tap': return { kind: 'tap', x: raw.x, y: raw.y }
+    case 'swipe': return { kind: 'swipe', x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2 }
+    case 'type': {
+      const text = raw.text.trim()
+      if (text.length === 0) throw new HarnessError('device_act type text must be non-empty', 'PHONE_UNSUPPORTED')
+      return { kind: 'type', text }
     }
-    return { kind: 'type', text }
+    case 'button': return { kind: 'button', name: raw.name }
+    default: return assertNever(raw)
   }
-  return { kind: 'button', name: raw.name }
 }
+
+function assertNever(value: never): never { throw new TypeError(`unexpected phone action: ${String(value)}`) }
 
 const IO_BUTTONS: Record<(typeof BUTTON_NAMES)[number], string> = {
   home: 'HOME',
@@ -304,19 +302,26 @@ const IO_BUTTONS: Record<(typeof BUTTON_NAMES)[number], string> = {
  * @returns the Service IO request.
  */
 function ioRequestFrom(id: DeviceId, action: DeviceAction): PhoneIoRequest {
-  if (action.kind === 'tap') return { deviceId: id, method: 'tap', x: action.x, y: action.y }
-  if (action.kind === 'swipe') {
-    return {
-      deviceId: id,
-      method: 'gesture',
-      actions: phoneSwipeActions([
-        { x: action.x1, y: action.y1 },
-        { x: action.x2, y: action.y2 },
-      ]),
-    }
+  switch (action.kind) {
+    case 'tap':
+      return { deviceId: id, method: 'tap', source: { kind: 'fresh-probe' }, x: action.x, y: action.y }
+    case 'swipe':
+      return {
+        deviceId: id,
+        method: 'swipe',
+        source: { kind: 'fresh-probe' },
+        x1: action.x1,
+        y1: action.y1,
+        x2: action.x2,
+        y2: action.y2,
+      }
+    case 'type':
+      return { deviceId: id, method: 'text', text: action.text }
+    case 'button':
+      return { deviceId: id, method: 'button', button: IO_BUTTONS[action.name] }
+    default:
+      return assertNever(action)
   }
-  if (action.kind === 'type') return { deviceId: id, method: 'text', text: action.text }
-  return { deviceId: id, method: 'button', button: IO_BUTTONS[action.name] }
 }
 
 /**
@@ -455,7 +460,7 @@ function registerPhoneTools(ctx: Context, fleet: PhoneFleet, timeoutMs: number):
         action: {
           required: true as const,
           oneOf: [TAP_ACTION, SWIPE_ACTION, TYPE_ACTION, BUTTON_ACTION],
-          description: 'Exactly one closed gesture or hardware-button action.',
+          description: 'Exactly one closed semantic action or hardware-button action.',
         },
       },
       output: { schema: ACT_SCHEMA, render: renderValue },

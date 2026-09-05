@@ -83,7 +83,7 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
     const context = await mountWith(fake)
-    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 15, y: 18 })
+    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 15, y: 18 })
     expect((await fake.counters()).io).toEqual([
       { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 5, y: 6 } },
     ])
@@ -98,7 +98,7 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
       ['REAL-UDID', 'unauthorized', false],
     ])
 
-    const refused = await errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 1, y: 2 }))
+    const refused = await errorOf(() => context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', source: { kind: 'fresh-probe' }, x: 1, y: 2 }))
     expect(refused.code).toBe('PHONE_UPSTREAM')
     expect(refused.message).toContain('unauthorized')
     // The structured fact lives on the listing's state field; the #362 arm
@@ -141,7 +141,7 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
 
     // observe leg: the captured handset answers io (the Consumer observe path
     // reads the same listing for its device facts).
-    await context.phoneDevices.io({ deviceId: ENVELOPE_REAL_HANDSET, method: 'tap', x: 3, y: 3 })
+    await context.phoneDevices.io({ deviceId: ENVELOPE_REAL_HANDSET, method: 'tap', source: { kind: 'fresh-probe' }, x: 3, y: 3 })
     expect((await fake.counters()).io).toEqual([
       { method: 'device.io.tap', params: { deviceId: '00008101-000A2B3C4D5E6F70', x: 1, y: 1 } },
     ])

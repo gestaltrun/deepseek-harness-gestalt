@@ -47,6 +47,7 @@ describe('PhoneConnectionController lifecycle', () => {
       kind: 'live',
       streamUrl: SESSION_A.h264.url,
       format: 'h264',
+      captureId: SESSION_A.h264.captureId,
       expiresAt: SESSION_A.h264.expiresAt,
     })
   })
@@ -62,6 +63,7 @@ describe('PhoneConnectionController lifecycle', () => {
       kind: 'live',
       streamUrl: SESSION_A.mjpeg.url,
       format: 'mjpeg',
+      captureId: SESSION_A.mjpeg.captureId,
       expiresAt: SESSION_A.mjpeg.expiresAt,
     })
   })
@@ -125,7 +127,7 @@ describe('PhoneConnectionController lifecycle', () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
-    controller.noteSurface('h264', 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
     expect(controller.tap(0.5, 0.5)).toBe(true)
 
     gateway.lastSocket!.drop()
@@ -136,7 +138,7 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(controller.tap(0.5, 0.5)).toBe(false)
     expect(gateway.lastSocket!.sent).toEqual([])
 
-    controller.noteSurface('h264', 390, 844)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
     expect(controller.tap(0.5, 0.5)).toBe(true)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({
       method: 'tap',
@@ -290,7 +292,7 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(controller.snapshot()).toEqual({ kind: 'repairing-agent', force: false })
     await flush()
     gateway.lastSocket!.accept()
-    controller.noteSurface('h264', 390, 844)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
     expect(controller.button('HOME')).toBe(true)
     expect(gateway.agentInstallCalls).toEqual([{ deviceId: 'UDID-9', force: false }])
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({
@@ -367,7 +369,7 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(gateway.agentStatusDevices).toEqual(['UDID-9'])
   })
 
-  it('keeps a managed session live after a tap JSON-RPC error', async () => {
+  it('keeps a managed session live and surfaces a structured tap error', async () => {
     for (const session of [
       { ...SESSION_A, agentManaged: true },
       { ...SESSION_A, deviceId: 'UDID-9', agentManaged: true },
@@ -380,16 +382,40 @@ describe('PhoneConnectionController lifecycle', () => {
       controller.connect()
       await flush()
       gateway.lastSocket!.accept()
-      controller.noteSurface('h264', 2_868, 1_320)
+      controller.noteSurface('h264', SESSION_A.h264.captureId, 2_868, 1_320)
       expect(controller.tap(1, 0.5)).toBe(true)
       const socket = gateway.lastSocket!
       socket.receive(JSON.stringify({
         jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'input command failed' },
       }))
       expect(controller.snapshot()).toMatchObject({ kind: 'live' })
+      expect(controller.actionStatus()).toEqual({ code: -32000, message: 'input command failed' })
       expect(gateway.agentStatusDevices).toEqual([])
       expect(socket.opened).toBe(true)
     }
+  })
+
+  it('keeps action status monotonic across sends and out-of-order replies', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 100, 200, 0)
+    expect(controller.tap(0.1, 0.1)).toBe(true)
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'first failed' },
+    }))
+    expect(controller.actionStatus()).toEqual({ code: -32000, message: 'first failed' })
+    expect(controller.tap(0.2, 0.2)).toBe(true)
+    expect(controller.actionStatus()).toEqual({ code: -32000, message: 'first failed' })
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32010, message: 'stale offline' },
+    }))
+    expect(controller.snapshot()).toMatchObject({ kind: 'live' })
+    gateway.lastSocket!.receive(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { status: 'ok' } }))
+    expect(controller.actionStatus()).toBeUndefined()
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'late failure' },
+    }))
+    expect(controller.actionStatus()).toBeUndefined()
   })
 
   it('offers install or reinstall after a managed picture failure based on agent status', async () => {
@@ -504,7 +530,7 @@ describe('PhoneConnectionController lifecycle', () => {
 
   it('ignores capture failures before a stream is live', () => {
     const controller = controllerOn(new FakeGateway(), new ManualScheduler())
-    controller.noteCaptureFailure('h264')
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
     expect(controller.snapshot()).toEqual({ kind: 'idle' })
   })
 
@@ -512,8 +538,8 @@ describe('PhoneConnectionController lifecycle', () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
-    controller.noteCaptureFailure('h264')
-    controller.noteCaptureFailure('mjpeg')
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
+    controller.noteCaptureFailure('mjpeg', SESSION_A.mjpeg.captureId)
     expect(controller.snapshot().kind).toBe('reconnecting')
     scheduler.runNext()
     await flush()
@@ -527,12 +553,13 @@ describe('PhoneConnectionController lifecycle', () => {
     const controller = await connectToLive(gateway, scheduler)
     const socket = gateway.lastSocket
 
-    controller.noteCaptureFailure('h264')
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
 
     expect(controller.snapshot()).toEqual({
       kind: 'live',
       streamUrl: SESSION_A.mjpeg.url,
       format: 'mjpeg',
+      captureId: SESSION_A.mjpeg.captureId,
       expiresAt: SESSION_A.mjpeg.expiresAt,
     })
     expect(gateway.mintedDevices).toEqual(['emulator-5554'])
@@ -544,8 +571,8 @@ describe('PhoneConnectionController lifecycle', () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
-    controller.noteCaptureFailure('h264')
-    controller.noteCaptureFailure('mjpeg')
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
+    controller.noteCaptureFailure('mjpeg', SESSION_A.mjpeg.captureId)
     expect(controller.snapshot()).toEqual({
       kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.mjpeg.url,
     })
@@ -555,8 +582,8 @@ describe('PhoneConnectionController lifecycle', () => {
   it('ignores a stale capture callback from the encoding already replaced', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
-    controller.noteCaptureFailure('h264')
-    controller.noteCaptureFailure('h264')
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
     expect(controller.snapshot()).toMatchObject({ kind: 'live', format: 'mjpeg' })
   })
 
@@ -615,11 +642,11 @@ describe('PhoneConnectionController io', () => {
   it('keeps the last valid surface when an invalid size is reported', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
-    controller.noteSurface('h264', 360, 720)
-    controller.noteSurface('h264', Number.NaN, 720)
-    controller.noteSurface('h264', 360, Number.POSITIVE_INFINITY)
-    controller.noteSurface('h264', 0, 720)
-    controller.noteSurface('h264', 360, -1)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, Number.NaN, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, Number.POSITIVE_INFINITY)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 0, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, -1)
     expect(controller.tap(0.5, 0.5)).toBe(true)
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
       method: 'tap', params: { x: 180, y: 360 },
@@ -630,7 +657,7 @@ describe('PhoneConnectionController io', () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
     expect(controller.swipe([{ u: 0, v: 0 }])).toBe(false)
-    controller.noteSurface('h264', 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
     expect(controller.swipe([])).toBe(false)
     expect(gateway.lastSocket!.sent).toEqual([])
   })
@@ -642,12 +669,13 @@ describe('PhoneConnectionController io', () => {
     // No surface yet: the touch is dropped instead of guessing coordinates.
     expect(controller.tap(0.5, 0.25)).toBe(false)
     expect(gateway.lastSocket!.sent).toHaveLength(0)
-    controller.noteSurface('h264', 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
     expect(controller.tap(0.5, 0.25)).toBe(true)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 180, y: 180, captureWidth: 360, captureHeight: 720,
+        deviceId: 'emulator-5554', x: 180, y: 180, kind: 'capture', captureWidth: 360, captureHeight: 720,
+        captureId: SESSION_A.h264.captureId, captureFormat: 'h264',
       },
     })
   })
@@ -659,18 +687,34 @@ describe('PhoneConnectionController io', () => {
     let notifications = 0
     controller.subscribe(() => { notifications += 1 })
 
-    controller.noteSurface('h264', 390, 844)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
     expect(controller.surfaceSize()).toEqual({ width: 390, height: 844 })
     expect(notifications).toBe(1)
 
     // A repeated identical measurement (the MJPEG re-measure cadence) is a no-op.
-    controller.noteSurface('h264', 390, 844)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
     expect(notifications).toBe(1)
     expect(controller.surfaceSize()).toEqual({ width: 390, height: 844 })
 
     // A rotation flip is a new snapshot identity and notifies again.
-    controller.noteSurface('h264', 844, 390)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 844, 390)
     expect(notifications).toBe(2)
+    expect(controller.surfaceSize()).toEqual({ width: 844, height: 390 })
+  })
+
+  it('ignores a stale same-format surface from the previous capture identity', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844, 0)
+    controller.disconnect()
+    const next = { ...SESSION_A, h264: { ...SESSION_A.h264, captureId: 'h264-b' as typeof SESSION_A.h264.captureId } }
+    gateway.queueMint({ session: next })
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 844, 390, 90)
+    expect(controller.surfaceSize()).toBeUndefined()
+    controller.noteSurface('h264', next.h264.captureId, 844, 390, 90)
     expect(controller.surfaceSize()).toEqual({ width: 844, height: 390 })
   })
 
@@ -686,13 +730,14 @@ describe('PhoneConnectionController io', () => {
   it('maps a tap through the rotated landscape surface onto landscape device coordinates', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
-    controller.noteSurface('h264', 390, 844)
-    controller.noteSurface('h264', 844, 390)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 844, 390)
     expect(controller.tap(0.75, 0.5)).toBe(true)
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 633, y: 195, captureWidth: 844, captureHeight: 390,
+        deviceId: 'emulator-5554', x: 633, y: 195, kind: 'capture', captureWidth: 844, captureHeight: 390,
+        captureId: SESSION_A.h264.captureId, captureFormat: 'h264',
       },
     })
   })
@@ -700,35 +745,28 @@ describe('PhoneConnectionController io', () => {
   it('uses MJPEG natural dimensions after fallback and ignores stale H264 dimensions', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
-    controller.noteCaptureFailure('h264')
-    controller.noteSurface('h264', 390, 844)
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 390, 844)
     expect(controller.tap(0.5, 0.5)).toBe(false)
-    controller.noteSurface('mjpeg', 1080, 2400)
+    controller.noteSurface('mjpeg', SESSION_A.mjpeg.captureId, 1080, 2400)
     expect(controller.tap(0.5, 0.5)).toBe(true)
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
       method: 'tap', params: { x: 540, y: 1200 },
     })
   })
 
-  it('maps a drag onto the WDA positioning, destination move, and travel pause list', async () => {
+  it('maps a drag onto one semantic swipe between its endpoints', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
-    controller.noteSurface('h264', 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
     expect(controller.swipe([{ u: 0, v: 0 }, { u: 0.5, v: 0.5 }, { u: 1, v: 1 }])).toBe(true)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
-      jsonrpc: '2.0', id: 1, method: 'gesture',
+      jsonrpc: '2.0', id: 1, method: 'swipe',
       params: {
-        deviceId: 'emulator-5554',
-        captureWidth: 360,
-        captureHeight: 720,
-        actions: [
-          { type: 'pointerMove', x: 0, y: 0 },
-          { type: 'pointerDown' },
-          { type: 'pointerMove', x: 360, y: 720 },
-          { type: 'pause', duration: 150 },
-          { type: 'pointerUp' },
-        ],
+        deviceId: 'emulator-5554', kind: 'capture', captureWidth: 360, captureHeight: 720,
+        captureId: SESSION_A.h264.captureId, captureFormat: 'h264',
+        x1: 0, y1: 0, x2: 360, y2: 720,
       },
     })
   })
@@ -737,7 +775,7 @@ describe('PhoneConnectionController io', () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
-    controller.noteSurface('h264', 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
     controller.text('验证码')
     controller.button('HOME')
     const [textFrame, buttonFrame] = gateway.lastSocket!.sent.map(parseSentFrame)
@@ -754,7 +792,7 @@ describe('PhoneConnectionController io', () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = controllerOn(gateway, scheduler)
-    controller.noteSurface('h264', 360, 720)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
     expect(controller.tap(0.5, 0.5)).toBe(false)
     controller.connect()
     await flush()
@@ -765,32 +803,112 @@ describe('PhoneConnectionController io', () => {
   it('drops io after both capture formats move a surfaced connection into retry', async () => {
     const gateway = new FakeGateway()
     const controller = await connectToLive(gateway, new ManualScheduler())
-    controller.noteSurface('h264', 360, 720)
-    controller.noteCaptureFailure('h264')
-    controller.noteSurface('mjpeg', 360, 720)
-    controller.noteCaptureFailure('mjpeg')
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
+    controller.noteCaptureFailure('h264', SESSION_A.h264.captureId)
+    controller.noteSurface('mjpeg', SESSION_A.mjpeg.captureId, 360, 720)
+    controller.noteCaptureFailure('mjpeg', SESSION_A.mjpeg.captureId)
     expect(controller.snapshot().kind).toBe('reconnecting')
     expect(controller.button('HOME')).toBe(false)
     expect(gateway.lastSocket!.sent).toEqual([])
   })
 
-  it('moves to the offline error arm when the device stops answering io', async () => {
+  it('lets an older outstanding offline reply terminate after a newer action', async () => {
     const gateway = new FakeGateway()
     gateway.queueMint({ session: { ...SESSION_A, agentManaged: true } })
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
-    controller.tap(0.5, 0.5)
+    controller.noteSurface('h264', SESSION_A.h264.captureId, 360, 720)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    expect(controller.button('HOME')).toBe(true)
+    expect(gateway.lastSocket!.sent).toHaveLength(2)
     gateway.lastSocket!.receive(JSON.stringify({
       jsonrpc: '2.0', id: 1, error: { code: -32010, message: 'PHONE_DEVICE_NOT_FOUND' },
     }))
     expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
+    gateway.lastSocket!.receive(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { status: 'ok' } }))
+    expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
     expect(gateway.agentStatusDevices).toEqual([])
   })
 
-  it('moves to the unauthorized error arm on an upstream authorization failure', async () => {
+  it('applies a reply delivered synchronously from send', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    const socket = gateway.lastSocket!
+    const originalSend = socket.send.bind(socket)
+    socket.send = (data: string) => {
+      const admitted = originalSend(data)
+      const id = (JSON.parse(data) as { id: number }).id
+      socket.receive(JSON.stringify({ jsonrpc: '2.0', id, result: { status: 'ok' } }))
+      return admitted
+    }
+    expect(controller.button('HOME')).toBe(true)
+    expect(controller.snapshot().kind).toBe('live')
+    socket.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'late failure' },
+    }))
+    expect(controller.actionStatus()).toBeUndefined()
+    expect(controller.snapshot().kind).toBe('live')
+  })
+
+  it('rolls back a send that returns false and reconnects', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
+    gateway.lastSocket!.send = () => false
+    expect(controller.button('HOME')).toBe(false)
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.h264.url })
+    scheduler.runNext()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot().kind).toBe('live')
+    expect(controller.button('HOME')).toBe(true)
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({ id: 1, method: 'button' })
+  })
+
+  it('rolls back a send that throws and reconnects', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = await connectToLive(gateway, scheduler)
+    gateway.lastSocket!.send = () => { throw new Error('io send failed') }
+    expect(controller.button('HOME')).toBe(false)
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.h264.url })
+    scheduler.runNext()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot().kind).toBe('live')
+    expect(controller.button('BACK')).toBe(true)
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({ id: 1, method: 'button' })
+  })
+
+  it('ignores a terminal reply from a previous socket generation', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = await connectToLive(gateway, scheduler)
+    const stale = gateway.lastSocket!
+    expect(controller.button('HOME')).toBe(true)
+    stale.drop()
+    scheduler.runNext()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot().kind).toBe('live')
+    expect(controller.button('BACK')).toBe(true)
+    stale.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32010, message: 'PHONE_DEVICE_NOT_FOUND' },
+    }))
+    stale.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 2, error: { code: -32010, message: 'PHONE_DEVICE_NOT_FOUND' },
+    }))
+    expect(controller.snapshot().kind).toBe('live')
+    expect(gateway.lastSocket!.opened).toBe(true)
+  })
+
+  it('lets an older outstanding unauthorized reply terminate after a newer action', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = await connectToLive(gateway, scheduler)
+    expect(controller.button('HOME')).toBe(true)
+    expect(controller.button('BACK')).toBe(true)
+    expect(gateway.lastSocket!.sent).toHaveLength(2)
     gateway.lastSocket!.receive(JSON.stringify({
       jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'device unauthorized: allow USB debugging' },
     }))

@@ -7,7 +7,7 @@ export interface PhoneH264PlaybackOptions {
   /** Canvas that receives the most recently decoded frame. */
   readonly canvas: HTMLCanvasElement
   /** Called when post-rotation display dimensions first appear or change. */
-  readonly onSurface: (width: number, height: number) => void
+  readonly onSurface: (width: number, height: number, rotation: 0 | 90 | 180 | 270) => void
   /** Called once when fetch, parsing, decoding, or drawing fails. */
   readonly onError: (error: unknown) => void
 }
@@ -413,7 +413,7 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
   let stopPromise: Promise<void> | undefined
   let settlePromise: Promise<void> | undefined
   let paintedFrames = 0
-  let surface: { width: number; height: number } | undefined
+  let surface: { width: number; height: number; rotation: 0 | 90 | 180 | 270 } | undefined
   const isStopped = (): boolean => closed || failed
 
   const wakeQueueDrain = (): void => {
@@ -471,9 +471,13 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
       if (options.canvas.height !== height) options.canvas.height = height
       paintRotatedFrame(context, frame, rotation, width, height, displayWidth, displayHeight)
       paintedFrames += 1
-      if (surface?.width !== width || surface.height !== height) {
-        surface = { width, height }
-        options.onSurface(width, height)
+      if (surface?.width !== width || surface.height !== height || surface.rotation !== rotation) {
+        surface = { width, height, rotation }
+        try {
+          options.onSurface(width, height, rotation)
+        } catch {
+          // Surface observers cannot turn healthy decoder output into playback failure.
+        }
       }
     } catch (error) {
       fail(error)

@@ -12,9 +12,9 @@ Mint 把 iOS 真机会话标为 `agentManaged: true` 并首选 H264。GUI 发送
 
 ## 决策
 
-Host `ioParams` 用缓存的 `device.info.screenSize`（不只是 scale）把 iOS 采集像素换成 XCTest 逻辑点。横竖屏 WDA 边界由 [live 采集面方向笔记](2026-09-04-ios-landscape-tap-orientation.zh.md) 拥有。Android 仍按采集像素原样转发。
+`PhoneDevices.io` and `upstreamIo` 用缓存的 `device.info.screenSize`（不只是 scale）把 iOS 采集像素换成 XCTest 逻辑点。横竖屏 WDA 边界由 [live 采集面方向笔记](2026-09-04-ios-semantic-input-rotation.zh.md) 拥有。Android 仍按采集像素原样转发。
 
-`handleFrame` 在 tap / gesture JSON-RPC 错误上保持 live 画面。agent 恢复仍用于 mint、画面与 socket 死亡。IO `-32010` 仍是 device-offline，未授权报文仍是 unauthorized，包括 `agentManaged` 会话。
+`handleFrame` 在 tap / swipe JSON-RPC 错误上保持 live 画面。agent 恢复仍用于 mint、画面与 socket 死亡。IO `-32010` 仍是 device-offline，未授权报文仍是 unauthorized，包括 `agentManaged` 会话。
 
 ## Alternatives considered
 
@@ -28,12 +28,12 @@ Host `ioParams` 用缓存的 `device.info.screenSize`（不只是 scale）把 iO
 
 ## 后果
 
-iOS 真机横屏 tap 的 JSON-RPC 错误不进入 checking-agent。画面与 socket 死亡仍会复检托管 agent。左侧横屏映射由 [live 采集面方向笔记](2026-09-04-ios-landscape-tap-orientation.zh.md) 拥有。
+iOS 真机横屏 tap 的 JSON-RPC 错误不进入 checking-agent。画面与 socket 死亡仍会复检托管 agent。左侧横屏映射由 [live 采集面方向笔记](2026-09-04-ios-semantic-input-rotation.zh.md) 拥有。
 
 ## Testing
 
-`phone-connection.client.spec.ts` 在 tap JSON-RPC 错误后保持 `agentManaged` 的 iOS 真机或 Android 会话 live，并仍走 device-offline 与 unauthorized 分支。横屏 WDA 映射覆盖见 [live 采集面方向笔记](2026-09-04-ios-landscape-tap-orientation.zh.md)。
+`phone-connection.client.spec.ts` 在 tap JSON-RPC 错误后保持 `agentManaged` 的 iOS 真机或 Android 会话 live，并仍走 device-offline 与 unauthorized 分支。横屏 WDA 映射覆盖见 [live 采集面方向笔记](2026-09-04-ios-semantic-input-rotation.zh.md)。
 
 ## Related
 
-iOS WDA 方向由 [横屏点击笔记](2026-09-04-ios-landscape-tap-orientation.zh.md) 拥有。Android 横屏 H264 画面框对调仍由 [VideoFrame rotation 笔记](2026-09-05-android-h264-videoframe-rotation.zh.md) 拥有。
+iOS WDA 方向由 [横屏点击笔记](2026-09-04-ios-semantic-input-rotation.zh.md) 拥有。Android 横屏 H264 画面框对调仍由 [VideoFrame rotation 笔记](2026-09-05-android-h264-videoframe-rotation.zh.md) 拥有。

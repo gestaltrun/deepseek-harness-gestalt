@@ -30,4 +30,4 @@ Status: implemented
 
 ## 后果
 
-已连接视图优先 H264，且不增加 npm 依赖。该路径要求支持 WebCodecs AVC 的安全上下文浏览器；不支持的运行时使用同 session MJPEG fallback。H264 解码尺寸或 MJPEG natural 尺寸是设备 tap 与 gesture 坐标的权威值，CSS 与容器尺寸不是。
+已连接视图优先 H264，且不增加 npm 依赖。该路径要求支持 WebCodecs AVC 的安全上下文浏览器；不支持的运行时使用同 session MJPEG fallback。H264 解码尺寸或 MJPEG natural 尺寸是设备 tap 与 swipe 坐标的权威值，CSS 与容器尺寸不是。

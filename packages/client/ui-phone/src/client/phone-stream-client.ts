@@ -5,7 +5,9 @@
  * state machine in `phone-connection.ts` decides what the facts mean.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-stream-client
  */
+import type { PhoneCaptureId } from '@deepseek-ai/dsh-phone-runtime'
 import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from './phone-connection.ts'
+import { phoneCaptureIdOf } from './phone-capture-id.ts'
 
 /** Minting endpoint for signed same-origin capture URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
@@ -37,6 +39,8 @@ export function isUnauthorizedMessage(message: string): boolean {
 export interface PhoneStreamUrlView {
   /** Path and query to load on this Host; never a `:12000` origin. */
   readonly url: string
+  /** Opaque identity binding input to this exact active capture. */
+  readonly captureId: PhoneCaptureId
   /** Unix epoch milliseconds after which the Host refuses this URL. */
   readonly expiresAt: number
 }
@@ -81,18 +85,29 @@ export type PhoneClientIoRequest =
     readonly method: 'tap'
     readonly x: number
     readonly y: number
-    /** Live capture width in device pixels from the measured surface. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels from the measured surface. */
-    readonly captureHeight?: number
+    readonly source: {
+      readonly kind: 'capture'
+      readonly captureWidth: number
+      readonly captureHeight: number
+      readonly captureId: PhoneCaptureId
+      readonly captureFormat: 'h264' | 'mjpeg'
+      readonly captureRotation?: 0 | 90 | 180 | 270
+    }
   }
   | {
-    readonly method: 'gesture'
-    readonly actions: readonly Record<string, unknown>[]
-    /** Live capture width in device pixels from the measured surface. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels from the measured surface. */
-    readonly captureHeight?: number
+    readonly method: 'swipe'
+    readonly x1: number
+    readonly y1: number
+    readonly x2: number
+    readonly y2: number
+    readonly source: {
+      readonly kind: 'capture'
+      readonly captureWidth: number
+      readonly captureHeight: number
+      readonly captureId: PhoneCaptureId
+      readonly captureFormat: 'h264' | 'mjpeg'
+      readonly captureRotation?: 0 | 90 | 180 | 270
+    }
   }
   | { readonly method: 'text'; readonly text: string }
   | { readonly method: 'button'; readonly button: string }
@@ -125,26 +140,35 @@ export function encodePhoneIoFrame(id: number, deviceId: string, request: PhoneC
         method: 'tap',
         params: { deviceId, x: request.x, y: request.y, ...captureSizeParams(request) },
       })
-    case 'gesture':
+    case 'swipe':
       return JSON.stringify({
         jsonrpc: '2.0',
         id,
-        method: 'gesture',
-        params: { deviceId, actions: request.actions, ...captureSizeParams(request) },
+        method: 'swipe',
+        params: {
+          deviceId,
+          x1: request.x1,
+          y1: request.y1,
+          x2: request.x2,
+          y2: request.y2,
+          ...captureSizeParams(request),
+        },
       })
     case 'text':
       return JSON.stringify({ jsonrpc: '2.0', id, method: 'text', params: { deviceId, text: request.text } })
     case 'button':
       return JSON.stringify({ jsonrpc: '2.0', id, method: 'button', params: { deviceId, button: request.button } })
+    default:
+      return assertNever(request)
   }
 }
 
+function assertNever(value: never): never { throw new TypeError(`unexpected phone client io request: ${String(value)}`) }
+
 function captureSizeParams(
-  request: Extract<PhoneClientIoRequest, { method: 'tap' | 'gesture' }>,
-): { readonly captureWidth: number; readonly captureHeight: number } | Record<string, never> {
-  return request.captureWidth === undefined || request.captureHeight === undefined
-    ? {}
-    : { captureWidth: request.captureWidth, captureHeight: request.captureHeight }
+  request: Extract<PhoneClientIoRequest, { method: 'tap' | 'swipe' }>,
+): Record<string, unknown> {
+  return request.source
 }
 
 /**
@@ -163,23 +187,50 @@ export function parsePhoneIoReply(data: string): PhoneIoReply | undefined {
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined
   const record = parsed as { id?: unknown; result?: unknown; error?: unknown }
-  if (typeof record.id !== 'number') return undefined
-  if (typeof record.error === 'object' && record.error !== null) {
-    const error = record.error as { code?: unknown; message?: unknown }
-    return {
-      id: record.id,
-      ok: false,
-      code: typeof error.code === 'number' ? error.code : undefined,
-      message: typeof error.message === 'string' ? error.message : undefined,
-    }
+  if (!Number.isSafeInteger(record.id) || (record.id as number) <= 0) return undefined
+  const hasResult = Object.hasOwn(record, 'result')
+  const hasError = Object.hasOwn(record, 'error')
+  if (hasResult === hasError) return undefined
+  if (hasResult) {
+    const result = record.result
+    if (typeof result !== 'object' || result === null) return undefined
+    const fields = result as Record<string, unknown>
+    if (Object.keys(fields).length !== 1 || fields.status !== 'ok') return undefined
+    return { id: record.id as number, ok: true }
   }
-  return { id: record.id, ok: record.result !== undefined }
+  if (typeof record.error !== 'object' || record.error === null) return undefined
+  const error = record.error as Record<string, unknown>
+  if (error.code !== undefined && !Number.isSafeInteger(error.code)) return undefined
+  if (error.message !== undefined && typeof error.message !== 'string') return undefined
+  if (error.code === undefined && error.message === undefined) return undefined
+  return {
+    id: record.id as number,
+    ok: false,
+    ...(error.code === undefined ? {} : { code: error.code as number }),
+    ...(error.message === undefined ? {} : { message: error.message }),
+  }
 }
 
-function isStreamUrlView(value: unknown): value is PhoneStreamUrlView {
+function isStreamUrlView(
+  value: unknown,
+  deviceId: string,
+  format: 'mjpeg' | 'h264',
+): value is Omit<PhoneStreamUrlView, 'captureId'> & { readonly captureId: string } {
   if (typeof value !== 'object' || value === null) return false
   const record = value as Record<string, unknown>
-  return typeof record.url === 'string' && record.url.length > 0 && typeof record.expiresAt === 'number'
+  if (typeof record.url !== 'string' || typeof record.captureId !== 'string' || record.captureId.length === 0
+    || !Number.isSafeInteger(record.expiresAt) || (record.expiresAt as number) <= 0) return false
+  const expectedPath = `/phone/stream/${encodeURIComponent(deviceId)}/${format}`
+  if (!record.url.startsWith('/')) return false
+  try {
+    const url = new URL(record.url, 'https://dsh.invalid')
+    return url.origin === 'https://dsh.invalid' && url.pathname === expectedPath
+      && url.searchParams.get('token') === record.captureId
+  } catch (malformedUrl) {
+    // Illegal characters in a relative capture URL fail URL construction; that is not a signed same-origin stream.
+    void malformedUrl
+    return false
+  }
 }
 
 function issueOf(value: unknown): PhoneRealDeviceIssueView | undefined {
@@ -219,18 +270,19 @@ export async function mintPhoneSession(deviceId: string): Promise<PhoneStreamSes
   }
   const body: unknown = await response.json().catch(() => null)
   const record = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
-  if (!response.ok || !isStreamUrlView(record.mjpeg) || !isStreamUrlView(record.h264)
-    || typeof record.ioPath !== 'string' || typeof record.agentManaged !== 'boolean'
+  if (!response.ok || record.deviceId !== deviceId
+    || !isStreamUrlView(record.mjpeg, deviceId, 'mjpeg') || !isStreamUrlView(record.h264, deviceId, 'h264')
+    || record.ioPath !== '/phone/ws/io' || typeof record.agentManaged !== 'boolean'
     || (record.preferredFormat !== 'h264' && record.preferredFormat !== 'mjpeg')) {
     throw errorOf(response, body, `phone session mint failed with HTTP ${response.status}`)
   }
   return {
-    deviceId: typeof record.deviceId === 'string' ? record.deviceId : deviceId,
+    deviceId,
     ioPath: record.ioPath,
     agentManaged: record.agentManaged,
     preferredFormat: record.preferredFormat,
-    mjpeg: record.mjpeg,
-    h264: record.h264,
+    mjpeg: { ...record.mjpeg, captureId: phoneCaptureIdOf(record.mjpeg.captureId) },
+    h264: { ...record.h264, captureId: phoneCaptureIdOf(record.h264.captureId) },
   }
 }
 
@@ -320,7 +372,10 @@ export function openPhoneIoSocket(target: PhoneIoTarget, handlers: PhoneIoHandle
   socket.onerror = () => { handlers.onError() }
   socket.onmessage = (event) => { handlers.onMessage(typeof event.data === 'string' ? event.data : '') }
   return {
-    send: (data) => { socket.send(data) },
+    send: (data) => {
+      if (socket.readyState !== WebSocket.OPEN) return false
+      try { socket.send(data); return true } catch { return false }
+    },
     close: () => { socket.close() },
   }
 }

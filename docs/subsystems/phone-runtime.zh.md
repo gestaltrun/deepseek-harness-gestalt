@@ -4,7 +4,7 @@
 
 手机设备群缝：`packages/phone/phone-runtime` 在 mobilecli 仍是唯一后端期间，将服务定义与其 mobilecli 服务提供方折叠于一个包；`packages/phone/tool-phone` 是延迟模型消费方。服务持有外部 `mobilecli server start` 子进程（仅回环，使用去除凭据后的父环境启动），探测其 HTTP JSON-RPC 端点直至首个 `server.info` 成功应答，随后按配置节奏轮询 `devices.list`——结果接受裸设备数组或 mobilecli 1.0.5 的 `{ devices: [...] }` 信封两种形态，上游重复条目原样保留。设备 id 是 branded `DeviceId`（Android 序列号或 iOS UDID）；分组清单 `{ android, ios: { simulators, reals } }` 携带冻结的 `PhoneDeviceRef`，其 `kind` 翻译自上游 `type` 字段，其 `state` 原样保留上游状态——`unauthorized` 真机保留自身状态、在其接受信任提示前上游拒绝其 io，而非折叠进 offline——且 `online` 仅在上游 `online` 状态时为真。
 
-失败语义是全量的：缺失或不可用的 mobilecli 二进制仍会激活服务，此后一切操作以 `PHONE_UNRESOLVED` 拒绝并附带安装指引；就绪前退出的子进程令插件初始化拒绝；就绪后的异常退出（或拒连、协议违背）将服务置为 lost，此后一切操作以记录的原因拒绝而非降级。所有操作将调用方 `AbortSignal` 与经校验的 Config 上限（`requestTimeoutMs`、`bootTimeoutMs`、`agentTimeoutMs`）融合；boot 与 shutdown 在任何 RPC 之前就在本包内拒绝真机。`io`、`startCapture` 与 `screenshot` 接受真机，仅拒绝最新清单中不存在的 id。`startCapture` 将 `h264` 映射为上游 `avc`，并且只约束等待响应头的时间；未读的采集 body 由调用方持有。采集应答的两种上游形态均被跟随——裸流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封，会话 URL 相对服务器源归一并强制回到回环栅栏内。`screenshot` 通过 `mobilecli screenshot --format png` 返回一张 PNG 静帧，并持久化到 `$DSH_HOME/phone/screenshots` 下仅所有者可读写的路径。
+失败语义是全量的：缺失或不可用的 mobilecli 二进制仍会激活服务，此后一切操作以 `PHONE_UNRESOLVED` 拒绝并附带安装指引；就绪前退出的子进程令插件初始化拒绝；就绪后的异常退出（或拒连、协议违背）将服务置为 lost，此后一切操作以记录的原因拒绝而非降级。所有操作将调用方 `AbortSignal` 与经校验的 Config 上限（`requestTimeoutMs`、`bootTimeoutMs`、`agentTimeoutMs`）融合；boot 与 shutdown 在任何 RPC 之前就在本包内拒绝真机。`io`、`startCapture` 与 `screenshot` 接受真机，仅拒绝最新清单中不存在的 id。`startCapture` 将 `h264` 映射为上游 `avc`，并约束等待响应头的时间；已发布且未读的采集 body 由调用方持有。响应头到达后若 generation 或 incarnation 已过期，runtime 会在 `captureCleanupTimeoutMs` 内等待外部 body 取消。采集应答的两种上游形态均被跟随——裸流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封，会话 URL 相对服务器源归一并强制回到回环栅栏内。`screenshot` 通过 `mobilecli screenshot --format png` 返回一张 PNG 静帧，并持久化到 `$DSH_HOME/phone/screenshots` 下仅所有者可读写的路径。
 
 iOS 真机链路位于清单的 real 分组之后：`agentStatus` 与 `installAgent` 以同一可执行文件的一次性 `agent status` / `agent install` 子进程驱动，幂等地保持设备端 agent 处于安装状态，并通过所配置的 `provisioningProfilePath` 为真机重签（上游要求真机 iOS 安装必须提供）。凡关于已安装、已重签真机的应答都携带 `FREE_SIGNING_PROFILE_REMINDER`——免费团队签名 7 天过期，`installAgent(id, { force: true })` 是复跑入口。输出中出现结构化错误臂的失败以 `PHONE_REAL_DEVICE_ISSUE` 暴露，错误臂由 `PhoneDevicesError.issue` 携带，agent 命令输出与上游 JSON-RPC 错误消息按同一规则分类；上游 `-32010` 仍保持 `PHONE_DEVICE_NOT_FOUND`。
 
@@ -13,31 +13,41 @@ iOS 真机链路位于清单的 real 分组之后：`agentStatus` 与 `installAg
 `ctx.phoneEnvironment` 发布供「手机设备」设置使用的 revisioned `PhoneEnvironmentSnapshot`：其中包含持久化启用值、共享运行时状态，以及相互独立的 Android/iOS 准备状态。运行时按运维 override、托管 current、系统发现的顺序选择。平台提供方注册在同一服务后方；Android 提供方准备固定 API 35 SDK/AVD，并贡献仅子进程使用的 SDK 环境项。运行中的平台只有在选中的 mobilecli 代携带这些环境项重新激活、将 branded emulator id 列为在线并产出语法有效的 Annex-B key access unit，且其中的 SPS、PPS 与 IDR slice header 相互引用一致后，才成为 ready。Host 探测不解码像素；真实画面的 GUI 验收保持独立。关闭、取消或 teardown 会取消整段事务并停止所持有的 Emulator 与 mobilecli 子进程。
 
 ```ts type-equiv
-/** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
-type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
+/** Closed semantic actions accepted by the phone fleet Service. */
+type PhoneIoMethod = 'tap' | 'swipe' | 'text' | 'button'
 ```
 
 ```ts type-equiv
-/** One JSON-RPC `device.io.*` request addressed by branded device id. */
-type PhoneIoRequest =
+/** Exact clockwise rotation required to display a captured frame. */
+type PhoneRotation = 0 | 90 | 180 | 270
+```
+
+```ts type-equiv
+/** Trusted coordinate-plane source for one semantic coordinate action. */
+type PhoneCoordinateSource =
+  | { readonly kind: 'fresh-probe' }
   | {
-    readonly deviceId: DeviceId
-    readonly method: 'tap'
-    readonly x: number
-    readonly y: number
-    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
-    readonly captureHeight?: number
+    readonly kind: 'capture'
+    readonly captureId: PhoneCaptureId
+    readonly captureFormat: PhoneCaptureFormat
+    readonly captureWidth: number
+    readonly captureHeight: number
+    readonly captureRotation?: PhoneRotation
   }
+```
+
+```ts type-equiv
+/** One semantic phone action addressed by branded device id. */
+type PhoneIoRequest =
+  | { readonly deviceId: DeviceId; readonly method: 'tap'; readonly x: number; readonly y: number; readonly source: PhoneCoordinateSource }
   | {
     readonly deviceId: DeviceId
-    readonly method: 'gesture'
-    readonly actions: readonly Record<string, unknown>[]
-    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
-    readonly captureHeight?: number
+    readonly method: 'swipe'
+    readonly x1: number
+    readonly y1: number
+    readonly x2: number
+    readonly y2: number
+    readonly source: PhoneCoordinateSource
   }
   | { readonly deviceId: DeviceId; readonly method: 'text'; readonly text: string }
   | { readonly deviceId: DeviceId; readonly method: 'button'; readonly button: string }
@@ -55,6 +65,8 @@ interface PhoneCaptureRequest {
   readonly deviceId: DeviceId
   /** `mjpeg` for both platforms; `h264` maps onto upstream `avc` (Android). */
   readonly format: PhoneCaptureFormat
+  /** Runtime-owned identity binding active observation and later coordinate projection when the caller needs coordinate evidence. */
+  readonly captureId?: PhoneCaptureId
   /** Optional caller cancellation fused with the request ceiling until headers arrive. */
   readonly signal?: AbortSignal
 }
@@ -219,15 +231,12 @@ async boot(id: DeviceId, signal?: AbortSignal): Promise<void>
 async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
 
 /**
- * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
- * Public tap and gesture coordinates are capture pixels. Android forwards
- * them unchanged; iOS reads and caches `device.info.screenSize` for the
- * current runtime generation and converts those pixels to XCTest logical
- * points. Sticky portrait `screenSize` swaps when the request's live capture
- * surface is landscape (`captureWidth` greater than `captureHeight`); omitted
- * size falls back to overflow of one scaled point. Physical handsets are
- * valid targets; only ids absent from the latest published listing fail
- * locally before any RPC.
+ * Execute one semantic tap, swipe, text, or button action. Android coordinate
+ * actions retain their pixels. iOS obtains cached portrait `device.info`
+ * bounds and projects every displayed endpoint through exact rotation;
+ * browser actions bind current capture identity and model actions use a
+ * bounded fresh MJPEG EXIF probe. Physical handsets are valid targets; only
+ * ids absent from the latest published listing fail locally before any RPC.
  * @param request - Branded device id plus capture-pixel or non-coordinate input.
  * @param signal - Caller's optional cancellation signal.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -243,6 +252,8 @@ async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
  * then replaces an invalid, failed, timed-out, or landscape-logical-display
  * source with the system `screenrecord` H264 stream (`--size` from
  * `dumpsys display` `logicalFrame` when known). Other bodies remain unread.
+ * A generation or incarnation change after headers joins foreign body
+ * cancellation for at most `captureCleanupTimeoutMs`.
  * @param request - Branded device id, encoding, and optional cancellation.
  * @returns the live capture content type and body; the caller owns cancellation.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids

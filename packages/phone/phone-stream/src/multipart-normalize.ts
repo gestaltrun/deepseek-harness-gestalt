@@ -157,11 +157,11 @@ export function normalizeMultipartImageStream(
   return new ReadableStream<Uint8Array>(
     {
       pull,
-      cancel(): void {
-        void reader.cancel()
+      async cancel(reason): Promise<void> {
+        await reader.cancel(reason)
       },
     },
     // One part is held at most; the frame itself is the natural unit.
-    { highWaterMark: 1 },
+    { highWaterMark: 0 },
   )
 }

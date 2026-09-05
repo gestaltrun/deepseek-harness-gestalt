@@ -12,9 +12,9 @@ Mint marks iOS real sessions `agentManaged: true` with preferred H264. The GUI s
 
 ## Decision
 
-Host `ioParams` converts iOS capture pixels with the cached `device.info.screenSize`, not scale alone. Landscape versus portrait WDA bounds are owned by [the live-surface orientation note](2026-09-04-ios-landscape-tap-orientation.md). Android still forwards capture pixels unchanged.
+`PhoneDevices.io` and `upstreamIo` converts iOS capture pixels with the cached `device.info.screenSize`, not scale alone. Landscape versus portrait WDA bounds are owned by [the live-surface orientation note](2026-09-04-ios-semantic-input-rotation.md). Android still forwards capture pixels unchanged.
 
-`handleFrame` keeps the live picture on a tap or gesture JSON-RPC error. Agent recovery remains for mint, picture, and socket death. IO `-32010` stays device-offline and unauthorized messages stay unauthorized, including on `agentManaged` sessions.
+`handleFrame` keeps the live picture on a tap or swipe JSON-RPC error. Agent recovery remains for mint, picture, and socket death. IO `-32010` stays device-offline and unauthorized messages stay unauthorized, including on `agentManaged` sessions.
 
 ## Alternatives considered
 
@@ -28,12 +28,12 @@ Host `ioParams` converts iOS capture pixels with the cached `device.info.screenS
 
 ## Consequences
 
-A landscape iOS real tap JSON-RPC error does not enter checking-agent. Picture and socket death still re-check a managed agent. Left-side landscape mapping is owned by [the live-surface orientation note](2026-09-04-ios-landscape-tap-orientation.md).
+A landscape iOS real tap JSON-RPC error does not enter checking-agent. Picture and socket death still re-check a managed agent. Left-side landscape mapping is owned by [the live-surface orientation note](2026-09-04-ios-semantic-input-rotation.md).
 
 ## Testing
 
-`phone-connection.client.spec.ts` keeps an `agentManaged` iOS real or Android session live after a tap JSON-RPC error, and still takes device-offline and unauthorized arms. Landscape WDA mapping coverage lives on [the live-surface orientation note](2026-09-04-ios-landscape-tap-orientation.md).
+`phone-connection.client.spec.ts` keeps an `agentManaged` iOS real or Android session live after a tap JSON-RPC error, and still takes device-offline and unauthorized arms. Landscape WDA mapping coverage lives on [the live-surface orientation note](2026-09-04-ios-semantic-input-rotation.md).
 
 ## Related
 
-iOS WDA orientation from the live capture surface is [the landscape tap note](2026-09-04-ios-landscape-tap-orientation.md). Android landscape H264 box swap remains [the VideoFrame rotation note](2026-09-05-android-h264-videoframe-rotation.md).
+iOS semantic input rotation from the live capture surface is [the landscape tap note](2026-09-04-ios-semantic-input-rotation.md). Android landscape H264 box swap remains [the VideoFrame rotation note](2026-09-05-android-h264-videoframe-rotation.md).

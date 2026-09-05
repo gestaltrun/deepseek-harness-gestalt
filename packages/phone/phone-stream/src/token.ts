@@ -5,8 +5,9 @@
  * @module @deepseek-ai/dsh-phone-stream/token
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
-import type { PhoneCaptureFormat } from '@deepseek-ai/dsh-phone-runtime'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { phoneCaptureId } from '@deepseek-ai/dsh-phone-runtime'
+import type { PhoneCaptureFormat, PhoneCaptureId } from '@deepseek-ai/dsh-phone-runtime'
 
 /** Canonical capture encodings a signed URL may name. */
 const FORMATS: readonly PhoneCaptureFormat[] = ['mjpeg', 'h264']
@@ -17,6 +18,8 @@ export interface PhoneStreamGrant {
   readonly deviceId: string
   /** Capture encoding bound into the signature. */
   readonly format: PhoneCaptureFormat
+  /** Unique opaque identity bound into the signature. */
+  readonly captureId: PhoneCaptureId
   /** Unix epoch milliseconds after which this grant is refused. */
   readonly expiresAt: number
 }
@@ -35,8 +38,9 @@ export function signPhoneStreamToken(
   format: PhoneCaptureFormat,
   expiresAt: number,
 ): string {
-  const signature = createHmac('sha256', secret).update(payload(deviceId, format, expiresAt)).digest('base64url')
-  return `${String(expiresAt)}.${signature}`
+  const nonce = randomBytes(18).toString('base64url')
+  const signature = createHmac('sha256', secret).update(payload(deviceId, format, expiresAt, nonce)).digest('base64url')
+  return `${String(expiresAt)}.${nonce}.${signature}`
 }
 
 /**
@@ -56,16 +60,23 @@ export function verifyPhoneStreamToken(
   now: number,
 ): PhoneStreamGrant | undefined {
   if (!isCaptureFormat(format)) return undefined
-  const separator = token.indexOf('.')
-  if (separator <= 0 || separator === token.length - 1) return undefined
-  const expiryText = token.slice(0, separator)
-  if (!/^[0-9]+$/.test(expiryText)) return undefined
+  const first = token.indexOf('.')
+  const second = token.indexOf('.', first + 1)
+  if (first <= 0 || second <= first + 1 || second === token.length - 1) return undefined
+  const expiryText = token.slice(0, first)
+  const nonce = token.slice(first + 1, second)
+  const signatureText = token.slice(second + 1)
+  if (!/^(0|[1-9][0-9]*)$/u.test(expiryText)) return undefined
+  if (!/^[A-Za-z0-9_-]+$/u.test(nonce) || !/^[A-Za-z0-9_-]+$/u.test(signatureText)) return undefined
   const expiresAt = Number(expiryText)
   if (!Number.isSafeInteger(expiresAt) || now > expiresAt) return undefined
-  const actual = Buffer.from(token.slice(separator + 1), 'base64url')
-  const expected = createHmac('sha256', secret).update(payload(deviceId, format, expiresAt)).digest()
+  const nonceBytes = Buffer.from(nonce, 'base64url')
+  if (nonceBytes.length !== 18 || nonceBytes.toString('base64url') !== nonce) return undefined
+  const actual = Buffer.from(signatureText, 'base64url')
+  if (actual.toString('base64url') !== signatureText) return undefined
+  const expected = createHmac('sha256', secret).update(payload(deviceId, format, expiresAt, nonce)).digest()
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return undefined
-  return { deviceId, format, expiresAt }
+  return { deviceId, format, captureId: phoneCaptureId(token), expiresAt }
 }
 
 /**
@@ -77,6 +88,6 @@ export function isCaptureFormat(value: string): value is PhoneCaptureFormat {
   return (FORMATS as readonly string[]).includes(value)
 }
 
-function payload(deviceId: string, format: PhoneCaptureFormat, expiresAt: number): string {
-  return `${deviceId}\n${format}\n${String(expiresAt)}`
+function payload(deviceId: string, format: PhoneCaptureFormat, expiresAt: number, nonce: string): string {
+  return `${deviceId}\n${format}\n${String(expiresAt)}\n${nonce}`
 }

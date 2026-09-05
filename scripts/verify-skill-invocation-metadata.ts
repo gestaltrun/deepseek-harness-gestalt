@@ -73,6 +73,12 @@ export function collectSkillInvocationMetadataViolations(root: string): string[]
       continue
     }
 
+    const description = frontmatter.description
+    if (typeof description !== 'string' || description.trim() === '') {
+      violations.push(`${relativeRoot}/SKILL.md: description must be a non-empty string`)
+      continue
+    }
+
     const disableModelInvocation = frontmatter['disable-model-invocation']
     if (disableModelInvocation !== undefined && typeof disableModelInvocation !== 'boolean') {
       violations.push(`${relativeRoot}/SKILL.md: disable-model-invocation must be a boolean`)

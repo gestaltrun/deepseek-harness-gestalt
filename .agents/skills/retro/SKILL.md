@@ -4,7 +4,7 @@ description: "Conduct a retrospective on a coding session."
 disable-model-invocation: true
 ---
 
-The user has asked for a **retrospective**. You are suggesting improvements to the coding agent's **environment** to improve future runs.
+The user has asked for a **retrospective**. You are suggesting improvements to the coding agent's **environment** to improve future runs. The [session retrospective standard](../../../docs/agents/session-retro.md) owns the shared rules: review only the session running this skill, read no other session's logs, and hand candidates to the user's keep-or-drop decision instead of landing them.
 
 ## Steps
 

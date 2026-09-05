@@ -1,14 +1,14 @@
 # AGENTS.md
 
-DeepSeek Harness is a plugin harness on vendored Cordis: **everything is a plugin**. Read [docs/architecture.md](docs/architecture.md) before changing `packages/`; follow [docs/AGENTS.md](docs/AGENTS.md) for documentation.
+DeepSeek Harness uses vendored Cordis: **everything is a plugin**. See [architecture](docs/architecture.md) for composition and [documentation rules](docs/AGENTS.md) for docs.
 
 ## Agent skills
 
-Use the [Gestalt tracker](docs/agents/issue-tracker.md), [labels](docs/agents/triage-labels.md), [context map](CONTEXT-MAP.md), and [domain rules](docs/agents/domain.md). Agent Notes own decisions. [Orchestrate issue/spec delivery](.agents/skills/orchestrate-dsh-delivery/SKILL.md) through verified merge by default; tags and releases require explicit approval.
+Use the [tracker](docs/agents/issue-tracker.md), [labels](docs/agents/triage-labels.md), [contexts](CONTEXT-MAP.md), and [domain rules](docs/agents/domain.md); Agent Notes own decisions. Subagent descriptions/todos use user language, else runtime/UI locale, runtime language, then conversation language—not shell `LANG`; identifiers, paths, commands, and internal prompts stay unchanged. Apply [routing/context reuse](docs/agents/delegation-routing.md) before delegating. [Orchestrate delivery](.agents/skills/orchestrate-dsh-delivery/SKILL.md); tags/releases need approval.
 
-## Pre-release stance: foundation over blast radius
+## Unstable-format stance
 
-**Remove this section at the first tagged release.** Prefer foundations to compatibility shims: rename or repackage and update every reference. Backends reject old formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` without compatibility promises.
+Until its owner declares compatibility, prefer foundations to shims and update every reference. Backends reject old formats. SQLite uses monotonic `SCHEMA_VERSION`; `dsh-session` keeps `SESSION_FORMAT_VERSION` at `0` without compatibility promises.
 
 ## Repository layout
 
@@ -61,7 +61,7 @@ scripts/     repo gates and generators
 website/     VitePress projection of selected bilingual docs/ sources
 ```
 
-Package groups: [packages/README.md](packages/README.md). External plugins: [plugins/README.md](plugins/README.md).
+See [packages](packages/README.md) and [plugins](plugins/README.md).
 
 ## Commands
 

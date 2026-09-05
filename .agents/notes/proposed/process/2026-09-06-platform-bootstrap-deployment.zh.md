@@ -41,4 +41,4 @@ Platform Deploy 增加显式 `bootstrap` 模式，默认值为 false。工作流
 
 ## Risks
 
-主机清理依赖自举激活时写入的容器所有权标签；标签丢失时，清理会关闭失败并保留持久恢复状态供操作者处理。EIP 对是窄化的派发输入，不是全局 inventory（清单），仅对经过评审的自举事务有效。基础设施 readiness 仍是外部前提：派发前，出站 HTTPS 必须实际连通 registry（镜像仓库）与暂存产物，PostgreSQL 和 Redis 必须保持可达，证书与 EIP 路由也必须就绪。仅有 NAT、路由、allowlist 或成功的 TCP 探测不会把自举标记为 ready（就绪），本工作流不会配置或修复这些资源。
+主机清理依赖自举激活时写入的容器所有权标签；标签丢失时，清理会关闭失败并保留持久恢复状态供操作者处理。EIP 对是窄化的派发输入，不是全局 inventory（清单），仅对经过评审的自举事务有效。基础设施 readiness 仍是外部前提。派发前，每台主机必须连通用于签名候选产物的部署 OSS endpoint、用于安装 Docker 与 OpenSSL 的已配置 OS 软件包仓库、指定的阿里云 LoongCollector registry（除非已经缓存该精确镜像）、PostgreSQL 与 Redis；证书和 EIP 路由也必须就绪。源码路径不要求通用互联网、公共 resolver、GitHub 或 DockerHub 连通。本工作流不会配置或修复这些依赖。

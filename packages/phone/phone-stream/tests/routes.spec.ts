@@ -23,6 +23,20 @@ vi.mock('../../phone-runtime/src/android-display.ts', async (importOriginal) => 
   }
 })
 
+vi.mock('../../phone-runtime/src/android-h264-process.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../phone-runtime/src/android-h264-process.ts')>()
+  const { buildGradientH264 } = await import('../../phone-runtime/tests/fixtures/u3-visible-frames.ts')
+  return {
+    ...actual,
+    openAndroidSystemH264: vi.fn(() => new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(buildGradientH264())
+        controller.close()
+      },
+    })),
+  }
+})
+
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>()
   class InstrumentedServer extends actual.WebSocketServer {
@@ -859,6 +873,7 @@ describe('phone stream Host routes', () => {
   })
 
   it('forwards tap JSON-RPC over the trusted WebSocket upgrade', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 100, height: 200 })
     const { origin } = await mount(undefined, { streamFrameCount: 20 })
     const host = new URL(origin).host
     const session = await mint(origin)
@@ -887,6 +902,7 @@ describe('phone stream Host routes', () => {
   })
 
   it('forwards live capture size from a tap frame onto Host io', async () => {
+    vi.mocked(readAndroidLogicalDisplay).mockReturnValue({ width: 2_868, height: 1_320 })
     const { origin, context } = await mount(undefined, { streamFrameCount: 20 })
     const host = new URL(origin).host
     const session = await mint(origin)

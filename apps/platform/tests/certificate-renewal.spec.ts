@@ -220,7 +220,7 @@ describe('Platform certificate renewal automation', () => {
     })
   })
 
-  it('uploads protected local cleanup evidence as a private run artifact on failure', () => {
+  it('uploads sanitized local cleanup evidence as a run artifact on failure', () => {
     const renew = record(record(workflow.jobs).renew)
     const steps = renew.steps as Array<Record<string, unknown>>
     const upload = steps.find(step => typeof step.uses === 'string' && step.uses.startsWith('actions/upload-artifact@'))
@@ -375,7 +375,21 @@ describe('Platform certificate renewal automation', () => {
     expect(pending.cleanupRecordIds).toEqual(['record-1'])
   }, 15_000)
 
-  it('retains protected local evidence with the upload error when OSS is unavailable', () => {
+  it('deletes only durably recorded challenge ids and preserves unknown records at the same name', () => {
+    const result = runRenewal('renew', {
+      seedTransaction: { version: 1, phase: 'cleanup-pending', priorCertificateId: 'prior-cn-hangzhou', currentCertificateId: '', fingerprint: '', cleanupRecordIds: ['record-1'] },
+      seedDnsRecords: [
+        { RecordId: 'record-1', RR: '_acme-challenge', Type: 'TXT' },
+        { RecordId: 'record-x', RR: '_acme-challenge', Type: 'TXT' },
+      ],
+    })
+    expect(result.status).toBe(0)
+    expect(result.operations).toContain('DeleteDomainRecord --RegionId cn-hangzhou --RecordId record-1')
+    expect(result.operations).not.toContain('RecordId record-x')
+    expect(dnsRecords(result.state).map(entry => entry.RecordId)).toEqual(['record-x'])
+  }, 15_000)
+
+  it('retains protected local evidence with sanitized failure metadata when OSS is unavailable', () => {
     const state = renewalState()
     const result = runRenewal('renew', { deleteDnsFails: true, ossUploadFails: true }, state)
     expect(result.status).not.toBe(0)
@@ -387,7 +401,12 @@ describe('Platform certificate renewal automation', () => {
     const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as Record<string, unknown>
     expect(evidence.phase).toBe('cleanup-pending')
     expect(evidence.cleanupRecordIds).toEqual(['record-1'])
-    expect(String(evidence.evidenceUploadError)).toContain('MockOssUnavailable')
+    // The artifact is reader-accessible, so the evidence carries only sanitized
+    // metadata — status, count, hash — and never raw command output.
+    expect(evidence.recordCount).toBe(1)
+    expect(typeof evidence.recordIdsSha256).toBe('string')
+    expect(evidence.evidenceUploadStatus).toBe(9)
+    expect(JSON.stringify(evidence)).not.toContain('MockOssUnavailable')
     expect(dnsRecords(state)).toHaveLength(1)
   }, 15_000)
 

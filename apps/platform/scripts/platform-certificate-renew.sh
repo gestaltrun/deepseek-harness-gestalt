@@ -46,8 +46,9 @@ mkdir -m 700 "$acme_home" "$workdir/acme-source" "$workdir/current"
 listener_changed=0
 prior_listener_cert=
 # Evidence fallback for an OSS outage: owner-only file on the runner, uploaded by the
-# workflow as a private run artifact. Contains no secrets: record ids, the prior
-# certificate id, and the failed upload's stderr.
+# workflow as a run artifact that repository readers can access. It therefore carries
+# only operational metadata: record ids, their count and hash, the prior certificate
+# id, and the failed upload's exit status.
 local_evidence="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/platform-certificate-renewal-cleanup-evidence.json"
 cleanup_files() {
   find "$workdir" -type f -delete 2>/dev/null || true
@@ -120,41 +121,27 @@ write_transaction() {
     >/dev/null 2>"$workdir/oss-write.err"
 }
 persist_cleanup_evidence() {
-  local ids upload_error
+  local ids id_count id_hash upload_status
   ids=$(jq -Rsc 'split("\n") | map(select(length > 0))' < "$record_ids")
   if write_transaction cleanup-pending "${prior_listener_cert:-}" "" "" "$ids"; then
     echo 'platform certificate: challenge cleanup incomplete; remaining record ids retained in durable transaction evidence' >&2
     return 0
+  else
+    upload_status=$?
   fi
   # The remote transaction object is unreachable, so durability cannot be claimed:
-  # retain the remaining ids and the upload failure output in protected local evidence.
-  upload_error=$(tr '\n' ' ' < "$workdir/oss-write.err" | cut -c1-500)
-  jq -nc --arg prior "${prior_listener_cert:-}" --argjson cleanupRecordIds "$ids" --arg uploadError "$upload_error" \
-    '{version:1,phase:"cleanup-pending",priorCertificateId:$prior,cleanupRecordIds:$cleanupRecordIds,evidenceUploadError:$uploadError}' \
+  # retain the remaining ids in protected local evidence. The workflow uploads it as a
+  # run artifact that repository readers can access, so it carries only operational
+  # record ids, their count and hash, and the failed upload's exit status — never raw
+  # command output and never any secret.
+  id_count=$(jq 'length' <<< "$ids")
+  id_hash=$(sha256sum "$record_ids" | cut -d' ' -f1)
+  jq -nc --arg prior "${prior_listener_cert:-}" --argjson cleanupRecordIds "$ids" \
+    --argjson recordCount "$id_count" --arg recordIdsSha256 "$id_hash" --argjson uploadStatus "$upload_status" \
+    '{version:1,phase:"cleanup-pending",priorCertificateId:$prior,cleanupRecordIds:$cleanupRecordIds,recordCount:$recordCount,recordIdsSha256:$recordIdsSha256,evidenceUploadStatus:$uploadStatus}' \
     > "$local_evidence"
-  echo "platform certificate: challenge cleanup incomplete; transaction evidence upload failed, so remaining record ids and the upload error are retained only in protected local evidence $local_evidence" >&2
+  echo "platform certificate: challenge cleanup incomplete; transaction evidence upload failed (status $upload_status), so remaining record ids are retained only in protected local evidence $local_evidence" >&2
   return 1
-}
-# A renewal run deletes every challenge record the exact allowed names still serve,
-# closing the kill window between AddDomainRecord and its transaction persistence.
-sweep_residual_challenges() {
-  local fqdn rr response record_id swept=0
-  for fqdn in "_acme-challenge.${PLATFORM_CERT_DOMAIN}" "_acme-challenge.${PLATFORM_CERT_WWW_DOMAIN}"; do
-    rr="${fqdn%.${PLATFORM_CERT_DOMAIN}}"
-    response=$(aliyun alidns DescribeDomainRecords --RegionId "$PLATFORM_ALIYUN_REGION" \
-      --DomainName "$PLATFORM_CERT_DOMAIN" --RRKeyWord "$rr" --Type TXT) \
-      || fail 'failed to query residual challenge records'
-    while IFS= read -r record_id; do
-      [ -n "$record_id" ] || continue
-      printf '%s\n' "$record_id" >> "$record_ids"
-      swept=1
-    done < <(printf '%s' "$response" | jq -r --arg rr "$rr" \
-      '.DomainRecords.Record[]? | select(.RR == $rr and .Type == "TXT") | .RecordId')
-  done
-  if [ "$swept" = 1 ] && ! cleanup_dns; then
-    persist_cleanup_evidence || true
-    fail 'challenge cleanup is still incomplete; residual challenge records remain'
-  fi
 }
 if read_oss_object "$state_uri" "$state_archive" "$workdir/state-read.err"; then
   tar -xzf "$state_archive" -C "$acme_home"
@@ -226,9 +213,6 @@ if [ "$transaction_phase" = cleanup-pending ] || [ -s "$record_ids" ]; then
   # The transaction object is never deleted; the terminal committed phase closes it.
   write_transaction committed "$transaction_prior" "$transaction_current" "$transaction_fingerprint" '[]'
 fi
-if [ "$mode" = renew ]; then
-  sweep_residual_challenges
-fi
 
 current_fingerprint=
 current_end=0
@@ -251,9 +235,11 @@ if [ "$mode" = validate ] || [ "$now" -lt "$due_at" ]; then
   exit 0
 fi
 
-# Standalone persist helper invoked by the DNS hook after every added record, so a
-# hard kill cannot leave an untracked challenge record wider than one add. Runs under
-# any shell acme.sh uses because it receives configuration through the environment.
+# Standalone persist helper invoked by the DNS hook immediately after every added
+# record. Renewal deletes only durably recorded ids — never unknown records at the
+# challenge names — so a kill between the add and this persist can orphan at most one
+# challenge record, which stays harmless until an operator removes it. The helper runs
+# under any shell acme.sh uses because it receives configuration through the environment.
 cat > "$workdir/persist-record-ids.sh" <<'HELPER'
 #!/usr/bin/env bash
 set -euo pipefail

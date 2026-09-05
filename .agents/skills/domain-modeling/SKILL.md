@@ -1,6 +1,6 @@
 ---
 name: domain-modeling
-description: Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording or editing an ADR.
+description: Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a CONTEXT.md, or recording a durable project decision in the repository's established decision-doc system.
 ---
 
 # Domain Modeling
@@ -9,35 +9,9 @@ Actively build and sharpen the project's domain model as you design. This is the
 
 ## File structure
 
-Most repos have a single context:
+Follow the repository's existing domain and decision owners. A root `CONTEXT.md` usually denotes one context; a `CONTEXT-MAP.md` routes a multi-context repository. Existing instructions may name Agent Notes, ADRs, RFCs, or another decision-doc tree; extend that system rather than creating a parallel `docs/adr/` hierarchy.
 
-```
-/
-├── CONTEXT.md
-├── docs/
-│   └── adr/
-│       ├── 0001-event-sourced-orders.md
-│       └── 0002-postgres-for-write-model.md
-└── src/
-```
-
-If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The map points to where each one lives:
-
-```
-/
-├── CONTEXT-MAP.md
-├── docs/
-│   └── adr/                          ← system-wide decisions
-├── src/
-│   ├── ordering/
-│   │   ├── CONTEXT.md
-│   │   └── docs/adr/                 ← context-specific decisions
-│   └── billing/
-│       ├── CONTEXT.md
-│       └── docs/adr/
-```
-
-Create files lazily: only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
+Create files lazily. Add a context document only when durable terminology needs an owner, and add a decision record only when the repository's decision criteria are met.
 
 ## During the session
 
@@ -63,12 +37,12 @@ When a term is resolved, update `CONTEXT.md` right there. Don't batch these up: 
 
 `CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
 
-### Offer ADRs sparingly
+### Offer decision records sparingly
 
-Only offer to create an ADR when all three are true:
+Use the repository's established decision-doc format only when all three are true:
 
 1. **Hard to reverse**: the cost of changing your mind later is meaningful
 2. **Surprising without context**: a future reader will wonder "why did they do it this way?"
 3. **The result of a real trade-off**: there were genuine alternatives and you picked one for specific reasons
 
-If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
+If any condition is missing, skip the record. When the repository has no established owner, use [ADR-FORMAT.md](./ADR-FORMAT.md) as a fallback only after confirming the location.

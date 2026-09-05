@@ -110,15 +110,15 @@ export async function runAssembledProjectMembersWalk(): Promise<string> {
     expect((await platform.heartbeat(b2)).status).toBe(204)
     await expectOnlineRoster(platform, project.id, a1, b1, b2)
     expect((await platform.closePresence(b2)).status).toBe(204)
-    expect(await rosterPresence(platform, project.id, a1)).toEqual([
+    await expectRosterAfterClose(platform, project.id, a1, [a1, b1], [
       [String(a1.accountId), 'online'],
       [String(b1.accountId), 'online'],
-    ].sort(([left], [right]) => left.localeCompare(right)))
+    ])
     expect((await platform.closePresence(b1)).status).toBe(204)
-    expect(await rosterPresence(platform, project.id, a1)).toEqual([
+    await expectRosterAfterClose(platform, project.id, a1, [a1], [
       [String(a1.accountId), 'online'],
       [String(b1.accountId), 'offline'],
-    ].sort(([left], [right]) => left.localeCompare(right)))
+    ])
     expect((await platform.heartbeat(b1)).status).toBe(204)
     expect((await platform.heartbeat(b2)).status).toBe(204)
     await expectOnlineRoster(platform, project.id, a1, b1, b2)
@@ -440,6 +440,22 @@ async function pendingCount(
   const response = await platform.get('/v1/projects/invitations/pending', session)
   expect(response.status).toBe(200)
   return (await response.json() as unknown[]).length
+}
+
+/** Keep only expected-online Installation leases alive while polling an explicit close result. */
+async function expectRosterAfterClose(
+  platform: Awaited<ReturnType<typeof startLocalKeylessPlatform>>,
+  projectId: string,
+  reader: KeylessPlatformSession,
+  onlineInstallations: readonly KeylessPlatformSession[],
+  expected: Array<[string, string]>,
+): Promise<void> {
+  await expect.poll(async () => {
+    for (const installation of onlineInstallations) {
+      expect((await platform.heartbeat(installation)).status).toBe(204)
+    }
+    return rosterPresence(platform, projectId, reader)
+  }, POLL).toEqual(expected.sort(([left], [right]) => left.localeCompare(right)))
 }
 
 async function expectOnlineRoster(

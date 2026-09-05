@@ -1,6 +1,9 @@
 ---
 name: code-review
-description: "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes: Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\"."
+description: >-
+  Review committed or work-in-progress changes since a fixed point along separate
+  repository-standards and specification axes. Use for a branch, pull request,
+  dirty worktree, or "review since X" request.
 ---
 
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
@@ -10,7 +13,7 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 
 Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
-The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `/setup-matt-pocock-skills`.
+Use the repository's issue-tracker instructions when present. If no tracker owner exists, ask where the originating specification lives; do not require an inaccessible setup skill.
 
 ## Process
 
@@ -18,9 +21,12 @@ The issue tracker should have been provided to you. If `docs/agents/issue-tracke
 
 Whatever the user said is the fixed point (a commit SHA, branch name, tag, `main`, `HEAD~5`, etc.). If they didn't specify one, ask for it.
 
-Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
+Confirm the fixed point resolves with `git rev-parse <fixed-point>`, then choose and state one review mode:
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here, not inside two parallel sub-agents.
+- **Committed-only:** inspect `git diff <fixed-point>...HEAD` and `git log <fixed-point>..HEAD --oneline`.
+- **Work in progress:** inspect the same committed diff plus `git diff --cached`, `git diff`, and `git ls-files --others --exclude-standard`. Include untracked file contents that fall inside the review scope.
+
+A bad ref fails here. An empty committed diff ends a committed-only review, but it does not end a work-in-progress review while staged, unstaged, or untracked paths exist.
 
 ### 2. Identify the spec source
 
@@ -57,9 +63,11 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 
 ### 4. Spawn both sub-agents in parallel
 
+Apply [delegation routing and context reuse](../../../docs/agents/delegation-routing.md). An independent review uses fresh children and explicit available routes; continuing the author is not independent review.
+
 **Standards sub-agent prompt** should include:
 
-- The full diff command and commit list.
+- The selected review mode, every corresponding diff command, the untracked-path list when applicable, and the commit list.
 - The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full (the sub-agent has no other access to it).
 - The brief: "Report, per file/hunk where relevant, (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls: documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 

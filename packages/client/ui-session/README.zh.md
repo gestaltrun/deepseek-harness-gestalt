@@ -8,7 +8,7 @@ kind: "package-reference"
 
 ## 概述
 
-面向 Session Controller 状态的 React 与 Slot adapter。本包在 root scope 提供 Session list 和 pending-interaction hook，物化逐 Session hook 与 prop，并拥有标准 `SessionProvider` 渲染行为，但不接管 Session transport 或 lifecycle 状态。当浏览器功能需要通过标准 React prop 和 hook 读取 Session 状态时，请使用它。
+面向 Session Controller 状态的 React 与 Slot adapter。本包在 root scope 提供 Session list 和 pending-interaction hook，物化逐 Session hook 与 prop，并拥有标准 `SessionProvider` 渲染行为，但不接管 Session transport 或 lifecycle 状态。显式挂载会取得引用计数的 render lease：首个 lease 调用 `sessions.openForRender()`，临时身份被 Host 发布升级时再恰好打开一次。当浏览器功能需要通过标准 React prop 和 hook 读取 Session 状态时，请使用它。
 
 ## 目录
 

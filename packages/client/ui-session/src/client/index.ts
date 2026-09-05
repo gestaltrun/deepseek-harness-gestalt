@@ -194,6 +194,11 @@ interface MaterializedBinding {
   readonly release: () => void
 }
 
+interface RenderLease {
+  count: number
+  provisional: boolean
+}
+
 const BUILTIN_SOURCE = {
   hooks: ['session'],
   keyedHooks: ['projection'],
@@ -218,6 +223,7 @@ export class UiSession extends Service {
   private absent: StandardSourceBinding
   private currentBinding: StandardSourceBinding
   private readonly currentListeners = new Set<() => void>()
+  private readonly renderLeases = new Map<SessionId, RenderLease>()
   private readonly pendingDomains: RuntimePendingDomain[] = []
   private pendingSnapshot: ReadonlyMap<SessionId, SessionPendingInteractionBase> = new Map()
   private readonly pendingListeners = new Set<() => void>()
@@ -252,13 +258,18 @@ export class UiSession extends Service {
         },
       },
       resolve: key => this.resolve(key as SessionId),
+      acquireForRender: key => this.acquireForRender(key as SessionId),
       renderArea: renderSessionArea,
     }
 
     ctx.effect(() => {
-      const disposeList = sessions.list.subscribe(() => { this.publishCurrent() })
+      const disposeList = sessions.list.subscribe(() => {
+        this.openPublishedRenderLeases()
+        this.publishCurrent()
+      })
       return () => {
         disposeList()
+        this.renderLeases.clear()
         const records = [...this.bindings.values()]
         this.bindings.clear()
         for (const record of records) record.release()
@@ -338,6 +349,37 @@ export class UiSession extends Service {
     this.bindings = bindings
     for (const record of previous.values()) record.release()
     this.publishCurrent()
+  }
+
+  private acquireForRender(key: SessionId): (() => void) | undefined {
+    if (this.resolve(key) === undefined) return undefined
+    const existing = this.renderLeases.get(key)
+    if (existing === undefined) {
+      const provisional = this.sessions.list.getSnapshot().byId[key]?.provisional === true
+      this.renderLeases.set(key, { count: 1, provisional })
+      this.sessions.openForRender(key)
+    } else {
+      existing.count += 1
+    }
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      const lease = this.renderLeases.get(key)
+      if (lease === undefined) return
+      lease.count -= 1
+      if (lease.count === 0) this.renderLeases.delete(key)
+    }
+  }
+
+  private openPublishedRenderLeases(): void {
+    const rows = this.sessions.list.getSnapshot().byId
+    for (const [sessionId, lease] of this.renderLeases) {
+      const row = rows[sessionId]
+      if (!lease.provisional || row === undefined || row.provisional === true) continue
+      lease.provisional = false
+      this.sessions.openForRender(sessionId)
+    }
   }
 
   private resolve(key: SessionId): ScopedStandardSourceBinding | undefined {

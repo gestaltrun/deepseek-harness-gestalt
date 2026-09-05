@@ -97,23 +97,25 @@ function mountApp(container: HTMLElement, app: () => ReactNode): Root {
  */
 export function apply(ctx: Context): void {
   const slots = new SlotRegistry(ctx)
-  const roots = new Set<Root>()
+  const roots = new Map<Root, () => void>()
   slots.install(createSlotRenderer())
   ctx.effect(() => () => {
-    for (const root of [...roots]) {
+    for (const [root, release] of [...roots]) {
       roots.delete(root)
       root.unmount()
+      release()
     }
   }, 'ui-renderer: mounted React roots')
 
-  const ownRoot = (root: Root): (() => void) => {
-    roots.add(root)
+  const ownRoot = (root: Root, release: () => void = () => {}): (() => void) => {
+    roots.set(root, release)
     let disposed = false
     return () => {
       if (disposed) return
       disposed = true
       roots.delete(root)
       root.unmount()
+      release()
     }
   }
 
@@ -126,15 +128,16 @@ export function apply(ctx: Context): void {
       sessionId: SessionId,
       ownerProps: object,
     ): (() => void) => {
-      const element = slots.renderSessionSlot(slotKey, sessionId, ownerProps)
+      const prepared = slots.prepareSessionSlot(slotKey, sessionId, ownerProps)
       const root = createRoot(container)
       try {
-        flushSync(() => { root.render(element) })
+        flushSync(() => { root.render(prepared.element) })
       } catch (error) {
         root.unmount()
+        prepared.release()
         throw error
       }
-      return ownRoot(root)
+      return ownRoot(root, prepared.release)
     },
   })
 }

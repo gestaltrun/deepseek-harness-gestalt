@@ -359,17 +359,17 @@ export class SlotRegistry extends Service {
   }
 
   /**
-   * Render one declared Session-scoped slot against an explicit Session id.
+   * Prepare one declared Session-scoped slot and acquire its render lifetime.
    * @param key - non-root Session or Session-maybe slot key.
    * @param sessionId - identity resolved by the installed Session adapter.
    * @param owner - owner share for this slot occurrence.
-   * @returns the rendered Session-scoped tree.
+   * @returns rendered tree and idempotent scope release.
    */
-  renderSessionSlot(
+  prepareSessionSlot(
     key: string,
     sessionId: string,
     owner: object,
-  ): ReturnType<SlotRenderer['renderSession']> {
+  ): { element: ReturnType<SlotRenderer['renderSession']>; release: () => void } {
     if (key === 'root') throw new Error("explicit Session rendering cannot target 'root'")
     const spec = this._core.specDynamic(key)
     if (spec === undefined) throw new Error(`explicit Session slot '${key}' is not declared`)
@@ -384,7 +384,16 @@ export class SlotRegistry extends Service {
     if (adapter.resolve(sessionId) === undefined) {
       throw new Error(`explicit Session slot '${key}' could not resolve Session '${sessionId}'`)
     }
-    return this._renderer.renderSession(this.hostFace(), key, sessionId, owner)
+    const release = adapter.acquireForRender?.(sessionId) ?? (() => {})
+    try {
+      return {
+        element: this._renderer.renderSession(this.hostFace(), key, sessionId, owner),
+        release,
+      }
+    } catch (error) {
+      release()
+      throw error
+    }
   }
 
   /**

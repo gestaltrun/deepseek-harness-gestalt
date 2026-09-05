@@ -97,6 +97,12 @@ export interface SlotScopeAdapter {
    */
   resolve(key: string): ScopedStandardSourceBinding | undefined
   /**
+   * Acquire one explicit-render lifetime for an available scope identity.
+   * @param key - scope identity.
+   * @returns idempotent release, or `undefined` when the identity is unavailable.
+   */
+  acquireForRender?(key: string): (() => void) | undefined
+  /**
    * Render the scope owner's area seat over the current binding. The renderer
    * binds this function to the standard `SessionProvider` prop without owning
    * Session selection semantics.

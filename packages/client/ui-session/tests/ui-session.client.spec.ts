@@ -1,6 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
 import type {
-  AgentContext,
   ISessions,
   SessionBinding,
   SessionListState,
@@ -26,6 +25,7 @@ interface SessionsBench {
   readonly createSession: ReturnType<typeof vi.fn<ISessions['create']>>
   readonly openSession: ReturnType<typeof vi.fn<(id: SessionId) => void>>
   readonly clearSession: ReturnType<typeof vi.fn<() => void>>
+  readonly openForRender: ReturnType<typeof vi.fn<(id: SessionId) => void>>
   binding(id: SessionId): SessionBinding
   select(id: SessionId | undefined): void
   release(id: SessionId): Promise<void>
@@ -54,12 +54,14 @@ function createSessionsBench(_ctx: Context): SessionsBench {
   const clearSession = vi.fn(() => {
     list.update((draft) => { draft.current = undefined })
   })
+  const openForRender = vi.fn<(id: SessionId) => void>()
   const sessions = {
     list,
     create: createSession,
     open: openSession,
     clear: clearSession,
     binding: resolveBinding,
+    openForRender,
   } as unknown as ISessions
 
   return {
@@ -69,6 +71,7 @@ function createSessionsBench(_ctx: Context): SessionsBench {
     createSession,
     openSession,
     clearSession,
+    openForRender,
     binding(id) {
       const scopeCtx = new Context()
       const snapshot = createSnapshotStore<SessionSnapshot>({
@@ -108,7 +111,7 @@ function createSessionsBench(_ctx: Context): SessionsBench {
         sessionId: id,
         session,
         eventSource: new MutableSessionEventSource(),
-        ctx: scopeCtx as AgentContext,
+        ctx: scopeCtx,
       }
       bindings.set(id, binding)
       scopes.set(id, scopeCtx)
@@ -146,6 +149,52 @@ afterEach(() => {
 })
 
 describe('UiSession bindings', () => {
+  it('opens each resolved explicit Session for rendering without changing selection', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const service = createUiSession(ctx, bench)
+    const selected = bench.binding(sessionId('selected'))
+    const explicit = bench.binding(sessionId('explicit'))
+    bench.select(selected.sessionId)
+
+    expect(service.adapter.acquireForRender?.(explicit.sessionId)).toEqual(expect.any(Function))
+
+    expect(bench.openForRender).toHaveBeenCalledOnce()
+    expect(bench.openForRender).toHaveBeenCalledWith(explicit.sessionId)
+    expect(bench.list.getSnapshot().current).toBe(selected.sessionId)
+  })
+
+  it('opens a provisional render lease again exactly once when Host publication upgrades it', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const service = createUiSession(ctx, bench)
+    const id = sessionId('draft')
+    bench.binding(id)
+    bench.list.update((draft) => { draft.byId[id]!.provisional = true })
+
+    const releaseFirst = service.adapter.acquireForRender?.(id)
+    const releaseSecond = service.adapter.acquireForRender?.(id)
+    expect(bench.openForRender).toHaveBeenCalledTimes(1)
+
+    bench.list.update((draft) => { draft.byId[id]!.provisional = false })
+    expect(bench.openForRender).toHaveBeenCalledTimes(2)
+    bench.list.update((draft) => { draft.byId[id]!.title = 'published' })
+    expect(bench.openForRender).toHaveBeenCalledTimes(2)
+
+    releaseFirst?.()
+    releaseFirst?.()
+    releaseSecond?.()
+  })
+
+  it('does not open an unresolved identity for rendering', () => {
+    const ctx = new Context()
+    const bench = createSessionsBench(ctx)
+    const service = createUiSession(ctx, bench)
+
+    expect(service.adapter.acquireForRender?.(sessionId('missing'))).toBeUndefined()
+    expect(bench.openForRender).not.toHaveBeenCalled()
+  })
+
   it('binds each materialized Session to renderer-owned Store cleanup', () => {
     const ctx = new Context()
     const bench = createSessionsBench(ctx)

@@ -47,9 +47,13 @@ async function bench() {
       return () => { currentListeners.delete(listener) }
     },
   }
+  const releaseRender = vi.fn()
+  const acquireForRender = vi.fn((key: string) =>
+    key === explicitBinding.key ? releaseRender : undefined)
   const adapter: SlotScopeAdapter = {
     current,
     resolve: key => key === explicitBinding.key ? explicitBinding : undefined,
+    acquireForRender,
     renderArea: (value, props) => value.key === undefined ? props.empty?.() : props.children,
   }
   slots.installScope('session', adapter)
@@ -58,6 +62,8 @@ async function bench() {
     slots,
     fiber,
     currentListeners,
+    acquireForRender,
+    releaseRender,
     select: (key: string | undefined) => {
       selectedBinding = key === undefined ? undefined : binding(key)
       for (const listener of currentListeners) listener()
@@ -125,7 +131,7 @@ describe('UI renderer plugin', () => {
   })
 
   it('mounts an explicit Session independently from selected Session changes and removal', async () => {
-    const { ctx, slots, currentListeners, select } = await bench()
+    const { ctx, slots, currentListeners, acquireForRender, releaseRender, select } = await bench()
     slots.register({
       name: 'root',
       children: { 'test.session': { kind: 'single', scope: 'session' } },
@@ -145,6 +151,9 @@ describe('UI renderer plugin', () => {
     })
 
     expect(el.querySelector('[data-testid="session-probe"]')?.textContent).toBe('explicit-session:owner')
+    expect(acquireForRender).toHaveBeenCalledOnce()
+    expect(acquireForRender).toHaveBeenCalledWith('explicit-session')
+    expect(releaseRender).not.toHaveBeenCalled()
     expect(currentListeners).toHaveLength(0)
     act(() => { select('other-selected-session') })
     expect(el.querySelector('[data-testid="session-probe"]')?.textContent).toBe('explicit-session:owner')
@@ -183,7 +192,7 @@ describe('UI renderer plugin', () => {
   })
 
   it('fiber disposal unmounts live roots and releases subscriptions without caller disposers', async () => {
-    const { ctx, slots, fiber } = await bench()
+    const { ctx, slots, fiber, releaseRender } = await bench()
     slots.register({
       name: 'root',
       children: { 'test.session': { kind: 'single', scope: 'session' } },
@@ -209,6 +218,7 @@ describe('UI renderer plugin', () => {
     expect(sessionEl.childElementCount).toBe(0)
     expect(core.records.get('root')?.listeners.size).toBe(0)
     expect(core.records.get('test.session')?.listeners.size).toBe(0)
+    expect(releaseRender).toHaveBeenCalledOnce()
     expect(ctx.get('uiRenderer')).toBeUndefined()
     expect(() => slots.renderSlot('root', {})).toThrow('not installed')
   })

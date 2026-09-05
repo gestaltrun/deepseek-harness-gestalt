@@ -22,7 +22,7 @@ with DeepSeekHarness() as harness:
     result = harness.run("Say hi.")
 ```
 
-`DeepSeekHarness` keeps its lazily started runtime subprocess for reuse across calls. Use it as a context manager, as above, or call `close()` explicitly when finished.
+`DeepSeekHarness` keeps its lazily started runtime subprocess for reuse across calls. Use it as a context manager, as above, or call `close()` explicitly when finished. After the runtime acknowledges `shutdown`, `close()` waits for server-owned teardown, persistence, and normal process exit before signaling the process. With a finite `shutdown_timeout_seconds`, that value independently bounds the shutdown request, the normal-exit wait, and the post-terminate wait; a missing acknowledgement or exit timeout enters the terminate/kill fallback. Setting it to `None` preserves unbounded waits at those phases.
 
 By default, the SDK launches the bundled single-file `dsh-jsonrpc-agent` executable from the `deepseek-harness-runtime-bin` package and injects that package's default configuration (the stdio JSON-RPC server, agent core, preloaded DeepSeek adapter, JSONL session persistence with an explicitly composed semantic checkpoint policy, local bash) via `DSH_CORDIS_CONFIG`. To run a plugin composition of your own, keep the `@deepseek-ai/dsh-sdk-jsonrpc-server` entry in the config and pass the Cordis config path.
 

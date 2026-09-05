@@ -661,20 +661,26 @@ describe('playPhoneH264Stream', () => {
     expect(fetchStub).not.toHaveBeenCalled()
   })
 
-  it('contains consumer callback exceptions while releasing playback resources', async () => {
-    vi.stubGlobal('VideoDecoder', undefined)
-    let errorCalls = 0
+  it('contains a surface observer exception while decoded frames continue', async () => {
+    FakeVideoDecoder.frameSizes = [{ width: 390, height: 844 }, { width: 400, height: 800 }]
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80),
+      nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80),
+    ))))
+    const canvas = document.createElement('canvas')
+    vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
+    const errors: unknown[] = []
     const playback = playPhoneH264Stream({
-      url: '/phone/stream/device/h264?token=test',
-      canvas: document.createElement('canvas'),
+      url: '/phone/stream/device/h264?token=test', canvas,
       onSurface: () => { throw new Error('surface consumer failed') },
-      onError: () => {
-        errorCalls += 1
-        throw new Error('error consumer failed')
-      },
+      onError: error => errors.push(error),
     })
-    await vi.waitFor(() => { expect(errorCalls).toBe(1) })
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.frames).toHaveLength(2) })
+    expect(errors).toEqual([])
     await expect(playback.close()).resolves.toBeUndefined()
+    expect(FakeVideoDecoder.instances[0]).toBeDefined()
   })
 
   it('reports an unsolicited fetch AbortError as a playback failure', async () => {
@@ -952,6 +958,33 @@ describe('playPhoneH264Stream', () => {
     expect(context.drawImage).toHaveBeenCalledWith(
       FakeVideoDecoder.instances[0]!.frames[0], 0, 0, 1080, 2248,
     )
+  })
+
+  it('reports same-size opposite rotations but not repeated complete identities', async () => {
+    FakeVideoDecoder.frameSizes = [
+      { width: 390, height: 844, rotation: 0 },
+      { width: 390, height: 844, rotation: 180 },
+      { width: 844, height: 390, rotation: 90 },
+      { width: 844, height: 390, rotation: 270 },
+      { width: 844, height: 390, rotation: 270 },
+    ]
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80),
+      nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80), nal(0x09, 0xf0),
+      nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80),
+    ))))
+    const canvas = document.createElement('canvas')
+    vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn(), save: vi.fn(), restore: vi.fn(), translate: vi.fn(), rotate: vi.fn() } as never)
+    const surfaces: string[] = []
+    playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test', canvas,
+      onSurface: (width, height, rotation) => { surfaces.push(`${String(width)}x${String(height)}@${String(rotation)}`) },
+      onError: () => {},
+    })
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.frames).toHaveLength(5) })
+    expect(surfaces).toEqual(['390x844@0', '390x844@180', '390x844@90', '390x844@270'])
   })
 
   it('reports dimension changes but not repeated dimensions', async () => {

@@ -95,7 +95,11 @@ export async function readUntilRecognizable(
   }
 }
 
-function rejectWhenAborted(signal: AbortSignal): {
+/** Create an abort rejection and exact listener disposer.
+ * @param signal - Signal whose current or future abort rejects the promise.
+ * @returns abort promise plus idempotent listener disposal.
+ */
+export function rejectWhenAborted(signal: AbortSignal): {
   readonly promise: Promise<never>
   dispose(): void
 } {
@@ -145,5 +149,5 @@ function replay(
     async cancel(reason) {
       await reader.cancel(reason)
     },
-  })
+  }, { highWaterMark: 0 })
 }

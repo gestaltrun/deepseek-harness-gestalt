@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-28-ui-phone-connected-device-tabs.md
-2026-08-28-ui-phone-connected-device-tabs.md: 6a0f49446cbe6251e0294c225f4a402d1820658a
-2026-08-28-ui-phone-connected-device-tabs.zh.md: 5cbb192d94572e2722a231031c3e700eb023fdf6
+2026-08-28-ui-phone-connected-device-tabs.md: af5b08682ef19321932f89341ca07c20880cd908
+2026-08-28-ui-phone-connected-device-tabs.zh.md: b7cb41d6bca173d18b808695e2121bf953ee11b4

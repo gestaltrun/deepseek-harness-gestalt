@@ -2130,6 +2130,8 @@ export interface Config {
   requestTimeoutMs?: number
   /** Ceiling for recognizing one H264 key access unit from each Android source. */
   h264ProbeTimeoutMs?: number
+  /** Maximum milliseconds spent joining foreign capture reader cleanup. */
+  captureCleanupTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -2161,10 +2163,12 @@ export interface Config {
 export interface Config {
   /** Milliseconds a minted capture URL remains valid. */
   tokenTtlMs?: number
+  /** Maximum milliseconds spent joining foreign capture cleanup during shutdown. */
+  transportCleanupTimeoutMs?: number
 }
 ```
 
-来源：[`packages/phone/phone-stream/src/index.ts:59`](../packages/phone/phone-stream/src/index.ts)
+来源：[`packages/phone/phone-stream/src/index.ts:65`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 

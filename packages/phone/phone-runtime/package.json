@@ -22,10 +22,6 @@
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
     },
-    "./swipe": {
-      "types": "./lib/types/swipe.d.ts",
-      "default": "./lib/types/swipe.js"
-    },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

@@ -155,7 +155,7 @@ describe('PhoneConnectedView chrome', () => {
     expect(screen.queryByText(/decode failed/)).toBeNull()
     const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
     expect(surface).toBeInstanceOf(HTMLImageElement)
-    expect(surface.getAttribute('src')).toBe('/phone/stream/emulator-5554/mjpeg?token=a')
+    expect(surface.getAttribute('src')).toBe(SESSION_A.mjpeg.url)
     Object.defineProperties(surface, {
       naturalWidth: { configurable: true, value: 1080 },
       naturalHeight: { configurable: true, value: 2400 },
@@ -470,7 +470,8 @@ describe('PhoneConnectedView screen frame aspect', () => {
     expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 633, y: 195, captureWidth: 844, captureHeight: 390,
+        deviceId: 'emulator-5554', x: 633, y: 195, kind: 'capture', captureWidth: 844,
+        captureHeight: 390, captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
       },
     })
   })
@@ -495,7 +496,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
     expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 1686, y: 540, captureWidth: 2248, captureHeight: 1080,
+        deviceId: 'emulator-5554', x: 1686, y: 540, kind: 'capture', captureWidth: 2248, captureHeight: 1080, captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
       },
     })
   })
@@ -584,7 +585,8 @@ describe('PhoneConnectedView screen frame aspect', () => {
       expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
         jsonrpc: '2.0', id: 1, method: 'tap',
         params: {
-          deviceId: 'emulator-5554', x: 1800, y: 540, captureWidth: 2400, captureHeight: 1080,
+          deviceId: 'emulator-5554', x: 1800, y: 540, kind: 'capture', captureWidth: 2400, captureHeight: 1080,
+          captureId: SESSION_A.mjpeg.captureId, captureFormat: 'mjpeg',
         },
       })
 
@@ -614,7 +616,7 @@ describe('PhoneConnectedView touch and keys', () => {
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 195, y: 211, captureWidth: 390, captureHeight: 844,
+        deviceId: 'emulator-5554', x: 195, y: 211, kind: 'capture', captureWidth: 390, captureHeight: 844, captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
       },
     })
   })
@@ -637,18 +639,11 @@ describe('PhoneConnectedView touch and keys', () => {
     expect(setPointerCapture).toHaveBeenCalledWith(7)
     expect(releasePointerCapture).toHaveBeenCalledWith(7)
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
-      jsonrpc: '2.0', id: 1, method: 'gesture',
+      jsonrpc: '2.0', id: 1, method: 'swipe',
       params: {
-        deviceId: 'emulator-5554',
-        captureWidth: 390,
-        captureHeight: 844,
-        actions: [
-          { type: 'pointerMove', x: 39, y: 42 },
-          { type: 'pointerDown' },
-          { type: 'pointerMove', x: 254, y: 485 },
-          { type: 'pause', duration: 150 },
-          { type: 'pointerUp' },
-        ],
+        deviceId: 'emulator-5554', kind: 'capture', captureWidth: 390, captureHeight: 844,
+        captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
+        x1: 39, y1: 42, x2: 254, y2: 485,
       },
     })
   })
@@ -658,18 +653,11 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.pointerDown(frame(), { pointerId: 10, clientX: 20, clientY: 20 })
     fireEvent.pointerUp(frame(), { pointerId: 10, clientX: 30, clientY: 30 })
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
-      jsonrpc: '2.0', id: 1, method: 'gesture',
+      jsonrpc: '2.0', id: 1, method: 'swipe',
       params: {
-        deviceId: 'emulator-5554',
-        captureWidth: 390,
-        captureHeight: 844,
-        actions: [
-          { type: 'pointerMove', x: 39, y: 42 },
-          { type: 'pointerDown' },
-          { type: 'pointerMove', x: 59, y: 63 },
-          { type: 'pause', duration: 150 },
-          { type: 'pointerUp' },
-        ],
+        deviceId: 'emulator-5554', kind: 'capture', captureWidth: 390, captureHeight: 844,
+        captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
+        x1: 39, y1: 42, x2: 59, y2: 63,
       },
     })
   })
@@ -706,7 +694,7 @@ describe('PhoneConnectedView touch and keys', () => {
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 103, y: 114, captureWidth: 390, captureHeight: 844,
+        deviceId: 'emulator-5554', x: 103, y: 114, kind: 'capture', captureWidth: 390, captureHeight: 844, captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
       },
     })
   })
@@ -722,26 +710,19 @@ describe('PhoneConnectedView touch and keys', () => {
       expect(gateway.lastSocket!.sent).toEqual([])
       await act(async () => { vi.advanceTimersByTime(50) })
       const frame = parseSentFrame(gateway.lastSocket!.sent[0]!) as {
-        readonly params: { readonly actions: ReadonlyArray<{ readonly y?: number }> }
+        readonly params: { readonly y1?: number; readonly y2?: number }
       }
-      const originY = frame.params.actions[0]?.y
-      const destinationY = frame.params.actions[2]?.y
+      const originY = frame.params.y1
+      const destinationY = frame.params.y2
       expect(originY).toEqual(expect.any(Number))
       expect(destinationY).toEqual(expect.any(Number))
       expect(originY).not.toBe(destinationY)
       expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
-        jsonrpc: '2.0', id: 1, method: 'gesture',
+        jsonrpc: '2.0', id: 1, method: 'swipe',
         params: {
-          deviceId: 'emulator-5554',
-          captureWidth: 390,
-          captureHeight: 844,
-          actions: [
-            { type: 'pointerMove', x: 195, y: originY },
-            { type: 'pointerDown' },
-            { type: 'pointerMove', x: 195, y: destinationY },
-            { type: 'pause', duration: 150 },
-            { type: 'pointerUp' },
-          ],
+          deviceId: 'emulator-5554', kind: 'capture', captureWidth: 390, captureHeight: 844,
+          captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
+          x1: 195, y1: originY, x2: 195, y2: destinationY,
         },
       })
     } finally {
@@ -844,7 +825,7 @@ describe('PhoneConnectedView touch and keys', () => {
     expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
       params: {
-        deviceId: 'emulator-5554', x: 0, y: 0, captureWidth: 390, captureHeight: 844,
+        deviceId: 'emulator-5554', x: 0, y: 0, kind: 'capture', captureWidth: 390, captureHeight: 844, captureId: SESSION_A.h264.captureId, captureFormat: 'h264', captureRotation: 0,
       },
     })
   })
@@ -1093,6 +1074,27 @@ describe('PhoneConnectedView error and recovery arms', () => {
     await flush()
     await step(() => { harness.gateway.lastSocket!.accept() })
     expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeTruthy()
+  })
+
+  it('shows the newest structured action failure while the picture remains live', async () => {
+    const harness = await renderLive()
+    const socket = harness.gateway.lastSocket!
+    const frame = screen.getByRole('application')
+    stubRect(frame, 390, 844)
+    fireEvent.pointerDown(frame, { clientX: 100, clientY: 100 })
+    fireEvent.pointerUp(frame, { clientX: 100, clientY: 100 })
+    expect(socket.sent).toHaveLength(1)
+    await act(async () => {
+      socket.receive(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'first failure' } }))
+    })
+    expect(screen.getByRole('status').textContent).toContain('first failure')
+    expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeDefined()
+    fireEvent.pointerDown(frame, { clientX: 120, clientY: 120 })
+    fireEvent.pointerUp(frame, { clientX: 120, clientY: 120 })
+    await act(async () => {
+      socket.receive(JSON.stringify({ jsonrpc: '2.0', id: 2, error: { code: -32000, message: 'newest failure' } }))
+    })
+    expect(screen.getByRole('status').textContent).toContain('newest failure')
   })
 
   it('shows the reconnecting note between interruption retries', async () => {

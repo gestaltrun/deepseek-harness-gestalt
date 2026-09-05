@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-01-phone-stream-real-format-fallback.md
-2026-09-01-phone-stream-real-format-fallback.md: c4389db19b274a1500e2b904fd2c8ff4c2648ff8
-2026-09-01-phone-stream-real-format-fallback.zh.md: 617356238516714fe5b8412cb61b6f0e57cd9024
+2026-09-01-phone-stream-real-format-fallback.md: e283753e38c26b53d8f0c6d56bdba16860eb1875
+2026-09-01-phone-stream-real-format-fallback.zh.md: b80a91f026b1d2dc1fb7902c1bbb82b14a3ab818

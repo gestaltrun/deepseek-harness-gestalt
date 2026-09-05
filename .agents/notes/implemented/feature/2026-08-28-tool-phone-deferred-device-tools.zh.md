@@ -12,7 +12,7 @@ Status: implemented
 
 `packages/phone/tool-phone`（`@deepseek-ai/dsh-tool-phone`）是 `ctx.phoneDevices` 的延迟 Consumer。它注入 `phoneDevices` 与 `tools`，注册六个 `deferLoading` 工具（`device_list`、`device_open`、`device_close`、`device_observe`、`device_act`、`device_screenshot`），并在禁用 `toolSearch` 时拒绝加载。初始请求不含这些 schema；`tool_search` 返回匹配 schema 但不激活工具，后续请求从持久 `loadedTools` 重建。
 
-`device_act` 只接受封闭的 `tap` / `swipe` / `type` / `button` 动作，并转发到 `phoneDevices.io`（`tap`、`gesture`、`text`、`button`）。没有 shell、`adb` 或自由命令参数。`device_open` 与 `device_close` 监听 `tools/pre-execute`，在先前监听器返回 `allow` 后替换为 `ask`。`device_act` 尊重先前的 deny 或 ask，否则不再弹出新的审批。审批 `allowed-once` 会执行一次设备群调用；拒绝则永远到不了 `boot` / `shutdown`。
+`device_act` 只接受封闭的 `tap` / `swipe` / `type` / `button` 动作，并转发到 `phoneDevices.io`（`tap`、`swipe`、`text`、`button`）。没有 shell、`adb` 或自由命令参数。`device_open` 与 `device_close` 监听 `tools/pre-execute`，在先前监听器返回 `allow` 后替换为 `ask`。`device_act` 尊重先前的 deny 或 ask，否则不再弹出新的审批。审批 `allowed-once` 会执行一次设备群调用；拒绝则永远到不了 `boot` / `shutdown`。
 
 已携带 `PhoneDevicesError` 代码的设备群失败会以同一代码重抛为 `HarnessError`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 调用 `phoneDevices.screenshot`，后者把 PNG 持久化到 `$DSH_HOME/phone/screenshots` 并返回 `{ mediaType: 'image/png', path }`；工具结果是 `{ deviceId, path }`，渲染为这两项，绝不是 PNG 字节或 base64 图片块。仅当注入的测试设备群省略该方法时仍走 `PHONE_UNSUPPORTED`。实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。本 Consumer 未编入已交付的 Desktop/headless preset；发现重建由包测试通过 `systemPrompt.assemble` 证明。
 

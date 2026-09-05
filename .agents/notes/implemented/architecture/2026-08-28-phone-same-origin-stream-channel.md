@@ -6,17 +6,17 @@ English | [中文](2026-08-28-phone-same-origin-stream-channel.zh.md)
 
 ## Problem
 
-The mobile device dock (#355) needs live screen frames and tap/gesture/text/button IO in the browser, but mobilecli listens on loopback `:12000`. A page that dials that port would leak the device fleet past the Host trust fence, and a LAN Host that reverse-proxied unsigned capture URLs would let any same-network browser read the stream.
+The mobile device dock (#355) needs live screen frames and tap/swipe/text/button IO in the browser, but mobilecli listens on loopback `:12000`. A page that dials that port would leak the device fleet past the Host trust fence, and a LAN Host that reverse-proxied unsigned capture URLs would let any same-network browser read the stream.
 
 ## Decision
 
 `packages/phone/phone-stream` (`@deepseek-ai/dsh-phone-stream`) is the Host Consumer on `ctx.phoneStream`. It injects `phoneDevices` and `webServer` and never lets the browser dial `:12000`.
 
-- IO rides the exact-path WebSocket upgrade `/phone/ws/io` after the `/api` trust fence (Host loopback or declared `trustedHosts`, same-origin Origin, no cross-site Fetch-Metadata). Frames are JSON-RPC `tap` / `gesture` / `text` / `button` forwarded onto `phoneDevices.io`.
+- IO rides the exact-path WebSocket upgrade `/phone/ws/io` after the `/api` trust fence (Host loopback or declared `trustedHosts`, same-origin Origin, no cross-site Fetch-Metadata). Frames are JSON-RPC `tap` / `swipe` / `text` / `button` forwarded onto `phoneDevices.io`.
 - Capture rides signed Host-origin URLs `/phone/stream/<id>/<mjpeg|h264>?token=`. Minting is `sessionFor` / `POST /phone/session`. For a listed iOS real device, mint installs a missing recoverable control agent before answering, as owned by [the mint autoinstall note](../bug-fix/2026-09-03-phone-ios-real-mint-autoinstall.md). Each token is HMAC-SHA256 over `deviceId`, format, and expiry, with `tokenTtlMs` (default 30s). Capture additionally refuses a non-loopback Host, so a trusted LAN authority that can call `/api` still cannot play video.
 - `phone-runtime` appends `io` and `startCapture` without changing `listDevices` / `boot` / `shutdown`. `startCapture` maps `h264` onto upstream `avc` and bounds only the wait for response headers; the unread body belongs to the Host reverse-proxy, which cancels it when the browser disconnects.
 
-Picture aspect (fixed 1:2, axis 3) stays a GUI consumer contract. This package mints stream URLs and forwards frames; it does not render `react-device-view`.
+Picture layout stays capture-bound and measured by the GUI consumer; placeholder ratio is not input authority. This package mints stream URLs and forwards frames; it does not render `react-device-view`.
 
 ## Alternatives considered
 

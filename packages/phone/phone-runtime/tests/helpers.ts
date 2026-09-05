@@ -5,6 +5,9 @@
  */
 
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import net from 'node:net'
@@ -62,8 +65,11 @@ export interface FakeKnobs {
   captureEnvelope?: boolean
   /** MJPEG frames per capture body (default 1); larger values keep the body open for mid-stream teardown tests. */
   streamFrameCount?: number
+  /** EXIF orientations consumed by successive MJPEG frame requests. */
+  mjpegOrientations?: number[]
   /** Device ids whose AVC response is HTTP 200 video/h264 carrying the real mobilecli failure text. */
   h264FailureDeviceIds?: readonly string[]
+  ownerToken?: string
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */
@@ -101,8 +107,12 @@ export interface StagedFake {
     captures: Array<{ readonly deviceId: string; readonly format: string }>
     scroll: Record<string, number>
   }>
-  /** Resolves when the RPC endpoint answers or rejects when the fake is gone. */
+  /** Resolve when this fake's exact owner identity answers on its staged origin. */
   awaitOnline(timeoutMs?: number): Promise<void>
+  /** Resolve with the exact owned process identity answering on an explicitly active origin. */
+  awaitOwnedOnlineAt(baseUrl: string, timeoutMs?: number): Promise<{ readonly pid: number }>
+  /** True only while this fake's exact owner identity answers on the supplied origin. */
+  answersAt(baseUrl: string): Promise<boolean>
   dispose(): Promise<void>
 }
 
@@ -126,7 +136,13 @@ function randomPort(): Promise<number> {
  * workers cannot steal the ephemeral slot between staging and spawning.
  */
 async function holdPort(port: number): Promise<{ release(): Promise<void> }> {
-  const placeholder = net.createServer()
+  const sockets = new Set<net.Socket>()
+  const placeholder = net.createServer((socket) => {
+    sockets.add(socket)
+    const forget = (): void => { sockets.delete(socket) }
+    socket.once('close', forget)
+    socket.once('error', forget)
+  })
   await new Promise<void>((resolve, reject) => {
     placeholder.once('error', reject)
     placeholder.listen(port, '127.0.0.1', resolve)
@@ -134,11 +150,79 @@ async function holdPort(port: number): Promise<{ release(): Promise<void> }> {
   let releasePromise: Promise<void> | undefined
   return {
     release(): Promise<void> {
-      releasePromise ??= new Promise<void>((resolve, reject) => {
-        placeholder.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      if (releasePromise !== undefined) return releasePromise
+      let resolveRelease!: () => void
+      let rejectRelease!: (reason?: unknown) => void
+      const promise = new Promise<void>((resolve, reject) => {
+        resolveRelease = resolve
+        rejectRelease = reject
       })
+      const settled = { promise, resolve: resolveRelease, reject: rejectRelease }
+      releasePromise = settled.promise
+      try {
+        for (const socket of sockets) socket.destroy()
+        sockets.clear()
+        placeholder.close((error) => {
+          if (error === undefined) settled.resolve()
+          else settled.reject(error)
+        })
+      } catch (error) {
+        settled.reject(error)
+      }
       return releasePromise
     },
+  }
+}
+
+async function emergencyStopStagedFake(baseUrl: string, ownerToken: string): Promise<Error | undefined> {
+  let identity: { readonly pid: number; readonly ownerToken: string }
+  try {
+    const response = await fetch(`${baseUrl}/__test/pid`, { signal: AbortSignal.timeout(500) })
+    const body = await response.json() as { pid?: unknown; ownerToken?: unknown }
+    if (!response.ok || !Number.isSafeInteger(body.pid) || body.ownerToken !== ownerToken) return undefined
+    identity = { pid: body.pid as number, ownerToken }
+  } catch {
+    return undefined
+  }
+  const survivor = new Error(`staged fake ${String(identity.pid)} survived product context disposal`)
+  if (process.platform === 'win32') await execFileAsync('taskkill', ['/PID', String(identity.pid), '/T', '/F'])
+  else process.kill(identity.pid, 'SIGTERM')
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const response = await fetch(`${baseUrl}/__test/pid`, { signal: AbortSignal.timeout(500) })
+      const body = await response.json() as { pid?: unknown; ownerToken?: unknown }
+      if (body.pid !== identity.pid || body.ownerToken !== identity.ownerToken) return survivor
+    } catch {
+      return survivor
+    }
+    await wait(10)
+  }
+  if (process.platform !== 'win32') process.kill(-identity.pid, 'SIGKILL')
+  return survivor
+}
+
+async function stagedFakeIdentity(baseUrl: string, ownerToken: string): Promise<{ readonly pid: number } | undefined> {
+  try {
+    const response = await fetch(`${baseUrl}/__test/pid`, { signal: AbortSignal.timeout(250) })
+    const body = await response.json() as { pid?: unknown; ownerToken?: unknown }
+    if (!response.ok || !Number.isSafeInteger(body.pid) || body.ownerToken !== ownerToken) return undefined
+    return { pid: body.pid as number }
+  } catch {
+    return undefined
+  }
+}
+
+async function awaitStagedFakeOwner(
+  baseUrl: string,
+  ownerToken: string,
+  timeoutMs: number,
+): Promise<{ readonly pid: number }> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const identity = await stagedFakeIdentity(baseUrl, ownerToken)
+    if (identity !== undefined) return identity
+    if (Date.now() >= deadline) throw new Error(`fakemobilecli owner never came online at ${baseUrl}`)
+    await wait(10)
   }
 }
 
@@ -147,6 +231,7 @@ function wait(ms: number): Promise<void> {
 }
 
 const WINDOWS_BOOTSTRAP_OPTION = `--import=${new URL('./fixtures/fakemobilecli-bootstrap.mjs', import.meta.url).href}`
+const execFileAsync = promisify(execFile)
 let windowsLauncherUsers = 0
 let previousNodeOptions: string | undefined
 
@@ -187,6 +272,8 @@ export async function stageFake(
   platform: NodeJS.Platform = process.platform,
 ): Promise<StagedFake> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-phone-fake-'))
+  const ownerToken = randomUUID()
+  knobs = { ...knobs, ownerToken }
   const releaseLauncher = platform === 'win32' ? retainWindowsLauncher() : undefined
   try {
     const fixturesDir = join(root, 'fixtures')
@@ -274,25 +361,23 @@ export async function stageFake(
         }
       },
       async awaitOnline(timeoutMs = 5_000): Promise<void> {
-        const deadline = Date.now() + timeoutMs
-        for (;;) {
-          try {
-            await fetch(`${baseUrl}/__test/counters`)
-            return
-          } catch {
-            if (Date.now() > deadline) throw new Error('fakemobilecli never came online')
-            await wait(10)
-          }
-        }
+        await awaitStagedFakeOwner(baseUrl, ownerToken, timeoutMs)
+      },
+      async awaitOwnedOnlineAt(activeBaseUrl, timeoutMs = 5_000): Promise<{ readonly pid: number }> {
+        return await awaitStagedFakeOwner(activeBaseUrl, ownerToken, timeoutMs)
+      },
+      async answersAt(activeBaseUrl): Promise<boolean> {
+        return await stagedFakeIdentity(activeBaseUrl, ownerToken) !== undefined
       },
       dispose(): Promise<void> {
         disposal ??= (async () => {
+          const survivor = await emergencyStopStagedFake(baseUrl, ownerToken)
           const settled = await Promise.allSettled([
             hold.release(),
             rm(root, { recursive: true, force: true }),
           ])
           releaseLauncher?.()
-          const errors: Error[] = []
+          const errors: Error[] = survivor === undefined ? [] : [survivor]
           for (const result of settled) {
             if (result.status !== 'rejected') continue
             const reason: unknown = result.reason

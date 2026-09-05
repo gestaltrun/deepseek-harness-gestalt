@@ -1540,13 +1540,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>',
-        description: 'Forward one `device.io.tap` / `gesture` / `text` / `button` round trip. Public tap and gesture coordinates are capture pixels. Android forwards them unchanged; iOS reads and caches `device.info.screenSize` for the current runtime generation and converts those pixels to XCTest logical points. Sticky portrait `screenSize` swaps when the request\'s live capture surface is landscape (`captureWidth` greater than `captureHeight`); omitted size falls back to overflow of one scaled point. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
+        description: 'Execute one semantic tap, swipe, text, or button action. Android coordinate actions retain their pixels. iOS obtains cached portrait `device.info` bounds and projects every displayed endpoint through exact rotation; browser actions bind current capture identity and model actions use a bounded fresh MJPEG EXIF probe. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
         parameters: [{ name: 'request', description: 'Branded device id plus capture-pixel or non-coordinate input.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_PROTOCOL` when an iOS `device.info` answer lacks a valid positive screen size, and otherwise per the class-documented failure modes.'],
       },
       {
         signature: 'async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream>',
-        description: 'Open one `device.screencapture` stream. `h264` maps onto upstream `avc`; Android pre-reads and replays at most one bounded key-access-unit probe, then replaces an invalid, failed, timed-out, or landscape-logical-display source with the system `screenrecord` H264 stream (`--size` from `dumpsys display` `logicalFrame` when known). Other bodies remain unread.',
+        description: 'Open one `device.screencapture` stream. `h264` maps onto upstream `avc`; Android pre-reads and replays at most one bounded key-access-unit probe, then replaces an invalid, failed, timed-out, or landscape-logical-display source with the system `screenrecord` H264 stream (`--size` from `dumpsys display` `logicalFrame` when known). Other bodies remain unread. A generation or incarnation change after headers joins foreign body cancellation for at most `captureCleanupTimeoutMs`.',
         parameters: [{ name: 'request', description: 'Branded device id, encoding, and optional cancellation.' }],
         returns: 'the live capture content type and body; the caller owns cancellation.',
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
@@ -5560,12 +5560,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PhoneAndroidState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n} | {\n    readonly kind: \'checking\';\n} | {\n    readonly kind: \'missing\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'awaiting-license\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'downloading\';\n    readonly plan: AndroidPreparationPlan;\n    readonly receivedBytes: number;\n    readonly totalBytes: number;\n} | {\n    readonly kind: \'installing\';\n    readonly plan: AndroidPreparationPlan;\n    readonly step: \'licenses\' | \'packages\';\n} | {\n    readonly kind: \'creating-avd\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'checking-acceleration\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'booting\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'manual-required\';\n    readonly plan: AndroidPreparationPlan;\n    readonly code: \'disk-space\' | \'windows-hypervisor\' | \'linux-kvm\' | \'virtualization\';\n    readonly message: string;\n} | {\n    readonly kind: \'ready\';\n    readonly plan: AndroidPreparationPlan;\n    readonly deviceId?: DeviceId;\n    readonly running: boolean;\n} | {\n    readonly kind: \'failed\';\n    readonly plan?: AndroidPreparationPlan;\n    readonly code: string;\n    readonly message: string;\n    readonly retryable: boolean;\n};',
   },
   {
+    name: 'PhoneCaptureId',
+    declaration: 'export type PhoneCaptureId = Branded<\'PhoneCaptureId\'>;',
+  },
+  {
     name: 'PhoneCaptureRequest',
-    declaration: 'export interface PhoneCaptureRequest {\n    readonly deviceId: DeviceId;\n    readonly format: PhoneCaptureFormat;\n    readonly signal?: AbortSignal;\n}',
+    declaration: 'export interface PhoneCaptureRequest {\n    readonly deviceId: DeviceId;\n    readonly format: PhoneCaptureFormat;\n    readonly captureId?: PhoneCaptureId;\n    readonly signal?: AbortSignal;\n}',
   },
   {
     name: 'PhoneCaptureStream',
     declaration: 'export interface PhoneCaptureStream {\n    readonly contentType: string;\n    readonly body: ReadableStream<Uint8Array>;\n}',
+  },
+  {
+    name: 'PhoneCoordinateSource',
+    declaration: 'export type PhoneCoordinateSource = {\n    readonly kind: \'fresh-probe\';\n} | {\n    readonly kind: \'capture\';\n    readonly captureId: PhoneCaptureId;\n    readonly captureFormat: PhoneCaptureFormat;\n    readonly captureWidth: number;\n    readonly captureHeight: number;\n    readonly captureRotation?: PhoneRotation;\n};',
   },
   {
     name: 'PhoneDeviceChange',
@@ -5589,11 +5597,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneIoRequest',
-    declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n    readonly captureWidth?: number;\n    readonly captureHeight?: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n    readonly captureWidth?: number;\n    readonly captureHeight?: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
+    declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n    readonly source: PhoneCoordinateSource;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'swipe\';\n    readonly x1: number;\n    readonly y1: number;\n    readonly x2: number;\n    readonly y2: number;\n    readonly source: PhoneCoordinateSource;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
   },
   {
     name: 'PhoneIosState',
     declaration: 'export type PhoneIosState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n} | {\n    readonly kind: \'checking\';\n    readonly operation?: \'prepare\';\n} | {\n    readonly kind: \'xcode-missing\';\n    readonly message: string;\n} | {\n    readonly kind: \'license-required\';\n    readonly developerDir: string;\n    readonly message: string;\n} | {\n    readonly kind: \'manual-required\';\n    readonly code: \'first-launch\' | \'xcode-update\';\n    readonly message: string;\n    readonly developerDir?: string;\n} | {\n    readonly kind: \'runtime-missing\';\n    readonly plan: IosPreparationPlan;\n} | {\n    readonly kind: \'no-simulator\';\n    readonly plan: IosPreparationPlan;\n} | {\n    readonly kind: \'preparing\';\n    readonly plan: IosPreparationPlan;\n    readonly step: \'downloading-runtime\' | \'creating-simulator\' | \'booting\';\n} | {\n    readonly kind: \'ready\';\n    readonly plan: IosPreparationPlan;\n    readonly deviceId: DeviceId;\n    readonly running: boolean;\n} | {\n    readonly kind: \'failed\';\n    readonly plan?: IosPreparationPlan;\n    readonly code: string;\n    readonly message: string;\n    readonly retryable: boolean;\n};',
+  },
+  {
+    name: 'PhoneRotation',
+    declaration: 'export type PhoneRotation = 0 | 90 | 180 | 270;',
   },
   {
     name: 'PhoneRuntimeState',
@@ -5609,7 +5621,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneStreamUrl',
-    declaration: 'export interface PhoneStreamUrl {\n    readonly url: string;\n    readonly expiresAt: number;\n}',
+    declaration: 'export interface PhoneStreamUrl {\n    readonly url: string;\n    readonly captureId: PhoneCaptureId;\n    readonly expiresAt: number;\n}',
   },
   {
     name: 'PlatformAccountId',

@@ -2,13 +2,15 @@
 
 [English](phone-stream.md) | 中文
 
-同源手机 IO 与采集反代：`packages/phone/phone-stream` 注入 `phoneDevices` 与 `webServer`，注册 Host 路由，并发布 `ctx.phoneStream`。浏览器永不直连 mobilecli `:12000`。IO 在 `/api` 信任栅栏之后走 `/phone/ws/io`。MJPEG 与 H264 帧走签名的 Host 同源 URL，并且额外要求 loopback Host 与短时效 HMAC token。画面比例（固定 1:2，轴 3）是 GUI Consumer 的约定；本包只签发流 URL 并转发帧。
+同源手机 IO 与采集反代：`packages/phone/phone-stream` 注入 `phoneDevices` 与 `webServer`，注册 Host 路由，并发布 `ctx.phoneStream`。浏览器永不直连 mobilecli `:12000`。IO 在 `/api` 信任栅栏之后走 `/phone/ws/io`。MJPEG 与 H264 帧走签名的 Host 同源 URL，并且额外要求 loopback Host 与短时效 HMAC token。本包签发唯一采集身份并转发帧；ui-phone 负责按实测画面尺寸排版。
 
 ```ts type-equiv
 /** One signed same-origin capture URL plus its expiry. */
 interface PhoneStreamUrl {
   /** Path and query the browser loads on this Host; never a `:12000` origin. */
   readonly url: string
+  /** Opaque identity binding browser input to this exact active capture. */
+  readonly captureId: PhoneCaptureId
   /** Unix epoch milliseconds after which the Host refuses this URL. */
   readonly expiresAt: number
 }
@@ -23,7 +25,7 @@ interface PhoneStreamSession {
   readonly ioPath: string
   /**
    * Whether picture or socket failures for this session can enter
-   * product-managed device-agent recovery. Tap and gesture JSON-RPC errors stay live.
+   * product-managed device-agent recovery. Tap and swipe JSON-RPC errors stay live.
    */
   readonly agentManaged: boolean
   /** Encoding the browser should open first for this device class. */

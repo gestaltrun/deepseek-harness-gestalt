@@ -221,6 +221,20 @@
   pointer-events: none;
 }
 
+.actionError {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 5;
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-state-danger-tertiary);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12);
+  pointer-events: none;
+}
+
 .statusNote {
   display: flex;
   align-items: center;

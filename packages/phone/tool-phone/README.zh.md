@@ -14,7 +14,7 @@
 
 `device_open` 与 `device_close` 在先前监听器返回 `allow` 后，默认走 `tools/pre-execute` `ask`。先前的 deny 或 ask 保持不变。`allowed-once` 审批会执行一次设备群调用；拒绝则设备无副作用。`device_act` 同样尊重先前的 deny 或 ask，否则直接执行封闭的 tap、swipe、type 或按钮，不再弹出新的审批。
 
-已携带 `PhoneDevicesError` 代码（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）的设备群失败会以同一代码重抛为 `HarnessError`。`device_act` 把封闭的 tap、swipe、type 或按钮动作转发到 `phoneDevices.io`。swipe 使用 `@deepseek-ai/dsh-phone-runtime/swipe` 的 `phoneSwipeActions`（[编码](../../../.agents/notes/implemented/bug-fix/2026-09-02-phone-ios-wda-swipe-gesture.zh.md)）。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 调用 `phoneDevices.screenshot`，返回磁盘上仅所有者可读写 PNG 的 `{ deviceId, path }`；渲染后的工具文本就是这两项，绝不是 PNG 字节或 base64 图片块。仅当注入的测试设备群省略该方法时仍走 `PHONE_UNSUPPORTED`。实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。
+已携带 `PhoneDevicesError` 代码（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）的设备群失败会以同一代码重抛为 `HarnessError`。`device_act` 把封闭的 tap、swipe、type 或按钮动作转发到 `phoneDevices.io`。swipe 转发语义端点，并把平台与旋转转换留给 `PhoneDevices.io()`（[输入所有权](../../../.agents/notes/implemented/bug-fix/2026-09-04-ios-semantic-input-rotation.zh.md)）。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 调用 `phoneDevices.screenshot`，返回磁盘上仅所有者可读写 PNG 的 `{ deviceId, path }`；渲染后的工具文本就是这两项，绝不是 PNG 字节或 base64 图片块。仅当注入的测试设备群省略该方法时仍走 `PHONE_UNSUPPORTED`。实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。
 
 ## 模型体验
 
@@ -34,4 +34,4 @@
 
 ## 已知限制与后续工作
 
-- 已交付的 Desktop 与 headless preset 不挂载本 Consumer，因此还没有无密钥组装 transcript 快照。发现重建由包测试通过 `systemPrompt.assemble` 证明；产品组合挂上这些工具后再补 snapshot。实况视频、签名流路由与 GUI chrome 仍在各自的包中。
+- 已交付的 headless 无密钥快照在记录式假设备群上挂载本 Consumer，并证明初始设备 schema 为零、`tool_search` 可重建工具，以及一次闭合动作。Desktop 不挂载本 Consumer。实况视频、签名流路由与 GUI chrome 仍在各自的包中。

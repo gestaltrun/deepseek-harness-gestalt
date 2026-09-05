@@ -292,7 +292,7 @@ describe('deferred phone device Consumer', () => {
       value: { deviceId: 'emulator-5554', action: { kind: 'tap', x: 12, y: 40 }, status: 'ok' },
     })
     expect(asked).toEqual([])
-    expect(fleet.ioCalls).toEqual([{ deviceId: ANDROID_ID, method: 'tap', x: 12, y: 40 }])
+    expect(fleet.ioCalls).toEqual([{ deviceId: ANDROID_ID, method: 'tap', source: { kind: 'fresh-probe' }, x: 12, y: 40 }])
 
     const opened = await ctx.tools.execute({
       callId: CallId('open-allow'),
@@ -328,18 +328,8 @@ describe('deferred phone device Consumer', () => {
     })).resolves.toMatchObject({ isError: false, value: { action: { kind: 'button', name: 'home' } } })
     expect(asked).toEqual(['device_open'])
     expect(fleet.ioCalls).toEqual([
-      { deviceId: ANDROID_ID, method: 'tap', x: 12, y: 40 },
-      {
-        deviceId: ANDROID_ID,
-        method: 'gesture',
-        actions: [
-          { type: 'pointerMove', x: 1, y: 2 },
-          { type: 'pointerDown' },
-          { type: 'pointerMove', x: 3, y: 4 },
-          { type: 'pause', duration: 150 },
-          { type: 'pointerUp' },
-        ],
-      },
+      { deviceId: ANDROID_ID, method: 'tap', source: { kind: 'fresh-probe' }, x: 12, y: 40 },
+      { deviceId: ANDROID_ID, method: 'swipe', source: { kind: 'fresh-probe' }, x1: 1, y1: 2, x2: 3, y2: 4 },
       { deviceId: ANDROID_ID, method: 'text', text: 'hello' },
       { deviceId: ANDROID_ID, method: 'button', button: 'HOME' },
     ])

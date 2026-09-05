@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { verifyMjpegJpegPicture } from '../src/jpeg.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { JpegFrameOrientationObserver, jpegExifRotation, probeMjpegExifRotation, verifyMjpegJpegPicture } from '../src/jpeg.ts'
 import { buildGradientJpeg } from './fixtures/u3-visible-frames.ts'
 
 function streamOf(...chunks: readonly Uint8Array[]): ReadableStream<Uint8Array> {
@@ -45,6 +45,125 @@ function structuralJpeg(options: {
     0xff, 0xd9,
   ])
 }
+
+function exifJpeg(orientation: number, little = true): Uint8Array {
+  const tiff = little
+    ? [0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 1, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0, 0, 0, 0, 0]
+    : [0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 1, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0]
+  return Uint8Array.from([0xff, 0xd8, ...segment(0xe1, [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff]), 0xff, 0xd9])
+}
+
+describe('probeMjpegExifRotation', () => {
+  it('abandons a forever-hung reader cancellation within the configured cleanup ceiling', async () => {
+    const abort = new AbortController()
+    const body = new ReadableStream<Uint8Array>({
+      pull() { abort.abort(new DOMException('stop', 'AbortError')) },
+      cancel() { return new Promise<void>(() => {}) },
+    })
+    const started = Date.now()
+    await expect(probeMjpegExifRotation(body, abort.signal, 1024, 20)).rejects.toBeInstanceOf(Error)
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
+  it('reports a cleanup rejection once after bounded abandonment', async () => {
+    let rejectCancel!: (error: unknown) => void
+    const cancel = new Promise<void>((_resolve, reject) => { rejectCancel = reject })
+    const abort = new AbortController()
+    const body = new ReadableStream<Uint8Array>({
+      pull() { abort.abort(new DOMException('stop', 'AbortError')) },
+      cancel() { return cancel },
+    })
+    const errors: unknown[] = []
+    await expect(probeMjpegExifRotation(body, abort.signal, 1024, 20, (error) => { errors.push(error) })).rejects.toBeInstanceOf(Error)
+    const failure = new Error('late cancel failure')
+    rejectCancel(failure)
+    await vi.waitFor(() => { expect(errors).toEqual([failure]) })
+  })
+})
+
+describe('jpegExifRotation', () => {
+  it.each([[1, 0], [6, 90], [3, 180], [8, 270]] as const)('maps EXIF %i to %i°', (orientation, rotation) => {
+    expect(jpegExifRotation(exifJpeg(orientation))).toBe(rotation)
+    expect(jpegExifRotation(exifJpeg(orientation, false))).toBe(rotation)
+  })
+
+  it('returns undefined when EXIF or a recognized orientation is absent', () => {
+    expect(jpegExifRotation(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]))).toBeUndefined()
+    expect(jpegExifRotation(exifJpeg(2))).toBeUndefined()
+  })
+
+  it.each([
+    ['non-JPEG', Uint8Array.from([0, 1, 2])],
+    ['truncated marker', Uint8Array.from([0xff, 0xd8, 0xff])],
+    ['truncated segment', Uint8Array.from([0xff, 0xd8, 0xff, 0xe1, 0, 20, 1])],
+    ['bad TIFF', Uint8Array.from([0xff, 0xd8, ...segment(0xe1, [0x45, 0x78, 0x69, 0x66, 0, 0, 1, 2, 3])])],
+  ])('rejects %s', (_label, bytes) => {
+    expect(() => jpegExifRotation(bytes)).toThrow()
+  })
+
+  it('rejects an oversized bounded prefix', () => {
+    expect(() => jpegExifRotation(new Uint8Array(17), 16)).toThrow(/exceeded 16 bytes/u)
+  })
+})
+
+describe('JpegFrameOrientationObserver', () => {
+  const orientedStructuralJpeg = (orientation?: number, appPayload: readonly number[] = []): Uint8Array => {
+    const exif = orientation === undefined ? [] : [...exifJpeg(orientation).subarray(2, -2)]
+    return Uint8Array.from([
+      0xff, 0xd8,
+      ...(appPayload.length === 0 ? [] : segment(0xe0, appPayload)),
+      ...exif,
+      ...segment(0xc0, VALID_SOF),
+      ...segment(0xda, VALID_SOS),
+      1,
+      0xff, 0xd9,
+    ])
+  }
+
+  it('observes every complete frame across byte chunking and clears absent orientation', () => {
+    const seen: Array<number | undefined> = []
+    const observer = new JpegFrameOrientationObserver(rotation => seen.push(rotation), 1024)
+    const bytes = Uint8Array.from([
+      ...orientedStructuralJpeg(), ...orientedStructuralJpeg(8),
+      ...orientedStructuralJpeg(6), 0xff, 0xd8, 0xff, 0x00,
+      ...orientedStructuralJpeg(1),
+    ])
+    for (const byte of bytes) observer.push(Uint8Array.of(byte))
+    expect(seen).toEqual([undefined, 270, 90, 0])
+  })
+
+  it('ignores fake markers in APP payloads and stuffed or restart entropy bytes', () => {
+    const seen: Array<number | undefined> = []
+    const observer = new JpegFrameOrientationObserver(rotation => seen.push(rotation), 1024)
+    const header = orientedStructuralJpeg(8, [1, 0xff, 0xd9, 2, 0xff, 0xd8, 3])
+    const eoi = header.length - 2
+    observer.push(Uint8Array.from([
+      ...header.subarray(0, eoi - 1), 0xff, 0x00, 0xd9, 0xff, 0xd0, 4, 0xff, 0xd9,
+    ]))
+    expect(seen).toEqual([270])
+  })
+
+  it('rejects bare marker bytes and preserves the first recognized EXIF APP1', () => {
+    const seen: Array<number | undefined> = []
+    const observer = new JpegFrameOrientationObserver(rotation => seen.push(rotation), 1024)
+    const valid = orientedStructuralJpeg(8)
+    const sos = valid.indexOf(0xff, 4)
+    observer.push(Uint8Array.from([0xff, 0xd8, 0xe1, 0, 2, ...valid]))
+    observer.push(Uint8Array.from([
+      ...valid.subarray(0, sos), ...segment(0xe1, [1, 2, 3]), ...valid.subarray(sos),
+    ]))
+    expect(seen).toEqual([270, 270])
+  })
+
+  it('bounds retained metadata and resumes at the next frame', () => {
+    const seen: Array<number | undefined> = []
+    const observer = new JpegFrameOrientationObserver(rotation => seen.push(rotation), 100)
+    observer.push(Uint8Array.from([
+      ...orientedStructuralJpeg(8, new Array(120).fill(1)), ...orientedStructuralJpeg(1),
+    ]))
+    expect(seen).toEqual([undefined, 0])
+  })
+})
 
 describe('verifyMjpegJpegPicture', () => {
   it.each([

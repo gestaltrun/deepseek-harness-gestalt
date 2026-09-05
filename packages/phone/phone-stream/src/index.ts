@@ -2,8 +2,8 @@
  * Host-half Consumer that reverse-proxies mobilecli IO and screen capture
  * through the Host webserver. The browser never dials `:12000`: IO rides a
  * same-origin WebSocket upgrade, and MJPEG/H264 frames ride signed loopback
- * HTTP URLs. Picture aspect (1:2, axis 3) is a GUI consumer contract; this
- * package only mints stream URLs and forwards frames.
+ * HTTP URLs. This package mints capture identities and forwards frames; the
+ * GUI owns measured picture layout and input presentation.
  * @module @deepseek-ai/dsh-phone-stream
  */
 
@@ -12,13 +12,19 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import type { DeviceId, PhoneCaptureFormat, PhoneCaptureStream, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
+import { deviceId, phoneCaptureId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneCaptureFormat, PhoneCaptureId, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import { HttpError, readJsonObject, writeHttpError, writeJson } from '@deepseek-ai/dsh-host-webserver'
 import { WebSocketServer } from 'ws'
 import { signPhoneStreamToken, verifyPhoneStreamToken } from './token.ts'
 import { isLoopbackApiRequest, isTrustedApiRequest } from './trust.ts'
-import { MJPEG_NORMALIZED_BOUNDARY, normalizeMultipartImageStream } from './multipart-normalize.ts'
+import { normalizeMultipartImageStream } from './multipart-normalize.ts'
+import { CaptureRelays } from './capture-relays.ts'
+import { ServerResponseCaptureSink } from './server-response-capture-sink.ts'
+import { PhoneIoTransports } from './phone-io-transports.ts'
+import { CaptureGrantLedger } from './capture-grant-ledger.ts'
+import { PhoneStreamOwner } from './phone-stream-owner.ts'
+import { PhoneHttpTransactions } from './phone-http-transactions.ts'
 import type { PhoneDeviceRefWire, PhoneStreamSession, PhoneStreamUrl } from './types.ts'
 
 export type { PhoneStreamSession, PhoneStreamUrl } from './types.ts'
@@ -59,11 +65,14 @@ declare module '@deepseek-ai/cordis' {
 export interface Config {
   /** Milliseconds a minted capture URL remains valid. */
   tokenTtlMs?: number
+  /** Maximum milliseconds spent joining foreign capture cleanup during shutdown. */
+  transportCleanupTimeoutMs?: number
 }
 
 /** Runtime configuration schema applied by composition. */
 export const Config: z<Config> = z.object({
   tokenTtlMs: z.number().default(30_000),
+  transportCleanupTimeoutMs: z.number().default(1_000),
 })
 
 /**
@@ -79,8 +88,13 @@ export class PhoneStream extends Service {
   static inject = ['phoneDevices', 'webServer']
 
   private readonly tokenTtlMs: number
+  private readonly transportCleanupTimeoutMs: number
   private readonly secret = randomBytes(32)
-  private readonly sockets = new Set<Duplex>()
+  private readonly grants = new CaptureGrantLedger()
+  private readonly relays: CaptureRelays
+  private readonly transports: PhoneIoTransports
+  private readonly httpTransactions: PhoneHttpTransactions
+  private closing = false
 
   /**
    * Register Host routes as fiber effects and mint the process-local HMAC key.
@@ -89,39 +103,52 @@ export class PhoneStream extends Service {
    */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'phoneStream')
-    this.tokenTtlMs = resolveTokenTtl(config.tokenTtlMs as number)
-    const wss = new WebSocketServer({ noServer: true })
-    ctx.effect(() => ctx.webServer.register({
-      kind: 'prefix',
-      path: PHONE_SESSION_PATH,
-      handler: (req, res) => this.handleSession(req, res),
-    }), 'phone-stream: /phone/session')
-    ctx.effect(() => ctx.webServer.register({
-      kind: 'prefix',
-      path: PHONE_AGENT_PATH,
-      handler: (req, res) => this.handleAgent(req, res),
-    }), 'phone-stream: /phone/agent')
-    ctx.effect(() => ctx.webServer.register({
-      kind: 'prefix',
-      path: PHONE_DEVICES_PATH,
-      handler: (req, res) => this.handleDevices(req, res),
-    }), 'phone-stream: /phone/devices')
-    ctx.effect(() => ctx.webServer.register({
-      kind: 'prefix',
-      path: PHONE_STREAM_PATH,
-      handler: (req, res) => this.handleCapture(req, res),
-    }), 'phone-stream: /phone/stream')
-    ctx.effect(() => ctx.webServer.registerUpgrade({
-      path: PHONE_IO_PATH,
-      handler: (req, socket, head) => {
-        this.handleIoUpgrade(wss, req, socket, head)
+    this.tokenTtlMs = resolvePositiveSafeInteger('tokenTtlMs', config.tokenTtlMs as number)
+    this.transportCleanupTimeoutMs = resolvePositiveSafeInteger('transportCleanupTimeoutMs', config.transportCleanupTimeoutMs as number)
+    this.relays = new CaptureRelays(
+      async cleanup => await cleanupDeadline(cleanup, this.transportCleanupTimeoutMs),
+      {
+        primary: (error) => { this.ctx.logger.warn('phone-stream: capture pipe failed'); this.ctx.logger.warn(error) },
+        cleanup: (error) => { this.ctx.logger.warn('phone-stream: capture cleanup failed'); this.ctx.logger.warn(error) },
+        timeout: (error) => { this.ctx.logger.warn('phone-stream: capture cleanup timed out'); this.ctx.logger.warn(error) },
       },
-    }), 'phone-stream: /phone/ws/io')
-    ctx.effect(() => () => {
-      for (const socket of this.sockets) socket.destroy()
-      this.sockets.clear()
-      wss.close()
-    }, 'phone-stream: socket teardown')
+    )
+    const wss = new WebSocketServer({ noServer: true })
+    this.httpTransactions = new PhoneHttpTransactions(async task => await cleanupDeadline(task, this.transportCleanupTimeoutMs))
+    this.transports = new PhoneIoTransports(
+      wss,
+      { reject: (socket) => { rejectUpgrade(socket) } },
+      async task => await cleanupDeadline(task, this.transportCleanupTimeoutMs),
+      {
+        failure: (scope, error) => { this.ctx.logger.warn(`phone-stream: ${scope.subsystem} transport failed`)
+          this.ctx.logger.warn(error) },
+        timeout: (scope) => { this.ctx.logger.warn(`phone-stream: ${scope.subsystem} transport cleanup timed out`) },
+      },
+    )
+    ctx.effect(() => {
+      const reason = new PhoneDevicesError('PHONE_ABORTED', 'phone-stream is closing')
+      const owner = new PhoneStreamOwner(
+        ctx.fiber,
+        listener => ctx.on('internal/plugin', listener),
+        [
+          () => ctx.webServer.register({ kind: 'prefix', path: PHONE_SESSION_PATH, handler: (req, res) => this.httpTransactions.run(async (signal) => { await this.handleSession(req, res, signal) }, () => { this.rejectClosing(res, false) }) }),
+          () => ctx.webServer.register({ kind: 'prefix', path: PHONE_AGENT_PATH, handler: (req, res) => this.httpTransactions.run(async (signal) => { await this.handleAgent(req, res, signal) }, () => { this.rejectClosing(res, false) }) }),
+          () => ctx.webServer.register({ kind: 'prefix', path: PHONE_DEVICES_PATH, handler: (req, res) => this.httpTransactions.run(async (signal) => { await this.handleDevices(req, res, signal) }, () => { this.rejectClosing(res, false) }) }),
+          () => ctx.webServer.register({ kind: 'prefix', path: PHONE_STREAM_PATH, handler: (req, res) => this.httpTransactions.run(async (signal) => { await this.handleCapture(req, res, signal) }, () => { this.rejectClosing(res, true) }) }),
+          () => ctx.webServer.registerUpgrade({ path: PHONE_IO_PATH, handler: (req, socket, head) => {
+            if (this.closing || !isTrustedApiRequest(req, this.trustedHosts())) { rejectUpgrade(socket); return }
+            this.transports.accept(req, socket, head, async (ws, raw, signal) => { await this.dispatchIo(ws, raw, signal) })
+          } }),
+        ],
+        () => { this.closing = true },
+        {
+          http: () => this.httpTransactions.close(reason),
+          transport: () => this.transports.close(reason),
+          relay: () => this.relays.close(reason),
+        },
+      )
+      return () => owner.dispose()
+    }, 'phone-stream: route and transport owner')
   }
 
   /**
@@ -136,7 +163,9 @@ export class PhoneStream extends Service {
     agentManaged: boolean = false,
     preferredFormat: PhoneCaptureFormat = 'h264',
   ): PhoneStreamSession {
+    if (this.closing) throw new PhoneDevicesError('PHONE_ABORTED', 'phone-stream is closing')
     const expiresAt = Date.now() + this.tokenTtlMs
+    if (!Number.isSafeInteger(expiresAt)) throw new RangeError('phone-stream: capture token expiry exceeds the safe integer range')
     return Object.freeze({
       deviceId: id,
       ioPath: PHONE_IO_PATH,
@@ -151,6 +180,7 @@ export class PhoneStream extends Service {
     const token = signPhoneStreamToken(this.secret, id, format, expiresAt)
     return Object.freeze({
       url: `${PHONE_STREAM_PATH}/${encodeURIComponent(id)}/${format}?token=${encodeURIComponent(token)}`,
+      captureId: phoneCaptureId(token),
       expiresAt,
     })
   }
@@ -160,7 +190,18 @@ export class PhoneStream extends Service {
     return runtime?.trustedHosts ?? []
   }
 
-  private async handleSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private isClosing(signal?: AbortSignal): boolean {
+    return this.closing || signal?.aborted === true
+  }
+
+  private rejectClosing(res: ServerResponse, capture: boolean): void {
+    if (res.headersSent || res.writableEnded) return
+    if (capture) writeForbidden(res)
+    else writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing'))
+  }
+
+  private async handleSession(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (this.closing) { writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing')); return }
     if (!isTrustedApiRequest(req, this.trustedHosts())) {
       writeForbidden(res)
       return
@@ -182,6 +223,7 @@ export class PhoneStream extends Service {
       }
       const id = deviceId(rawId)
       const list = await this.ctx.phoneDevices.listDevices()
+      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       const knownReal = list.ios.reals.find(ref => ref.id === id)
       const knownSimulator = list.ios.simulators.find(ref => ref.id === id)
       const known = knownReal ?? knownSimulator ?? list.android.find(ref => ref.id === id)
@@ -194,9 +236,13 @@ export class PhoneStream extends Service {
       if (knownReal !== undefined) {
         // Mint installs a missing recoverable agent; PHONE_AGENT_MISSING is the leftover-absent answer.
         let status = await this.ctx.phoneDevices.agentStatus(id)
+        if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
         if (!status.installed) {
+          if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
           await this.ctx.phoneDevices.installAgent(id)
+          if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
           status = await this.ctx.phoneDevices.agentStatus(id)
+          if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
         }
         if (!status.installed) {
           writeJson(res, 409, {
@@ -208,6 +254,7 @@ export class PhoneStream extends Service {
           return
         }
       }
+      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       writeJson(res, 200, this.sessionFor(
         id,
         knownReal !== undefined || known.platform === 'android',
@@ -218,7 +265,8 @@ export class PhoneStream extends Service {
     }
   }
 
-  private async handleAgent(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handleAgent(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (this.closing) { writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing')); return }
     if (!isTrustedApiRequest(req, this.trustedHosts())) {
       writeForbidden(res)
       return
@@ -240,14 +288,20 @@ export class PhoneStream extends Service {
       }
       const id = deviceId(rawId)
       await this.requireManagedAgentDevice(id)
+      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       if (pathname === `${PHONE_AGENT_PATH}/status`) {
-        writeJson(res, 200, await this.ctx.phoneDevices.agentStatus(id))
+        const status = await this.ctx.phoneDevices.agentStatus(id)
+        if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
+        writeJson(res, 200, status)
         return
       }
       if (body.force !== undefined && typeof body.force !== 'boolean') {
         throw new HttpError(400, 'bad-request', 'force must be a boolean')
       }
-      writeJson(res, 200, await this.ctx.phoneDevices.installAgent(id, { force: body.force === true }))
+      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
+      const installed = await this.ctx.phoneDevices.installAgent(id, { force: body.force === true })
+      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
+      writeJson(res, 200, installed)
     } catch (error) {
       this.writeFailure(res, error)
     }
@@ -273,7 +327,8 @@ export class PhoneStream extends Service {
    * @param req - Incoming request.
    * @param res - Response to write the listing JSON onto.
    */
-  private async handleDevices(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handleDevices(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (this.closing) { writeHttpError(res, new HttpError(503, 'unavailable', 'phone-stream is closing')); return }
     if (!isTrustedApiRequest(req, this.trustedHosts())) {
       writeForbidden(res)
       return
@@ -288,6 +343,7 @@ export class PhoneStream extends Service {
     }
     try {
       const list = await this.ctx.phoneDevices.listDevices()
+      if (this.isClosing(signal)) { this.rejectClosing(res, false); return }
       const refOf = ({
         id, name, kind, state, online, logicalDisplay,
       }: PhoneDeviceRef): PhoneDeviceRefWire => Object.freeze({
@@ -310,8 +366,8 @@ export class PhoneStream extends Service {
     }
   }
 
-  private async handleCapture(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!isTrustedApiRequest(req, this.trustedHosts()) || !isLoopbackApiRequest(req)) {
+  private async handleCapture(req: IncomingMessage, res: ServerResponse, signal: AbortSignal): Promise<void> {
+    if (!isTrustedApiRequest(req, this.trustedHosts()) || !isLoopbackApiRequest(req) || this.isClosing(signal)) {
       writeForbidden(res)
       return
     }
@@ -325,107 +381,74 @@ export class PhoneStream extends Service {
       writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone capture path'))
       return
     }
+    const now = Date.now()
     const token = url.searchParams.get('token') ?? ''
-    const grant = verifyPhoneStreamToken(this.secret, parsed.deviceId, parsed.format, token, Date.now())
-    if (grant === undefined) {
+    const grant = verifyPhoneStreamToken(this.secret, parsed.deviceId, parsed.format, token, now)
+    if (grant === undefined || !this.grants.consume(grant.captureId, grant.expiresAt, now)) {
       writeForbidden(res)
       return
     }
-    let capture: PhoneCaptureStream
-    try {
-      capture = await this.ctx.phoneDevices.startCapture({
-        deviceId: deviceId(grant.deviceId),
-        format: grant.format,
-      })
-    } catch (error) {
-      this.writeFailure(res, error)
-      return
-    }
-    // Real 1.0.5 streams mix a declared JSON-notification boundary with an
-    // undeclared frame boundary; the browser can only parse one, so the
-    // multipart body is re-emitted under a single normalized image-frame
-    // boundary. Non-multipart bodies (H264) stream through untouched.
-    const multipart = capture.contentType.includes('multipart/x-mixed-replace')
-    res.writeHead(200, {
-      'content-type': multipart
-        ? `multipart/x-mixed-replace; boundary=${MJPEG_NORMALIZED_BOUNDARY}`
-        : capture.contentType,
-      'cache-control': 'no-store',
-      'x-content-type-options': 'nosniff',
-    })
-    const reader = (multipart ? normalizeMultipartImageStream(capture.body) : capture.body).getReader()
-    let cancellation: Promise<void> | undefined
-    const abort = (): void => {
-      cancellation ??= reader.cancel()
-    }
+
+    const lifetime = new AbortController()
+    const transactionAbort = (): void => { lifetime.abort(signal.reason) }
+    signal.addEventListener('abort', transactionAbort, { once: true })
+    if (signal.aborted) transactionAbort()
+    const abort = (): void => { lifetime.abort() }
+    const close = (): void => { if (!res.writableFinished) abort() }
     req.on('aborted', abort)
-    res.on('close', abort)
+    res.on('close', close)
+    const multipart = grant.format === 'mjpeg'
+    const sink = new ServerResponseCaptureSink(res, multipart)
     try {
-      for (;;) {
-        const next = await reader.read()
-        if (next.done) break
-        res.write(Buffer.from(next.value))
-      }
-      res.end()
-    } catch {
-      // The browser or upstream capture ended the pipe; both sides are already closing.
-      res.destroy()
+      if (this.isClosing(signal)) { this.rejectClosing(res, true); return }
+      await this.relays.run(
+        async signal => await this.ctx.phoneDevices.startCapture({
+          deviceId: deviceId(grant.deviceId), format: grant.format, captureId: grant.captureId, signal,
+        }),
+        sink,
+        lifetime.signal,
+        multipart ? normalizeMultipartImageStream : body => body,
+      )
     } finally {
+      signal.removeEventListener('abort', transactionAbort)
       req.off('aborted', abort)
-      res.off('close', abort)
-      if (cancellation !== undefined) await cancellation
+      res.off('close', close)
     }
   }
 
-  private handleIoUpgrade(
-    wss: WebSocketServer,
-    req: IncomingMessage,
-    socket: Duplex,
-    head: Buffer,
-  ): void {
-    if (!isTrustedApiRequest(req, this.trustedHosts())) {
-      rejectUpgrade(socket)
-      return
-    }
-    this.sockets.add(socket)
-    socket.once('close', () => {
-      this.sockets.delete(socket)
-    })
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.on('message', (raw) => {
-        void this.dispatchIo(ws, raw)
-      })
-    })
-  }
-
-  private async dispatchIo(ws: { send(data: string): void }, raw: unknown): Promise<void> {
+  private async dispatchIo(ws: { send(data: string): void }, raw: unknown, signal: AbortSignal): Promise<void> {
     let parsed: unknown
     try {
       parsed = JSON.parse(String(raw)) as unknown
     } catch {
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'invalid JSON' } }))
+      safeWebSocketSend(ws, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'invalid JSON' } })
       return
     }
     if (typeof parsed !== 'object' || parsed === null) {
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } }))
+      safeWebSocketSend(ws, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } })
       return
     }
-    const record = parsed as { id?: unknown; method?: unknown; params?: unknown }
-    const id = record.id ?? null
+    const record = parsed as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
+    const id = Number.isSafeInteger(record.id) && (record.id as number) > 0 ? record.id as number : null
+    if (record.jsonrpc !== '2.0' || id === null) {
+      safeWebSocketSend(ws, { jsonrpc: '2.0', id, error: { code: -32600, message: 'invalid request' } })
+      return
+    }
     try {
       const request = parseIoRequest(record.method, record.params)
-      await this.ctx.phoneDevices.io(request)
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id, result: { status: 'ok' } }))
+      await this.ctx.phoneDevices.io(request, signal)
+      if (!signal.aborted) safeWebSocketSend(ws, { jsonrpc: '2.0', id, result: { status: 'ok' } })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       const code = error instanceof PhoneDevicesError && error.code === 'PHONE_DEVICE_NOT_FOUND'
         ? -32010
         : -32000
-      ws.send(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }))
+      if (!signal.aborted) safeWebSocketSend(ws, { jsonrpc: '2.0', id, error: { code, message } })
     }
   }
 
   private writeFailure(res: ServerResponse, error: unknown): void {
+    if (this.closing || res.headersSent || res.writableEnded) return
     if (error instanceof HttpError) {
       writeHttpError(res, error)
       return
@@ -449,9 +472,9 @@ export class PhoneStream extends Service {
   }
 }
 
-function resolveTokenTtl(value: number): number {
+function resolvePositiveSafeInteger(name: string, value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new Error('phone-stream: tokenTtlMs must be a positive safe integer')
+    throw new Error(`phone-stream: ${name} must be a positive safe integer`)
   }
   return value
 }
@@ -494,15 +517,17 @@ function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
         method: 'tap',
         x: requireInteger(record.x, 'x'),
         y: requireInteger(record.y, 'y'),
-        ...optionalCaptureSize(record),
+        source: captureSource(record),
       }
-    case 'gesture':
-      if (!Array.isArray(record.actions)) throw new HttpError(400, 'bad-request', 'gesture actions must be an array')
+    case 'swipe':
       return {
         deviceId: id,
-        method: 'gesture',
-        actions: record.actions as readonly Record<string, unknown>[],
-        ...optionalCaptureSize(record),
+        method: 'swipe',
+        x1: requireInteger(record.x1, 'x1'),
+        y1: requireInteger(record.y1, 'y1'),
+        x2: requireInteger(record.x2, 'x2'),
+        y2: requireInteger(record.y2, 'y2'),
+        source: captureSource(record),
       }
     case 'text':
       if (typeof record.text !== 'string') throw new HttpError(400, 'bad-request', 'text is required')
@@ -517,22 +542,67 @@ function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
   }
 }
 
-function optionalCaptureSize(
-  record: Record<string, unknown>,
-): { readonly captureWidth: number; readonly captureHeight: number } | Record<string, never> {
+function captureSource(record: Record<string, unknown>): {
+  readonly kind: 'capture'
+  readonly captureWidth: number
+  readonly captureHeight: number
+  readonly captureId: PhoneCaptureId
+  readonly captureFormat: PhoneCaptureFormat
+  readonly captureRotation?: 0 | 90 | 180 | 270
+} {
+  if (record.kind !== 'capture') {
+    throw new HttpError(400, 'bad-request', 'coordinate input kind must be capture')
+  }
   const widthPresent = record.captureWidth !== undefined
   const heightPresent = record.captureHeight !== undefined
-  if (!widthPresent && !heightPresent) return {}
   if (!widthPresent || !heightPresent) {
     throw new HttpError(400, 'bad-request', 'captureWidth and captureHeight must be sent together')
   }
   const captureWidth = requirePositiveInteger(record.captureWidth, 'captureWidth')
   const captureHeight = requirePositiveInteger(record.captureHeight, 'captureHeight')
-  return { captureWidth, captureHeight }
+  if (typeof record.captureId !== 'string' || record.captureId.length === 0) {
+    throw new HttpError(400, 'bad-request', 'captureId is required')
+  }
+  const captureId = phoneCaptureId(record.captureId)
+  if (record.captureFormat !== 'mjpeg' && record.captureFormat !== 'h264') {
+    throw new HttpError(400, 'bad-request', 'captureFormat must be mjpeg or h264')
+  }
+  const rotation = record.captureRotation
+  if (record.captureFormat === 'mjpeg' && rotation !== undefined) {
+    throw new HttpError(400, 'bad-request', 'MJPEG coordinate input cannot supply captureRotation')
+  }
+  if (rotation !== undefined && rotation !== 0 && rotation !== 90 && rotation !== 180 && rotation !== 270) {
+    throw new HttpError(400, 'bad-request', 'captureRotation must be 0, 90, 180, or 270')
+  }
+  return {
+    kind: 'capture',
+    captureWidth,
+    captureHeight,
+    captureId,
+    captureFormat: record.captureFormat,
+    ...(rotation === undefined ? {} : { captureRotation: rotation }),
+  }
+}
+
+async function cleanupDeadline(cleanup: Promise<void>, timeoutMs: number): Promise<'settled' | 'timeout'> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      cleanup.then(() => 'settled' as const),
+      new Promise<'timeout'>((resolve) => { timer = setTimeout(() => { resolve('timeout') }, timeoutMs) }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+function safeWebSocketSend(ws: { readonly readyState?: number; send(data: string): void }, payload: unknown): void {
+  if (ws.readyState !== undefined && ws.readyState !== 1) return
+  try { ws.send(JSON.stringify(payload)) } catch { /* a concurrent close drops the terminal reply */ }
 }
 
 function requireInteger(value: unknown, name: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
     throw new HttpError(400, 'bad-request', `${name} must be an integer`)
   }
   return value

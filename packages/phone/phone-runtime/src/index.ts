@@ -19,8 +19,10 @@ import { readAndroidLogicalDisplay } from './android-display.ts'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
-import { ioParams, iosScreenSize, type IosScreenSize } from './io.ts'
+import { iosScreenSize, upstreamIo, type IosScreenSize } from './io.ts'
+import { JpegFrameOrientationObserver, probeMjpegExifRotation } from './jpeg.ts'
 import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
+import { rejectWhenAborted } from './recognizable-stream.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { runMobilecliScreenshot } from './screenshot-process.ts'
 import { persistPhoneScreenshot } from './screenshot-store.ts'
@@ -45,6 +47,8 @@ import type {
   PhoneDeviceList,
   PhoneDeviceRef,
   PhoneIoRequest,
+  PhoneCaptureId,
+  PhoneRotation,
   PhoneScreenshot,
 } from './types.ts'
 
@@ -55,6 +59,7 @@ export type {
   PhoneAgentInstallResult,
   PhoneAgentStatus,
   PhoneCaptureFormat,
+  PhoneCaptureId,
   PhoneCaptureRequest,
   PhoneCaptureStream,
   PhoneDeviceChange,
@@ -65,14 +70,14 @@ export type {
   PhoneIoMethod,
   PhoneIoRequest,
   PhoneRealDeviceIssue,
+  PhoneRotation,
   PhoneScreenshot,
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
-export { deviceId } from './ids.ts'
-export { phoneSwipeActions } from './swipe.ts'
+export { deviceId, phoneCaptureId } from './ids.ts'
 export { verifyAnnexBH264KeyAccessUnit } from './h264.ts'
 export type { H264KeyAccessUnitVerificationOptions } from './h264.ts'
-export { verifyMjpegJpegPicture } from './jpeg.ts'
+export { jpegExifRotation, probeMjpegExifRotation, verifyMjpegJpegPicture } from './jpeg.ts'
 export type { MjpegPictureVerificationOptions } from './jpeg.ts'
 export { resolveMobilecliExecutable } from './resolve-binary.ts'
 export type { ServerExit } from './server-process.ts'
@@ -99,12 +104,7 @@ const METHOD_SERVER_INFO = 'server.info'
 /** Maximum bytes inspected before one Android H264 source is rejected. */
 const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
 
-const IO_METHODS = {
-  tap: 'device.io.tap',
-  gesture: 'device.io.gesture',
-  text: 'device.io.text',
-  button: 'device.io.button',
-} as const
+const IOS_ROTATION_PROBE_MAX_BYTES = 256 * 1024
 
 /**
  * Validated runtime configuration. Defaults carry the upstream facts they can:
@@ -133,6 +133,8 @@ export interface Config {
   requestTimeoutMs?: number
   /** Ceiling for recognizing one H264 key access unit from each Android source. */
   h264ProbeTimeoutMs?: number
+  /** Maximum milliseconds spent joining foreign capture reader cleanup. */
+  captureCleanupTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -155,6 +157,7 @@ export const Config: z<Config> = z.object({
   readyTimeoutMs: z.number().default(60_000),
   requestTimeoutMs: z.number().default(30_000),
   h264ProbeTimeoutMs: z.number().default(15_000),
+  captureCleanupTimeoutMs: z.number().default(1_000),
   bootTimeoutMs: z.number().default(180_000),
   agentTimeoutMs: z.number().default(120_000),
 })
@@ -162,10 +165,33 @@ export const Config: z<Config> = z.object({
 type ResolvedConfig = Omit<Required<Config>, 'executablePath' | 'provisioningProfilePath'> & Pick<Config, 'executablePath' | 'provisioningProfilePath'>
 
 /** Immutable references that keep a chained io operation on one runtime generation. */
+interface RotationObservation {
+  readonly rotation: PhoneRotation
+  readonly revision: object
+}
+
+interface ActiveCaptureObservation {
+  readonly deviceId: DeviceId
+  readonly format: 'mjpeg' | 'h264'
+  readonly revision: object
+}
+
+interface RotationProbe {
+  readonly abort: AbortController
+  readonly promise: Promise<PhoneRotation>
+  readonly settled: Promise<void>
+}
+
 interface IoGeneration {
+  readonly identity: object
   readonly client: MobilecliRpc
   readonly lifetime: AbortController
-  readonly iosScreenSizes: Map<DeviceId, IosScreenSize>
+  readonly iosScreenSizes: Map<DeviceId, { readonly incarnation: object; readonly screen: IosScreenSize }>
+  readonly rotations: Map<PhoneCaptureId, RotationObservation>
+  readonly activeCaptures: Map<PhoneCaptureId, ActiveCaptureObservation>
+  readonly rotationProbes: Map<DeviceId, RotationProbe>
+  readonly deviceIncarnations: Map<DeviceId, object>
+  readonly childEnvironment: Readonly<Record<string, string>>
 }
 
 function assertDurationField(name: string, value: number): void {
@@ -187,6 +213,7 @@ function resolveValidatedConfig(config: Config): ResolvedConfig {
   assertDurationField('readyStabilityMs', values.readyStabilityMs)
   assertDurationField('readyTimeoutMs', values.readyTimeoutMs)
   assertDurationField('requestTimeoutMs', values.requestTimeoutMs)
+  assertDurationField('captureCleanupTimeoutMs', values.captureCleanupTimeoutMs)
   assertDurationField('h264ProbeTimeoutMs', values.h264ProbeTimeoutMs)
   assertDurationField('bootTimeoutMs', values.bootTimeoutMs)
   assertDurationField('agentTimeoutMs', values.agentTimeoutMs)
@@ -278,6 +305,7 @@ export class PhoneDevices extends Service {
   private lifetime = new AbortController()
   private activationTail: Promise<void> = Promise.resolve()
   private queueTail: Promise<void> = Promise.resolve()
+  private teardownPromise: Promise<void> | undefined
   private closing = false
   private disposed = false
   private ready = false
@@ -286,7 +314,12 @@ export class PhoneDevices extends Service {
   private child: MobilecliServerProcess | undefined
   private rpcClient: MobilecliRpc | undefined
   private publishedList: PhoneDeviceList | undefined
-  private iosScreenSizes = new Map<DeviceId, IosScreenSize>()
+  private iosScreenSizes = new Map<DeviceId, { readonly incarnation: object; readonly screen: IosScreenSize }>()
+  private rotations = new Map<PhoneCaptureId, RotationObservation>()
+  private activeCaptures = new Map<PhoneCaptureId, ActiveCaptureObservation>()
+  private rotationProbes = new Map<DeviceId, RotationProbe>()
+  private deviceIncarnations = new Map<DeviceId, object>()
+  private generationIdentity = Object.freeze({})
   private readonly openNativeAndroidH264 = openAndroidSystemH264
   private readonly readAndroidLogicalDisplay = readAndroidLogicalDisplay
   private startupOutcome: Promise<void> | undefined
@@ -400,7 +433,12 @@ export class PhoneDevices extends Service {
       this.resolutionFailure = undefined
       this.lost = undefined
       this.lifetime = new AbortController()
+      this.generationIdentity = Object.freeze({})
       this.iosScreenSizes = new Map()
+      this.rotations = new Map()
+      this.activeCaptures = new Map()
+      this.rotationProbes = new Map()
+      this.deviceIncarnations = new Map()
       this.child = new MobilecliServerProcess({
         executablePath: resolved,
         port: this.resolved.serverPort,
@@ -617,8 +655,9 @@ export class PhoneDevices extends Service {
     this.assertAccepting()
     this.requireResolved()
     await this.whenReady(signal)
-    const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
-    return this.withAndroidLogicalDisplays(groupEntries(parseDeviceInfos(result)))
+    this.assertAccepting()
+    this.assertUsable()
+    return await this.enqueueDeviceAcquisition(signal)
   }
 
   /**
@@ -656,15 +695,12 @@ export class PhoneDevices extends Service {
   }
 
   /**
-   * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
-   * Public tap and gesture coordinates are capture pixels. Android forwards
-   * them unchanged; iOS reads and caches `device.info.screenSize` for the
-   * current runtime generation and converts those pixels to XCTest logical
-   * points. Sticky portrait `screenSize` swaps when the request's live capture
-   * surface is landscape (`captureWidth` greater than `captureHeight`); omitted
-   * size falls back to overflow of one scaled point. Physical handsets are
-   * valid targets; only ids absent from the latest published listing fail
-   * locally before any RPC.
+   * Execute one semantic tap, swipe, text, or button action. Android coordinate
+   * actions retain their pixels. iOS obtains cached portrait `device.info`
+   * bounds and projects every displayed endpoint through exact rotation;
+   * browser actions bind current capture identity and model actions use a
+   * bounded fresh MJPEG EXIF probe. Physical handsets are valid targets; only
+   * ids absent from the latest published listing fail locally before any RPC.
    * @param request - Branded device id plus capture-pixel or non-coordinate input.
    * @param signal - Caller's optional cancellation signal.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -673,31 +709,153 @@ export class PhoneDevices extends Service {
    *   per the class-documented failure modes.
    */
   async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
+    this.assertAccepting()
     this.requireResolved()
     this.assertUsable()
-    const known = this.requireKnown(request.deviceId, 'io')
     await this.whenReady(signal)
+    this.assertAccepting()
+    this.assertUsable()
     const generation = this.captureIoGeneration()
-    const screen = await this.ioScreen(generation, known, request, signal)
+    const known = this.requireKnown(request.deviceId, 'io')
+    const incarnation = generation.deviceIncarnations.get(known.id)
+    if (incarnation === undefined) throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `cannot io: ${JSON.stringify(known.id)} has no active incarnation`)
+    const coordinate = request.method === 'tap' || request.method === 'swipe'
+    const admittedCaptureSource = coordinate && request.source.kind === 'capture' ? request.source : undefined
+    const admittedCapture = admittedCaptureSource === undefined
+      ? undefined
+      : this.requireActiveCaptureSource(generation, known, admittedCaptureSource)
+    const rotation = known.platform === 'ios' && coordinate
+      ? await this.rotationFor(generation, known, request, signal)
+      : undefined
+    const screen = known.platform === 'ios' && coordinate
+      ? await this.ioScreen(generation, known, incarnation, signal)
+      : undefined
+    const call = upstreamIo(request, known.platform, rotation, screen)
+    if (generation.deviceIncarnations.get(known.id) !== incarnation) {
+      throw new PhoneDevicesError('PHONE_ABORTED', 'device incarnation changed before io dispatch')
+    }
+    if (admittedCapture !== undefined && admittedCaptureSource !== undefined
+      && generation.activeCaptures.get(admittedCaptureSource.captureId) !== admittedCapture) {
+      throw new PhoneDevicesError('PHONE_PROTOCOL', 'capture authority changed before io dispatch')
+    }
     await this.roundTripInGeneration(
       generation,
-      IO_METHODS[request.method],
-      ioParams(request, screen),
+      call.method,
+      call.params,
       signal,
       this.resolved.requestTimeoutMs,
     )
   }
 
-  /** Resolve and cache the iOS capture-pixel to XCTest logical-point screen size. */
+  private requireActiveCaptureSource(
+    generation: IoGeneration,
+    known: PhoneDeviceRef,
+    source: Extract<PhoneIoRequest, { method: 'tap' | 'swipe' }>['source'] & { readonly kind: 'capture' },
+  ): ActiveCaptureObservation {
+    const active = generation.activeCaptures.get(source.captureId)
+    if (active === undefined || active.deviceId !== known.id || active.format !== source.captureFormat) {
+      throw new PhoneDevicesError('PHONE_PROTOCOL', 'trusted capture evidence is not active for this device and format')
+    }
+    return active
+  }
+
+  private async rotationFor(
+    generation: IoGeneration,
+    known: PhoneDeviceRef,
+    request: Extract<PhoneIoRequest, { method: 'tap' | 'swipe' }>,
+    signal?: AbortSignal,
+  ): Promise<PhoneRotation> {
+    switch (request.source.kind) {
+      case 'capture': {
+        const source = request.source
+        if (source.captureFormat === 'mjpeg') {
+          if (source.captureRotation !== undefined) throw new PhoneDevicesError('PHONE_PROTOCOL', 'MJPEG rotation is runtime-owned')
+          const active = generation.activeCaptures.get(source.captureId)
+          const observed = generation.rotations.get(source.captureId)
+          if (active !== undefined && observed?.revision === active.revision) return observed.rotation
+          throw new PhoneDevicesError('PHONE_PROTOCOL', 'the current MJPEG capture has not published exact rotation')
+        }
+        if (source.captureRotation === undefined) throw new PhoneDevicesError('PHONE_PROTOCOL', 'H264 capture evidence requires exact rotation')
+        return source.captureRotation
+      }
+      case 'fresh-probe':
+        break
+      default:
+        return assertNever(request.source)
+    }
+    let current = generation.rotationProbes.get(known.id)
+    if (current === undefined) {
+      const abort = new AbortController()
+      const raw = this.probeRotation(generation, known, abort.signal)
+      const published = {} as RotationProbe
+      const promise = raw.then(
+        (rotation) => {
+          if (generation.rotationProbes.get(known.id) === published) generation.rotationProbes.delete(known.id)
+          return rotation
+        },
+        (error: unknown) => {
+          if (generation.rotationProbes.get(known.id) === published) generation.rotationProbes.delete(known.id)
+          throw error
+        },
+      )
+      const settled = promise.then(() => {}, () => {})
+      Object.assign(published, { abort, promise, settled })
+      current = published
+      generation.rotationProbes.set(known.id, current)
+    }
+    return await awaitProbeForCaller(current.promise, signal)
+  }
+
+  private async probeRotation(
+    generation: IoGeneration,
+    known: PhoneDeviceRef,
+    probeSignal: AbortSignal,
+  ): Promise<PhoneRotation> {
+    const window = deadline(
+      AbortSignal.any([generation.lifetime.signal, probeSignal]),
+      this.resolved.requestTimeoutMs,
+      'IOS_ROTATION_PROBE',
+    )
+    const incarnation = generation.deviceIncarnations.get(known.id)
+    if (incarnation === undefined) throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `cannot probe rotation: ${JSON.stringify(known.id)} has no active incarnation`)
+    let capture: PhoneCaptureStream
+    try {
+      capture = await generation.client.stream(
+        METHOD_DEVICE_SCREENCAPTURE,
+        { deviceId: known.id, format: 'mjpeg' },
+        window.signal,
+      )
+      const rotation = await probeMjpegExifRotation(
+        capture.body,
+        window.signal,
+        IOS_ROTATION_PROBE_MAX_BYTES,
+        this.resolved.captureCleanupTimeoutMs,
+        (error) => {
+          this.ctx.logger.warn('phone-runtime: abandoned rotation probe cleanup failed')
+          this.ctx.logger.warn(error)
+        },
+      )
+      if (generation.identity !== this.generationIdentity
+        || generation.deviceIncarnations.get(known.id) !== incarnation) {
+        throw new PhoneDevicesError('PHONE_ABORTED', 'stale iOS rotation probe was discarded')
+      }
+      return rotation
+    } catch (error) {
+      throw normalizeOperationError(error)
+    } finally {
+      window[Symbol.dispose]()
+    }
+  }
+
+  /** Resolve and cache the iOS portrait event bounds. */
   private async ioScreen(
     generation: IoGeneration,
     known: PhoneDeviceRef,
-    request: PhoneIoRequest,
+    incarnation: object,
     signal?: AbortSignal,
-  ): Promise<number | IosScreenSize> {
-    if (known.platform !== 'ios' || request.method === 'text' || request.method === 'button') return 1
+  ): Promise<IosScreenSize> {
     const cached = generation.iosScreenSizes.get(known.id)
-    if (cached !== undefined) return cached
+    if (cached?.incarnation === incarnation) return cached.screen
     const result = await this.roundTripInGeneration(
       generation,
       METHOD_DEVICE_INFO,
@@ -706,7 +864,10 @@ export class PhoneDevices extends Service {
       this.resolved.requestTimeoutMs,
     )
     const screen = iosScreenSize(result)
-    generation.iosScreenSizes.set(known.id, screen)
+    if (generation.deviceIncarnations.get(known.id) !== incarnation) {
+      throw new PhoneDevicesError('PHONE_ABORTED', 'device incarnation changed during screen observation')
+    }
+    generation.iosScreenSizes.set(known.id, { incarnation, screen })
     return screen
   }
 
@@ -715,9 +876,15 @@ export class PhoneDevices extends Service {
     // Callers enter only after resolution/readiness; teardown aborts the
     // captured lifetime before clearing the active client.
     return {
+      identity: this.generationIdentity,
       client: this.rpcClient as MobilecliRpc,
       lifetime: this.lifetime,
       iosScreenSizes: this.iosScreenSizes,
+      rotations: this.rotations,
+      activeCaptures: this.activeCaptures,
+      rotationProbes: this.rotationProbes,
+      deviceIncarnations: this.deviceIncarnations,
+      childEnvironment: this.childEnvironment,
     }
   }
 
@@ -727,6 +894,8 @@ export class PhoneDevices extends Service {
    * then replaces an invalid, failed, timed-out, or landscape-logical-display
    * source with the system `screenrecord` H264 stream (`--size` from
    * `dumpsys display` `logicalFrame` when known). Other bodies remain unread.
+   * A generation or incarnation change after headers joins foreign body
+   * cancellation for at most `captureCleanupTimeoutMs`.
    * @param request - Branded device id, encoding, and optional cancellation.
    * @returns the live capture content type and body; the caller owns cancellation.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -734,19 +903,24 @@ export class PhoneDevices extends Service {
    *   class-documented failure modes.
    */
   async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream> {
+    this.assertAccepting()
     this.requireResolved()
     this.assertUsable()
-    const known = this.requireKnown(request.deviceId, 'capture')
     await this.whenReady(request.signal)
+    this.assertAccepting()
     this.assertUsable()
+    const known = this.requireKnown(request.deviceId, 'capture')
+    const incarnation = this.deviceIncarnations.get(known.id)
+    if (incarnation === undefined) throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `cannot capture: ${JSON.stringify(known.id)} has no active incarnation`)
+    const generation = this.captureIoGeneration()
     if (request.signal?.aborted === true) {
       throw new PhoneDevicesError('PHONE_ABORTED', 'cancelled before the request was sent')
     }
-    const fused = fuseCallerAndLifetime(request.signal, this.lifetime.signal)
+    const fused = fuseCallerAndLifetime(request.signal, generation.lifetime.signal)
     const budget = deadline(fused, this.resolved.requestTimeoutMs, METHOD_DEVICE_SCREENCAPTURE)
     let capture: PhoneCaptureStream
     try {
-      capture = await (this.rpcClient as MobilecliRpc).stream(
+      capture = await generation.client.stream(
         METHOD_DEVICE_SCREENCAPTURE,
         {
           deviceId: request.deviceId,
@@ -765,10 +939,85 @@ export class PhoneDevices extends Service {
     } finally {
       budget[Symbol.dispose]()
     }
-    if (request.format !== 'h264' || known.platform !== 'android') {
-      return Object.freeze({ contentType: capture.contentType, body: capture.body })
+    if (request.format === 'h264' && known.platform === 'android') {
+      capture = await this.preferAndroidH264(capture, known, generation, fused)
     }
-    return await this.preferAndroidH264(capture, known, fused)
+    const staleGeneration = generation.lifetime.signal.aborted || this.generationIdentity !== generation.identity
+    const staleIncarnation = this.deviceIncarnations.get(known.id) !== incarnation
+    if (staleGeneration || staleIncarnation) {
+      const stale = new PhoneDevicesError('PHONE_ABORTED', 'capture generation changed before publication')
+      await joinForeignCleanup(
+        Promise.resolve().then(() => capture.body.cancel(stale)),
+        this.resolved.captureCleanupTimeoutMs,
+        (error) => { this.ctx.logger.warn(error) },
+      )
+      throw stale
+    }
+    if (request.captureId === undefined) return Object.freeze({ contentType: capture.contentType, body: capture.body })
+    const revision = Object.freeze({})
+    generation.activeCaptures.set(request.captureId, { deviceId: known.id, format: request.format, revision })
+    if (request.format === 'mjpeg' && known.platform === 'ios') {
+      return Object.freeze({
+        contentType: capture.contentType,
+        body: this.observeIosMjpeg(capture.body, known.id, incarnation, request.captureId, revision),
+      })
+    }
+    return Object.freeze({
+      contentType: capture.contentType,
+      body: this.observeCaptureLifetime(capture.body, generation.activeCaptures, request.captureId, revision),
+    })
+  }
+
+  /** Pass every MJPEG byte through while observing each complete frame's EXIF rotation. */
+  private observeIosMjpeg(
+    body: ReadableStream<Uint8Array>,
+    deviceId: DeviceId,
+    incarnation: object,
+    captureId: PhoneCaptureId,
+    revision: object,
+  ): ReadableStream<Uint8Array> {
+    const generation = this.captureIoGeneration()
+    const key = captureId
+    const identity = generation.identity
+    const reader = body.getReader()
+    let released = false
+    const release = (): void => {
+      if (released) return
+      released = true
+      if (generation.rotations.get(key)?.revision === revision) generation.rotations.delete(key)
+      if (generation.activeCaptures.get(key)?.revision === revision) generation.activeCaptures.delete(key)
+    }
+    const observer = new JpegFrameOrientationObserver((rotation) => {
+      if (this.generationIdentity !== identity
+        || generation.deviceIncarnations.get(deviceId) !== incarnation || released) return
+      if (generation.activeCaptures.get(key)?.revision !== revision) return
+      if (rotation === undefined) {
+        if (generation.rotations.get(key)?.revision === revision) generation.rotations.delete(key)
+      } else {
+        generation.rotations.set(key, { rotation, revision })
+      }
+    }, IOS_ROTATION_PROBE_MAX_BYTES)
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const read = await reader.read()
+          if (read.done) {
+            release()
+            controller.close()
+            return
+          }
+          observer.push(read.value)
+          controller.enqueue(read.value)
+        } catch (error) {
+          release()
+          controller.error(error)
+        }
+      },
+      async cancel(reason) {
+        release()
+        await reader.cancel(reason)
+      },
+    }, { highWaterMark: 0 })
   }
 
   /**
@@ -798,10 +1047,32 @@ export class PhoneDevices extends Service {
     return Object.freeze({ mediaType: 'image/png' as const, path })
   }
 
+  private observeCaptureLifetime(
+    body: ReadableStream<Uint8Array>,
+    activeCaptures: Map<PhoneCaptureId, ActiveCaptureObservation>,
+    captureId: PhoneCaptureId,
+    revision: object,
+  ): ReadableStream<Uint8Array> {
+    const reader = body.getReader()
+    const release = (): void => {
+      if (activeCaptures.get(captureId)?.revision === revision) activeCaptures.delete(captureId)
+    }
+    return new ReadableStream({
+      async pull(controller) {
+        try {
+          const next = await reader.read()
+          if (next.done) { release(); controller.close() } else controller.enqueue(next.value)
+        } catch (error) { release(); controller.error(error) }
+      },
+      async cancel(reason) { release(); await reader.cancel(reason) },
+    }, { highWaterMark: 0 })
+  }
+
   /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */
   private async preferAndroidH264(
     capture: PhoneCaptureStream,
     known: PhoneDeviceRef,
+    generation: IoGeneration,
     signal: AbortSignal,
   ): Promise<PhoneCaptureStream> {
     const id = known.id
@@ -818,7 +1089,7 @@ export class PhoneDevices extends Service {
     }
     const size = this.readAndroidLogicalDisplay({
       deviceId: id,
-      environment: this.childEnvironment,
+      environment: generation.childEnvironment,
     }) ?? known.logicalDisplay
     const landscape = size !== undefined && size.width > size.height
     if (mobilecli.recognizable && !landscape) {
@@ -832,7 +1103,7 @@ export class PhoneDevices extends Service {
     try {
       nativeBody = this.openNativeAndroidH264({
         deviceId: id,
-        environment: this.childEnvironment,
+        environment: generation.childEnvironment,
         signal,
         ...(size === undefined ? {} : { size }),
       })
@@ -1063,11 +1334,53 @@ export class PhoneDevices extends Service {
    * @param required - Whether this attempt must establish the startup baseline.
    * @param signal - Optional startup cancellation and readiness budget.
    */
+  private async enqueueDeviceAcquisition(signal?: AbortSignal): Promise<PhoneDeviceList> {
+    this.assertAccepting()
+    const generation = this.captureIoGeneration()
+    if (!this.ready || generation.lifetime.signal.aborted) {
+      throw new PhoneDevicesError('PHONE_ABORTED', 'device listing generation retired before admission')
+    }
+    const admissionIdentity = generation.identity
+    const admitted = this.queueTail.then(async () => {
+      this.assertAccepting()
+      if (generation.lifetime.signal.aborted || this.generationIdentity !== admissionIdentity) throw new PhoneDevicesError('PHONE_ABORTED', 'device listing generation changed before admission')
+      if (signal?.aborted === true) throw new PhoneDevicesError('PHONE_ABORTED', 'device listing acquisition was cancelled before admission')
+      return await this.acquireAndPublishDevicesNow(generation, signal)
+    })
+    this.queueTail = admitted.then(() => {}, () => {})
+    if (signal === undefined) return await admitted
+    const abortRace = normalizedAbortWaiter(signal, 'device listing acquisition was cancelled while queued')
+    try { return await Promise.race([admitted, abortRace.promise]) } finally { abortRace.dispose() }
+  }
+
+  private async acquireAndPublishDevicesNow(generation: IoGeneration, signal?: AbortSignal): Promise<PhoneDeviceList> {
+    const result = await this.roundTripInGeneration(
+      generation,
+      METHOD_DEVICES_LIST,
+      { includeOffline: true },
+      signal,
+      this.resolved.requestTimeoutMs,
+    )
+    if (generation.lifetime.signal.aborted || this.generationIdentity !== generation.identity) {
+      throw new PhoneDevicesError('PHONE_ABORTED', 'device listing generation changed before publication')
+    }
+    const next = this.withAndroidLogicalDisplays(groupEntries(parseDeviceInfos(result)), generation.childEnvironment)
+    const delta = changeSets(this.publishedList, next)
+    if (delta.changed) {
+      const published = this.publish(Object.freeze({
+        list: next,
+        added: Object.freeze(delta.added),
+        removed: Object.freeze(delta.removed),
+      }))
+      if (!published) throw this.lost ?? new PhoneDevicesError('PHONE_PROTOCOL', 'the mobilecli device listing was rejected')
+    }
+    return this.publishedList ?? next
+  }
+
   private async pollAttempt(required = false, signal?: AbortSignal): Promise<void> {
     let next: PhoneDeviceList
     try {
-      const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
-      next = this.withAndroidLogicalDisplays(groupEntries(parseDeviceInfos(result)))
+      next = await this.acquireAndPublishDevicesNow(this.captureIoGeneration(), signal)
     } catch (error) {
       const normalized = normalizeOperationError(error)
       if (required) throw normalized
@@ -1080,22 +1393,38 @@ export class PhoneDevices extends Service {
       this.ctx.logger.warn(`phone-runtime: device poll missed (${normalized.code}); keeping the last listing`)
       return
     }
-    const delta = changeSets(this.publishedList, next)
-    if (!delta.changed) return
-    const published = this.publish(Object.freeze({
-      list: next,
-      added: Object.freeze(delta.added),
-      removed: Object.freeze(delta.removed),
-    }))
-    if (required && !published) throw this.lost ?? new PhoneDevicesError(
-      'PHONE_PROTOCOL', 'the initial mobilecli device listing was rejected',
-    )
+    void next
   }
 
   private publish(change: PhoneDeviceChange): boolean {
     const validator = phoneRuntimeStateValidator(this[PHONE_RUNTIME_STATE_OWNER])
     if (validator !== undefined && !this.guarded(validator, change)) return false
+    const previous = this.publishedList
     this.publishedList = change.list
+    const stale = new Set<DeviceId>(change.removed)
+    const nextIncarnations = new Map<DeviceId, object>()
+    for (const next of allRefsOf(change.list)) {
+      const prior = previous === undefined ? undefined : allRefsOf(previous).find(candidate => candidate.id === next.id)
+      const priorToken = this.deviceIncarnations.get(next.id)
+      if (prior !== undefined && priorToken !== undefined && sameDeviceIncarnation(prior, next)) nextIncarnations.set(next.id, priorToken)
+      else {
+        nextIncarnations.set(next.id, Object.freeze({}))
+        if (prior !== undefined) stale.add(next.id)
+      }
+    }
+    this.deviceIncarnations.clear()
+    for (const [id, token] of nextIncarnations) this.deviceIncarnations.set(id, token)
+    for (const id of stale) {
+      this.iosScreenSizes.delete(id)
+      const probe = this.rotationProbes.get(id)
+      probe?.abort.abort(new PhoneDevicesError('PHONE_ABORTED', 'the iOS rotation probe device incarnation changed'))
+      this.rotationProbes.delete(id)
+      for (const [captureId, active] of this.activeCaptures) {
+        if (active.deviceId !== id) continue
+        this.activeCaptures.delete(captureId)
+        this.rotations.delete(captureId)
+      }
+    }
     for (const sub of [...this.subscribers]) {
       try {
         sub(change)
@@ -1146,8 +1475,11 @@ export class PhoneDevices extends Service {
    * Drain the publication queue, silence subscribers before killing the child,
    * and reach child-exit quiescence before returning.
    */
-  private teardown(): void | Promise<void> {
-    if (this.disposed) return undefined
+  private teardown(): Promise<void> {
+    if (this.teardownPromise !== undefined) return this.teardownPromise
+    let resolveTeardown!: () => void
+    let rejectTeardown!: (error: unknown) => void
+    this.teardownPromise = new Promise<void>((resolve, reject) => { resolveTeardown = resolve; rejectTeardown = reject })
     this.closing = true
     this.subscribers.clear()
     this.readinessSubscribers.clear()
@@ -1156,7 +1488,8 @@ export class PhoneDevices extends Service {
       new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed'),
     ))
     this.activationTail = operation.catch(() => {})
-    return operation
+    void operation.then(resolveTeardown, rejectTeardown)
+    return this.teardownPromise
   }
 
   private publishReadiness(next: boolean): void {
@@ -1178,12 +1511,20 @@ export class PhoneDevices extends Service {
     this.lifetime.abort(reason)
     this.ready = false
     this.publishReadiness(false)
+    this.iosScreenSizes.clear()
+    this.rotations.clear()
+    this.activeCaptures.clear()
+    this.deviceIncarnations.clear()
+    const activeProbes = [...this.rotationProbes.values()]
+    for (const probe of activeProbes) probe.abort.abort(reason)
+    const probes = activeProbes.map(probe => probe.settled)
+    this.rotationProbes.clear()
     await this.startupOutcome?.catch(() => {})
     await this.queueTail
     const child = this.child
-    this.iosScreenSizes.clear()
+    const childStop = child?.stop() ?? Promise.resolve()
+    await Promise.all([Promise.all(probes), childStop])
     this.clearPublishedList()
-    if (child !== undefined) await child.stop()
     if (child !== this.child) return
     this.child = undefined
     this.rpcClient = undefined
@@ -1205,12 +1546,15 @@ export class PhoneDevices extends Service {
    * Attach current `dumpsys display` logicalFrame pixels to online Android
    * rows. Misses leave the field absent; never `device.info.screenSize`.
    */
-  private withAndroidLogicalDisplays(list: PhoneDeviceList): PhoneDeviceList {
+  private withAndroidLogicalDisplays(
+    list: PhoneDeviceList,
+    environment: Readonly<Record<string, string>> = this.childEnvironment,
+  ): PhoneDeviceList {
     const android = list.android.map((device) => {
       if (!device.online) return device
       const logicalDisplay = this.readAndroidLogicalDisplay({
         deviceId: device.id,
-        environment: this.childEnvironment,
+        environment,
       })
       if (logicalDisplay === undefined) return device
       return Object.freeze({ ...device, logicalDisplay })
@@ -1230,6 +1574,15 @@ function exitedBeforeReady(child: MobilecliServerProcess, exit: { readonly code:
   )
 }
 
+function assertNever(value: never): never {
+  throw new PhoneDevicesError('PHONE_PROTOCOL', `unsupported coordinate source ${JSON.stringify(value)}`)
+}
+
+function sameDeviceIncarnation(left: PhoneDeviceRef, right: PhoneDeviceRef): boolean {
+  return left.id === right.id && left.platform === right.platform && left.kind === right.kind
+    && left.state === right.state
+}
+
 function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
   return [...list.android, ...list.ios.simulators, ...list.ios.reals]
 }
@@ -1246,9 +1599,69 @@ function tailOf(text: string): string {
   return trimmed.length > 0 ? trimmed.slice(-2000) : '(empty)'
 }
 
+function normalizedAbortWaiter(signal: AbortSignal, message: string): { readonly promise: Promise<never>; dispose(): void } {
+  let rejectAbort!: (reason: PhoneDevicesError) => void
+  const abort = (): void => { rejectAbort(new PhoneDevicesError('PHONE_ABORTED', message, { cause: signal.reason })) }
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+  })
+  return { promise, dispose() { signal.removeEventListener('abort', abort) } }
+}
+
+async function awaitProbeForCaller(probe: Promise<PhoneRotation>, signal: AbortSignal | undefined): Promise<PhoneRotation> {
+  if (signal === undefined) return await probe
+  const abortRace = rejectWhenAborted(signal)
+  try {
+    return await Promise.race([probe, abortRace.promise])
+  } finally {
+    abortRace.dispose()
+  }
+}
+
 function fuseCallerAndLifetime(caller: AbortSignal | undefined, lifetime: AbortSignal): AbortSignal {
   // The lifetime signal is always present, so the fused signal always exists.
   return caller === undefined ? lifetime : AbortSignal.any([caller, lifetime])
+}
+
+/**
+ * Bound the local wait for one foreign cleanup while observing its settlement forever.
+ * Prompt rejection is the operation failure; a rejection after abandonment is reported once.
+ * @param cleanup - Foreign cancel/settlement promise; throw and thenable forms are admitted.
+ * @param timeoutMs - Maximum local wait before abandonment.
+ * @param reportLate - Exact-once sink for rejection after the wait is abandoned.
+ */
+async function joinForeignCleanup(
+  cleanup: Promise<unknown>,
+  timeoutMs: number,
+  reportLate: (error: unknown) => void,
+): Promise<void> {
+  let abandoned = false
+  let reported = false
+  const observed = Promise.resolve(cleanup).then(
+    () => undefined,
+    (error: unknown) => {
+      if (!abandoned) throw error
+      if (reported) return
+      reported = true
+      try {
+        reportLate(error)
+      } catch {
+        /* Only the injected diagnostic can fail; settlement remains authoritative. */
+      }
+    },
+  )
+  let expire!: () => void
+  const timeout = new Promise<void>((resolve) => {
+    const timer = setTimeout(() => { abandoned = true; resolve() }, timeoutMs)
+    expire = () => { clearTimeout(timer); resolve() }
+  })
+  try {
+    await Promise.race([observed, timeout])
+  } finally {
+    expire()
+  }
 }
 
 /**

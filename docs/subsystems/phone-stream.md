@@ -2,13 +2,15 @@
 
 English | [中文](phone-stream.zh.md)
 
-Same-origin phone IO and capture reverse-proxy: `packages/phone/phone-stream` injects `phoneDevices` and `webServer`, registers Host routes, and publishes `ctx.phoneStream`. The browser never dials mobilecli `:12000`. IO rides `/phone/ws/io` after the `/api` trust fence. MJPEG and H264 frames ride signed Host-origin URLs that additionally require a loopback Host and a short-lived HMAC token. Picture aspect (fixed 1:2, axis 3) is a GUI consumer contract; this package only mints stream URLs and forwards frames.
+Same-origin phone IO and capture reverse-proxy: `packages/phone/phone-stream` injects `phoneDevices` and `webServer`, registers Host routes, and publishes `ctx.phoneStream`. The browser never dials mobilecli `:12000`. IO rides `/phone/ws/io` after the `/api` trust fence. MJPEG and H264 frames ride signed Host-origin URLs that additionally require a loopback Host and a short-lived HMAC token. The package mints unique capture identities and forwards frames; ui-phone owns measured picture layout.
 
 ```ts type-equiv
 /** One signed same-origin capture URL plus its expiry. */
 interface PhoneStreamUrl {
   /** Path and query the browser loads on this Host; never a `:12000` origin. */
   readonly url: string
+  /** Opaque identity binding browser input to this exact active capture. */
+  readonly captureId: PhoneCaptureId
   /** Unix epoch milliseconds after which the Host refuses this URL. */
   readonly expiresAt: number
 }
@@ -23,7 +25,7 @@ interface PhoneStreamSession {
   readonly ioPath: string
   /**
    * Whether picture or socket failures for this session can enter
-   * product-managed device-agent recovery. Tap and gesture JSON-RPC errors stay live.
+   * product-managed device-agent recovery. Tap and swipe JSON-RPC errors stay live.
    */
   readonly agentManaged: boolean
   /** Encoding the browser should open first for this device class. */

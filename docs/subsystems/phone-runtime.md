@@ -4,7 +4,7 @@ English | [中文](phone-runtime.zh.md)
 
 The phone device fleet seam: `packages/phone/phone-runtime` folds the Service Definition and its mobilecli Service Provider into one package while mobilecli is the only backend, and `packages/phone/tool-phone` is the deferred model Consumer. The Service owns the external `mobilecli server start` child process (loopback-only, spawned with the credential-scrubbed parent environment), probes its HTTP JSON-RPC endpoint until the first successful `server.info` reply, then polls `devices.list` on the configured cadence — accepting the result as the bare device array or mobilecli 1.0.5's `{ devices: [...] }` envelope, with duplicate upstream entries kept verbatim. Device ids are branded `DeviceId` values (an Android serial or an iOS UDID); the grouped listing `{ android, ios: { simulators, reals } }` carries frozen `PhoneDeviceRef` entries whose `kind` translates the upstream `type` field, whose `state` carries the upstream state verbatim — an `unauthorized` handset keeps its state, with upstream refusing its io until the trust prompt is accepted, instead of folding into offline — and whose `online` is true only for the upstream `online` state.
 
-Failure semantics are total: a missing or unusable mobilecli binary still activates the Service, and every operation then rejects with `PHONE_UNRESOLVED` plus install guidance; a child that dies before readiness rejects plugin initialization; an unexpected post-ready exit (or a refused socket, or a protocol breach) marks the Service lost, and every later operation rejects with the recorded reason instead of degrading. All operations fuse the caller's `AbortSignal` with validated Config ceilings (`requestTimeoutMs`, `bootTimeoutMs`, `agentTimeoutMs`); boot and shutdown refuse physical handsets locally before any RPC. `io`, `startCapture`, and `screenshot` accept physical handsets and only refuse ids absent from the latest published listing. `startCapture` maps `h264` onto upstream `avc` and bounds only the wait for response headers; the caller owns the unread capture body. The capture answer follows both upstream shapes — the bare stream and mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is resolved against the server origin and forced back onto the loopback fence. `screenshot` returns one PNG still through `mobilecli screenshot --format png`, persisted at an owner-only path under `$DSH_HOME/phone/screenshots`.
+Failure semantics are total: a missing or unusable mobilecli binary still activates the Service, and every operation then rejects with `PHONE_UNRESOLVED` plus install guidance; a child that dies before readiness rejects plugin initialization; an unexpected post-ready exit (or a refused socket, or a protocol breach) marks the Service lost, and every later operation rejects with the recorded reason instead of degrading. All operations fuse the caller's `AbortSignal` with validated Config ceilings (`requestTimeoutMs`, `bootTimeoutMs`, `agentTimeoutMs`); boot and shutdown refuse physical handsets locally before any RPC. `io`, `startCapture`, and `screenshot` accept physical handsets and only refuse ids absent from the latest published listing. `startCapture` maps `h264` onto upstream `avc` and bounds the wait for response headers; the caller owns a published unread capture body. A generation or incarnation change after headers joins foreign body cancellation for at most `captureCleanupTimeoutMs`. The capture answer follows both upstream shapes — the bare stream and mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is resolved against the server origin and forced back onto the loopback fence. `screenshot` returns one PNG still through `mobilecli screenshot --format png`, persisted at an owner-only path under `$DSH_HOME/phone/screenshots`.
 
 The iOS real-device link lives behind the listing's real group: `agentStatus` and `installAgent` run the upstream `agent status` / `agent install` commands as one-shot children of the same executable, keeping the on-device agent installed idempotently and re-signing real handsets through the configured `provisioningProfilePath` (the upstream command requires it for real iOS installs). Every answer about an installed, re-signed real handset carries `FREE_SIGNING_PROFILE_REMINDER` — free-team profiles expire after 7 days, and `installAgent(id, { force: true })` is the re-run entry. Failures whose output names a structured arm surface as `PHONE_REAL_DEVICE_ISSUE` with the arm on `PhoneDevicesError.issue`, classified identically from agent-command output and upstream JSON-RPC error messages; upstream `-32010` stays `PHONE_DEVICE_NOT_FOUND`.
 
@@ -13,31 +13,41 @@ Publication is monotonic and change-driven: a poll publishes only when the fresh
 `ctx.phoneEnvironment` publishes the revisioned `PhoneEnvironmentSnapshot` consumed by Phone Devices settings: the durable enable value, shared runtime state, and independent Android/iOS preparation states. Runtime selection uses operator override, managed current, then system discovery. Platform Providers register behind the same Service; the Android Provider prepares a fixed API 35 SDK/AVD and contributes child-only SDK environment entries. A running platform becomes ready only after the selected mobilecli generation reactivates with those entries, lists the branded emulator id online, and yields a syntactically valid Annex-B key access unit with linked SPS, PPS, and IDR slice headers. This Host probe does not decode pixels; real-picture GUI acceptance remains separate. Disable, cancellation, or teardown cancels that whole transaction and stops the owned Emulator and mobilecli children.
 
 ```ts type-equiv
-/** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
-type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
+/** Closed semantic actions accepted by the phone fleet Service. */
+type PhoneIoMethod = 'tap' | 'swipe' | 'text' | 'button'
 ```
 
 ```ts type-equiv
-/** One JSON-RPC `device.io.*` request addressed by branded device id. */
-type PhoneIoRequest =
+/** Exact clockwise rotation required to display a captured frame. */
+type PhoneRotation = 0 | 90 | 180 | 270
+```
+
+```ts type-equiv
+/** Trusted coordinate-plane source for one semantic coordinate action. */
+type PhoneCoordinateSource =
+  | { readonly kind: 'fresh-probe' }
   | {
-    readonly deviceId: DeviceId
-    readonly method: 'tap'
-    readonly x: number
-    readonly y: number
-    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
-    readonly captureHeight?: number
+    readonly kind: 'capture'
+    readonly captureId: PhoneCaptureId
+    readonly captureFormat: PhoneCaptureFormat
+    readonly captureWidth: number
+    readonly captureHeight: number
+    readonly captureRotation?: PhoneRotation
   }
+```
+
+```ts type-equiv
+/** One semantic phone action addressed by branded device id. */
+type PhoneIoRequest =
+  | { readonly deviceId: DeviceId; readonly method: 'tap'; readonly x: number; readonly y: number; readonly source: PhoneCoordinateSource }
   | {
     readonly deviceId: DeviceId
-    readonly method: 'gesture'
-    readonly actions: readonly Record<string, unknown>[]
-    /** Live capture width in device pixels; with height, owns iOS WDA orientation. */
-    readonly captureWidth?: number
-    /** Live capture height in device pixels; with width, owns iOS WDA orientation. */
-    readonly captureHeight?: number
+    readonly method: 'swipe'
+    readonly x1: number
+    readonly y1: number
+    readonly x2: number
+    readonly y2: number
+    readonly source: PhoneCoordinateSource
   }
   | { readonly deviceId: DeviceId; readonly method: 'text'; readonly text: string }
   | { readonly deviceId: DeviceId; readonly method: 'button'; readonly button: string }
@@ -55,6 +65,8 @@ interface PhoneCaptureRequest {
   readonly deviceId: DeviceId
   /** `mjpeg` for both platforms; `h264` maps onto upstream `avc` (Android). */
   readonly format: PhoneCaptureFormat
+  /** Runtime-owned identity binding active observation and later coordinate projection when the caller needs coordinate evidence. */
+  readonly captureId?: PhoneCaptureId
   /** Optional caller cancellation fused with the request ceiling until headers arrive. */
   readonly signal?: AbortSignal
 }
@@ -219,15 +231,12 @@ async boot(id: DeviceId, signal?: AbortSignal): Promise<void>
 async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
 
 /**
- * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
- * Public tap and gesture coordinates are capture pixels. Android forwards
- * them unchanged; iOS reads and caches `device.info.screenSize` for the
- * current runtime generation and converts those pixels to XCTest logical
- * points. Sticky portrait `screenSize` swaps when the request's live capture
- * surface is landscape (`captureWidth` greater than `captureHeight`); omitted
- * size falls back to overflow of one scaled point. Physical handsets are
- * valid targets; only ids absent from the latest published listing fail
- * locally before any RPC.
+ * Execute one semantic tap, swipe, text, or button action. Android coordinate
+ * actions retain their pixels. iOS obtains cached portrait `device.info`
+ * bounds and projects every displayed endpoint through exact rotation;
+ * browser actions bind current capture identity and model actions use a
+ * bounded fresh MJPEG EXIF probe. Physical handsets are valid targets; only
+ * ids absent from the latest published listing fail locally before any RPC.
  * @param request - Branded device id plus capture-pixel or non-coordinate input.
  * @param signal - Caller's optional cancellation signal.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -243,6 +252,8 @@ async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
  * then replaces an invalid, failed, timed-out, or landscape-logical-display
  * source with the system `screenrecord` H264 stream (`--size` from
  * `dumpsys display` `logicalFrame` when known). Other bodies remain unread.
+ * A generation or incarnation change after headers joins foreign body
+ * cancellation for at most `captureCleanupTimeoutMs`.
  * @param request - Branded device id, encoding, and optional cancellation.
  * @returns the live capture content type and body; the caller owns cancellation.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids

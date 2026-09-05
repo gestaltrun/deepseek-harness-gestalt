@@ -12,49 +12,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildGradientH264, buildGradientJpeg, buildGradientPng } from './u3-visible-frames.ts'
 
-/**
- * Vertical page-offset delta for one gesture list. A tap-shaped list, any
- * pause after pointerDown before destination move (Speak Selection), or a
- * destination move with no post-move pause keeps offset 0.
- */
-function phoneSwipeScrollDelta(actions) {
-  let origin
-  let destination
-  let pressed = false
-  let longPress = false
-  let travelPause = false
-  for (const action of actions ?? []) {
-    if (action?.type === 'pointerMove' && typeof action.x === 'number' && typeof action.y === 'number') {
-      if (!pressed) origin = { x: action.x, y: action.y }
-      else destination = { x: action.x, y: action.y }
-      continue
-    }
-    if (action?.type === 'pointerDown') {
-      pressed = true
-      if (typeof action.x === 'number' && typeof action.y === 'number' && origin === undefined) {
-        origin = { x: action.x, y: action.y }
-      }
-      continue
-    }
-    if (action?.type === 'pointerUp') {
-      pressed = false
-      continue
-    }
-    if (action?.type === 'pause' && pressed) {
-      if (destination === undefined) longPress = true
-      else travelPause = true
-    }
-  }
-  if (longPress || !travelPause || origin === undefined || destination === undefined) return 0
-  return origin.y - destination.y
-}
-
-function applyGestureScroll(deviceId, params) {
-  const delta = phoneSwipeScrollDelta(params?.actions)
-  const current = state.scroll[deviceId] ?? 0
-  state.scroll[deviceId] = current + delta
-}
-
 const args = process.argv.slice(2)
 if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('mobilecli version 1.0.5\n')
@@ -90,6 +47,10 @@ if (knobs.exitFast === true) {
 let gradientJpeg
 let gradientH264
 function jpegFrame() {
+  if (Array.isArray(knobs.mjpegOrientations) && knobs.mjpegOrientations.length > 0) {
+    const orientation = knobs.mjpegOrientations.shift()
+    return buildGradientJpeg(0, orientation)
+  }
   gradientJpeg ??= buildGradientJpeg(0)
   return gradientJpeg
 }
@@ -377,7 +338,7 @@ async function handleRpc(req, res) {
       return
     }
     case 'device.io.tap':
-    case 'device.io.gesture':
+    case 'device.io.swipe':
     case 'device.io.text':
     case 'device.io.button': {
       const deviceId = params?.deviceId
@@ -394,7 +355,10 @@ async function handleRpc(req, res) {
         return
       }
       state.io.push({ method, params })
-      if (method === 'device.io.gesture') applyGestureScroll(String(deviceId), params)
+      if (method === 'device.io.swipe') {
+        const delta = Number(params?.y2) - Number(params?.y1)
+        state.scroll[String(deviceId)] = (state.scroll[String(deviceId)] ?? 0) + (Number.isFinite(delta) ? delta : 0)
+      }
       reply(res, id, { result: { status: 'ok' } })
       return
     }

@@ -6,6 +6,7 @@
  * `createHttpPhoneListingSource`.
  */
 import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from '../src/client/phone-connection.ts'
+import { phoneCaptureIdOf } from '../src/client/phone-capture-id.ts'
 import type { PhoneIoTarget, PhoneStreamSessionView } from '../src/client/phone-stream-client.ts'
 import type {
   PhoneBadgeSnapshot, PhoneDeviceSummary, PhoneGateSource, PhoneListingSnapshot, PhoneListingSource,
@@ -17,8 +18,8 @@ export const SESSION_A: PhoneStreamSessionView = {
   ioPath: '/phone/ws/io',
   agentManaged: false,
   preferredFormat: 'h264',
-  mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1000 },
-  h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1000 },
+  mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=mjpeg-a', captureId: phoneCaptureIdOf('mjpeg-a'), expiresAt: 1000 },
+  h264: { url: '/phone/stream/emulator-5554/h264?token=h264-a', captureId: phoneCaptureIdOf('h264-a'), expiresAt: 1000 },
 }
 
 /** Drain the microtask queue of one in-flight mint round trip. */
@@ -179,8 +180,9 @@ export class FakeSocket implements PhoneIoSocket {
     this.handlers.onError()
   }
 
-  send(data: string): void {
+  send(data: string): boolean {
     this.sent.push(data)
+    return true
   }
 
   close(): void {

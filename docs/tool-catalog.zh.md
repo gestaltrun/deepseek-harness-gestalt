@@ -2640,11 +2640,11 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
             },
             "x": {
               "type": "integer",
-              "description": "Horizontal pixel coordinate."
+              "description": "Horizontal pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch."
             },
             "y": {
               "type": "integer",
-              "description": "Vertical pixel coordinate."
+              "description": "Vertical pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch."
             }
           },
           "required": [
@@ -2663,19 +2663,19 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
             },
             "x1": {
               "type": "integer",
-              "description": "Start horizontal pixel coordinate."
+              "description": "Start horizontal pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch."
             },
             "y1": {
               "type": "integer",
-              "description": "Start vertical pixel coordinate."
+              "description": "Start vertical pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch."
             },
             "x2": {
               "type": "integer",
-              "description": "End horizontal pixel coordinate."
+              "description": "End horizontal pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch."
             },
             "y2": {
               "type": "integer",
-              "description": "End vertical pixel coordinate."
+              "description": "End vertical pixel coordinate in the latest device screenshot the model inspected; the service maps and validates that plane before dispatch."
             }
           },
           "required": [
@@ -2731,7 +2731,7 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
           ]
         }
       ],
-      "description": "Exactly one closed gesture or hardware-button action."
+      "description": "Exactly one closed semantic action or hardware-button action."
     }
   },
   "required": [

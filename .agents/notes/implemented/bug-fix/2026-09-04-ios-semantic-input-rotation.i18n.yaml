@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-04-ios-semantic-input-rotation.md
+2026-09-04-ios-semantic-input-rotation.md: d061c4fdd37b8e1da21a36f8160269d81689bfa1
+2026-09-04-ios-semantic-input-rotation.zh.md: a0c4f3b9876bfa57f7450cfb035ff017e9232bda

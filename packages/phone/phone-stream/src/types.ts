@@ -3,12 +3,14 @@
  * @module @deepseek-ai/dsh-phone-stream/types
  */
 
-import type { DeviceId, PhoneCaptureFormat, PhoneDeviceKind } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneCaptureFormat, PhoneCaptureId, PhoneDeviceKind } from '@deepseek-ai/dsh-phone-runtime'
 
 /** One signed same-origin capture URL plus its expiry. */
 export interface PhoneStreamUrl {
   /** Path and query the browser loads on this Host; never a `:12000` origin. */
   readonly url: string
+  /** Opaque identity binding browser input to this exact active capture. */
+  readonly captureId: PhoneCaptureId
   /** Unix epoch milliseconds after which the Host refuses this URL. */
   readonly expiresAt: number
 }
@@ -21,7 +23,7 @@ export interface PhoneStreamSession {
   readonly ioPath: string
   /**
    * Whether picture or socket failures for this session can enter
-   * product-managed device-agent recovery. Tap and gesture JSON-RPC errors stay live.
+   * product-managed device-agent recovery. Tap and swipe JSON-RPC errors stay live.
    */
   readonly agentManaged: boolean
   /** Encoding the browser should open first for this device class. */

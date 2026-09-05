@@ -590,7 +590,7 @@ function dhtSegment(classAndId: number, bits: readonly number[], values: readonl
 }
 
 /** Baseline 390×844 JPEG of the same gradient color bars. */
-export function buildGradientJpeg(frameIndex = 0): Buffer {
+export function buildGradientJpeg(frameIndex = 0, orientation = 1): Buffer {
   const planes = [
     new Uint8Array(JPEG_PADDED_WIDTH * JPEG_PADDED_HEIGHT),
     new Uint8Array(JPEG_PADDED_WIDTH * JPEG_PADDED_HEIGHT),
@@ -615,6 +615,12 @@ export function buildGradientJpeg(frameIndex = 0): Buffer {
     0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00,
   ])
   writer.marker(0xe0, jfif)
+  writer.marker(0xe1, Buffer.from([
+    0x45, 0x78, 0x69, 0x66, 0, 0,
+    0x49, 0x49, 42, 0, 8, 0, 0, 0,
+    1, 0, 0x12, 1, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0,
+    0, 0, 0, 0,
+  ]))
   writer.marker(0xdb, dqtSegment(0, LUM_QUANT))
   writer.marker(0xdb, dqtSegment(1, CHR_QUANT))
   const sof = Buffer.alloc(15)

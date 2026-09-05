@@ -4,10 +4,12 @@
  * WebSocket wiring — against stubbed browser globals.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { phoneCaptureIdOf } from '../src/client/phone-capture-id.ts'
 import {
   createHttpPhoneGateway, encodePhoneIoFrame, installPhoneAgent, mintPhoneSession, openPhoneIoSocket,
   parsePhoneIoReply, PHONE_AGENT_PATH, PHONE_SESSION_PATH, PhoneStreamHttpError, readPhoneAgentStatus,
 } from '../src/client/phone-stream-client.ts'
+import type { PhoneClientIoRequest } from '../src/client/phone-stream-client.ts'
 
 async function rejectionOf(run: () => Promise<unknown>): Promise<PhoneStreamHttpError> {
   try {
@@ -26,41 +28,33 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 describe('io frame codec', () => {
   it('encodes the four io methods onto the phoneStream JSON-RPC signature', () => {
-    expect(JSON.parse(encodePhoneIoFrame(1, 'emulator-5554', { method: 'tap', x: 12, y: 34 }))).toEqual({
-      jsonrpc: '2.0', id: 1, method: 'tap', params: { deviceId: 'emulator-5554', x: 12, y: 34 },
-    })
-    expect(JSON.parse(encodePhoneIoFrame(5, 'emulator-5554', {
-      method: 'tap', x: 99, y: 660, captureWidth: 2_868, captureHeight: 1_320,
-    }))).toEqual({
+    const tap = {
+      method: 'tap', x: 99, y: 660,
+      source: { kind: 'capture', captureWidth: 2_868, captureHeight: 1_320,
+        captureId: phoneCaptureIdOf('mjpeg-a'), captureFormat: 'mjpeg' },
+    } satisfies PhoneClientIoRequest
+    expect(JSON.parse(encodePhoneIoFrame(5, 'emulator-5554', tap))).toEqual({
       jsonrpc: '2.0', id: 5, method: 'tap',
-      params: {
-        deviceId: 'emulator-5554', x: 99, y: 660, captureWidth: 2_868, captureHeight: 1_320,
-      },
+      params: { deviceId: 'emulator-5554', x: 99, y: 660, kind: 'capture', captureWidth: 2_868,
+        captureHeight: 1_320, captureId: 'mjpeg-a', captureFormat: 'mjpeg' },
     })
-    expect(JSON.parse(encodePhoneIoFrame(2, 'emulator-5554', {
-      method: 'gesture', actions: [{ type: 'pointerDown', x: 1, y: 2 }],
-    }))).toEqual({
-      jsonrpc: '2.0', id: 2, method: 'gesture',
-      params: { deviceId: 'emulator-5554', actions: [{ type: 'pointerDown', x: 1, y: 2 }] },
+    const swipe = {
+      method: 'swipe', x1: 99, y1: 660, x2: 100, y2: 200,
+      source: { kind: 'capture', captureWidth: 2_868, captureHeight: 1_320,
+        captureId: phoneCaptureIdOf('h264-a'), captureFormat: 'h264', captureRotation: 90 },
+    } satisfies PhoneClientIoRequest
+    expect(JSON.parse(encodePhoneIoFrame(6, 'emulator-5554', swipe))).toEqual({
+      jsonrpc: '2.0', id: 6, method: 'swipe',
+      params: { deviceId: 'emulator-5554', x1: 99, y1: 660, x2: 100, y2: 200, kind: 'capture',
+        captureWidth: 2_868, captureHeight: 1_320, captureId: 'h264-a', captureFormat: 'h264',
+        captureRotation: 90 },
     })
-    expect(JSON.parse(encodePhoneIoFrame(6, 'emulator-5554', {
-      method: 'gesture',
-      actions: [{ type: 'pointerMove', x: 99, y: 660 }],
-      captureWidth: 2_868,
-      captureHeight: 1_320,
-    }))).toEqual({
-      jsonrpc: '2.0', id: 6, method: 'gesture',
-      params: {
-        deviceId: 'emulator-5554',
-        actions: [{ type: 'pointerMove', x: 99, y: 660 }],
-        captureWidth: 2_868,
-        captureHeight: 1_320,
-      },
-    })
-    expect(JSON.parse(encodePhoneIoFrame(3, 'R3CN30', { method: 'text', text: '验证码' }))).toEqual({
+    const text = { method: 'text', text: '验证码' } satisfies PhoneClientIoRequest
+    expect(JSON.parse(encodePhoneIoFrame(3, 'R3CN30', text))).toEqual({
       jsonrpc: '2.0', id: 3, method: 'text', params: { deviceId: 'R3CN30', text: '验证码' },
     })
-    expect(JSON.parse(encodePhoneIoFrame(4, 'R3CN30', { method: 'button', button: 'BACK' }))).toEqual({
+    const button = { method: 'button', button: 'BACK' } satisfies PhoneClientIoRequest
+    expect(JSON.parse(encodePhoneIoFrame(4, 'R3CN30', button))).toEqual({
       jsonrpc: '2.0', id: 4, method: 'button', params: { deviceId: 'R3CN30', button: 'BACK' },
     })
   })
@@ -71,8 +65,10 @@ describe('io frame codec', () => {
     expect(parsePhoneIoReply(JSON.stringify({
       jsonrpc: '2.0', id: 8, error: { code: -32010, message: 'PHONE_DEVICE_NOT_FOUND' },
     }))).toEqual({ id: 8, ok: false, code: -32010, message: 'PHONE_DEVICE_NOT_FOUND' })
-    expect(parsePhoneIoReply(JSON.stringify({ jsonrpc: '2.0', id: 9, error: {} })))
-      .toEqual({ id: 9, ok: false, code: undefined, message: undefined })
+    expect(parsePhoneIoReply(JSON.stringify({ jsonrpc: '2.0', id: 9, error: {} }))).toBeUndefined()
+    expect(parsePhoneIoReply(JSON.stringify({ jsonrpc: '2.0', id: 0, result: { status: 'ok' } }))).toBeUndefined()
+    expect(parsePhoneIoReply(JSON.stringify({ jsonrpc: '2.0', id: 9, result: {}, error: { code: 1 } }))).toBeUndefined()
+    expect(parsePhoneIoReply(JSON.stringify({ jsonrpc: '2.0', id: 9, result: { status: 'nope' } }))).toBeUndefined()
     expect(parsePhoneIoReply('not json')).toBeUndefined()
     expect(parsePhoneIoReply(JSON.stringify({ jsonrpc: '2.0', method: 'tap' }))).toBeUndefined()
     expect(parsePhoneIoReply('42')).toBeUndefined()
@@ -96,8 +92,8 @@ describe('session minting', () => {
       ioPath: '/phone/ws/io',
       agentManaged: false,
       preferredFormat: 'h264',
-      mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=a', expiresAt: 1234 },
-      h264: { url: '/phone/stream/emulator-5554/h264?token=a', expiresAt: 1234 },
+      mjpeg: { url: '/phone/stream/emulator-5554/mjpeg?token=mjpeg-a', captureId: 'mjpeg-a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/emulator-5554/h264?token=h264-a', captureId: 'h264-a', expiresAt: 1234 },
     }
     const seen = await stubFetch(200, session)
     expect(await mintPhoneSession('emulator-5554')).toEqual(session)
@@ -106,17 +102,15 @@ describe('session minting', () => {
     expect(seen.init.body).toBe(JSON.stringify({ deviceId: 'emulator-5554', format: 'avc' }))
   })
 
-  it('uses the requested device when an otherwise valid response omits its echo', async () => {
+  it('rejects a session that omits the exact requested device echo', async () => {
     await stubFetch(200, {
       ioPath: '/phone/ws/io',
       agentManaged: false,
       preferredFormat: 'mjpeg',
-      mjpeg: { url: '/phone/stream/fallback/mjpeg?token=a', expiresAt: 1234 },
-      h264: { url: '/phone/stream/fallback/h264?token=a', expiresAt: 1234 },
+      mjpeg: { url: '/phone/stream/fallback/mjpeg?token=mjpeg-a', captureId: 'mjpeg-a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/fallback/h264?token=h264-a', captureId: 'h264-a', expiresAt: 1234 },
     })
-    expect(await mintPhoneSession('fallback-device')).toMatchObject({
-      deviceId: 'fallback-device', preferredFormat: 'mjpeg',
-    })
+    await expect(mintPhoneSession('fallback-device')).rejects.toBeInstanceOf(PhoneStreamHttpError)
   })
 
   it('maps error payloads and malformed bodies onto the wire error', async () => {
@@ -145,8 +139,8 @@ describe('session minting', () => {
       ioPath: '/phone/ws/io',
       agentManaged: false,
       preferredFormat: 'av1',
-      mjpeg: { url: '/phone/stream/x/mjpeg?token=a', expiresAt: 1234 },
-      h264: { url: '/phone/stream/x/h264?token=a', expiresAt: 1234 },
+      mjpeg: { url: '/phone/stream/x/mjpeg?token=mjpeg-a', captureId: 'mjpeg-a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/x/h264?token=h264-a', captureId: 'h264-a', expiresAt: 1234 },
     })
     await expect(mintPhoneSession('x')).rejects.toBeInstanceOf(PhoneStreamHttpError)
 
@@ -302,8 +296,8 @@ describe('io socket wiring', () => {
       ioPath: MINTED_IO_PATH,
       agentManaged: false,
       preferredFormat: 'h264',
-      mjpeg: { url: '/phone/stream/R3CN30/mjpeg?token=a', expiresAt: 1234 },
-      h264: { url: '/phone/stream/R3CN30/h264?token=a', expiresAt: 1234 },
+      mjpeg: { url: '/phone/stream/R3CN30/mjpeg?token=mjpeg-a', captureId: 'mjpeg-a', expiresAt: 1234 },
+      h264: { url: '/phone/stream/R3CN30/h264?token=h264-a', captureId: 'h264-a', expiresAt: 1234 },
     }
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })))
     expect((await createHttpPhoneGateway().mintSession('R3CN30')).deviceId).toBe('R3CN30')

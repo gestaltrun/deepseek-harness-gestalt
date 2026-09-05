@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.md
-2026-08-30-ui-phone-h264-webcodecs-playback.md: cd2236ecd24e55060cba0126f0430d9aff0cd64c
-2026-08-30-ui-phone-h264-webcodecs-playback.zh.md: e85cff63c0631562829f3086ac05f3258cc4d78c
+2026-08-30-ui-phone-h264-webcodecs-playback.md: 92f070e7472f33e5467a957cef39209bea7cab9f
+2026-08-30-ui-phone-h264-webcodecs-playback.zh.md: 58747f6b2db3780a8e30f529cc1f100d32c9b46a

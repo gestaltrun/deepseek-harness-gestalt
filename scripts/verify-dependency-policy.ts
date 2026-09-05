@@ -5,10 +5,13 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -42,6 +45,25 @@ interface Fixture {
 type Policy = 'error' | 'absent'
 type Entry = 'run' | 'exec'
 type EnvironmentClass = 'local' | 'ci'
+
+export const fixtureWorkspaceSettings = 'packages: []\npackageImportMethod: copy\n'
+
+/** Unlink links within an owned fixture without traversing their targets. */
+export function unlinkFixtureLinks(path: string): void {
+  let stat: ReturnType<typeof lstatSync>
+  try {
+    stat = lstatSync(path)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return
+    throw error
+  }
+  if (stat.isSymbolicLink()) {
+    unlinkSync(path)
+    return
+  }
+  if (!stat.isDirectory()) return
+  for (const name of readdirSync(path)) unlinkFixtureLinks(join(path, name))
+}
 
 function hashBytes(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -159,6 +181,7 @@ function createFixture(policy: Policy, environmentClass: EnvironmentClass): Fixt
     name: 'dependency-policy-fixture',
     version: '1.0.0',
     private: true,
+    packageManager: 'pnpm@11.7.0',
     scripts: fixtureScripts(),
     devDependencies: {
       'fixture-base': 'file:../deps/fixture-base',
@@ -166,7 +189,7 @@ function createFixture(policy: Policy, environmentClass: EnvironmentClass): Fixt
   }, null, 2)}\n`)
   writeFileSync(
     join(repo, 'pnpm-workspace.yaml'),
-    policy === 'error' ? 'packages: []\nverifyDepsBeforeRun: error\n' : 'packages: []\n',
+    policy === 'error' ? `${fixtureWorkspaceSettings}verifyDepsBeforeRun: error\n` : fixtureWorkspaceSettings,
   )
 
   return {
@@ -197,8 +220,35 @@ export function removeFixtureRoot(path: string, remove: typeof rmSync = rmSync):
   remove(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
 
-function removeFixture(fixture: Fixture): void {
-  removeFixtureRoot(fixture.root)
+export function finishFixture(primaryError: unknown, cleanup: () => void): void {
+  try {
+    cleanup()
+  } catch (cleanupError) {
+    if (primaryError !== undefined) {
+      throw new AggregateError([primaryError, cleanupError], 'dependency policy fixture failed and cleanup also failed')
+    }
+    throw cleanupError
+  }
+  if (primaryError instanceof Error) throw primaryError
+  if (primaryError !== undefined) throw new Error('dependency policy fixture failed with a non-Error value')
+}
+
+function useFixture(
+  policy: Policy,
+  environmentClass: EnvironmentClass,
+  run: (fixture: Fixture) => void,
+): void {
+  const fixture = createFixture(policy, environmentClass)
+  let primaryError: unknown
+  try {
+    run(fixture)
+  } catch (error) {
+    primaryError = error
+  }
+  finishFixture(primaryError, () => {
+    unlinkFixtureLinks(fixture.root)
+    removeFixtureRoot(fixture.root)
+  })
 }
 
 function addLockedExtraDependency(fixture: Fixture): void {
@@ -265,8 +315,7 @@ function verifyPolicyRejection(
   entry: Entry,
   environmentClass: EnvironmentClass,
 ): void {
-  const fixture = createFixture('error', environmentClass)
-  try {
+  useFixture('error', environmentClass, (fixture) => {
     if (state === 'stale') prepareWarmStale(fixture)
     else prepareCold(fixture)
     assertRejectedWithoutMutation(failures, `${state} ${entry} ${environmentClass}`, fixture, entry)
@@ -276,9 +325,7 @@ function verifyPolicyRejection(
     } else if (existsSync(join(fixture.repo, 'node_modules'))) {
       failures.push(`${state} ${entry} ${environmentClass}: cold rejection created node_modules`)
     }
-  } finally {
-    removeFixture(fixture)
-  }
+  })
 }
 
 function verifyExplicitRecovery(
@@ -287,8 +334,7 @@ function verifyExplicitRecovery(
   entry: Entry,
   environmentClass: EnvironmentClass,
 ): void {
-  const fixture = createFixture('error', environmentClass)
-  try {
+  useFixture('error', environmentClass, (fixture) => {
     if (state === 'stale') prepareWarmStale(fixture)
     else prepareCold(fixture)
     assertRejectedWithoutMutation(failures, `recovery ${state} ${entry} ${environmentClass}`, fixture, entry)
@@ -309,14 +355,11 @@ function verifyExplicitRecovery(
     }
     if (existsSync(fixture.lifecycleMarker)) failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command reran install lifecycle`)
     if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push(`recovery ${state} ${entry} ${environmentClass}: prepared command changed lockfile bytes`)
-  } finally {
-    removeFixture(fixture)
-  }
+  })
 }
 
 function verifyDefaultNegativeControl(failures: string[]): void {
-  const fixture = createFixture('absent', 'local')
-  try {
+  useFixture('absent', 'local', (fixture) => {
     prepareWarmStale(fixture)
     const lockBefore = readBytes(fixture.lockfile)
     const outcome = runPnpm(fixture, entryArgs('run'))
@@ -327,17 +370,14 @@ function verifyDefaultNegativeControl(failures: string[]): void {
     if (!existsSync(fixture.lifecycleMarker)) failures.push('default-install negative control did not run postinstall')
     if (!existsSync(fixture.extraSentinel)) failures.push('default-install negative control did not install the stale dependency')
     if (!sameBytes(readBytes(fixture.lockfile), lockBefore)) failures.push('default-install negative control changed the prepared lockfile')
-  } finally {
-    removeFixture(fixture)
-  }
+  })
 }
 
 function verifyOverride(
   failures: string[],
   kind: 'environment' | 'cli',
 ): void {
-  const fixture = createFixture('error', 'local')
-  try {
+  useFixture('error', 'local', (fixture) => {
     prepareWarmStale(fixture)
     const outcome = kind === 'environment'
       ? runPnpm(fixture, entryArgs('run'), { pnpm_config_verify_deps_before_run: 'install' })
@@ -348,9 +388,7 @@ function verifyOverride(
     if (!existsSync(fixture.lifecycleMarker) || !existsSync(fixture.runMarker) || !existsSync(fixture.extraSentinel)) {
       failures.push(`${kind} override did not exhibit explicit install precedence`)
     }
-  } finally {
-    removeFixture(fixture)
-  }
+  })
 }
 
 function verifySameLengthHashNegativeCase(failures: string[]): void {

@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "608-filed-domain-reissue",
+  "summary": {
+    "en": "Reissue Desktop and Mobile for the canonical https://www.beikejiedeliulangmao.top Platform authority and publish the migrated Platform.",
+    "zh": "为规范 Platform authority https://www.beikejiedeliulangmao.top 重新发布 Desktop 与 Mobile，并发布迁移后的 Platform。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "patch",
+    "platform": "patch"
+  },
+  "compatibilityExceptions": []
+}

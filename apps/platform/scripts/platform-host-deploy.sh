@@ -41,6 +41,19 @@ ensure_container_absent() {
   fi
 }
 
+require_bootstrap_owner() {
+  : "${DSH_DEPLOY_CANDIDATE:?}"
+  local bootstrap_owned
+  if ! bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}'); then
+    echo 'platform: bootstrap candidate ownership does not match durable recovery state' >&2
+    return 1
+  fi
+  if [ "$bootstrap_owned" != "$DSH_DEPLOY_CANDIDATE" ]; then
+    echo 'platform: bootstrap candidate ownership does not match durable recovery state' >&2
+    return 1
+  fi
+}
+
 case "$action" in
   verify-bootstrap-bare)
     container_names=
@@ -155,10 +168,7 @@ case "$action" in
     fi
     docker info >/dev/null || exit 1
     if docker inspect dsh-platform >/dev/null 2>&1; then
-      bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}' 2>/dev/null || true)
-      if [ "$bootstrap_owned" != "$DSH_DEPLOY_CANDIDATE" ]; then
-        exit 1
-      fi
+      require_bootstrap_owner || exit 1
       docker stop --time 60 dsh-platform >/dev/null 2>&1 || true
       ensure_container_absent dsh-platform || rollback_failed=1
     fi
@@ -205,9 +215,9 @@ case "$action" in
     test ! -e "$candidate_env"
     ;;
   complete-bootstrap)
-    : "${DSH_DEPLOY_CANDIDATE:?}"
-    bootstrap_owned=$(docker inspect dsh-platform --format '{{index .Config.Labels "dsh.platform.bootstrap-candidate"}}')
-    [ "$bootstrap_owned" = "$DSH_DEPLOY_CANDIDATE" ]
+    if ! require_bootstrap_owner; then
+      exit 1
+    fi
     ensure_container_absent dsh-platform-candidate
     ! docker inspect dsh-platform-rollback >/dev/null 2>&1
     wait_for_ready 80

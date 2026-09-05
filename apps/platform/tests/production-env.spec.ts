@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -326,6 +326,7 @@ function runRealBootstrapRecoveryHarness(
   const hostCopy = join(temp, 'platform-host-deploy.sh')
   const cloudCopy = join(temp, 'platform-cloud-assistant.sh')
   const candidateEnv = join(temp, 'candidate.env')
+  writeFileSync(candidateEnv, 'candidate=true\n')
   const hostLock = join(temp, 'host.lock')
   const log = join(temp, 'docker.log')
   writeFileSync(log, '')
@@ -378,7 +379,11 @@ function runRealBootstrapRecoveryHarness(
       },
     })
     const dockerLog = readFileSync(log, 'utf8')
-    return { ...result, stdout: `${result.stdout}${dockerLog}` }
+    return {
+      ...result,
+      stdout: `${result.stdout}${dockerLog}`,
+      candidateEnvExists: existsSync(candidateEnv),
+    }
   } finally {
     rmSync(temp, { recursive: true, force: true })
   }
@@ -1208,13 +1213,17 @@ describe('Platform release workflows', () => {
     for (const owner of ['foreign', 'missing'] as const) {
       const failedRollback = runRealBootstrapRecoveryHarness('rollbackable', owner)
       expect(failedRollback.status, owner).toBe(1)
+      expect(failedRollback.stderr).toContain('bootstrap candidate ownership does not match durable recovery state')
       expect(failedRollback.stdout).not.toContain('stop --time 60 dsh-platform')
       expect(failedRollback.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
       expect(failedRollback.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+      expect(failedRollback.candidateEnvExists).toBe(true)
 
       const failedCommit = runRealBootstrapRecoveryHarness('committed', owner)
       expect(failedCommit.status, owner).toBe(1)
+      expect(failedCommit.stderr).toContain('bootstrap candidate ownership does not match durable recovery state')
       expect(failedCommit.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+      expect(failedCommit.candidateEnvExists).toBe(true)
     }
   })
 

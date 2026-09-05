@@ -50,6 +50,7 @@ import { bootBackgroundColor } from './boot-session.ts'
 import { attachBootScreen, waitForShellReady } from './boot-screen.ts'
 import { planHostExit, shouldPreventQuit, startWithOneRetry } from './host-exit.ts'
 import { classifyNavigation } from './navigation-policy.ts'
+import { observeWebHostExit } from './observe-web-host-exit.ts'
 import { spawnWebHost, type RunningWebHost } from './spawn-web-host.ts'
 import {
   autoUpdaterFromModule, configurePackagedAutoUpdater, startAutoUpdater,
@@ -580,7 +581,7 @@ async function startHost(timeoutMs?: number): Promise<RunningWebHost> {
 }
 
 function observeHostExit(running: RunningWebHost): void {
-  void running.exited.then(() => { void onHostExit(running) })
+  observeWebHostExit(running, smokeLog, () => onHostExit(running))
 }
 
 /**

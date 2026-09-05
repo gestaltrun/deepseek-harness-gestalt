@@ -19,7 +19,7 @@ with DeepSeekHarness() as harness:
     result = harness.run("Say hi.")
 ```
 
-`DeepSeekHarness` 会保留其按需启动的运行时子进程，以便在多次调用之间复用。请像上例一样将其用作上下文管理器，或在使用完毕后显式调用 `close()`。
+`DeepSeekHarness` 会保留其按需启动的运行时子进程，以便在多次调用之间复用。请像上例一样将其用作上下文管理器，或在使用完毕后显式调用 `close()`。运行时确认 `shutdown` 后，`close()` 会先等待服务器拥有的 teardown（资源清理）、持久化和正常进程退出，再向进程发送信号。`shutdown_timeout_seconds` 为有限值时，该值分别约束 shutdown 请求、正常退出等待和 terminate 后等待；未收到确认或等待退出超时时，SDK 进入 terminate／kill 兜底流程。将其设为 `None` 会保留这些阶段的无界等待语义。
 
 默认情况下，SDK 会启动 `deepseek-harness-runtime-bin` 包内置的单文件可执行程序 `dsh-jsonrpc-agent`，并通过 `DSH_CORDIS_CONFIG` 注入该包的默认配置，其中包括 stdio JSON-RPC 服务器、agent core（智能体核心）、预载的 DeepSeek 适配器、采用显式组合语义检查点策略的 JSONL 会话持久化，以及本地 bash。要运行自己的插件组合，请在配置中保留 `@deepseek-ai/dsh-sdk-jsonrpc-server` 配置项，并传入 Cordis 配置文件路径。
 

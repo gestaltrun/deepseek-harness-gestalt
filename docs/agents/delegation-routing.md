@@ -47,6 +47,11 @@ Before creating a child, inspect relevant direct continuable children when the r
 
 The child catalog is not all workspace history. Only direct continuable children are follow-up targets; do not adopt children across parents or inspect private session storage to manufacture continuity. Persist durable decisions in repository owners such as specifications, Context documents, and Agent Notes.
 
+## Supervise running writers
+
+1. Merge feedback to a running writer into one versioned fix list delivered at its natural checkpoint (a check result, a reported phase completion, or the next turn it already requested). Scattered follow-up messages queue behind the running turn, and repeated acknowledgement turns burn the child's context; a numbered list lets both sides reference items unambiguously across fixes. An immediate safety stop still interrupts the writer without waiting.
+2. While a normally running writer produces no new commit, failure, or completion event, do not re-poll `list_agents`, git, or CI, and do not re-wait to watch progress. Rely on the runtime's completion notification, or one bounded managed wait when nothing else remains; re-verify state only after a change notification or a reported result.
+
 ## Dispatch brief and acceptance
 
 Use a minimal task packet:

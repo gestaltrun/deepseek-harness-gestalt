@@ -14,6 +14,8 @@ Status: implemented
 
 调度者在新建子会话前检查直属可继续子会话。同一产物的后续工作可以继续使用证据、模型、范围与权限仍匹配的子会话。独立审查、模型变更、陈旧假设或无关工作使用新会话。只有任务确实依赖父会话多个已完成回合时才 fork。差量 brief 只携带变化事实和完成证据。继续会话不会改变固定路由、重定向正在运行的回合、暴露全部 workspace 历史或保证 provider 侧 KV cache。
 
+writer 运行期间，协调者把反馈合并成一份带版本号的修复清单，在其自然检查点一次送达，而不是零散发送后续消息——它们会在运行中的回合后面排队并消耗确认回合；安全上需要立即停止时仍直接 interrupt。没有新提交、失败或完成事件时，协调者不重复轮询 `list_agents`、git 或 CI，依靠完成通知，仅在状态变化后再核验。这些监督规则是路由参考中的普通文字，不伴随任何工具或 runtime 变更。
+
 [`docs/agents/delegation-routing-cliproxyapi.md`](../../../../docs/agents/delegation-routing-cliproxyapi.zh.md) 是可选安装 profile。它保留本地可运行的精确 id 与能力限制，但不要求其他环境提供 CLIProxyAPI。它排除已移除的候选，不把 Astra 作为静默 fallback，区分纯文本 GLM-5.3 与视觉 GLM-5.3-Flash，并记录 `gemini-3.8-flash-high` 的后端映射未知。
 
 当目标技能只能由用户启动时，其他技能把共享流程作为普通参考读取。通用工作流服从仓库术语、决策记录、源码布局、hook owner 与按变更行为选择测试的政策。代码审查区分仅提交与进行中两种模式，使 staged、unstaged 和 untracked 工作都保持可见。YAML 保持标准 plain scalar 语义：未引用的 ` #` 会开始注释。因此，带井号的技能描述使用引号或 block scalar，聚焦 metadata 回归证明最终解析后的 catalog description 保留完整触发词；parser 不会保留错误编写的 plain scalar 文本。

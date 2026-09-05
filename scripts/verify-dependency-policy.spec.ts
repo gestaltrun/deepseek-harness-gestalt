@@ -32,24 +32,43 @@ describe('dependency policy fixture cleanup', () => {
   })
 
   it('does not swallow a final cleanup failure', () => {
-    const failure = Object.assign(new Error('permission denied'), { code: 'EPERM' })
+    const cleanup = Object.assign(new Error('permission denied'), { code: 'EPERM' })
     const remove = vi.fn(() => {
-      throw failure
+      throw cleanup
     })
 
     expect(() => {
       removeFixtureRoot('owned-fixture', remove)
-    }).toThrow(failure)
+    }).toThrow(cleanup)
+    expect(() => {
+      finishFixture(undefined, () => {
+        throw cleanup
+      })
+    }).toThrow(cleanup)
   })
 
-  it('reports both a primary fixture failure and a cleanup failure', () => {
+  it('preserves the primary failure when cleanup succeeds', () => {
+    const primary = new Error('prepare failed')
+
+    expect(() => {
+      finishFixture(primary, () => {})
+    }).toThrow(primary)
+  })
+
+  it('reports both original errors when the fixture and cleanup fail', () => {
     const primary = new Error('prepare failed')
     const cleanup = Object.assign(new Error('cleanup failed'), { code: 'EPERM' })
 
-    expect(() => {
+    try {
       finishFixture(primary, () => {
         throw cleanup
       })
-    }).toThrow(expect.objectContaining({ errors: [primary, cleanup] }))
+      expect.unreachable('finishFixture must throw')
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError)
+      expect((error as AggregateError).errors).toEqual([primary, cleanup])
+      expect((error as AggregateError).errors[0]).toBe(primary)
+      expect((error as AggregateError).errors[1]).toBe(cleanup)
+    }
   })
 })

@@ -166,6 +166,8 @@ jobs:
           [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$MOBILE_CANDIDATE_SHA" refs/remotes/origin/master
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm product-release:validate-candidate --plan "$PLAN_PATH" --candidate "$MOBILE_CANDIDATE_SHA" --master refs/remotes/origin/master
           version=$(node -p "require('./apps/mobile/package.json').version")
           build_number=$(node -p "require('./apps/mobile/release.json').buildNumber")
           node -e "const v=process.argv[1], b=Number(process.argv[2]); if (!/^\\d+\\.\\d+\\.\\d+$/.test(v) || !Number.isSafeInteger(b) || b < 1) process.exit(1)" "$version" "$build_number"
@@ -282,8 +284,13 @@ jobs:
           test -x "$apksigner"
           signer=$($apksigner verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
           [[ "$signer" =~ ^[0-9a-fA-F]{64}$ ]]
+          signer=$(printf '%s' "$signer" | tr '[:upper:]' '[:lower:]')
           artifact_digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
-          origin_digest=$(printf '%s' "$VITE_PLATFORM_ORIGIN" | sha256sum | cut -d ' ' -f 1)
+          runtime_identity=apps/mobile/android/app/src/main/assets/public/dsh-mobile-runtime-identity.json
+          test -f "$runtime_identity"
+          baked_origin=$(jq -er 'select(.version == 1) | .origin | strings' "$runtime_identity")
+          test "$baked_origin" = "$VITE_PLATFORM_ORIGIN"
+          runtime_identity_digest=$(sha256sum "$runtime_identity" | cut -d ' ' -f 1)
           packaging_digest=$(sha256sum apps/mobile/scripts/build-android-release.sh | cut -d ' ' -f 1)
           workflow_run="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           mkdir acceptance-candidate
@@ -292,14 +299,15 @@ jobs:
             --arg version "$MOBILE_VERSION" --argjson build "$MOBILE_BUILD_NUMBER" \
             --arg repository "$GITHUB_REPOSITORY" --arg workflowRun "$workflow_run" \
             --arg apk "$(basename "$apk")" --arg artifact "sha256:$artifact_digest" \
-            --arg signer "sha256:${signer,,}" --arg origin "sha256:$origin_digest" \
+            --arg signer "sha256:$signer" --arg runtimeIdentity "sha256:$runtime_identity_digest" \
             --arg packaging "sha256:$packaging_digest" \
-            '{version:1,mode:"acceptance-candidate",surface:"mobile",candidateCommit:$candidate,planPath:$plan,productVersion:$version,buildNumber:$build,repository:$repository,workflowRun:$workflowRun,artifactDigests:{($apk):$artifact},signerCertificateSha256:$signer,operatedOriginSha256:$origin,packagingScriptSha256:$packaging}' \
+            '{version:1,mode:"acceptance-candidate",surface:"mobile",candidateCommit:$candidate,planPath:$plan,productVersion:$version,buildNumber:$build,repository:$repository,workflowRun:$workflowRun,artifactDigests:{($apk):$artifact},signerCertificateSha256:$signer,runtimeIdentitySha256:$runtimeIdentity,packagingScriptSha256:$packaging}' \
             > acceptance-candidate/acceptance-candidate.json
           CANDIDATE_SHA="$CANDIDATE_SHA" PLAN_PATH="$PLAN_PATH" MOBILE_VERSION="$MOBILE_VERSION" \
             MOBILE_BUILD_NUMBER="$MOBILE_BUILD_NUMBER" OPERATED_ORIGIN="$VITE_PLATFORM_ORIGIN" \
             EXPECTED_REPOSITORY="$GITHUB_REPOSITORY" EXPECTED_WORKFLOW_RUN="$workflow_run" \
-            APKSIGNER_PATH="$apksigner" bash apps/mobile/scripts/verify-android-acceptance-candidate.sh \
+            RUNTIME_IDENTITY_PATH="$runtime_identity" APKSIGNER_PATH="$apksigner" \
+            bash apps/mobile/scripts/verify-android-acceptance-candidate.sh \
             acceptance-candidate/acceptance-candidate.json "acceptance-candidate/$(basename "$apk")"
           echo "artifact_name=mobile-acceptance-candidate-${CANDIDATE_SHA}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4

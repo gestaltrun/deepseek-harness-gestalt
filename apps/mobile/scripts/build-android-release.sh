@@ -30,6 +30,7 @@ chmod 600 "${keystore}"
 cd "${repo_root}"
 pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
+pnpm exec tsx apps/mobile/scripts/write-runtime-identity.ts apps/mobile/dist/dsh-mobile-runtime-identity.json
 pnpm --dir apps/mobile exec cap sync android
 
 cd "${mobile_root}/android"

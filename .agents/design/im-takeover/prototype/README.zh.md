@@ -22,4 +22,4 @@ npm run dev    # http://127.0.0.1:5174/
 
 ## 来源
 
-正式 UI 基础组件直接引用自已安装应用；主题 token 快照在 `system/tokens/`，来源哈希见 `manifest.json`。外壳按正式截图有据重建并在 `manifest.json` 标明，不宣称逐像素一致。`HASHES.sha256` 校验本归档 sanitize 后的实际文件集；正式 GUI 私人参考截图被刻意排除。
+正式 UI 基础组件直接引用自已安装应用；主题 token 快照在 `system/tokens/`，来源哈希见 `manifest.json`。外壳按正式截图有据重建并在 `manifest.json` 标明，不宣称逐像素一致。`HASHES.sha256` 只校验清单所列文件，即 sanitize 后的原型源码集；`prototype/` 之外的归档截图与规格文档不在本清单内，正式 GUI 私人参考截图被刻意排除。

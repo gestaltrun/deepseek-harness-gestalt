@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/design/im-takeover/README.md
-README.md: 663fa7e76e2f44c3d7b24a7c893e06b364173a49
-README.zh.md: 9eb431409d98ba1f1517c95c4c359bbbca860390
+README.md: 81e9c750f1273d5b37fd7e9973087bb26f6fc4a9
+README.zh.md: 6a1ac7078f88ebd47865f87a8cb8cd63239fd844

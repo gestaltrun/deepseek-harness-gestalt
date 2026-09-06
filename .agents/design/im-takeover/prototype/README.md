@@ -22,4 +22,4 @@ This archive is not self-contained and not fully reproducible: the `file:` primi
 
 ## Provenance
 
-Formal UI primitives are imported directly from the installed application; theme token snapshots live in `system/tokens/` with source hashes in `manifest.json`. Shell chrome is reconstructed from formal screenshots and marked as such in `manifest.json` — pixel-identity is not claimed. `HASHES.sha256` verifies the sanitized file set of this archive; private formal-GUI reference captures are deliberately excluded.
+Formal UI primitives are imported directly from the installed application; theme token snapshots live in `system/tokens/` with source hashes in `manifest.json`. Shell chrome is reconstructed from formal screenshots and marked as such in `manifest.json` — pixel-identity is not claimed. `HASHES.sha256` verifies exactly the files it lists — the sanitized prototype source set; archive screenshots and the specification documents outside `prototype/` are not part of this manifest, and private formal-GUI reference captures are deliberately excluded.

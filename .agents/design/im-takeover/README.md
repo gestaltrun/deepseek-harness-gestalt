@@ -6,7 +6,7 @@ This directory preserves the design inputs for the IM account takeover project s
 
 ## Contents
 
-- `scheme-source.md` is the approved-direction technical scheme source. The fixed base is `96d33581128676a469a1587ea85e0339e4853cf0`; its source interfaces remain unreviewed.
+- `scheme-source.md` is the approved-direction technical scheme source. The review baseline of the specification pull request is `origin/master`; the implementation baseline is fixed snapshot `96d33581128676a469a1587ea85e0339e4853cf0` (not an ancestor of the review branch; reachable via predecessor head `c2914ed9a5b3a8d51b2c0800d383376705e0da81`). Its source interfaces remain unreviewed.
 - `review-pack.html` is the self-contained human review pack.
 - `prototype/` contains the accepted high-fidelity React prototype source, fixtures, theme token snapshots, and package metadata; `prototype/README.md` documents how to run it.
 - `screenshots/` contains selected example-only design screenshots.

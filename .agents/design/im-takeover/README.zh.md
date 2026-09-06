@@ -6,7 +6,7 @@
 
 ## 内容
 
-- `scheme-source.md` 是方向已批准的技术方案源稿；固定基线为 `96d33581128676a469a1587ea85e0339e4853cf0`，固定 SHA 接口复核仍未完成。
+- `scheme-source.md` 是方向已批准的技术方案源稿。规格 PR 的审阅基线为 `origin/master`；实施基线为固定快照 `96d33581128676a469a1587ea85e0339e4853cf0`（非审阅分支祖先，可经前序 head `c2914ed9a5b3a8d51b2c0800d383376705e0da81` 获取）。固定 SHA 接口复核仍未完成。
 - `review-pack.html` 是自包含的人工评审图解。
 - `prototype/` 包含已认可的高保真 React 原型源码、fixtures、theme token 快照和 package 元数据；运行方式见 `prototype/README.md`。
 - `screenshots/` 包含精选纯示例设计截图。

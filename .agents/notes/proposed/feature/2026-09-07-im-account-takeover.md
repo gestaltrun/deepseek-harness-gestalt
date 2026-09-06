@@ -61,7 +61,7 @@ Wangwang evidence comes from the Travel-Team implementation: endpoint/access-key
 
 ## Risks
 
-- The synchronization staging branch remains unpublished, but the fixed snapshot is an ancestor of the published specification branch `codex/feature-im-takeover`; writers that fetch that branch can read the snapshot. The remaining blocker is source-interface and check review at that fixed snapshot, not artifact availability.
+- The review branch of the specification pull request descends from `origin/master` and does not contain the fixed snapshot; the snapshot is currently reachable through the ancestry of the previously published head `c2914ed9a5b3a8d51b2c0800d383376705e0da81` or the local preserved ref `codex/im-takeover-preserved-6d911d`. After the lease update, `c2914ed9` has no branch reference and GitHub does not guarantee retention of unreferenced commits, so the synchronization project must publish the fixed baseline officially before implementation; that publication is an implementation prerequisite, not a blocker for this specification delivery. The remaining blocker for implementation is source-interface and check review at the fixed snapshot.
 - Installed-version Session, Agent, tools, subagent, settings, workspace, and Sidebar APIs cannot prove compatibility with the fixed snapshot.
 - DWS real sending, sender evidence, and receipt semantics have dry-run and schema evidence but no authorized live-message test.
 - Wangwang cannot currently prove merchant identity from credentials because the reviewed OpenAPI surface has no whoami operation.

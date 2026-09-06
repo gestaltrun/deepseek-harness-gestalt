@@ -11,6 +11,12 @@
 - `prototype/` 包含已认可的高保真 React 原型源码、fixtures、theme token 快照和 package 元数据；运行方式见 `prototype/README.md`。
 - `screenshots/` 包含精选纯示例设计截图。
 
+## 版本来源
+
+- 审阅基线：`origin/master`（`5e55fbc0f9e699fa005028d2a591517fc72ba09e`）——规格 PR 从它分出，固定快照不是其祖先。
+- 实施基线：固定快照 `96d33581128676a469a1587ea85e0339e4853cf0`，不在审阅分支内。
+- 已发布旧 head `c2914ed9a5b3a8d51b2c0800d383376705e0da81` 的祖先链曾包含固定快照；lease 更新后该提交已无分支引用，仅为临时获取路径。本地保留 ref `codex/im-takeover-spec-fixedbase-preserved` 与 `codex/im-takeover-preserved-6d911d` 持有重写前的 head。固定基线的正式发布归同步项目，先于实施完成。
+
 ## 后续决策覆盖
 
 归档保留评审历史，但以下后续决策覆盖其中的旧内容：首期只做钉钉 DWS 与旺旺，飞书不预留空驱动或 UI 承诺；新触发在最近安全 step boundary 生效，不强制中断模型或已开始工具；重启沿用普通 Session 默认策略；群聊触发是三项多选，方案采用任一条件满足、重叠批次只提交一次、统计未提交消息、仅在有新消息时按固定间隔触发、提交成功后推进进度；HiQ 只作机制与问题参照，不作为复制来源，其许可不是阻塞项。

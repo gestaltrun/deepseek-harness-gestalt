@@ -61,7 +61,7 @@ DeepSeek Harness 需要用真实授权账号接收 IM 消息，把消息路由�
 
 ## Risks
 
-- 同步 staging 分支仍未发布，但固定快照是已发布规格分支 `codex/feature-im-takeover` 的祖先；fetch 该分支的 writer 可以读取该快照。剩余 blocker 是对固定快照做源码接口与检查复核，而不是产物不可用。
+- 规格 PR 的审阅分支派生自 `origin/master`，不包含固定快照；快照当前可经已推送旧 head `c2914ed9a5b3a8d51b2c0800d383376705e0da81` 的祖先链或本地保留 ref `codex/im-takeover-preserved-6d911d` 获取。lease 更新后 c291 已失去分支引用，GitHub 不保证永久保留未引用提交，因此正式实施前须由同步项目方正式发布固定基线；这是实施前置条件，不阻塞当前规格交付。实施剩余 blocker 是对固定快照做源码接口与检查复核。
 - 安装版本的 Session、Agent、tools、subagent、settings、workspace 和 Sidebar API 不能证明与固定快照兼容。
 - DWS 真实发送、发送者证据和回执语义只有 dry-run 与 schema 证据，没有已授权的真实消息测试。
 - 旺旺已核验 OpenAPI 没有 whoami，因此不能用凭据证明商家身份。

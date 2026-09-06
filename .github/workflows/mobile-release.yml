@@ -284,14 +284,23 @@ jobs:
           [[ "$signer" =~ ^[0-9a-fA-F]{64}$ ]]
           artifact_digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
           origin_digest=$(printf '%s' "$VITE_PLATFORM_ORIGIN" | sha256sum | cut -d ' ' -f 1)
+          packaging_digest=$(sha256sum apps/mobile/scripts/build-android-release.sh | cut -d ' ' -f 1)
+          workflow_run="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           mkdir acceptance-candidate
           cp "$apk" acceptance-candidate/
           jq -n --arg candidate "$CANDIDATE_SHA" --arg plan "$PLAN_PATH" \
             --arg version "$MOBILE_VERSION" --argjson build "$MOBILE_BUILD_NUMBER" \
+            --arg repository "$GITHUB_REPOSITORY" --arg workflowRun "$workflow_run" \
             --arg apk "$(basename "$apk")" --arg artifact "sha256:$artifact_digest" \
             --arg signer "sha256:${signer,,}" --arg origin "sha256:$origin_digest" \
-            '{version:1,mode:"acceptance-candidate",surface:"mobile",candidateCommit:$candidate,planPath:$plan,productVersion:$version,buildNumber:$build,artifactDigests:{($apk):$artifact},signerCertificateSha256:$signer,operatedOriginSha256:$origin}' \
+            --arg packaging "sha256:$packaging_digest" \
+            '{version:1,mode:"acceptance-candidate",surface:"mobile",candidateCommit:$candidate,planPath:$plan,productVersion:$version,buildNumber:$build,repository:$repository,workflowRun:$workflowRun,artifactDigests:{($apk):$artifact},signerCertificateSha256:$signer,operatedOriginSha256:$origin,packagingScriptSha256:$packaging}' \
             > acceptance-candidate/acceptance-candidate.json
+          CANDIDATE_SHA="$CANDIDATE_SHA" PLAN_PATH="$PLAN_PATH" MOBILE_VERSION="$MOBILE_VERSION" \
+            MOBILE_BUILD_NUMBER="$MOBILE_BUILD_NUMBER" OPERATED_ORIGIN="$VITE_PLATFORM_ORIGIN" \
+            EXPECTED_REPOSITORY="$GITHUB_REPOSITORY" EXPECTED_WORKFLOW_RUN="$workflow_run" \
+            APKSIGNER_PATH="$apksigner" bash apps/mobile/scripts/verify-android-acceptance-candidate.sh \
+            acceptance-candidate/acceptance-candidate.json "acceptance-candidate/$(basename "$apk")"
           echo "artifact_name=mobile-acceptance-candidate-${CANDIDATE_SHA}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:

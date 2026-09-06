@@ -12,7 +12,7 @@ Mobile 签名要求已完成实际运行验收，但物理 Android 对正式签�
 
 `Mobile Release` 提供显式的 `candidate_build_only` 模式，默认值为 false。该模式只接受当前 `master` 上精确的 Product Release Plan 候选、源码拥有的版本与 build，以及候选范围的显式 transport-risk 接受。它会在签名前拒绝 acceptance run id、artifact recovery、TestFlight 上传与 GitHub 发布。
 
-受保护的 `mobile-release` Environment 通过现有打包脚本构建一个正式签名 Android APK。workflow 将 APK 与 manifest 上传为仓库读者可访问的 `mobile-acceptance-candidate-<candidate_sha>` Actions artifact。manifest 绑定候选 commit、plan、版本、build、APK 摘要、签名证书摘要和实际运行 Platform origin 的摘要，不包含凭据或 origin 值。Candidate-build-only 不生成 iOS artifact、tag、Release、TestFlight 上传、发布验收或发布证据。
+受保护的 `mobile-release` Environment 通过现有打包脚本构建一个正式签名 Android APK。workflow 将 APK 与 manifest 上传为仓库读者可访问的 `mobile-acceptance-candidate-<candidate_sha>` Actions artifact。manifest 绑定候选 commit、plan、版本、build、仓库 workflow run、APK 摘要、签名证书摘要，以及实际运行 Platform origin 与打包脚本的摘要。workflow 会在上传前立即重新计算并校验这些字段。manifest 不包含凭据或 origin 值。Candidate-build-only 不生成 iOS artifact、tag、Release、TestFlight 上传、发布验收或发布证据。
 
 普通 Mobile 签名、TestFlight、GitHub prerelease 发布与 artifact recovery 仍要求成功的候选绑定 Mobile Companion Acceptance run，以及 dispatch 范围的 transport-risk 接受。Recovery producer allowlist 不包含 acceptance-candidate artifact，因此 build-only run 不能成为发布输入。Product Release 显式保持 `candidate_build_only` 为 false。
 

@@ -81,7 +81,9 @@ describe('Mobile brand validation', () => {
     expect(androidRelease).not.toContain('MOBILE_BUNDLE_ID:-')
     expect(iosRelease).not.toContain('MOBILE_BUNDLE_ID:-')
     expect(workflow.match(/MOBILE_BUNDLE_ID: \$\{\{ vars\.MOBILE_BUNDLE_ID \}\}/gu)).toHaveLength(3)
-    expect(workflow).toMatch(/android-acceptance-candidate:[\s\S]*?MOBILE_BUNDLE_ID: \$\{\{ vars\.MOBILE_BUNDLE_ID \}\}/u)
+    for (const job of ['android-acceptance-candidate', 'android', 'ios']) {
+      expect(workflow).toMatch(new RegExp(`\\n  ${job}:[\\s\\S]*?MOBILE_BUNDLE_ID: \\$\\{\\{ vars\\.MOBILE_BUNDLE_ID \\}\\}`, 'u'))
+    }
 
     for (const owner of [
       capacitor,

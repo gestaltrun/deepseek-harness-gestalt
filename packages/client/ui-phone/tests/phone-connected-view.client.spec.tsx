@@ -150,14 +150,115 @@ describe('PhoneConnectedView chrome', () => {
   it('renders the devbar rhythm: device dropdown, format chips, and the live frame', async () => {
     await renderLive()
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
-    const h264 = screen.getByLabelText('当前画面编码 H264 · 30 fps')
+    const h264 = screen.getByLabelText('当前画面编码 H264')
     expect(h264.textContent).toContain('H264')
-    expect(h264.textContent).toContain('30 fps')
+    expect(h264.textContent).not.toContain('30 fps')
+    expect(screen.queryByText('30 fps')).toBeNull()
     expect(screen.queryByText('MJPEG')).toBeNull()
     expect(screen.queryByRole('button', { name: /H264/ })).toBeNull()
     expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeTruthy()
     expect(screen.getByText('代理中')).toBeTruthy()
     expect(screen.getByText(/点击画面即向设备发送触控/)).toBeTruthy()
+  })
+
+  it('keeps connecting chrome until the IO socket opens and never claims H264 30 fps', async () => {
+    renderView()
+    await flush()
+    expect(screen.getByText('正在连接画面…')).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 正在连接').textContent).toContain('连接中')
+    expect(screen.queryByText('30 fps')).toBeNull()
+    expect(screen.queryByText('代理中')).toBeNull()
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+  })
+
+  it('waits for a decoded first frame before claiming H264 is playing', async () => {
+    h264Runtime = installFakeH264Playback({ holdFirstFrame: true })
+    await renderLive()
+    await flush()
+    expect(h264Runtime.drawImage).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('画面状态 等待 H264 首帧').textContent).toContain('等待首帧')
+    expect(screen.getAllByText('等待首帧').length).toBeGreaterThan(0)
+    expect(screen.queryByText('代理中')).toBeNull()
+    expect(screen.queryByText('30 fps')).toBeNull()
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+
+    await act(async () => { h264Runtime.emitFrame(390, 844); await flush() })
+    expect(h264Runtime.drawImage).toHaveBeenCalled()
+    const h264 = screen.getByLabelText('当前画面编码 H264')
+    expect(h264.textContent).toContain('H264')
+    expect(h264.textContent).not.toContain('等待首帧')
+    expect(screen.getByText('代理中')).toBeTruthy()
+    expect(screen.queryByText('30 fps')).toBeNull()
+  })
+
+  it('falls back after an empty H264 body without a playing 30 fps claim', async () => {
+    h264Runtime = installFakeH264Playback({ emptyBody: true })
+    await renderLive()
+    await flush()
+    expect(h264Runtime.drawImage).not.toHaveBeenCalled()
+    expect(screen.queryByText('30 fps')).toBeNull()
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧').textContent).toContain('MJPEG')
+    const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+    expect(surface).toBeInstanceOf(HTMLImageElement)
+    expect(surface.getAttribute('src')).toBe(SESSION_A.mjpeg.url)
+    expect(screen.queryByText('代理中')).toBeNull()
+  })
+
+  it('does not treat IO-open transport as a painted H264 picture', async () => {
+    h264Runtime = installFakeH264Playback({ holdFirstFrame: true })
+    const harness = await renderLive()
+    expect(harness.gateway.lastSocket!.opened).toBe(true)
+    expect(h264Runtime.drawImage).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('画面状态 等待 H264 首帧')).toBeTruthy()
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+    expect(screen.queryByText('代理中')).toBeNull()
+    expect(screen.queryByText('30 fps')).toBeNull()
+  })
+
+  it('ignores a painted frame from a disposed H264 owner after refresh', async () => {
+    h264Runtime = installFakeH264Playback({ holdFirstFrame: true })
+    const harness = await renderLive()
+    await vi.waitFor(() => { expect(h264Runtime.abortSignals).toHaveLength(1) })
+    harness.gateway.queueMint({ session: SESSION_B })
+    fireEvent.click(screen.getByRole('button', { name: '刷新流' }))
+    await flush()
+    await step(() => { harness.gateway.lastSocket!.accept() })
+    await vi.waitFor(() => { expect(h264Runtime.abortSignals).toHaveLength(2) })
+    expect(h264Runtime.abortSignals[0]!.aborted).toBe(true)
+    await act(async () => { h264Runtime.emitFrameAt(0, 390, 844); await flush() })
+    expect(screen.getByLabelText('画面状态 等待 H264 首帧')).toBeTruthy()
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+    expect(screen.queryByText('代理中')).toBeNull()
+    await act(async () => { h264Runtime.emitFrameAt(1, 390, 844); await flush() })
+    expect(h264Runtime.drawImage).toHaveBeenCalled()
+    expect(screen.getByLabelText('当前画面编码 H264')).toBeTruthy()
+    expect(screen.getByText('代理中')).toBeTruthy()
+  })
+
+  it('names the current MJPEG surface after H264 fallback, not preferred H264 playing', async () => {
+    const harness = await renderLive()
+    await act(async () => { h264Runtime.failLastDecoder(); await flush() })
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧').textContent).toContain('MJPEG')
+    expect(screen.queryByText('代理中')).toBeNull()
+    const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+    expect(surface).toBeInstanceOf(HTMLImageElement)
+    expect(surface.getAttribute('src')).toBe(SESSION_A.mjpeg.url)
+    stubCurrentMjpegFrame(1080, 2400)
+    Object.defineProperties(surface, {
+      naturalWidth: { configurable: true, value: 1080 },
+      naturalHeight: { configurable: true, value: 2400 },
+    })
+    await act(async () => { fireEvent.load(surface) })
+    expect(screen.getByLabelText('当前画面编码 MJPEG').textContent).toContain('MJPEG')
+    expect(screen.getByText('代理中')).toBeTruthy()
+    await act(async () => { fireEvent.error(surface); await flush() })
+    expect(screen.getByText(/画面重连中（第 1 次尝试）/)).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 正在重连')).toBeTruthy()
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+    expect(screen.queryByLabelText('当前画面编码 MJPEG')).toBeNull()
+    expect(harness.scheduler.scheduledCount).toBe(1)
   })
 
   it('does not delegate the raw H264 elementary stream to an image element', async () => {
@@ -170,8 +271,8 @@ describe('PhoneConnectedView chrome', () => {
     const harness = await renderLive()
     await act(async () => { h264Runtime.failLastDecoder(); await flush() })
 
-    expect(screen.queryByLabelText('当前画面编码 H264 · 30 fps')).toBeNull()
-    expect(screen.getByLabelText('当前画面编码 MJPEG').textContent).toContain('MJPEG')
+    expect(screen.queryByLabelText('当前画面编码 H264')).toBeNull()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧').textContent).toContain('MJPEG')
     expect(screen.queryByText(/decode failed/)).toBeNull()
     const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
     expect(surface).toBeInstanceOf(HTMLImageElement)
@@ -182,6 +283,7 @@ describe('PhoneConnectedView chrome', () => {
     })
     stubCurrentMjpegFrame(1080, 2400)
     await act(async () => { fireEvent.load(surface) })
+    expect(screen.getByLabelText('当前画面编码 MJPEG').textContent).toContain('MJPEG')
     stubRect(frame(), 270, 600)
     fireEvent.pointerDown(frame(), { clientX: 135, clientY: 300 })
     fireEvent.pointerUp(frame(), { clientX: 135, clientY: 300 })
@@ -203,7 +305,8 @@ describe('PhoneConnectedView chrome', () => {
     renderView(false)
     await flush()
     expect(screen.queryByRole('img')).toBeNull()
-    expect(screen.getByText(/已暂停/)).toBeTruthy()
+    expect(screen.getByText(/已暂停——回到此标签页时恢复画面/)).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 已暂停')).toBeTruthy()
   })
 
   it('renders the design unauthorized arm from the listing instead of a dead stream', async () => {
@@ -890,7 +993,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
     await flush()
     await step(() => { harness.gateway.lastSocket!.accept() })
     await act(async () => { h264Runtime.failLastDecoder(); await flush() })
-    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '刷新流' }))
     await act(async () => {
       resolveBitmap?.({ width: 1080, height: 2400, close: vi.fn() })
@@ -912,7 +1015,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
     await flush()
     await step(() => { harness.gateway.lastSocket!.accept() })
     await act(async () => { h264Runtime.failLastDecoder(); await flush() })
-    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧')).toBeTruthy()
     expect(harness.gateway.mintedDevices).toHaveLength(1)
     source.scriptNext(listingOf([{
       id: 'emulator-5554',
@@ -926,7 +1029,7 @@ describe('PhoneConnectedView screen frame aspect', () => {
     await flush()
     expect(harness.gateway.mintedDevices).toHaveLength(1)
     expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeInstanceOf(HTMLImageElement)
-    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧')).toBeTruthy()
   })
 
   it('does not remint a live MJPEG session when Host listing reports landscape', async () => {
@@ -1599,7 +1702,7 @@ describe('PhoneConnectedView error and recovery arms', () => {
   it('releases the failed H264 decoder while the same session falls back to MJPEG', async () => {
     await renderLive()
     await act(async () => { h264Runtime.failLastDecoder() })
-    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
+    expect(screen.getByLabelText('画面状态 等待 MJPEG 首帧')).toBeTruthy()
     expect(h264Runtime.abortSignals[0]!.aborted).toBe(true)
     expect(h264Runtime.decoderCloseCounts[0]).toBe(1)
   })

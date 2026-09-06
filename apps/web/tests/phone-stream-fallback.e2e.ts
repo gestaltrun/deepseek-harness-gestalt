@@ -75,7 +75,10 @@ describe('web e2e: phone H264 fallback', () => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         android: [
-          { id: 'android-real', name: 'Android Real', kind: 'real', state: 'online', online: true },
+          {
+            id: 'android-real', name: 'Android Real', kind: 'real', state: 'online', online: true,
+            logicalDisplay: { width: 1, height: 1 },
+          },
           { id: 'android-restricted', name: 'Android Restricted', kind: 'real', state: 'online', online: true },
         ],
         ios: {
@@ -99,8 +102,8 @@ describe('web e2e: phone H264 fallback', () => {
         body: JSON.stringify({
           deviceId, ioPath: '/phone/ws/io', agentManaged: false,
           preferredFormat: simulator ? 'mjpeg' : 'h264',
-          h264: { url: `/phone/stream/${deviceId}/h264?token=${token}`, expiresAt: Date.now() + 60_000 },
-          mjpeg: { url: `/phone/stream/${deviceId}/mjpeg?token=${token}`, expiresAt: Date.now() + 60_000 },
+          h264: { url: `/phone/stream/${deviceId}/h264?token=${token}`, captureId: token, expiresAt: Date.now() + 60_000 },
+          mjpeg: { url: `/phone/stream/${deviceId}/mjpeg?token=${token}`, captureId: token, expiresAt: Date.now() + 60_000 },
         }),
       })
     })
@@ -161,7 +164,7 @@ describe('web e2e: phone H264 fallback', () => {
     const open = page.getByRole('button', { name: '打开', exact: true }).first()
     await open.waitFor({ timeout: 10_000 })
     await open.click()
-    await page.getByLabel('当前画面编码 H264 · 30 fps').waitFor({ timeout: 10_000 })
+    await page.getByLabel('画面状态 等待 H264 首帧').waitFor({ timeout: 10_000 })
     const before = await capturePhoneState(page, scaffold, 'before')
     releaseH264()
     await page.getByLabel('当前画面编码 MJPEG').waitFor({ timeout: 10_000 })

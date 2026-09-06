@@ -26,10 +26,10 @@ describe('Android acceptance candidate manifest', () => {
     expect(run(fixture).status).toBe(0)
   })
 
-  it('rejects changed APK, signer, baked origin, duplicate runtime identity, workflow, and packaging provenance', () => {
-    for (const mutation of ['artifact', 'signer', 'baked-origin', 'duplicate-identity', 'workflow', 'packaging'] as const) {
+  it('rejects changed APK, signer, missing or wrong or duplicate runtime identity, workflow, and packaging provenance', () => {
+    for (const mutation of ['artifact', 'signer', 'missing-identity', 'baked-origin', 'duplicate-identity', 'workflow', 'packaging'] as const) {
       const fixture = createFixture(mutation === 'baked-origin' ? 'https://wrong.example' : origin,
-        mutation === 'duplicate-identity')
+        mutation === 'duplicate-identity', mutation === 'missing-identity')
       if (mutation === 'artifact') writeFileSync(fixture.apk, 'changed')
       else if (mutation === 'signer' || mutation === 'workflow' || mutation === 'packaging') {
         const manifest = JSON.parse(readFileSync(fixture.manifest, 'utf8')) as Record<string, unknown>
@@ -46,7 +46,7 @@ describe('Android acceptance candidate manifest', () => {
   })
 })
 
-function createFixture(bakedOrigin = origin, duplicateIdentity = false) {
+function createFixture(bakedOrigin = origin, duplicateIdentity = false, missingIdentity = false) {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-acceptance-candidate-'))
   temporary.push(directory)
   const apk = join(directory, 'Gestalt-0.1.3-8.apk')
@@ -55,8 +55,9 @@ function createFixture(bakedOrigin = origin, duplicateIdentity = false) {
   const identityDirectory = join(directory, 'assets/public')
   execFileSync('mkdir', ['-p', identityDirectory])
   const runtimeIdentityBody = `${JSON.stringify({ version: 1, origin: bakedOrigin })}\n`
-  writeFileSync(join(identityDirectory, 'dsh-mobile-runtime-identity.json'), runtimeIdentityBody)
-  execFileSync('zip', ['-q', '-r', apk, 'assets'], { cwd: directory })
+  if (!missingIdentity) writeFileSync(join(identityDirectory, 'dsh-mobile-runtime-identity.json'), runtimeIdentityBody)
+  if (missingIdentity) writeFileSync(join(directory, 'placeholder'), 'missing identity')
+  execFileSync('zip', ['-q', '-r', apk, missingIdentity ? 'placeholder' : 'assets'], { cwd: directory })
   if (duplicateIdentity) {
     execFileSync('python3', ['-c', [
       'import sys, zipfile',

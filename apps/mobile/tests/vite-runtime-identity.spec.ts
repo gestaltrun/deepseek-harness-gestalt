@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mobileRuntimeIdentity } from '../vite-runtime-identity.ts'
 
 const ENV = {
@@ -10,9 +10,13 @@ const ENV = {
   VITE_PLATFORM_IDENTITY_NAMESPACE: 'namespace-production',
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
+
 describe('Mobile runtime identity Vite plugin', () => {
   it('emits the same validated identity for Web, Android, and iOS packaging', () => {
-    Object.assign(process.env, ENV)
+    for (const [key, value] of Object.entries(ENV)) vi.stubEnv(key, value)
     const plugin = mobileRuntimeIdentity()
     const configResolved = hook(plugin.configResolved)
     const generateBundle = hook(plugin.generateBundle)
@@ -24,7 +28,6 @@ describe('Mobile runtime identity Vite plugin', () => {
       fileName: 'dsh-mobile-runtime-identity.json',
       source: expect.stringContaining(ENV.VITE_PLATFORM_ORIGIN),
     })])
-    for (const key of Object.keys(ENV)) process.env[key] = undefined
   })
 
   it('fails configuration before serving or building when identity is missing', () => {

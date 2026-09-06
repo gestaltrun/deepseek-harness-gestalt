@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Self-contained React/Vite prototype of the accepted IM takeover design. It runs entirely on in-memory demo data: no real IM connection, no real authentication, no credential storage.
+React/Vite prototype of the accepted IM takeover design. It runs entirely on in-memory demo data: no real IM connection, no real authentication, no credential storage.
 
 ## Run
 

@@ -144,6 +144,11 @@ jobs:
           ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
       - name: Read source-owned version and build number
         id: version
         env:

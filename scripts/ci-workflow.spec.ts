@@ -65,6 +65,28 @@ describe('CI workflow', () => {
     } })
   })
 
+  it('sets up pnpm before candidate-only release validation uses it', () => {
+    const workflow = loadWorkflow('.github/workflows/mobile-release.yml')
+    const releaseVersion = workflowJob(workflow, 'release-version')
+    if (!Array.isArray(releaseVersion.steps)) {
+      throw new TypeError('Mobile release version must define steps')
+    }
+    const steps = releaseVersion.steps.filter(isRecord)
+    const pnpmSetup = steps.findIndex(step => step.uses === 'pnpm/action-setup@v4')
+    const nodeSetup = steps.findIndex(step => step.uses === 'actions/setup-node@v6')
+    const validation = steps.findIndex(step => step.name === 'Read source-owned version and build number')
+
+    expect(pnpmSetup).toBeGreaterThanOrEqual(0)
+    expect(nodeSetup).toBeGreaterThan(pnpmSetup)
+    expect(steps[nodeSetup]?.with).toEqual({
+      'node-version': '${{ env.PRIMARY_NODE_VERSION }}',
+      cache: 'pnpm',
+    })
+    expect(validation).toBeGreaterThan(nodeSetup)
+    expect(String(steps[validation]?.run)).toContain('pnpm install --frozen-lockfile --ignore-scripts')
+    expect(String(steps[validation]?.run)).toContain('pnpm product-release:validate-candidate')
+  })
+
   it('publishes candidate-bound Mobile Companion acceptance only after the verifier succeeds', () => {
     const workflow = loadWorkflow('.github/workflows/mobile-companion-acceptance.yml')
     const verdict = workflowJob(workflow, 'acceptance-verdict')

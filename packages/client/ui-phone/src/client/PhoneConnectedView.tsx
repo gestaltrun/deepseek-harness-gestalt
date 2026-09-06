@@ -17,7 +17,13 @@ import type {
   ReactNode,
   WheelEvent as ReactWheelEvent,
 } from 'react'
-import { type PhoneConnectionController, type PhoneCoordinateUnavailableReason, type PhoneStreamFailureKind } from './phone-connection.ts'
+import {
+  type PhoneConnectionController,
+  type PhoneConnectionPhase,
+  type PhoneCoordinateUnavailableReason,
+  type PhoneStreamFailureKind,
+  type PhoneSurfaceSize,
+} from './phone-connection.ts'
 import { startPhoneListingPoll } from './phone-listing-poll.ts'
 import type { PhoneListingSource } from './registry.ts'
 import { measureMjpegCurrentFrame } from './measure-mjpeg-current-frame.ts'
@@ -134,6 +140,50 @@ const WHEEL_MAX_TRAVEL = 0.4
 const MJPEG_SURFACE_POLL_MS = 500
 
 /** The toolbar icon glyphs, drawn inline to stay on the primitives idiom. */
+/** Devbar encoding/status chip derived from the controller phase and painted surface. */
+interface PlaybackChip {
+  readonly ariaLabel: string
+  readonly label: string
+  readonly caption?: string
+  readonly playing: boolean
+}
+
+/**
+ * Name playback from the existing connection owner and decoded first frame.
+ * Socket-open `live` without `surfaceSize` is waiting, not playing. The stream
+ * contract has no fps field, so the chip never invents a measured cadence.
+ */
+function playbackChipOf(
+  phase: PhoneConnectionPhase,
+  surfaceSize: PhoneSurfaceSize | undefined,
+  online: boolean,
+): PlaybackChip {
+  if (phase.kind === 'connecting' || phase.kind === 'checking-agent' || phase.kind === 'repairing-agent') {
+    return { ariaLabel: '画面状态 正在连接', label: '连接中', playing: false }
+  }
+  if (phase.kind === 'reconnecting') {
+    return { ariaLabel: '画面状态 正在重连', label: '重连中', playing: false }
+  }
+  if (phase.kind === 'error') {
+    return { ariaLabel: '画面状态 画面错误', label: '错误', playing: false }
+  }
+  if (phase.kind === 'suspended') {
+    return { ariaLabel: '画面状态 已暂停', label: '已暂停', playing: false }
+  }
+  if (phase.kind === 'idle') {
+    return {
+      ariaLabel: online ? '画面状态 设备在线' : '画面状态 未连接',
+      label: online ? '在线' : '未连接',
+      playing: false,
+    }
+  }
+  const encoding = phase.format === 'mjpeg' ? 'MJPEG' : 'H264'
+  if (surfaceSize === undefined) {
+    return { ariaLabel: `画面状态 等待 ${encoding} 首帧`, label: '等待首帧', caption: encoding, playing: false }
+  }
+  return { ariaLabel: `当前画面编码 ${encoding}`, label: encoding, playing: true }
+}
+
 function ChevronDown(): ReactNode {
   return (
     <svg aria-hidden="true" width="9" height="9" viewBox="0 0 24 24" fill="none">
@@ -389,6 +439,7 @@ export function PhoneConnectedView({
 
   const online = current?.online === true
   const unauthorized = current?.state === 'unauthorized'
+  const chip = playbackChipOf(phase, surfaceSize, online)
 
   const screenContent = (): ReactNode => {
     // A listed-unauthorized handset cannot stream: the design's warn arm
@@ -456,8 +507,8 @@ export function PhoneConnectedView({
         >
           {surface}
           <span className={css.liveFlag}>
-            <span aria-hidden="true" className={css.liveDot} />
-            代理中
+            {chip.playing ? <span aria-hidden="true" className={css.liveDot} /> : undefined}
+            {chip.playing ? '代理中' : '等待首帧'}
           </span>
           {coordinateUnavailable === 'missing-logical'
             || coordinateUnavailable === 'orientation-mismatch'
@@ -532,17 +583,13 @@ export function PhoneConnectedView({
           选择设备
         </button>
         <span className={css.devbarSpacer} />
-        {/* The H264 cadence is the locked mockup's caption; the stream
-            contract carries no fps field, so MJPEG names only its encoding. */}
         <span
-          className={`${css.tierChip} ${css.tierChipActive}`}
-          aria-label={phase.kind === 'live' && phase.format === 'mjpeg'
-            ? '当前画面编码 MJPEG'
-            : '当前画面编码 H264 · 30 fps'}
+          className={clsx(css.tierChip, chip.playing && css.tierChipActive)}
+          aria-label={chip.ariaLabel}
         >
-          <span aria-hidden="true" className={css.liveDot} />
-          {phase.kind === 'live' && phase.format === 'mjpeg' ? 'MJPEG' : 'H264'}
-          {!(phase.kind === 'live' && phase.format === 'mjpeg') && <span className={css.reslv}>30 fps</span>}
+          {chip.playing ? <span aria-hidden="true" className={css.liveDot} /> : undefined}
+          {chip.label}
+          {chip.caption !== undefined ? <span className={css.reslv}>{chip.caption}</span> : undefined}
         </span>
         {menuOpen && (
           <div role="menu" aria-label="切换设备" className={css.pickMenu}>

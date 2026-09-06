@@ -55,10 +55,20 @@ export interface FakeH264PlaybackRuntime {
   failLastDecoder(): void
   /** Emit one decoded frame of the given display size from the newest decoder. */
   emitFrame(width: number, height: number, rotation?: number): void
+  /** Emit one decoded frame from a specific decoder generation. */
+  emitFrameAt(index: number, width: number, height: number, rotation?: number): void
+}
+
+/** Fixture knobs for first-frame and empty-body playback oracles. */
+export interface FakeH264PlaybackOptions {
+  /** Decoder input does not paint until `emitFrame`; used to prove waiting-first-frame chrome. */
+  readonly holdFirstFrame?: boolean
+  /** Signed H264 fetch answers `video/h264` with an immediately closed empty body. */
+  readonly emptyBody?: boolean
 }
 
 /** Install a same-origin Annex-B response and WebCodecs decoder for view specs. */
-export function installFakeH264Playback(): FakeH264PlaybackRuntime {
+export function installFakeH264Playback(options: FakeH264PlaybackOptions = {}): FakeH264PlaybackRuntime {
   const abortSignals: AbortSignal[] = []
   const decoderCloseCounts: number[] = []
   const frameCloseCounts: number[] = []
@@ -106,6 +116,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     configure(): void { this.state = 'configured' }
     decode(_chunk: Chunk): void {
       this.decoded += 1
+      if (options.holdFirstFrame === true) return
       const frameIndex = frameCloseCounts.push(0) - 1
       this.emitted += 1
       this.output({
@@ -116,6 +127,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
       })
     }
     async flush(): Promise<void> {
+      if (options.holdFirstFrame === true) return
       while (this.emitted < this.decoded) {
         const frameIndex = frameCloseCounts.push(0) - 1
         this.emitted += 1
@@ -138,7 +150,9 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
   vi.stubGlobal('VideoDecoder', Decoder)
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
     if (init?.signal !== undefined && init.signal !== null) abortSignals.push(init.signal)
-    const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(payload) } })
+    const body = options.emptyBody === true
+      ? new ReadableStream<Uint8Array>({ start(controller) { controller.close() } })
+      : new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(payload) } })
     return new Response(body, { status: 200, headers: { 'content-type': 'video/h264' } })
   }))
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as never)
@@ -151,8 +165,11 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
       decoderErrors.at(-1)?.(new DOMException('decode failed', 'EncodingError'))
     },
     emitFrame(width: number, height: number, rotation = 0) {
+      this.emitFrameAt(decoderOutputs.length - 1, width, height, rotation)
+    },
+    emitFrameAt(index: number, width: number, height: number, rotation = 0) {
       const frameIndex = frameCloseCounts.push(0) - 1
-      decoderOutputs.at(-1)?.({
+      decoderOutputs.at(index)?.({
         displayWidth: width,
         displayHeight: height,
         rotation,

@@ -120,6 +120,10 @@ write_transaction() {
     --endpoint "$PLATFORM_CERT_OSS_ENDPOINT" --meta 'x-oss-server-side-encryption:AES256' --force \
     >/dev/null 2>"$workdir/oss-write.err"
 }
+capture_tls_handshake() {
+  local host="$1" ip="$2" destination="$3"
+  openssl s_client -connect "$ip:443" -servername "$host" </dev/null > "$destination" 2>/dev/null
+}
 persist_cleanup_evidence() {
   local ids id_count id_hash upload_status
   ids=$(jq -Rsc 'split("\n") | map(select(length > 0))' < "$record_ids")
@@ -191,8 +195,9 @@ if [ "$transaction_phase" = issued ]; then
   for host in "$PLATFORM_CERT_DOMAIN" "$PLATFORM_CERT_WWW_DOMAIN"; do
     for ip in "${alb_eips[@]}"; do
       curl --proto '=https' --tlsv1.2 -sS --resolve "$host:443:$ip" "https://$host/healthz" -o /dev/null
-      served=$(echo | openssl s_client -connect "$ip:443" -servername "$host" 2>/dev/null \
-        | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2-)
+      handshake="$workdir/issued-${host}-${ip}.pem"
+      capture_tls_handshake "$host" "$ip" "$handshake"
+      served=$(openssl x509 -in "$handshake" -noout -fingerprint -sha256 | cut -d= -f2-)
       [ "$served" = "$issued_fingerprint" ] || fail 'issued certificate reconciliation did not reach every name and EIP'
     done
   done
@@ -219,8 +224,10 @@ current_end=0
 for host in "$PLATFORM_CERT_DOMAIN" "$PLATFORM_CERT_WWW_DOMAIN"; do
   for ip in "${alb_eips[@]}"; do
     curl --proto '=https' --tlsv1.2 -sS --resolve "$host:443:$ip" "https://$host/healthz" -o /dev/null
+    handshake="$workdir/current/${host}-${ip}.handshake"
     leaf="$workdir/current/${host}-${ip}.pem"
-    echo | openssl s_client -connect "$ip:443" -servername "$host" 2>/dev/null | openssl x509 -outform PEM > "$leaf"
+    capture_tls_handshake "$host" "$ip" "$handshake"
+    openssl x509 -in "$handshake" -outform PEM > "$leaf"
     fingerprint=$(openssl x509 -in "$leaf" -noout -fingerprint -sha256 | cut -d= -f2-)
     end=$(openssl x509 -in "$leaf" -noout -enddate | cut -d= -f2-)
     epoch=$(date -u -d "$end" +%s)
@@ -318,8 +325,9 @@ listener_changed=1
 for host in "$PLATFORM_CERT_DOMAIN" "$PLATFORM_CERT_WWW_DOMAIN"; do
   for ip in "${alb_eips[@]}"; do
     curl --proto '=https' --tlsv1.2 -sS --resolve "$host:443:$ip" "https://$host/healthz" -o /dev/null
-    served=$(echo | openssl s_client -connect "$ip:443" -servername "$host" 2>/dev/null \
-      | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2-)
+    handshake="$workdir/renewed-${host}-${ip}.pem"
+    capture_tls_handshake "$host" "$ip" "$handshake"
+    served=$(openssl x509 -in "$handshake" -noout -fingerprint -sha256 | cut -d= -f2-)
     [ "$served" = "$new_fingerprint" ] || fail 'ALB did not serve renewed certificate on every name and EIP'
   done
 done

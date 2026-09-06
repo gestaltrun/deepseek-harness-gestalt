@@ -31,6 +31,8 @@ interface RenewalOptions {
   unexpectedDns?: boolean
   ossUploadFails?: boolean
   listenerCert?: string
+  tlsHandshakeFails?: boolean
+  certificateParsingFails?: boolean
   seedTransaction?: Record<string, unknown>
   seedDnsRecords?: Array<{ RecordId: string; RR: string; Type: string }>
 }
@@ -83,11 +85,12 @@ function runRenewal(mode: 'validate' | 'renew', options: RenewalOptions = {}, st
   executable(join(bin, 'sha256sum'), '#!/bin/bash\nif [[ "$1" == -c ]]; then cat >/dev/null; exit 0; fi\necho "HASH  $1"\n')
   executable(join(bin, 'date'), '#!/bin/bash\ncase "$*" in *+%s*) echo ${MOCK_NOW:-1000};; *+%Y%m%d*) echo 20260905;; *-d*) echo 1000;; *) /bin/date "$@";; esac\n')
   executable(join(bin, 'openssl'), `#!/bin/bash\ncase "$1 $2" in
-"s_client -connect") echo CERT;;
-"x509 -outform") cat;;
-"x509 -noout") echo "SHA256 Fingerprint=\${MOCK_SERVED_FINGERPRINT:-NEWFP}"; cat >/dev/null;;
+"s_client -connect")
+ [[ "$MOCK_TLS_HANDSHAKE_FAIL" == 1 ]] && exit 7
+ echo CERT;;
 "x509 -in")
- case "$*" in *-enddate*) echo notAfter=Dec\\ 4\\ 16:29:23\\ 2026\\ GMT;; *-fingerprint*) [[ "$MOCK_FINGERPRINT_MISMATCH" == 1 && "$*" == *current/www.example.test-192.0.2.2.pem* ]] && echo SHA256\\ Fingerprint=OTHER || echo SHA256\\ Fingerprint=NEWFP;; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\\n    DNS:example.test, DNS:www.example.test\\n';; *-checkend*) exit 0;; esac;;
+ [[ "$MOCK_CERTIFICATE_PARSING_FAIL" == 1 ]] && exit 8
+ case "$*" in *-outform*) cat "$3";; *-enddate*) echo notAfter=Dec\\ 4\\ 16:29:23\\ 2026\\ GMT;; *-fingerprint*) [[ "$MOCK_FINGERPRINT_MISMATCH" == 1 && "$*" == *current/www.example.test-192.0.2.2.pem* ]] && echo SHA256\\ Fingerprint=OTHER || [[ "$*" == *current/* ]] && echo SHA256\\ Fingerprint=NEWFP || echo "SHA256 Fingerprint=\${MOCK_SERVED_FINGERPRINT:-NEWFP}";; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\\n    DNS:example.test, DNS:www.example.test\\n';; *-checkend*) exit 0;; esac;;
 "pkey -in") echo PUB;;
 esac\n`)
   executable(join(bin, 'cmp'), '#!/bin/bash\nexit 0\n')
@@ -176,6 +179,8 @@ esac
       MOCK_NOW: mode === 'renew' ? '2000' : '1000',
       MOCK_FAIL_COMMIT: options.failCommit ? '1' : '0', MOCK_UNEXPECTED_DNS: options.unexpectedDns ? '1' : '0',
       MOCK_FINGERPRINT_MISMATCH: options.fingerprintMismatch ? '1' : '0',
+      MOCK_TLS_HANDSHAKE_FAIL: options.tlsHandshakeFails ? '1' : '0',
+      MOCK_CERTIFICATE_PARSING_FAIL: options.certificateParsingFails ? '1' : '0',
       MOCK_DELETE_DNS_FAILS: options.deleteDnsFails ? '1' : '0',
       MOCK_OSS_UPLOAD_FAIL: options.ossUploadFails ? '1' : '0',
       RUNNER_TEMP: state.runnerTemp,
@@ -233,12 +238,24 @@ describe('Platform certificate renewal automation', () => {
     expect(String(inputs.name)).toContain('run_id')
   })
 
-  it('validates current TLS without DNS, CAS, listener, or state writes', () => {
+  it('validates current TLS when s_client exits without reading stdin', () => {
     const result = runRenewal('validate')
     expect(result.status).toBe(0)
     expect(result.stdout).toContain('validation passed')
     expect(result.operations).not.toMatch(/AddDomainRecord|DeleteDomainRecord|DescribeDomainRecords/)
     expect(result.operations).not.toMatch(/UploadUserCertificate|UpdateListenerAttribute|AES256/)
+    expect(script).not.toContain('echo | openssl s_client')
+    expect(script).toContain('openssl s_client -connect "$ip:443" -servername "$host" </dev/null > "$destination"')
+  })
+
+  it('fails validation when the TLS handshake fails', () => {
+    const result = runRenewal('validate', { tlsHandshakeFails: true })
+    expect(result.status).not.toBe(0)
+  })
+
+  it('fails validation when the served certificate cannot be parsed', () => {
+    const result = runRenewal('validate', { certificateParsingFails: true })
+    expect(result.status).not.toBe(0)
   })
 
   it('rejects a different current leaf even when its expiry matches', () => {

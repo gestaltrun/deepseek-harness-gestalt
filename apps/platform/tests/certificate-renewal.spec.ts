@@ -32,6 +32,7 @@ interface RenewalOptions {
   ossUploadFails?: boolean
   listenerCert?: string
   tlsHandshakeFails?: boolean
+  tlsHandshakeFailsAfter?: number
   certificateParsingFails?: boolean
   seedTransaction?: Record<string, unknown>
   seedDnsRecords?: Array<{ RecordId: string; RR: string; Type: string }>
@@ -86,11 +87,13 @@ function runRenewal(mode: 'validate' | 'renew', options: RenewalOptions = {}, st
   executable(join(bin, 'date'), '#!/bin/bash\ncase "$*" in *+%s*) echo ${MOCK_NOW:-1000};; *+%Y%m%d*) echo 20260905;; *-d*) echo 1000;; *) /bin/date "$@";; esac\n')
   executable(join(bin, 'openssl'), `#!/bin/bash\ncase "$1 $2" in
 "s_client -connect")
+ n=$(( $(cat "$MOCK_TLS_HANDSHAKE_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$MOCK_TLS_HANDSHAKE_COUNT"
  [[ "$MOCK_TLS_HANDSHAKE_FAIL" == 1 ]] && exit 7
+ [[ "$MOCK_TLS_HANDSHAKE_FAIL_AFTER" -gt 0 && "$n" -gt "$MOCK_TLS_HANDSHAKE_FAIL_AFTER" ]] && exit 7
  echo CERT;;
 "x509 -in")
  [[ "$MOCK_CERTIFICATE_PARSING_FAIL" == 1 ]] && exit 8
- case "$*" in *-outform*) cat "$3";; *-enddate*) echo notAfter=Dec\\ 4\\ 16:29:23\\ 2026\\ GMT;; *-fingerprint*) [[ "$MOCK_FINGERPRINT_MISMATCH" == 1 && "$*" == *current/www.example.test-192.0.2.2.pem* ]] && echo SHA256\\ Fingerprint=OTHER || [[ "$*" == *current/* ]] && echo SHA256\\ Fingerprint=NEWFP || echo "SHA256 Fingerprint=\${MOCK_SERVED_FINGERPRINT:-NEWFP}";; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\\n    DNS:example.test, DNS:www.example.test\\n';; *-checkend*) exit 0;; esac;;
+ case "$*" in *-outform*) cat "$3";; *-enddate*) echo notAfter=Dec\\ 4\\ 16:29:23\\ 2026\\ GMT;; *-fingerprint*) if [[ "$MOCK_FINGERPRINT_MISMATCH" == 1 && "$*" == *current/www.example.test-192.0.2.2.pem* ]]; then echo SHA256\\ Fingerprint=OTHER; elif [[ "$*" == *current/* ]]; then echo SHA256\\ Fingerprint=NEWFP; else echo "SHA256 Fingerprint=\${MOCK_SERVED_FINGERPRINT:-NEWFP}"; fi;; *-pubkey*) echo PUB;; *-text*) printf 'X509v3 Subject Alternative Name:\\n    DNS:example.test, DNS:www.example.test\\n';; *-checkend*) exit 0;; esac;;
 "pkey -in") echo PUB;;
 esac\n`)
   executable(join(bin, 'cmp'), '#!/bin/bash\nexit 0\n')
@@ -180,6 +183,8 @@ esac
       MOCK_FAIL_COMMIT: options.failCommit ? '1' : '0', MOCK_UNEXPECTED_DNS: options.unexpectedDns ? '1' : '0',
       MOCK_FINGERPRINT_MISMATCH: options.fingerprintMismatch ? '1' : '0',
       MOCK_TLS_HANDSHAKE_FAIL: options.tlsHandshakeFails ? '1' : '0',
+      MOCK_TLS_HANDSHAKE_FAIL_AFTER: String(options.tlsHandshakeFailsAfter ?? 0),
+      MOCK_TLS_HANDSHAKE_COUNT: join(root, 'tls-handshake-count'),
       MOCK_CERTIFICATE_PARSING_FAIL: options.certificateParsingFails ? '1' : '0',
       MOCK_DELETE_DNS_FAILS: options.deleteDnsFails ? '1' : '0',
       MOCK_OSS_UPLOAD_FAIL: options.ossUploadFails ? '1' : '0',
@@ -195,6 +200,7 @@ esac
   return {
     ...result,
     state,
+    mockOpenssl: join(bin, 'openssl'),
     operations: readFileSync(log, 'utf8'),
     phases: readFileSync(phases, 'utf8').split('\n').filter(Boolean),
     capturedCert: existsSync(`${join(root, 'cas-capture')}.cert`) ? readFileSync(`${join(root, 'cas-capture')}.cert`, 'utf8') : null,
@@ -248,20 +254,33 @@ describe('Platform certificate renewal automation', () => {
     expect(script).toContain('openssl s_client -connect "$ip:443" -servername "$host" </dev/null > "$destination"')
   })
 
-  it('fails validation when the TLS handshake fails', () => {
+  it('fails validation without state changes when the TLS handshake fails', () => {
     const result = runRenewal('validate', { tlsHandshakeFails: true })
     expect(result.status).not.toBe(0)
+    expect(result.operations).not.toMatch(/AddDomainRecord|DeleteDomainRecord|UploadUserCertificate|UpdateListenerAttribute|AES256/)
+    expect(existsSync(join(result.state.oss, transactionKey))).toBe(false)
   })
 
-  it('fails validation when the served certificate cannot be parsed', () => {
+  it('fails validation without state changes when the served certificate cannot be parsed', () => {
     const result = runRenewal('validate', { certificateParsingFails: true })
     expect(result.status).not.toBe(0)
+    expect(result.operations).not.toMatch(/AddDomainRecord|DeleteDomainRecord|UploadUserCertificate|UpdateListenerAttribute|AES256/)
+    expect(existsSync(join(result.state.oss, transactionKey))).toBe(false)
   })
 
   it('rejects a different current leaf even when its expiry matches', () => {
     const result = runRenewal('validate', { fingerprintMismatch: true })
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('different certificates')
+  })
+
+  it('mock openssl emits exactly one fingerprint per capture path', () => {
+    const { mockOpenssl } = runRenewal('validate')
+    const fingerprint = (env: Record<string, string>, file: string) =>
+      spawnSync('bash', [mockOpenssl, 'x509', '-in', file, '-noout', '-fingerprint', '-sha256'], { encoding: 'utf8', env }).stdout.trim()
+    expect(fingerprint({ MOCK_FINGERPRINT_MISMATCH: '1' }, '/w/current/www.example.test-192.0.2.2.pem')).toBe('SHA256 Fingerprint=OTHER')
+    expect(fingerprint({ MOCK_FINGERPRINT_MISMATCH: '1' }, '/w/current/example.test-192.0.2.1.pem')).toBe('SHA256 Fingerprint=NEWFP')
+    expect(fingerprint({ MOCK_FINGERPRINT_MISMATCH: '0', MOCK_SERVED_FINGERPRINT: 'SERVEDFP' }, '/w/renewed-www.example.test-192.0.2.1.pem')).toBe('SHA256 Fingerprint=SERVEDFP')
   })
 
   it('reports an issued transaction without mutation in validate mode', () => {
@@ -432,6 +451,17 @@ describe('Platform certificate renewal automation', () => {
     expect(result.status).not.toBe(0)
     expect(result.operations).not.toContain('AddDomainRecord')
     expect(result.operations).not.toContain('UploadUserCertificate')
+  }, 15_000)
+
+  it('restores the prior listener when post-activation TLS capture fails', () => {
+    const result = runRenewal('renew', { tlsHandshakeFailsAfter: 4 })
+    expect(result.status).not.toBe(0)
+    const updates = listenerUpdates(result.operations)
+    expect(updates).toHaveLength(2)
+    expect(updates[0]).toContain('new-cert-cn-hangzhou')
+    expect(updates[1]).toContain('prior-cn-hangzhou')
+    expect(storedTransaction(result.state).phase).toBe('issued')
+    expect(result.phases).not.toContain('committed')
   }, 15_000)
 
   it('restores the prior listener when the committed metadata write fails', () => {

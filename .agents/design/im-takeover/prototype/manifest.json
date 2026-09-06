@@ -1,0 +1,30 @@
+{
+  "name": "dsh-design-workbench",
+  "purpose": "DSH 设计工作台：正式组件复用验证 + IM 接管高保真草稿",
+  "createdAt": "2026-09-05",
+  "source": {
+    "formalCheckout": "/Applications/DeepSeek Gestalt.app/Contents/Resources/dsh/",
+    "formalVersion": "0.1.1-rc.2",
+    "primitivesPackage": "@deepseek-ai/dsh-client-ui-primitives (file: 只读引用，不经复制)",
+    "primitivesLibIndexSha256": "af0328928688feb2546a3be465090456973b745b1ed9ae8b02ee5486d03308d2",
+    "primitivesButtonCssSha256": "4666bf191abc8b6bcfd4e22355bab0c2f04391b85c2e918bd882a37ff68ef2b9",
+    "referenceGui": "http://127.0.0.1:62529 （正式 GUI，仅只读截图参照，未改动）"
+  },
+  "assets": {
+    "directReuse": [
+      { "path": "system/tokens/base.css", "from": "dsh-client-ui-theme/lib/styles/base.css", "sha256": "85f8970d2650108ad47d66da1db3ba00ebbe3f26aaec00551cfa69dd029347a3" },
+      { "path": "system/tokens/design-platform.css", "from": "dsh-client-ui-theme/lib/styles/design-platform.css", "sha256": "c07dee451bc0b0cee5629a0eac64099865ced007b061d516e2c9e706af1ac9bf" },
+      { "path": "system/tokens/scrollbar.css", "from": "dsh-client-ui-theme/lib/styles/scrollbar.css", "sha256": "1364c2c2ac058427ec820bc3583927924f0119d5fea41088dddff7cd71990235" },
+      { "path": "system/tokens/gradient-shadow-text.css", "from": "dsh-client-ui-theme/lib/styles/gradient-shadow-text.css", "sha256": "728d31d7dbab6f5e59f68e3da919d8086d8539be2e794871620c75f068d49f44" },
+      { "path": "system/components/primitives.js", "note": "Button/Input/Modal/StateDot/Pill/Menu/Tooltip/Toast 与约 30 个正式图标：自 @deepseek-ai/dsh-client-ui-primitives 直接 re-export（组件本体不复制）" }
+    ],
+    "adapted": [
+      { "path": "system/components/primitives.js 别名块", "note": "语义图标无正式同名项，以近似正式图标别名适配（如 IconWarningOutline16 as IconAlertOutline16），逐条见文件注释" }
+    ],
+    "rebuilt": [
+      { "path": "system/chrome/", "note": "左导航/设置壳/工作区设置弹层壳/Sidebar 壳：正式壳组件未导出（仅 cordis apply/inject），按 references/gui 截图与正式 token 有据重建，不宣称逐像素一致" },
+      { "path": "system/components/ui.jsx", "note": "Switch/ConfirmStrip/Banner/ToolCall/ImRow/Toast 等草稿业务组件（正式库无对应物）" }
+    ]
+  },
+  "updatePolicy": "应用升级后人工重抓 token 快照并对比 sha256；icons 待上游合并完成后从源码 packages/client/ui-primitives 重提取替换适配别名；不自动 watch、不锁源码接法。"
+}

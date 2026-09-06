@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IM 账号接管 · 技术方案评审</title>
+<style>
+  :root{
+    --ink:#0F1115; --ink2:#3A4150; --ink3:#7A8296; --blue:#4176E6; --blue-soft:#EAF0FE;
+    --line:#E4E8F0; --bg:#F7F8FB; --card:#FFFFFF; --amber:#B7791F; --amber-soft:#FDF6E7;
+    --green:#1F9254; --green-soft:#EAF7EF; --purple:#7C5CFC; --purple-soft:#F1EDFE;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.65;font-size:15px}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 80px}
+  header.hero{background:var(--ink);color:#fff;border-radius:20px;padding:32px 36px;margin-bottom:28px}
+  header.hero h1{font-size:24px;font-weight:650;letter-spacing:.2px;margin-bottom:10px}
+  header.hero p{color:#B9C0D0;font-size:14.5px;max-width:720px}
+  .links{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap}
+  .links a{color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);
+    border-radius:999px;padding:7px 16px;font-size:13.5px;text-decoration:none}
+  .links a:hover{background:rgba(255,255,255,.2)}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:26px}
+  .tag{font-size:12.5px;border-radius:999px;padding:4px 12px;font-weight:550}
+  .tag.fact{background:var(--green-soft);color:var(--green)}
+  .tag.rec{background:var(--blue-soft);color:var(--blue)}
+  .tag.tbd{background:var(--amber-soft);color:var(--amber)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px 32px;margin-bottom:24px}
+  section h2{font-size:18px;font-weight:650;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+  section h2 .n{width:26px;height:26px;border-radius:8px;background:var(--ink);color:#fff;font-size:13px;
+    display:inline-flex;align-items:center;justify-content:center;flex:none}
+  section .sub{color:var(--ink3);font-size:13.5px;margin-bottom:18px}
+  .oneline{background:var(--blue-soft);border-left:4px solid var(--blue);border-radius:0 12px 12px 0;
+    padding:14px 18px;font-size:15px;margin:14px 0 4px}
+  ul.tight{margin:10px 0 0 20px;color:var(--ink2)}
+  ul.tight li{margin:5px 0}
+  svg.diagram{display:block;width:100%;height:auto;background:#FBFCFE;border:1px solid var(--line);border-radius:14px;margin-top:14px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .mini{border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .mini h3{font-size:14px;margin-bottom:6px}
+  .mini p{font-size:13.5px;color:var(--ink2)}
+  details{margin-top:14px;border:1px dashed var(--line);border-radius:12px;padding:10px 16px}
+  details summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--ink2)}
+  details .body{font-size:13.5px;color:var(--ink2);padding-top:10px}
+  details .body code{background:#F1F3F8;border-radius:6px;padding:1px 6px;font-size:12.5px}
+  .ask{border:1.5px solid var(--amber);background:var(--amber-soft);border-radius:14px;padding:16px 20px;margin-top:16px}
+  .ask b{color:var(--amber)}
+  .confirmed-box{border:1.5px solid var(--green);background:var(--green-soft);border-radius:14px;padding:16px 20px;margin-top:16px}
+  .confirmed-box b{color:var(--green)}
+  .foot{color:var(--ink3);font-size:12.5px;text-align:center;margin-top:28px}
+  .pill{display:inline-block;font-size:12px;border-radius:6px;padding:2px 8px;margin-left:6px;vertical-align:middle}
+  .pill.sim{background:var(--purple-soft);color:var(--purple)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>IM 账号接管 · 技术方案评审</h1>
+  <p>少量深模块隐藏平台差异与投递复杂度，通过 DSH 现有 Session / 工具 / 审批 / Sidebar 接缝装配；真实与模拟是同一接口的两个 adapter，被测 Agent 走同一条收发路径。首期只做钉钉（DWS）与旺旺，飞书排除。</p>
+  <div class="links">
+    <a href="./scheme-source.md">完整方案 scheme-source.md</a>
+    <a href="./README.zh.md">已认可 UI 归档说明</a>
+  </div>
+</header>
+
+<div class="legend">
+  <span class="tag fact">已验证事实</span>
+  <span class="tag rec">本方案采用（建议）</span>
+  <span class="tag tbd">待核验 / 待确认</span>
+</div>
+
+<!-- 1. 模块 -->
+<section>
+  <h2><span class="n">1</span>模块：六个深模块，平台只是 adapter</h2>
+  <p class="sub">每个模块对外接口小、对内隐藏多；adapter 只在真实平台与模拟之间变化。</p>
+  <svg class="diagram" viewBox="0 0 920 340" xmlns="http://www.w3.org/2000/svg" font-family="inherit">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A8296"/></marker></defs>
+    <!-- adapters -->
+    <rect x="20" y="40" width="150" height="52" rx="12" fill="#0F1115"/><text x="95" y="63" fill="#fff" font-size="13" text-anchor="middle" font-weight="600">钉钉 adapter</text><text x="95" y="80" fill="#B9C0D0" font-size="11" text-anchor="middle">DWS 登录态</text>
+    <rect x="20" y="110" width="150" height="52" rx="12" fill="#0F1115"/><text x="95" y="133" fill="#fff" font-size="13" text-anchor="middle" font-weight="600">旺旺 adapter</text><text x="95" y="150" fill="#B9C0D0" font-size="11" text-anchor="middle">endpoint/AK/SK</text>
+    <rect x="20" y="180" width="150" height="52" rx="12" fill="#7C5CFC"/><text x="95" y="203" fill="#fff" font-size="13" text-anchor="middle" font-weight="600">模拟 adapter</text><text x="95" y="220" fill="#E4DEFC" font-size="11" text-anchor="middle">本地双向投递</text>
+    <text x="95" y="272" font-size="11.5" fill="#B7791F" text-anchor="middle">飞书：本期排除</text>
+    <!-- core modules -->
+    <rect x="230" y="30" width="200" height="46" rx="10" fill="#EAF0FE" stroke="#4176E6" stroke-opacity=".35"/><text x="330" y="50" font-size="13" text-anchor="middle" font-weight="600" fill="#0F1115">账号与身份</text><text x="330" y="66" font-size="11" text-anchor="middle" fill="#7A8296">凭据 reference · 连接状态</text>
+    <rect x="230" y="96" width="200" height="46" rx="10" fill="#EAF0FE" stroke="#4176E6" stroke-opacity=".35"/><text x="330" y="116" font-size="13" text-anchor="middle" font-weight="600" fill="#0F1115">路由与触发</text><text x="330" y="132" font-size="11" text-anchor="middle" fill="#7A8296">全部/指定 · @ / 每N条 / 定时</text>
+    <rect x="230" y="162" width="200" height="46" rx="10" fill="#EAF0FE" stroke="#4176E6" stroke-opacity=".35"/><text x="330" y="182" font-size="13" text-anchor="middle" font-weight="600" fill="#0F1115">消息投递与历史</text><text x="330" y="198" font-size="11" text-anchor="middle" fill="#7A8296">游标 · outbox · 查询</text>
+    <rect x="230" y="228" width="200" height="46" rx="10" fill="#EAF0FE" stroke="#4176E6" stroke-opacity=".35"/><text x="330" y="248" font-size="13" text-anchor="middle" font-weight="600" fill="#0F1115">模拟工具门控</text><text x="330" y="264" font-size="11" text-anchor="middle" fill="#7A8296">workspace 配置后才有工具</text>
+    <!-- coordination -->
+    <rect x="490" y="96" width="190" height="112" rx="12" fill="#fff" stroke="#0F1115" stroke-width="1.6"/><text x="585" y="126" font-size="13.5" text-anchor="middle" font-weight="650">DSH 执行协调</text><text x="585" y="146" font-size="11" text-anchor="middle" fill="#7A8296">新触发直接插队（steer）</text><text x="585" y="163" font-size="11" text-anchor="middle" fill="#7A8296">长任务 → subagent</text><text x="585" y="180" font-size="11" text-anchor="middle" fill="#7A8296">来源身份随输入落日志</text>
+    <!-- dsh seams -->
+    <rect x="740" y="30" width="160" height="40" rx="10" fill="#F1F3F8"/><text x="820" y="55" font-size="12.5" text-anchor="middle" fill="#0F1115">Session / Agent</text>
+    <rect x="740" y="86" width="160" height="40" rx="10" fill="#F1F3F8"/><text x="820" y="111" font-size="12.5" text-anchor="middle" fill="#0F1115">工具 + 权限审批</text>
+    <rect x="740" y="142" width="160" height="40" rx="10" fill="#F1F3F8"/><text x="820" y="167" font-size="12.5" text-anchor="middle" fill="#0F1115">全局设置 · 工作区设置</text>
+    <rect x="740" y="198" width="160" height="40" rx="10" fill="#F1F3F8"/><text x="820" y="223" font-size="12.5" text-anchor="middle" fill="#0F1115">Better Sidebar 面板</text>
+    <!-- arrows -->
+    <line x1="170" y1="66" x2="226" y2="66" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="170" y1="136" x2="226" y2="136" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="170" y1="206" x2="226" y2="206" stroke="#7C5CFC" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="430" y1="119" x2="486" y2="140" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="430" y1="185" x2="486" y2="176" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="680" y1="120" x2="736" y2="106" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar)"/>
+    <line x1="680" y1="152" x2="736" y2="162" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar)"/>
+    <text x="460" y="310" font-size="11.5" fill="#7A8296" text-anchor="middle">agent-loop 不修改；通道行为全部走插件与现有接缝</text>
+  </svg>
+  <details><summary>为什么不复制 HiQ / Travel-Team 整包</summary><div class="body">HiQ 的 DWS alias 与本机不同、产物为不可拆改的 bundle；Travel-Team 的轮询与出站证据机制可靠但耦合电商业务与自有存储。两个项目都只吸纳机制，模块按 DSH 接缝重新组织。</div></details>
+</section>
+
+<!-- 2. 数据流 -->
+<section>
+  <h2><span class="n">2</span>数据流：真实与模拟共享被测路径</h2>
+  <p class="sub">被测 Agent 不知道自己在被模拟；隔离由实例上下文强制，不靠提示词。</p>
+  <svg class="diagram" viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" font-family="inherit">
+    <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A8296"/></marker></defs>
+    <!-- real lane -->
+    <rect x="20" y="24" width="880" height="118" rx="14" fill="#FBFCFE" stroke="#E4E8F0"/>
+    <text x="36" y="46" font-size="12" fill="#7A8296" font-weight="600">真实通道</text>
+    <rect x="36" y="60" width="150" height="56" rx="10" fill="#0F1115"/><text x="111" y="83" font-size="12.5" fill="#fff" text-anchor="middle" font-weight="600">平台消息</text><text x="111" y="100" font-size="10.5" fill="#B9C0D0" text-anchor="middle">游标 · 去重 · 来源分类</text>
+    <rect x="226" y="60" width="170" height="56" rx="10" fill="#EAF0FE"/><text x="311" y="83" font-size="12.5" text-anchor="middle" font-weight="600" fill="#0F1115">路由 + 触发</text><text x="311" y="100" font-size="10.5" fill="#7A8296" text-anchor="middle">命中已启用规则才提交</text>
+    <rect x="436" y="60" width="190" height="56" rx="10" fill="#fff" stroke="#4176E6" stroke-width="1.5"/><text x="531" y="83" font-size="12.5" text-anchor="middle" font-weight="650" fill="#0F1115">被测 Agent（workspace）</text><text x="531" y="100" font-size="10.5" fill="#7A8296" text-anchor="middle">插队输入 · 权限检查 · 审批只在 DSH</text>
+    <rect x="666" y="60" width="150" height="56" rx="10" fill="#0F1115"/><text x="741" y="83" font-size="12.5" fill="#fff" text-anchor="middle" font-weight="600">outbox → 平台</text><text x="741" y="100" font-size="10.5" fill="#B9C0D0" text-anchor="middle">回执 · 未知不重发</text>
+    <line x1="186" y1="88" x2="222" y2="88" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar2)"/>
+    <line x1="396" y1="88" x2="432" y2="88" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar2)"/>
+    <line x1="626" y1="88" x2="662" y2="88" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar2)"/>
+    <!-- sim lane -->
+    <rect x="20" y="162" width="880" height="118" rx="14" fill="#F8F6FE" stroke="#E4DEFC"/>
+    <text x="36" y="184" font-size="12" fill="#7C5CFC" font-weight="600">模拟通道 <tspan class="pill sim" fill="#7C5CFC">每 Session 一实例 · 并发隔离</tspan></text>
+    <rect x="36" y="196" width="180" height="56" rx="10" fill="#7C5CFC"/><text x="126" y="219" font-size="12.5" fill="#fff" text-anchor="middle" font-weight="600">模拟用户 Agent</text><text x="126" y="236" font-size="10.5" fill="#E4DEFC" text-anchor="middle">创建 · 按身份发送 · 结束</text>
+    <rect x="256" y="196" width="170" height="56" rx="10" fill="#F1EDFE"/><text x="341" y="219" font-size="12.5" text-anchor="middle" font-weight="600" fill="#0F1115">实例内双向投递</text><text x="341" y="236" font-size="10.5" fill="#7A8296" text-anchor="middle">固定创建时目标 · 绝不外发</text>
+    <rect x="466" y="196" width="190" height="56" rx="10" fill="#fff" stroke="#7C5CFC" stroke-width="1.5" stroke-dasharray="5 4"/><text x="561" y="219" font-size="12.5" text-anchor="middle" font-weight="650" fill="#0F1115">被测 Agent（同一 workspace）</text><text x="561" y="236" font-size="10.5" fill="#7A8296" text-anchor="middle">同一条 IM 输入与发信路径</text>
+    <line x1="216" y1="224" x2="252" y2="224" stroke="#7C5CFC" stroke-width="1.4" marker-end="url(#ar2)"/>
+    <line x1="426" y1="224" x2="462" y2="224" stroke="#7C5CFC" stroke-width="1.4" marker-end="url(#ar2)"/>
+    <!-- shared -->
+    <line x1="531" y1="116" x2="561" y2="192" stroke="#4176E6" stroke-width="1.3" stroke-dasharray="4 4" marker-end="url(#ar2)"/>
+    <text x="556" y="152" font-size="11" fill="#4176E6">同一 Consumer 按实例上下文选择 adapter</text>
+  </svg>
+  <ul class="tight">
+    <li><span class="tag fact">事实</span> 旺旺参考实现已有游标追赶与出站证据；HiQ 已有 outbox 与恢复机制——只吸纳机制。</li>
+    <li><span class="tag rec">采用</span> 三分进度：已接收 / 已提交 Agent / 对外已发送，重启后按进度补交且仅一次。</li>
+    <li><span class="tag tbd">待核验</span> DWS 真实收发与回执仅有 dry-run/mock 级证据；旺旺无 whoami，商家身份绑定路径未知。</li>
+  </ul>
+</section>
+
+<!-- 3. 插队与触发 -->
+<section>
+  <h2><span class="n">3</span>插队与触发：新消息立刻到场，但不动运行中的工具</h2>
+  <div class="grid2">
+    <div class="mini">
+      <h3>新触发直接插队 <span class="tag fact" style="margin-left:4px">用户已确认</span></h3>
+      <p>不等当前轮 FIFO 排队。候选机制是现有 steer / 优先 inbox，在最近安全的 step boundary 以高优先级生效；不强制中断模型生成、不动已开始的工具。</p>
+    </div>
+    <div class="mini">
+      <h3>群触发三选多 <span class="tag fact" style="margin-left:4px">多选已确认</span></h3>
+      <p>被 @ ／每 N 条新消息／定时（仅有新消息）。<span class="tag rec">本轮采用</span> 任一满足即触发、同批只提交一次、N 计未提交消息、固定周期、提交成功才推进。</p>
+    </div>
+  </div>
+  <div class="confirmed-box">
+    <b>已确认（用户两次明确）：</b>插队在最近安全的 step boundary 以高优先级生效，不强制中断模型生成、不动已开始的工具执行。方案即按此设计，不再是开放问题。
+  </div>
+</section>
+
+<!-- 4. 生命周期 -->
+<section>
+  <h2><span class="n">4</span>隔离、生命周期与安全：四条硬规则</h2>
+  <div class="grid2">
+    <div class="mini"><h3>重启零定制</h3><p>完全跟随普通 Session 默认：该续跑就续跑、该停就停。显式停止的模拟实例不可复活。</p></div>
+    <div class="mini"><h3>配置变更只影响新建</h3><p>清除/改换模拟目标配置不影响运行中实例；旧实例固定创建时目标，继续收发并可停止。</p></div>
+    <div class="mini"><h3>权限与身份</h3><p>外部 IM 发言不是 owner 指令；审批只在 DSH 页面；凭据只以 reference 出现在配置与日志。来源不可证明时保留“不确定”，不按昵称猜。</p></div>
+    <div class="mini"><h3>模拟边界</h3><p>未配置模拟目标的 workspace 没有模拟工具；被测 workspace 不因成为目标获得工具；模拟只替换 IM 投递，其他工具的副作用各自负责。</p></div>
+  </div>
+</section>
+
+<!-- 5. 基线策略 -->
+<section>
+  <h2><span class="n">5</span>并行基线：固定同步快照开工，单一集成者合入更新</h2>
+  <svg class="diagram" viewBox="0 0 920 170" xmlns="http://www.w3.org/2000/svg" font-family="inherit">
+    <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A8296"/></marker></defs>
+    <rect x="20" y="46" width="240" height="70" rx="12" fill="#0F1115"/><text x="140" y="76" fill="#fff" font-size="13" text-anchor="middle" font-weight="600">上游同步项目</text><text x="140" y="96" fill="#B9C0D0" font-size="11" text-anchor="middle">持续推进 · 单一集成者</text>
+    <rect x="330" y="20" width="260" height="56" rx="12" fill="#EAF0FE" stroke="#4176E6" stroke-opacity=".4"/><text x="460" y="43" font-size="12.5" text-anchor="middle" font-weight="650" fill="#0F1115">固定快照 96d33581…（规格基线）</text><text x="460" y="61" font-size="11" text-anchor="middle" fill="#7A8296">接口复核未完成 · 本方案不定最终签名</text>
+    <rect x="330" y="96" width="260" height="56" rx="12" fill="#fff" stroke="#0F1115" stroke-width="1.4"/><text x="460" y="119" font-size="12.5" text-anchor="middle" font-weight="650">IM 规格分支（已建立）</text><text x="460" y="137" font-size="11" text-anchor="middle" fill="#7A8296">方案冻结后实施 · 周期性合入同步更新</text>
+    <line x1="260" y1="66" x2="326" y2="48" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <line x1="260" y1="96" x2="326" y2="118" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <rect x="660" y="46" width="240" height="70" rx="12" fill="#FDF6E7" stroke="#B7791F" stroke-opacity=".5"/><text x="780" y="76" font-size="12.5" text-anchor="middle" font-weight="650" fill="#B7791F">合入后逐项复核高重叠区</text><text x="780" y="96" font-size="11" text-anchor="middle" fill="#B7791F">session / tools / subagent / sidebar</text>
+    <line x1="590" y1="118" x2="656" y2="92" stroke="#7A8296" stroke-width="1.4" marker-end="url(#ar3)"/>
+    <text x="460" y="165" font-size="11.5" fill="#7A8296" text-anchor="middle">不追最新 upstream；不承诺“只 merge 无返工”</text>
+  </svg>
+  <details><summary>改动范围一览（复用 / 修改 / 新增）</summary>
+    <div class="body">
+      <b>复用：</b>Session/Agent/subagent/审批/credentials/primitives/Better Sidebar 接缝；<code>agent-loop</code> 不改。<br>
+      <b>修改：</b>全局设置（IM 账号 section）、工作区设置（IM 接管 / IM 模拟两节，导航容器已批准）、工具层（发信 + 模拟工具 Consumer）。<br>
+      <b>新增：</b>IM 域 durable domain（账号/路由/游标/outbox/模拟实例）、钉钉与旺旺 adapter、模拟 adapter、Sidebar IM 对话 tab。<br>
+      <b>不做：</b>飞书通道、评测评分、人工自动冻结、IM 审批通知、IM 专属重启策略、独立看板。
+    </div>
+  </details>
+  <details><summary>验收将如何观察</summary>
+    <div class="body">恢复补交一次且仅一次；同批多条件触发只提交一次；AI 回显不再触发；发送未知显示待确认且不重发；模拟消息跨实例/出真实通道即拒绝；未配置 workspace 无模拟工具；真实装配跑关键路径的 keyless snapshot。详见 scheme-source.md「可观察验证」。</div>
+  </details>
+</section>
+
+<p class="foot">方案方向已批准 · 已授权进入 spec/ticket（未授权产品实现）· proposed 状态，方案 note 已随规格分支持久化 · 本页与 scheme-source.md 均归档在 .agents/design/im-takeover/ 并已进入规格分支</p>
+
+</div>
+</body>
+</html>

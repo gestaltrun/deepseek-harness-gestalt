@@ -33,7 +33,11 @@ describe('product release workflows', () => {
     expect(input(mobile, 'workflow_call', 'artifact_run_id')).toMatchObject({ required: false, type: 'string' })
     expect(input(mobile, 'workflow_call', 'recover_artifacts')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(mobile, 'workflow_call', 'publish_github')).toMatchObject({ required: true, type: 'boolean' })
-    expect(input(mobile, 'workflow_call', 'candidate_build_only')).toMatchObject({ required: true, type: 'boolean', default: false })
+    expect(input(mobile, 'workflow_call', 'candidate_build_only')).toEqual({
+      description: 'Build one protected signed Android candidate for physical acceptance without publication or TestFlight.',
+      required: true,
+      type: 'boolean',
+    })
     expect(input(mobile, 'workflow_call', 'acceptance_run_id')).toMatchObject({ required: false, type: 'string', default: '' })
 
     expect(image.on).toHaveProperty('workflow_dispatch')

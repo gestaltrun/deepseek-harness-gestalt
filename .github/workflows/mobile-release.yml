@@ -28,7 +28,6 @@ on:
         description: Build one protected signed Android candidate for physical acceptance without publication or TestFlight.
         required: true
         type: boolean
-        default: false
       upload_testflight:
         description: Upload the signed iOS candidate to TestFlight.
         required: true

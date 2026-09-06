@@ -13,8 +13,17 @@ fi
 
 state_object="oss://${PLATFORM_OSS_BUCKET}/${PLATFORM_DEPLOY_OSS_OBJECT_PREFIX}/active-state.json"
 state=$(aliyun oss cat "$state_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT")
-phase=$(jq -er 'select(.version == 1) | .phase | select(. == "rollbackable" or . == "commit-pending" or . == "committed")' <<< "$state")
+version=$(jq -er '.version | select(. == 1 or . == 2)' <<< "$state")
+mode=rolling
+if [ "$version" = 2 ]; then
+  mode=$(jq -er '.mode | select(. == "rolling" or . == "bootstrap")' <<< "$state")
+fi
+phase=$(jq -er '.phase | select(. == "rollbackable" or . == "commit-pending" or . == "committed")' <<< "$state")
 object_root=$(jq -er '.objectRoot' <<< "$state")
+candidate_commit=
+if [ "$mode" = bootstrap ]; then
+  candidate_commit=$(jq -er '.candidateCommit | select(test("^[0-9a-f]{40}$"))' <<< "$state")
+fi
 state_instance_ids=()
 while IFS= read -r instance_id; do
   state_instance_ids+=("$instance_id")
@@ -45,6 +54,9 @@ trap 'stop_recovery 143' TERM
 write_recovery_command() {
   {
     printf 'set -- %s\n' "$1"
+    if [ "$mode" = bootstrap ]; then
+      printf 'export DSH_DEPLOY_CANDIDATE=%q\n' "$candidate_commit"
+    fi
     tail -n +2 "$script_dir/platform-host-deploy.sh"
   } > "$RECOVERY_COMMAND"
 }
@@ -58,7 +70,16 @@ run_recovery_on_all() {
   test "$recovery_failed" = 0
 }
 
-if [ "$phase" = rollbackable ]; then
+if [ "$mode" = bootstrap ]; then
+  if [ "$phase" = committed ]; then
+    run_recovery_on_all complete-bootstrap 2100
+  elif [ "$phase" = rollbackable ]; then
+    run_recovery_on_all bootstrap-rollback 2100
+  else
+    echo 'platform: bootstrap recovery state is ambiguous' >&2
+    exit 1
+  fi
+elif [ "$phase" = rollbackable ]; then
   run_recovery_on_all rollback 2100
 else
   if [ "$phase" = commit-pending ]; then

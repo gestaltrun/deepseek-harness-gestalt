@@ -25,7 +25,8 @@ describe('CI workflow', () => {
     }
     const dispatch = workflowEvent(workflow, 'workflow_dispatch')
     expect(dispatch).toMatchObject({ inputs: {
-      acceptance_run_id: { required: true, type: 'string' },
+      acceptance_run_id: { required: false, type: 'string' },
+      candidate_build_only: { required: true, type: 'boolean', default: false },
       accept_transport_risk: { required: true, type: 'boolean', default: false },
     } })
     const authorization = workflow.jobs['release-authorization']

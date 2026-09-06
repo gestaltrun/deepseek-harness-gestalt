@@ -5,7 +5,7 @@
     "outDir": "lib/types",
     "jsx": "react-jsx"
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "vite-runtime-identity.ts"],
   "references": [
     { "path": "../../packages/util/brand" },
     { "path": "../../packages/attachment/attachment" },

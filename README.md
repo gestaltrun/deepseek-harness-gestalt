@@ -7,7 +7,7 @@ English | [中文](README.zh.md)
   <p><sub>Product name: Gestalt · Chinese name and IP character: 獭子哥</sub></p>
   <p><strong>Gestalt is the product layer for DeepSeek Harness.</strong></p>
   <p>
-    <a href="https://www.gestaltrun.com/">Website</a> ·
+    <a href="https://www.beikejiedeliulangmao.top/">Website</a> ·
     <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases/latest">Download</a> ·
     <a href="docs/user/guide/index.md">Web guide</a> ·
     <a href="docs/architecture.md">Architecture</a>

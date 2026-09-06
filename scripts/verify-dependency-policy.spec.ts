@@ -43,7 +43,7 @@ describe('dependency policy fixture cleanup', () => {
     expect(remove).toHaveBeenCalledWith('owned-fixture', {
       recursive: true,
       force: true,
-      maxRetries: 5,
+      maxRetries: 10,
       retryDelay: 100,
     })
   })

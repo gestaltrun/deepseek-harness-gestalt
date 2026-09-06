@@ -1312,7 +1312,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const homepage = await fetch(`${listenOrigin}/`)
     expect(homepage.status).toBe(200)
     expect(homepage.headers.get('content-type')).toBe('text/html; charset=utf-8')
-    expect(await homepage.text()).toContain('<link rel="canonical" href="https://www.gestaltrun.com/"')
+    expect(await homepage.text()).toContain('<link rel="canonical" href="https://www.beikejiedeliulangmao.top/"')
     for (const [path, contentType] of [
       ['/robots.txt', 'text/plain; charset=utf-8'],
       ['/sitemap.xml', 'application/xml; charset=utf-8'],

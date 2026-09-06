@@ -1,0 +1,15 @@
+export const OPERATED_PLATFORM_BUILD_ENV = {
+  VITE_PLATFORM_ENV: '',
+  VITE_PLATFORM_ORIGIN: 'https://platform.example.com',
+  VITE_PLATFORM_CALLBACK_URL: 'https://platform.example.com/v1/account/oauth/github/callback',
+  VITE_PLATFORM_GITHUB_CLIENT_ID: 'mobile-operated',
+  VITE_PLATFORM_CREDENTIAL_REFERENCE: 'credentials://operated',
+  VITE_PLATFORM_DATABASE_IDENTITY: 'database-operated',
+  VITE_PLATFORM_IDENTITY_NAMESPACE: 'namespace-operated',
+  VITE_REMOTE_RELAY_WSS_URL: 'wss://relay.example.com/v1/remote-access/relay',
+  VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: '9999999',
+  VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: '8',
+  VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: '1000',
+  VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: '5000',
+  VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: '100',
+} as const

@@ -33,6 +33,12 @@ describe('product release workflows', () => {
     expect(input(mobile, 'workflow_call', 'artifact_run_id')).toMatchObject({ required: false, type: 'string' })
     expect(input(mobile, 'workflow_call', 'recover_artifacts')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(mobile, 'workflow_call', 'publish_github')).toMatchObject({ required: true, type: 'boolean' })
+    expect(input(mobile, 'workflow_call', 'candidate_build_only')).toEqual({
+      description: 'Build one protected signed Android candidate for physical acceptance without publication or TestFlight.',
+      required: true,
+      type: 'boolean',
+    })
+    expect(input(mobile, 'workflow_call', 'acceptance_run_id')).toMatchObject({ required: false, type: 'string', default: '' })
 
     expect(image.on).toHaveProperty('workflow_dispatch')
     expect(image.on).toHaveProperty('workflow_call')
@@ -41,14 +47,48 @@ describe('product release workflows', () => {
     expect(input(deploy, 'workflow_call', 'image_identity')).toMatchObject({ required: true, type: 'string' })
     expect(input(deploy, 'workflow_call', 'image_candidate_sha')).toMatchObject({ required: true, type: 'string' })
     expect(input(deploy, 'workflow_call', 'recover')).toMatchObject({ required: true, type: 'boolean' })
+    expect(input(deploy, 'workflow_call', 'bootstrap')).toMatchObject({ required: true, type: 'boolean' })
+    expect(input(deploy, 'workflow_call', 'bootstrap_eip_addresses')).toMatchObject({ required: false, type: 'string' })
+    expect(input(deploy, 'workflow_call', 'publish_release')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(deploy, 'workflow_call', 'publish_only')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(deploy, 'workflow_call', 'deployment_run_id')).toMatchObject({ required: false, type: 'string' })
+    expect(input(deploy, 'workflow_dispatch', 'bootstrap')).toMatchObject({ required: true, type: 'boolean', default: false })
+    expect(input(deploy, 'workflow_dispatch', 'publish_release')).toMatchObject({ required: true, type: 'boolean', default: false })
     for (const source of [desktopSource, text('.github/workflows/mobile-release.yml'), text('.github/workflows/platform-image.yml'), text('.github/workflows/platform-deploy.yml')]) {
       expect(source).toContain('git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master')
       expect(source).toContain('trustedWorkflowHeadCommits')
       expect(source).not.toContain('if [[ "$workflow_head" !=')
       expect(source.match(/git merge-base --is-ancestor/g)?.length).toBeGreaterThanOrEqual(2)
     }
+  })
+
+  it('keeps protected Mobile acceptance candidates isolated from publication and recovery', () => {
+    const source = text('.github/workflows/mobile-release.yml')
+    const mobile = workflow('.github/workflows/mobile-release.yml')
+    expect(input(mobile, 'workflow_dispatch', 'candidate_build_only')).toMatchObject({ required: true, type: 'boolean', default: false })
+    expect(input(mobile, 'workflow_dispatch', 'acceptance_run_id')).toMatchObject({ required: false, type: 'string' })
+    expect(job(mobile, 'release-authorization').if).toBe('${{ !inputs.candidate_build_only }}')
+    const candidate = job(mobile, 'android-acceptance-candidate')
+    expect(candidate.if).toBe("${{ inputs.candidate_build_only && needs.release-version.result == 'success' }}")
+    expect(candidate.environment).toBe('mobile-release')
+    const serialized = JSON.stringify(candidate)
+    expect(serialized).toContain('ANDROID_KEYSTORE_BASE64')
+    expect(serialized).toContain('mobile-acceptance-candidate-${{ inputs.candidate_sha }}')
+    const callOutputs = record(record(record(mobile.on, 'on').workflow_call, 'workflow_call').outputs, 'workflow_call outputs')
+    expect(callOutputs.acceptance_candidate_artifact).toMatchObject({ value: '${{ jobs.android-acceptance-candidate.outputs.artifact_name }}' })
+    expect(serialized).toContain('signerCertificateSha256')
+    expect(serialized).toContain('runtimeIdentitySha256')
+    expect(source).toContain('if [[ "$CANDIDATE_BUILD_ONLY" == true ]]')
+    expect(source).toContain('pnpm product-release:validate-candidate')
+    expect(serialized).not.toContain('gh release')
+    expect(serialized).not.toContain('upload-testflight')
+    expect(source).toContain('bash apps/mobile/scripts/validate-mobile-release-mode.sh')
+    expect(source).toContain('test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"')
+    expect(source).not.toContain('mobile-acceptance-candidate-" + candidate')
+    const releaseVersion = stepRun(mobile, 'release-version', 'Read source-owned version and build number')
+    expect(releaseVersion).toContain('if [[ "$CANDIDATE_BUILD_ONLY" == true ]]')
+    expect(releaseVersion.indexOf('if [[ "$CANDIDATE_BUILD_ONLY" == true ]]'))
+      .toBeLessThan(releaseVersion.indexOf('pnpm product-release:validate-candidate'))
   })
 
   it('projects the tracked Mobile marketing/build versions and publishes a durable prerelease', () => {
@@ -96,8 +136,10 @@ describe('product release workflows', () => {
     expect(deploySource).toContain('tag="platform-v${PLATFORM_VERSION}"')
     expect(deploySource).toContain('gh release create "$tag"')
     expect(deploySource).toContain('PLATFORM_IMAGE_IDENTITY: ${{ inputs.image_identity }}')
+    expect(deploySource).toContain('inputs.publish_release')
     expect(deploySource).toContain('inputs.publish_only')
     expect(deploySource).toContain('inputs.deployment_run_id')
+    expect(deploySource).toContain('if: ${{ inputs.publish_release')
     expect(deploySource).toContain('platform-deployment-candidate-')
     expect(imageSource).toContain('actions/runs/$PLATFORM_IMAGE_RUN_ID/jobs')
     expect(imageSource).toContain('actions/runs/$PLATFORM_IMAGE_RUN_ID/artifacts')
@@ -160,8 +202,14 @@ describe('product release workflows', () => {
     expect(coordinatorSource).toContain('refs/remotes/origin/master')
     expect(job(coordinator, 'desktop').uses).toBe('./.github/workflows/desktop-release.yml')
     expect(job(coordinator, 'mobile').uses).toBe('./.github/workflows/mobile-release.yml')
+    expect(record(job(coordinator, 'mobile').with, 'mobile inputs').candidate_build_only).toBe(false)
     expect(job(coordinator, 'platform-image').uses).toBe('./.github/workflows/platform-image.yml')
     expect(job(coordinator, 'platform-deploy').uses).toBe('./.github/workflows/platform-deploy.yml')
+    expect(record(job(coordinator, 'platform-deploy').with, 'platform deploy inputs')).toMatchObject({
+      bootstrap: false,
+      bootstrap_eip_addresses: '',
+      publish_release: true,
+    })
     expect(JSON.stringify(job(coordinator, 'manifest'))).toContain('product-release-manifest')
     expect(job(coordinator, 'manifest').if).toBe('${{ always() }}')
     expect(coordinatorSource).toContain('actions/runs/$GITHUB_RUN_ID')

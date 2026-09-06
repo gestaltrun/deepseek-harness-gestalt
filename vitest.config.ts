@@ -46,6 +46,8 @@ const windowsUnsupportedTests = process.platform === 'win32'
       'packages/subprocess/subprocess-local/tests/process-inspector.spec.ts',
       'packages/subprocess/subprocess-local/tests/spawn.spec.ts',
       'packages/subprocess/subprocess-local/tests/terminal.spec.ts',
+      'apps/platform/tests/certificate-renewal.spec.ts',
+      'apps/mobile/tests/android-acceptance-candidate.spec.ts',
     ]
   : []
 

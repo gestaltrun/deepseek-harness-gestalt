@@ -7,12 +7,12 @@
   "title": "Gestalt · 獭子哥",
   "lang": "zh-CN",
   "description": "Gestalt（獭子哥）是基于 DeepSeek Harness 构建的开源 AI coding agent（编程智能体）产品，提供桌面端、手机伴侣、会话回放和可组合插件。",
-  "canonical": "https://www.gestaltrun.com/",
+  "canonical": "https://www.beikejiedeliulangmao.top/",
   "repositoryLinks": [
     "https://github.com/gestaltrun/deepseek-harness-gestalt",
     "https://github.com/gestaltrun/deepseek-harness-gestalt/releases"
   ],
-  "jsonLd": "{\n  \"@context\": \"https://schema.org\",\n  \"@graph\": [\n    {\n      \"@type\": \"WebSite\",\n      \"@id\": \"https://www.gestaltrun.com/#website\",\n      \"url\": \"https://www.gestaltrun.com/\",\n      \"name\": \"Gestalt\",\n      \"alternateName\": [\"獭子哥\", \"DeepSeek Gestalt\"],\n      \"inLanguage\": [\"zh-CN\", \"en-US\"]\n    },\n    {\n      \"@type\": \"SoftwareApplication\",\n      \"@id\": \"https://www.gestaltrun.com/#software\",\n      \"name\": \"Gestalt\",\n      \"alternateName\": [\"獭子哥\", \"DeepSeek Gestalt\"],\n      \"url\": \"https://www.gestaltrun.com/\",\n      \"description\": \"An open-source AI coding agent product built on DeepSeek Harness, with desktop and mobile clients, replayable sessions, and composable plugins.\",\n      \"applicationCategory\": \"DeveloperApplication\",\n      \"operatingSystem\": [\"macOS\", \"Windows\", \"iOS\", \"Android\", \"Web\"],\n      \"image\": \"https://www.gestaltrun.com/images/hero-bg.png\",\n      \"downloadUrl\": \"https://github.com/gestaltrun/deepseek-harness-gestalt/releases\",\n      \"sameAs\": \"https://github.com/gestaltrun/deepseek-harness-gestalt\",\n      \"isBasedOn\": \"https://github.com/deepseek-ai/deepseek-harness\"\n    }\n  ]\n}"
+  "jsonLd": "{\n  \"@context\": \"https://schema.org\",\n  \"@graph\": [\n    {\n      \"@type\": \"WebSite\",\n      \"@id\": \"https://www.beikejiedeliulangmao.top/#website\",\n      \"url\": \"https://www.beikejiedeliulangmao.top/\",\n      \"name\": \"Gestalt\",\n      \"alternateName\": [\"獭子哥\", \"DeepSeek Gestalt\"],\n      \"inLanguage\": [\"zh-CN\", \"en-US\"]\n    },\n    {\n      \"@type\": \"SoftwareApplication\",\n      \"@id\": \"https://www.beikejiedeliulangmao.top/#software\",\n      \"name\": \"Gestalt\",\n      \"alternateName\": [\"獭子哥\", \"DeepSeek Gestalt\"],\n      \"url\": \"https://www.beikejiedeliulangmao.top/\",\n      \"description\": \"An open-source AI coding agent product built on DeepSeek Harness, with desktop and mobile clients, replayable sessions, and composable plugins.\",\n      \"applicationCategory\": \"DeveloperApplication\",\n      \"operatingSystem\": [\"macOS\", \"Windows\", \"iOS\", \"Android\", \"Web\"],\n      \"image\": \"https://www.beikejiedeliulangmao.top/images/hero-bg.png\",\n      \"downloadUrl\": \"https://github.com/gestaltrun/deepseek-harness-gestalt/releases\",\n      \"sameAs\": \"https://github.com/gestaltrun/deepseek-harness-gestalt\",\n      \"isBasedOn\": \"https://github.com/deepseek-ai/deepseek-harness\"\n    }\n  ]\n}"
 }
 ```
 
@@ -34,19 +34,19 @@
     "path": "/robots.txt",
     "status": 200,
     "type": "text/plain; charset=utf-8",
-    "body": "User-agent: *\nAllow: /\nSitemap: https://www.gestaltrun.com/sitemap.xml\n"
+    "body": "User-agent: *\nAllow: /\nSitemap: https://www.beikejiedeliulangmao.top/sitemap.xml\n"
   },
   {
     "path": "/sitemap.xml",
     "status": 200,
     "type": "application/xml; charset=utf-8",
-    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>https://www.gestaltrun.com/</loc>\n  </url>\n</urlset>\n"
+    "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>https://www.beikejiedeliulangmao.top/</loc>\n  </url>\n</urlset>\n"
   },
   {
     "path": "/llms.txt",
     "status": 200,
     "type": "text/plain; charset=utf-8",
-    "body": "# Gestalt · 獭子哥\n\n> Gestalt is an open-source AI coding agent product built on DeepSeek Harness. It packages the compatible plugin runtime as desktop, mobile, and operated Platform experiences.\n\n## Product\n\nGestalt keeps the DeepSeek Harness plugin model and adds an installable desktop host, a paired mobile companion, replayable sessions, release delivery, and the production Platform service at this origin.\n\n## Links\n\n- Product: https://www.gestaltrun.com/\n- Source: https://github.com/gestaltrun/deepseek-harness-gestalt\n- Documentation: https://gestaltrun.github.io/deepseek-harness-gestalt/\n- Releases: https://github.com/gestaltrun/deepseek-harness-gestalt/releases\n- Official DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness\n\n## Languages\n\nThe product page contains Chinese and English content at the same canonical URL. Use the documentation site for linkable pages in each language.\n"
+    "body": "# Gestalt · 獭子哥\n\n> Gestalt is an open-source AI coding agent product built on DeepSeek Harness. It packages the compatible plugin runtime as desktop, mobile, and operated Platform experiences.\n\n## Product\n\nGestalt keeps the DeepSeek Harness plugin model and adds an installable desktop host, a paired mobile companion, replayable sessions, release delivery, and the production Platform service at this origin.\n\n## Links\n\n- Product: https://www.beikejiedeliulangmao.top/\n- Source: https://github.com/gestaltrun/deepseek-harness-gestalt\n- Documentation: https://gestaltrun.github.io/deepseek-harness-gestalt/\n- Releases: https://github.com/gestaltrun/deepseek-harness-gestalt/releases\n- Official DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness\n\n## Languages\n\nThe product page contains Chinese and English content at the same canonical URL. Use the documentation site for linkable pages in each language.\n"
   }
 ]
 ```

@@ -149,6 +149,7 @@ jobs:
       version: ${{ needs.plan.outputs.mobile_version }}
       build_number: ${{ fromJSON(needs.plan.outputs.mobile_build) }}
       acceptance_run_id: ${{ inputs.mobile_acceptance_run_id }}
+      candidate_build_only: false
       upload_testflight: ${{ inputs.mobile_upload_testflight }}
       accept_transport_risk: ${{ inputs.mobile_accept_transport_risk }}
       publish_github: true
@@ -188,6 +189,9 @@ jobs:
       version: ${{ needs.plan.outputs.platform_version }}
       deploy: ${{ inputs.platform_deployment_run_id == '' }}
       recover: false
+      bootstrap: false
+      bootstrap_eip_addresses: ''
+      publish_release: true
       publish_only: ${{ inputs.platform_deployment_run_id != '' }}
       deployment_run_id: ${{ inputs.platform_deployment_run_id }}
       attachment_storage: ${{ inputs.platform_attachment_storage }}

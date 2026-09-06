@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -14,7 +15,7 @@ const workflowRun = `https://github.com/${repository}/actions/runs/123`
 const origin = 'https://www.beikejiedeliulangmao.top'
 
 const digest = (value: string | Buffer) =>
-  `sha256:${spawnSync('shasum', ['-a', '256'], { input: value, encoding: 'utf8' }).stdout.trim().split(' ')[0]}`
+  `sha256:${createHash('sha256').update(value).digest('hex')}`
 
 afterEach(() => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true })

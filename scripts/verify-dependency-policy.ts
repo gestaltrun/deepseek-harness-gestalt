@@ -217,7 +217,7 @@ function clearMarkers(fixture: Fixture): void {
 
 /** Remove one owned fixture with Node's bounded Windows EPERM retry. */
 export function removeFixtureRoot(path: string, remove: typeof rmSync = rmSync): void {
-  remove(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  remove(path, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 }
 
 export function finishFixture(primaryError: unknown, cleanup: () => void): void {

@@ -9,6 +9,7 @@ import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { chromium, type Browser } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { OPERATED_PLATFORM_BUILD_ENV } from './fixtures/operated-platform-environment.fixture.ts'
 
 const MOBILE_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const VITE_BIN = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url))
@@ -20,22 +21,6 @@ let previewClosed: Promise<unknown> | undefined
 let previewStdout: Promise<void> | undefined
 let previewStderr: Promise<void> | undefined
 let previewRoot: string | undefined
-
-const BUILD_ENV = {
-  VITE_PLATFORM_ENV: '',
-  VITE_PLATFORM_ORIGIN: 'https://platform.example.com',
-  VITE_PLATFORM_CALLBACK_URL: 'https://platform.example.com/v1/account/oauth/github/callback',
-  VITE_PLATFORM_GITHUB_CLIENT_ID: 'mobile-operated',
-  VITE_PLATFORM_CREDENTIAL_REFERENCE: 'credentials://operated',
-  VITE_PLATFORM_DATABASE_IDENTITY: 'database-operated',
-  VITE_PLATFORM_IDENTITY_NAMESPACE: 'namespace-operated',
-  VITE_REMOTE_RELAY_WSS_URL: 'wss://relay.example.com/v1/remote-access/relay',
-  VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: '9999999',
-  VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: '8',
-  VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: '1000',
-  VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: '5000',
-  VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: '100',
-}
 
 function drain(stream: Readable | null): Promise<void> {
   if (stream === null) return Promise.resolve()
@@ -126,7 +111,7 @@ beforeAll(async () => {
     '--outDir', previewRoot, '--emptyOutDir',
   ], {
     cwd: MOBILE_ROOT,
-    env: { ...process.env, ...BUILD_ENV },
+    env: { ...process.env, ...OPERATED_PLATFORM_BUILD_ENV },
     encoding: 'utf8',
   })
   if (build.status !== 0) throw new Error(`Mobile product build failed:\n${build.stdout}\n${build.stderr}`)
@@ -139,6 +124,7 @@ beforeAll(async () => {
     '--host', '127.0.0.1', '--port', String(port), '--strictPort',
   ], {
     cwd: MOBILE_ROOT,
+    env: { ...process.env, ...OPERATED_PLATFORM_BUILD_ENV },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   })

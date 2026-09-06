@@ -459,7 +459,7 @@ function runtimeIdentityResponse(): Response {
   })
 }
 
-function stubRuntimeIdentityFetch(): ReturnType<typeof vi.fn> {
+function stubRuntimeIdentityFetch() {
   const fetch = vi.fn(async (input: string | URL | Request) => {
     const url = requestUrl(input)
     if (url.endsWith(RUNTIME_IDENTITY_URL)) return runtimeIdentityResponse()

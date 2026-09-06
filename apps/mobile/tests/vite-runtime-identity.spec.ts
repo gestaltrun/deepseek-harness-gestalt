@@ -15,25 +15,25 @@ afterEach(() => {
 })
 
 describe('Mobile runtime identity Vite plugin', () => {
-  it('emits the same validated identity for Web, Android, and iOS packaging', () => {
+  it('emits the same validated identity for Web, Android, and iOS packaging', async () => {
     for (const [key, value] of Object.entries(ENV)) vi.stubEnv(key, value)
     const plugin = mobileRuntimeIdentity()
     const configResolved = hook(plugin.configResolved)
     const generateBundle = hook(plugin.generateBundle)
-    configResolved({ mode: 'production', root: '/missing' } as never)
+    await configResolved({ mode: 'production', root: '/missing' } as never)
     const emitted: unknown[] = []
-    generateBundle.call({ emitFile: (value: unknown) => emitted.push(value) } as never, {} as never, {} as never, false)
-    expect(emitted).toEqual([expect.objectContaining({
-      type: 'asset',
-      fileName: 'dsh-mobile-runtime-identity.json',
-      source: expect.stringContaining(ENV.VITE_PLATFORM_ORIGIN),
-    })])
+    await generateBundle.call({ emitFile: (value: unknown) => emitted.push(value) } as never, {} as never, {} as never, false)
+    expect(emitted).toHaveLength(1)
+    const asset = emitted[0]
+    if (typeof asset !== 'object' || asset === null || !('source' in asset)) throw new Error('expected runtime identity asset')
+    expect(asset).toMatchObject({ type: 'asset', fileName: 'dsh-mobile-runtime-identity.json' })
+    expect(asset.source).toEqual(expect.stringContaining(ENV.VITE_PLATFORM_ORIGIN))
   })
 
-  it('fails configuration before serving or building when identity is missing', () => {
+  it('fails configuration before serving or building when identity is missing', async () => {
     const configResolved = hook(mobileRuntimeIdentity().configResolved)
-    expect(() => configResolved({ mode: 'production', root: '/missing' } as never))
-      .toThrow('production origin is required')
+    await expect(Promise.resolve().then(() => configResolved({ mode: 'production', root: '/missing' } as never)))
+      .rejects.toThrow('production origin is required')
   })
 })
 

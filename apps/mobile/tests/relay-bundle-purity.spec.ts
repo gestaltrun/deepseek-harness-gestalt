@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { OPERATED_PLATFORM_BUILD_ENV } from './fixtures/operated-platform-environment.fixture.ts'
 
 const MOBILE_ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -13,6 +14,7 @@ const builtClientLibsPresent = existsSync(
 
 describe.skipIf(!builtClientLibsPresent)('Mobile Relay bundle purity', () => {
   it('builds the real Vite entry without importing a Node builtin', async () => {
+    for (const [name, value] of Object.entries(OPERATED_PLATFORM_BUILD_ENV)) vi.stubEnv(name, value)
     const result = await build({
       root: MOBILE_ROOT,
       configFile: fileURLToPath(new URL('../vite.config.ts', import.meta.url)),

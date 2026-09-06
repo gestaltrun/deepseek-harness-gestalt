@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -21,18 +21,17 @@ afterEach(() => {
 })
 
 describe('Android acceptance candidate manifest', () => {
-  it('authenticates candidate, artifact, signer, baked runtime identity, packaging, and workflow provenance', () => {
+  it('authenticates candidate, signed APK, signer, baked runtime identity, packaging, and workflow provenance', () => {
     const fixture = createFixture()
     expect(run(fixture).status).toBe(0)
   })
 
-  it('rejects changed artifact, signer, baked origin, workflow, and packaging provenance', () => {
-    for (const mutation of ['artifact', 'signer', 'baked-origin', 'workflow', 'packaging'] as const) {
-      const fixture = createFixture()
+  it('rejects changed APK, signer, baked origin, duplicate runtime identity, workflow, and packaging provenance', () => {
+    for (const mutation of ['artifact', 'signer', 'baked-origin', 'duplicate-identity', 'workflow', 'packaging'] as const) {
+      const fixture = createFixture(mutation === 'baked-origin' ? 'https://wrong.example' : origin,
+        mutation === 'duplicate-identity')
       if (mutation === 'artifact') writeFileSync(fixture.apk, 'changed')
-      else if (mutation === 'baked-origin') {
-        writeFileSync(fixture.runtimeIdentity, JSON.stringify({ version: 1, origin: 'https://wrong.example' }))
-      } else {
+      else if (mutation === 'signer' || mutation === 'workflow' || mutation === 'packaging') {
         const manifest = JSON.parse(readFileSync(fixture.manifest, 'utf8')) as Record<string, unknown>
         const field = {
           signer: 'signerCertificateSha256',
@@ -47,18 +46,25 @@ describe('Android acceptance candidate manifest', () => {
   })
 })
 
-function createFixture() {
+function createFixture(bakedOrigin = origin, duplicateIdentity = false) {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-acceptance-candidate-'))
   temporary.push(directory)
   const apk = join(directory, 'Gestalt-0.1.3-8.apk')
   const manifest = join(directory, 'acceptance-candidate.json')
-  const runtimeIdentity = join(directory, 'dsh-mobile-runtime-identity.json')
   const apksigner = join(directory, 'apksigner')
-  const apkBody = 'signed-apk-fixture'
+  const identityDirectory = join(directory, 'assets/public')
+  execFileSync('mkdir', ['-p', identityDirectory])
+  const runtimeIdentityBody = `${JSON.stringify({ version: 1, origin: bakedOrigin })}\n`
+  writeFileSync(join(identityDirectory, 'dsh-mobile-runtime-identity.json'), runtimeIdentityBody)
+  execFileSync('zip', ['-q', '-r', apk, 'assets'], { cwd: directory })
+  if (duplicateIdentity) {
+    execFileSync('python3', ['-c', [
+      'import sys, zipfile',
+      'with zipfile.ZipFile(sys.argv[1], "a") as archive:',
+      '    archive.writestr("assets/public/dsh-mobile-runtime-identity.json", sys.argv[2])',
+    ].join('\n'), apk, runtimeIdentityBody])
+  }
   const signer = 'b'.repeat(64)
-  const runtimeIdentityBody = `${JSON.stringify({ version: 1, origin })}\n`
-  writeFileSync(apk, apkBody)
-  writeFileSync(runtimeIdentity, runtimeIdentityBody)
   writeFileSync(apksigner, `#!/usr/bin/env bash\nprintf 'Signer #1 certificate SHA-256 digest: ${signer}\\n'\n`)
   chmodSync(apksigner, 0o755)
   writeFileSync(manifest, `${JSON.stringify({
@@ -71,12 +77,12 @@ function createFixture() {
     buildNumber: 8,
     repository,
     workflowRun,
-    artifactDigests: { 'Gestalt-0.1.3-8.apk': digest(apkBody) },
+    artifactDigests: { 'Gestalt-0.1.3-8.apk': digest(readFileSync(apk)) },
     signerCertificateSha256: `sha256:${signer}`,
     runtimeIdentitySha256: digest(runtimeIdentityBody),
     packagingScriptSha256: digest(readFileSync(packaging)),
   })}\n`)
-  return { apk, manifest, runtimeIdentity, apksigner }
+  return { apk, manifest, apksigner }
 }
 
 function run(fixture: ReturnType<typeof createFixture>) {
@@ -92,7 +98,6 @@ function run(fixture: ReturnType<typeof createFixture>) {
       OPERATED_ORIGIN: origin,
       EXPECTED_REPOSITORY: repository,
       EXPECTED_WORKFLOW_RUN: workflowRun,
-      RUNTIME_IDENTITY_PATH: fixture.runtimeIdentity,
       APKSIGNER_PATH: fixture.apksigner,
     },
   })

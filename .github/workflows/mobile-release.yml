@@ -286,8 +286,12 @@ jobs:
           [[ "$signer" =~ ^[0-9a-fA-F]{64}$ ]]
           signer=$(printf '%s' "$signer" | tr '[:upper:]' '[:lower:]')
           artifact_digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
-          runtime_identity=apps/mobile/android/app/src/main/assets/public/dsh-mobile-runtime-identity.json
-          test -f "$runtime_identity"
+          runtime_entry=assets/public/dsh-mobile-runtime-identity.json
+          entry_count=$(unzip -Z1 "$apk" | grep -Fxc "$runtime_entry" || true)
+          test "$entry_count" = 1
+          runtime_identity="$RUNNER_TEMP/dsh-mobile-runtime-identity.json"
+          unzip -p "$apk" "$runtime_entry" > "$runtime_identity"
+          test -s "$runtime_identity"
           baked_origin=$(jq -er 'select(.version == 1) | .origin | strings' "$runtime_identity")
           test "$baked_origin" = "$VITE_PLATFORM_ORIGIN"
           runtime_identity_digest=$(sha256sum "$runtime_identity" | cut -d ' ' -f 1)
@@ -306,8 +310,7 @@ jobs:
           CANDIDATE_SHA="$CANDIDATE_SHA" PLAN_PATH="$PLAN_PATH" MOBILE_VERSION="$MOBILE_VERSION" \
             MOBILE_BUILD_NUMBER="$MOBILE_BUILD_NUMBER" OPERATED_ORIGIN="$VITE_PLATFORM_ORIGIN" \
             EXPECTED_REPOSITORY="$GITHUB_REPOSITORY" EXPECTED_WORKFLOW_RUN="$workflow_run" \
-            RUNTIME_IDENTITY_PATH="$runtime_identity" APKSIGNER_PATH="$apksigner" \
-            bash apps/mobile/scripts/verify-android-acceptance-candidate.sh \
+            APKSIGNER_PATH="$apksigner" bash apps/mobile/scripts/verify-android-acceptance-candidate.sh \
             acceptance-candidate/acceptance-candidate.json "acceptance-candidate/$(basename "$apk")"
           echo "artifact_name=mobile-acceptance-candidate-${CANDIDATE_SHA}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4

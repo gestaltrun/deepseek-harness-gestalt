@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-09-06-protected-mobile-acceptance-candidate.md
-2026-09-06-protected-mobile-acceptance-candidate.md: b30e6f63b25cd40b294ca6071b6533f2771246e2
-2026-09-06-protected-mobile-acceptance-candidate.zh.md: 870465e208bd0f86d3e0318146f4b05556dadf03
+2026-09-06-protected-mobile-acceptance-candidate.md: 80a4e1dbf87a999daec370699b43b53ea3914c65
+2026-09-06-protected-mobile-acceptance-candidate.zh.md: 0edbccc75db5a2b5fd9e46dbb707ed346ab4a932

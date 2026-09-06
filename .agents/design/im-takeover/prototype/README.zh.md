@@ -16,6 +16,10 @@ npm run dev    # http://127.0.0.1:5174/
 
 不提交锁文件：npm 会把 `file:` 链接按 checkout 目录深度转成相对路径，提交的锁文件在归档被复制到其他位置后会失效。使用 `npm install`，不要用 `npm ci`。`npm run build` 验证打包可编译。
 
+## 可重现性限制
+
+本归档不自包含、不完全可重现：`file:` primitives 依赖要求正式应用 checkout 位于记录的绝对路径；registry 依赖（`vite`、`@vitejs/plugin-react`）每次安装重新解析。`package.json` 已钉住本次交付验证的版本；后续 registry 元数据或传递依赖解析仍可能漂移。本次实际验证环境：Node v24.16.0、npm 11.13.0；已验证版本 vite 5.4.21、@vitejs/plugin-react 4.7.0、react 18.2.0、react-dom 18.2.0、`@deepseek-ai/dsh-client-ui-primitives` 0.1.1-rc.2（来自已安装应用）。
+
 ## 来源
 
 正式 UI 基础组件直接引用自已安装应用；主题 token 快照在 `system/tokens/`，来源哈希见 `manifest.json`。外壳按正式截图有据重建并在 `manifest.json` 标明，不宣称逐像素一致。`HASHES.sha256` 校验本归档 sanitize 后的实际文件集；正式 GUI 私人参考截图被刻意排除。

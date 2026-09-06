@@ -166,8 +166,10 @@ jobs:
           [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$MOBILE_CANDIDATE_SHA" refs/remotes/origin/master
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm product-release:validate-candidate --plan "$PLAN_PATH" --candidate "$MOBILE_CANDIDATE_SHA" --master refs/remotes/origin/master
+          if [[ "$CANDIDATE_BUILD_ONLY" == true ]]; then
+            pnpm install --frozen-lockfile --ignore-scripts
+            pnpm product-release:validate-candidate --plan "$PLAN_PATH" --candidate "$MOBILE_CANDIDATE_SHA" --master refs/remotes/origin/master
+          fi
           version=$(node -p "require('./apps/mobile/package.json').version")
           build_number=$(node -p "require('./apps/mobile/release.json').buildNumber")
           node -e "const v=process.argv[1], b=Number(process.argv[2]); if (!/^\\d+\\.\\d+\\.\\d+$/.test(v) || !Number.isSafeInteger(b) || b < 1) process.exit(1)" "$version" "$build_number"

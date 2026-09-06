@@ -74,12 +74,17 @@ describe('product release workflows', () => {
     expect(callOutputs.acceptance_candidate_artifact).toMatchObject({ value: '${{ jobs.android-acceptance-candidate.outputs.artifact_name }}' })
     expect(serialized).toContain('signerCertificateSha256')
     expect(serialized).toContain('runtimeIdentitySha256')
+    expect(source).toContain('if [[ "$CANDIDATE_BUILD_ONLY" == true ]]')
     expect(source).toContain('pnpm product-release:validate-candidate')
     expect(serialized).not.toContain('gh release')
     expect(serialized).not.toContain('upload-testflight')
     expect(source).toContain('bash apps/mobile/scripts/validate-mobile-release-mode.sh')
     expect(source).toContain('test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"')
     expect(source).not.toContain('mobile-acceptance-candidate-" + candidate')
+    const releaseVersion = stepRun(mobile, 'release-version', 'Read source-owned version and build number')
+    expect(releaseVersion).toContain('if [[ "$CANDIDATE_BUILD_ONLY" == true ]]')
+    expect(releaseVersion.indexOf('if [[ "$CANDIDATE_BUILD_ONLY" == true ]]'))
+      .toBeLessThan(releaseVersion.indexOf('pnpm product-release:validate-candidate'))
   })
 
   it('projects the tracked Mobile marketing/build versions and publishes a durable prerelease', () => {

@@ -12,7 +12,7 @@ Mobile release validation 要求一个声称已完成独立 Noise security revie
 
 Repository 与实际运行的 native transport test 仍是强制 release evidence。已批准的 Android Emulator 与 iOS Simulator 可以提供 device evidence；fixture Web page 与 `prototype-companion` 不可以。独立外部评审不是第一次分发的前置条件。Acceptance verdict 位于受保护的 `mobile-release` Environment 之后，因此运营者提供的 evidence 在已配置 reviewer 批准前不能成为 release artifact。成功的 Mobile Companion Acceptance run 会校验确切的 flow 与 device vocabulary、upgrade preservation、phone-size UI、assembled failure 与 transport decision，然后发布一份以已测试 `master` commit 命名的 immutable artifact。
 
-每次 Mobile Release dispatch 都要提供该 acceptance run id 与 candidate-scoped `accept_transport_risk` input。authorization job 会先把 source run 的 workflow id 与 path 绑定到 `.github/workflows/mobile-companion-acceptance.yml`，再在 Android 或 iOS 获得 signing secret 前校验 event 与具名 verdict、唯一且未过期的 artifact、repository、source run id、commit、Git tree、完整 evidence 与 risk acceptance。verifier 会调用进程内 distribution helper；其他 workflow 与 workflow syntax 都无法绕过相同的 readiness rule。
+每次 Mobile 发布或普通签名 dispatch 都要提供该 acceptance run id 与 candidate-scoped `accept_transport_risk` input。authorization job 会先把 source run 的 workflow id 与 path 绑定到 `.github/workflows/mobile-companion-acceptance.yml`，再在普通 Android 或 iOS 签名获得 secret 前校验 event 与具名 verdict、唯一且未过期的 artifact、repository、source run id、commit、Git tree、完整 evidence 与 risk acceptance。受保护的 [Android acceptance-candidate 模式](2026-09-06-protected-mobile-acceptance-candidate.zh.md) 是唯一例外：它要求显式风险决定与当前 `master` 上的精确 plan 候选，但只生成不可推广的 Android artifact 用于物理验收。verifier 会调用进程内 distribution helper；其他 workflow 与 workflow syntax 都无法绕过相同的发布 readiness rule。
 
 ## 考虑过的替代方案
 

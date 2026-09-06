@@ -20,9 +20,15 @@ on:
         required: true
         type: number
       acceptance_run_id:
-        description: Successful Mobile Companion Acceptance run for this exact candidate.
-        required: true
+        description: Successful Mobile Companion Acceptance run for this exact candidate; omitted only for candidate-build-only.
+        required: false
         type: string
+        default: ''
+      candidate_build_only:
+        description: Build one protected signed Android candidate for physical acceptance without publication or TestFlight.
+        required: true
+        type: boolean
+        default: false
       upload_testflight:
         description: Upload the signed iOS candidate to TestFlight.
         required: true
@@ -45,6 +51,9 @@ on:
         required: true
         type: boolean
     outputs:
+      acceptance_candidate_artifact:
+        description: Repository-accessible signed Android candidate artifact for physical acceptance.
+        value: ${{ jobs.android-acceptance-candidate.outputs.artifact_name }}
       tag:
         description: Published Mobile component tag.
         value: ${{ jobs.publish.outputs.tag }}
@@ -79,9 +88,14 @@ on:
         required: true
         type: number
       acceptance_run_id:
-        description: Successful Mobile Companion Acceptance run for this exact candidate.
-        required: true
+        description: Successful Mobile Companion Acceptance run for this exact candidate; omitted only for candidate-build-only.
+        required: false
         type: string
+      candidate_build_only:
+        description: Build one protected signed Android candidate for physical acceptance without publication or TestFlight.
+        required: true
+        type: boolean
+        default: false
       upload_testflight:
         description: Upload the signed iOS candidate to TestFlight.
         required: true
@@ -142,12 +156,20 @@ jobs:
           ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
           RECOVER_ARTIFACTS: ${{ inputs.recover_artifacts }}
           PUBLISH_GITHUB: ${{ inputs.publish_github }}
+          UPLOAD_TESTFLIGHT: ${{ inputs.upload_testflight }}
+          ACCEPTANCE_RUN_ID: ${{ inputs.acceptance_run_id }}
+          ACCEPT_TRANSPORT_RISK: ${{ inputs.accept_transport_risk }}
+          CANDIDATE_BUILD_ONLY: ${{ inputs.candidate_build_only }}
         run: |
           test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
           git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
           [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$MOBILE_CANDIDATE_SHA" refs/remotes/origin/master
+          if [[ "$CANDIDATE_BUILD_ONLY" == true ]]; then
+            pnpm install --frozen-lockfile --ignore-scripts
+            pnpm product-release:validate-candidate --plan "$PLAN_PATH" --candidate "$MOBILE_CANDIDATE_SHA" --master refs/remotes/origin/master
+          fi
           version=$(node -p "require('./apps/mobile/package.json').version")
           build_number=$(node -p "require('./apps/mobile/release.json').buildNumber")
           node -e "const v=process.argv[1], b=Number(process.argv[2]); if (!/^\\d+\\.\\d+\\.\\d+$/.test(v) || !Number.isSafeInteger(b) || b < 1) process.exit(1)" "$version" "$build_number"
@@ -160,6 +182,10 @@ jobs:
             echo 'Mobile recover_artifacts and artifact_run_id must be provided together' >&2
             exit 1
           fi
+          bash apps/mobile/scripts/validate-mobile-release-mode.sh
+          if [[ "$CANDIDATE_BUILD_ONLY" == true ]]; then
+            test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
+          fi
           {
             echo "version=$version"
             echo "build_number=$build_number"
@@ -167,6 +193,7 @@ jobs:
 
   release-authorization:
     name: Verify candidate-bound release evidence
+    if: ${{ !inputs.candidate_build_only }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -199,6 +226,101 @@ jobs:
             --transport-risk-accepted "$MOBILE_TRANSPORT_RISK_ACCEPTED" \
             --test-flight true \
             --android-apk true
+
+  android-acceptance-candidate:
+    name: Protected signed Android acceptance candidate
+    needs: release-version
+    if: ${{ inputs.candidate_build_only && needs.release-version.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: mobile-release
+    outputs:
+      artifact_name: ${{ steps.identity.outputs.artifact_name }}
+    env:
+      MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
+      MOBILE_VERSION: ${{ needs.release-version.outputs.version }}
+      MOBILE_BUILD_NUMBER: ${{ needs.release-version.outputs.build_number }}
+      VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
+      VITE_PLATFORM_CALLBACK_URL: ${{ vars.VITE_PLATFORM_CALLBACK_URL }}
+      VITE_PLATFORM_GITHUB_CLIENT_ID: ${{ vars.VITE_PLATFORM_GITHUB_CLIENT_ID }}
+      VITE_PLATFORM_CREDENTIAL_REFERENCE: ${{ vars.VITE_PLATFORM_CREDENTIAL_REFERENCE }}
+      VITE_PLATFORM_DATABASE_IDENTITY: ${{ vars.VITE_PLATFORM_DATABASE_IDENTITY }}
+      VITE_PLATFORM_IDENTITY_NAMESPACE: ${{ vars.VITE_PLATFORM_IDENTITY_NAMESPACE }}
+      VITE_REMOTE_RELAY_WSS_URL: ${{ vars.VITE_REMOTE_RELAY_WSS_URL }}
+      VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: ${{ vars.VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS }}
+      VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: ${{ vars.VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS }}
+      VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: ${{ vars.VITE_REMOTE_RELAY_RECONNECT_DELAY_MS }}
+      VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: ${{ vars.VITE_REMOTE_RELAY_INBOUND_MAX_BYTES }}
+      VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: ${{ vars.VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: pnpm install --frozen-lockfile
+      - name: Build protected signed acceptance APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash apps/mobile/scripts/build-android-release.sh
+      - name: Record candidate, signer, origin, and artifact identity
+        id: identity
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+        run: |
+          set -Eeuo pipefail
+          apk=$(find apps/mobile/release -maxdepth 1 -name '*.apk' -type f -print -quit)
+          test -n "$apk"
+          apksigner=$(find "${ANDROID_SDK_ROOT:?}/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner -print | sort -V | tail -1)
+          test -x "$apksigner"
+          signer=$($apksigner verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          [[ "$signer" =~ ^[0-9a-fA-F]{64}$ ]]
+          signer=$(printf '%s' "$signer" | tr '[:upper:]' '[:lower:]')
+          artifact_digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
+          runtime_entry=assets/public/dsh-mobile-runtime-identity.json
+          entry_count=$(unzip -Z1 "$apk" | grep -Fxc "$runtime_entry" || true)
+          test "$entry_count" = 1
+          runtime_identity="$RUNNER_TEMP/dsh-mobile-runtime-identity.json"
+          unzip -p "$apk" "$runtime_entry" > "$runtime_identity"
+          test -s "$runtime_identity"
+          baked_origin=$(jq -er 'select(.version == 1) | .origin | strings' "$runtime_identity")
+          test "$baked_origin" = "$VITE_PLATFORM_ORIGIN"
+          runtime_identity_digest=$(sha256sum "$runtime_identity" | cut -d ' ' -f 1)
+          packaging_digest=$(sha256sum apps/mobile/scripts/build-android-release.sh | cut -d ' ' -f 1)
+          workflow_run="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          mkdir acceptance-candidate
+          cp "$apk" acceptance-candidate/
+          jq -n --arg candidate "$CANDIDATE_SHA" --arg plan "$PLAN_PATH" \
+            --arg version "$MOBILE_VERSION" --argjson build "$MOBILE_BUILD_NUMBER" \
+            --arg repository "$GITHUB_REPOSITORY" --arg workflowRun "$workflow_run" \
+            --arg apk "$(basename "$apk")" --arg artifact "sha256:$artifact_digest" \
+            --arg signer "sha256:$signer" --arg runtimeIdentity "sha256:$runtime_identity_digest" \
+            --arg packaging "sha256:$packaging_digest" \
+            '{version:1,mode:"acceptance-candidate",surface:"mobile",candidateCommit:$candidate,planPath:$plan,productVersion:$version,buildNumber:$build,repository:$repository,workflowRun:$workflowRun,artifactDigests:{($apk):$artifact},signerCertificateSha256:$signer,runtimeIdentitySha256:$runtimeIdentity,packagingScriptSha256:$packaging}' \
+            > acceptance-candidate/acceptance-candidate.json
+          CANDIDATE_SHA="$CANDIDATE_SHA" PLAN_PATH="$PLAN_PATH" MOBILE_VERSION="$MOBILE_VERSION" \
+            MOBILE_BUILD_NUMBER="$MOBILE_BUILD_NUMBER" OPERATED_ORIGIN="$VITE_PLATFORM_ORIGIN" \
+            EXPECTED_REPOSITORY="$GITHUB_REPOSITORY" EXPECTED_WORKFLOW_RUN="$workflow_run" \
+            APKSIGNER_PATH="$apksigner" bash apps/mobile/scripts/verify-android-acceptance-candidate.sh \
+            acceptance-candidate/acceptance-candidate.json "acceptance-candidate/$(basename "$apk")"
+          echo "artifact_name=mobile-acceptance-candidate-${CANDIDATE_SHA}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-acceptance-candidate-${{ inputs.candidate_sha }}
+          path: acceptance-candidate
+          if-no-files-found: error
+          retention-days: 30
 
   android:
     name: Signed Android APK

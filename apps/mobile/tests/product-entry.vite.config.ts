@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 import tsconfigPaths from 'vite-tsconfig-paths'
+import { mobileRuntimeIdentity } from '../vite-runtime-identity.ts'
 
 const MAIN = fileURLToPath(new URL('../src/main.tsx', import.meta.url))
 const FIXTURE = fileURLToPath(new URL('./fixtures/product-entry-launch.fixture.tsx', import.meta.url))
@@ -18,6 +19,7 @@ function productLaunchFixture(): Plugin {
 
 export default defineConfig({
   plugins: [
+    mobileRuntimeIdentity(),
     productLaunchFixture(),
     react(),
     tsconfigPaths({ projects: [fileURLToPath(new URL('../../../tsconfig.base.json', import.meta.url))] }),

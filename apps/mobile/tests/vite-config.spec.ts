@@ -6,6 +6,8 @@ describe('Mobile Vite config', () => {
     const production = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
     const snapshot = readFileSync(new URL('./product-entry.vite.config.ts', import.meta.url), 'utf8')
     expect(production).toContain('tsconfigPaths')
+    expect(production).toContain('mobileRuntimeIdentity()')
+    expect(snapshot).toContain('mobileRuntimeIdentity()')
     expect(production).toContain('tsconfig.base.json')
     expect(production).toContain("target: 'chrome83'")
     expect(snapshot).toContain("target: 'chrome83'")

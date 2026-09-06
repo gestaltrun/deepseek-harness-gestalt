@@ -149,6 +149,7 @@ jobs:
       version: ${{ needs.plan.outputs.mobile_version }}
       build_number: ${{ fromJSON(needs.plan.outputs.mobile_build) }}
       acceptance_run_id: ${{ inputs.mobile_acceptance_run_id }}
+      candidate_build_only: false
       upload_testflight: ${{ inputs.mobile_upload_testflight }}
       accept_transport_risk: ${{ inputs.mobile_accept_transport_risk }}
       publish_github: true

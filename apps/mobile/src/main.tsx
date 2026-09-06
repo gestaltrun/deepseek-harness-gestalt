@@ -53,6 +53,7 @@ import {
 } from './native-protected-storage.ts'
 import { mobileSystemBrowser } from './system-browser.ts'
 import { loadMobilePlatformEnvironment } from './platform-environment.ts'
+import { loadPackagedMobileRuntimeIdentity } from './runtime-identity.ts'
 import { MobileCompanionProjectionCacheRuntime } from './companion-cache-runtime.ts'
 import { launchMobileProduct } from './mobile-product-launch.ts'
 import { randomUuid } from './random-uuid.ts'
@@ -77,7 +78,7 @@ export function disposeCompanionVisibility(): Promise<void> {
 export const mobileProductStarted = launchMobileProduct(mountMobileProduct)
 
 async function mountMobileProduct(): Promise<void> {
-  const environment = loadMobilePlatformEnvironment(import.meta.env)
+  const environment = loadMobilePlatformEnvironment(await loadPackagedMobileRuntimeIdentity())
   const protectedStorage = new CapacitorMobileProtectedStorage()
   const parsedInstallationId = parseInstallationId(await loadProtectedInstallationId(
     protectedStorage,

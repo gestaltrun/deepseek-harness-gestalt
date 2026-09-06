@@ -2146,7 +2146,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-runtime/src/index.ts:111`](../packages/phone/phone-runtime/src/index.ts)
+来源：[`packages/phone/phone-runtime/src/index.ts:117`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 
@@ -4531,6 +4531,7 @@ export interface Config {
 - `@deepseek-ai/dsh-native-command`（[`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts)）
 - `@deepseek-ai/dsh-noise-channel`（[`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts)）
 - `@deepseek-ai/dsh-output-retention`（[`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts)）
+- `@deepseek-ai/dsh-phone-capture-wire-demo`（[`packages/examples/phone-capture-wire-demo/src/index.ts`](../packages/examples/phone-capture-wire-demo/src/index.ts)）
 - `@deepseek-ai/dsh-platform-account-client`（[`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts)）
 - `@deepseek-ai/dsh-project-membership-client`（[`packages/platform/project-membership-client/src/index.ts`](../packages/platform/project-membership-client/src/index.ts)）
 - `@deepseek-ai/dsh-remote-access-client`（[`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts)）

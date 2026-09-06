@@ -18,11 +18,19 @@ stdout carries only the scenario JSON line. The bin and boot guards diagnose on 
 
 ## Model Experience
 
-None. The composition is keyless and does not load an LLM.
+### Keyless scripted transcript
+
+#### What the model sees
+
+The shipped [`phone-capture-wire` composition](../../../examples/phone-capture-wire/cordis.yml) invokes no model. Its scenario plugin drives phone operations and writes a JSON transcript to `stdout`; that transcript is test output, not model context. The bin loads the supplied `cordis.yml`, so a different composition owns any model invocation it introduces.
+
+#### Token effect
+
+The shipped scripted composition sends no model request and consumes no model input or output tokens. Its JSON transcript is not evidence of a model run.
 
 #### KV Cache effect
 
-No request prefix.
+The shipped scripted composition creates no model request prefix and uses no provider KV cache.
 
 ## Known Limitations and Deferred Work
 

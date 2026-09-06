@@ -12,6 +12,14 @@ if [ -z "$apksigner" ]; then
 fi
 test -x "$apksigner"
 
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d ' ' -f 1
+  else
+    shasum -a 256 "$1" | cut -d ' ' -f 1
+  fi
+}
+
 runtime_entry=assets/public/dsh-mobile-runtime-identity.json
 entry_count=$(unzip -Z1 "$apk" | grep -Fxc "$runtime_entry" || true)
 test "$entry_count" = 1
@@ -22,14 +30,14 @@ unzip -p "$apk" "$runtime_entry" > "$runtime_identity"
 test -s "$runtime_identity"
 
 apk_name=$(basename "$apk")
-apk_digest=$(sha256sum "$apk" | cut -d ' ' -f 1)
+apk_digest=$(sha256_file "$apk")
 signer=$($apksigner verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
 [[ "$signer" =~ ^[0-9a-fA-F]{64}$ ]]
 signer=$(printf '%s' "$signer" | tr '[:upper:]' '[:lower:]')
 baked_origin=$(jq -er 'select(.version == 1) | .origin | strings' "$runtime_identity")
 test "$baked_origin" = "$OPERATED_ORIGIN"
-runtime_identity_digest=$(sha256sum "$runtime_identity" | cut -d ' ' -f 1)
-packaging_digest=$(sha256sum apps/mobile/scripts/build-android-release.sh | cut -d ' ' -f 1)
+runtime_identity_digest=$(sha256_file "$runtime_identity")
+packaging_digest=$(sha256_file apps/mobile/scripts/build-android-release.sh)
 
 jq -e --arg candidate "$CANDIDATE_SHA" --arg plan "$PLAN_PATH" \
   --arg version "$MOBILE_VERSION" --argjson build "$MOBILE_BUILD_NUMBER" \

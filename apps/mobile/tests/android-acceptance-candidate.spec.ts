@@ -44,7 +44,7 @@ describe('Android acceptance candidate manifest', () => {
       }
       expect(run(fixture).status, mutation).not.toBe(0)
     }
-  })
+  }, 30_000)
 })
 
 function createFixture(bakedOrigin = origin, duplicateIdentity = false, missingIdentity = false) {
@@ -58,9 +58,19 @@ function createFixture(bakedOrigin = origin, duplicateIdentity = false, missingI
   const runtimeIdentityBody = `${JSON.stringify({ version: 1, origin: bakedOrigin })}\n`
   if (!missingIdentity) writeFileSync(join(identityDirectory, 'dsh-mobile-runtime-identity.json'), runtimeIdentityBody)
   if (missingIdentity) writeFileSync(join(directory, 'placeholder'), 'missing identity')
-  execFileSync('zip', ['-q', '-r', apk, missingIdentity ? 'placeholder' : 'assets'], { cwd: directory })
+  const python = process.platform === 'win32' ? ['py', '-3'] : ['python3']
+  execFileSync(python[0] as string, [...python.slice(1), '-c', [
+    'import pathlib, sys, zipfile',
+    'root, output, source = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])',
+    'with zipfile.ZipFile(output, "w") as archive:',
+    '    if source.is_dir():',
+    '        for path in source.rglob("*"):',
+    '            if path.is_file(): archive.write(path, path.relative_to(root))',
+    '    else:',
+    '        archive.write(source, source.relative_to(root))',
+  ].join('\n'), directory, apk, missingIdentity ? join(directory, 'placeholder') : join(directory, 'assets')])
   if (duplicateIdentity) {
-    execFileSync('python3', ['-c', [
+    execFileSync(python[0] as string, [...python.slice(1), '-c', [
       'import sys, zipfile',
       'with zipfile.ZipFile(sys.argv[1], "a") as archive:',
       '    archive.writestr("assets/public/dsh-mobile-runtime-identity.json", sys.argv[2])',

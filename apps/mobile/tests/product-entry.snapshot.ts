@@ -90,7 +90,7 @@ async function availablePort(): Promise<number> {
 }
 
 async function waitForPreview(url: string): Promise<void> {
-  const deadline = Date.now() + 15_000
+  const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     try {
       const response = await fetch(url)

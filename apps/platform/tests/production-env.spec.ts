@@ -1031,28 +1031,30 @@ describe('Platform release workflows', () => {
     }
   })
 
-  it('replaces the collector only after the fixed image is pulled or found in cache', { timeout: 60_000 }, () => {
-    const pulled = runCollectorPrepareHarness('success', 'missing')
-    expect(pulled.status).toBe(0)
-    expect(pulled.stdout).toMatch(/pull .*loongcollector/)
-    expect(pulled.stdout).not.toContain('image inspect')
-    expect(pulled.stdout.indexOf('pull ')).toBeLessThan(pulled.stdout.indexOf('rm -f dsh-loongcollector'))
-    expect(pulled.stdout.indexOf('rm -f dsh-loongcollector'))
-      .toBeLessThan(pulled.stdout.indexOf('run -d --name dsh-loongcollector'))
+  describe.skipIf(process.platform === 'win32')('POSIX collector host script lifecycle', () => {
+    it('replaces the collector only after the fixed image is pulled or found in cache', { timeout: 60_000 }, () => {
+      const pulled = runCollectorPrepareHarness('success', 'missing')
+      expect(pulled.status).toBe(0)
+      expect(pulled.stdout).toMatch(/pull .*loongcollector/)
+      expect(pulled.stdout).not.toContain('image inspect')
+      expect(pulled.stdout.indexOf('pull ')).toBeLessThan(pulled.stdout.indexOf('rm -f dsh-loongcollector'))
+      expect(pulled.stdout.indexOf('rm -f dsh-loongcollector'))
+        .toBeLessThan(pulled.stdout.indexOf('run -d --name dsh-loongcollector'))
 
-    const cached = runCollectorPrepareHarness('failure', 'present')
-    expect(cached.status).toBe(0)
-    expect(cached.stdout.indexOf('pull ')).toBeLessThan(cached.stdout.indexOf('image inspect'))
-    expect(cached.stdout.indexOf('image inspect'))
-      .toBeLessThan(cached.stdout.indexOf('rm -f dsh-loongcollector'))
-    expect(cached.stdout.indexOf('rm -f dsh-loongcollector'))
-      .toBeLessThan(cached.stdout.indexOf('run -d --name dsh-loongcollector'))
+      const cached = runCollectorPrepareHarness('failure', 'present')
+      expect(cached.status).toBe(0)
+      expect(cached.stdout.indexOf('pull ')).toBeLessThan(cached.stdout.indexOf('image inspect'))
+      expect(cached.stdout.indexOf('image inspect'))
+        .toBeLessThan(cached.stdout.indexOf('rm -f dsh-loongcollector'))
+      expect(cached.stdout.indexOf('rm -f dsh-loongcollector'))
+        .toBeLessThan(cached.stdout.indexOf('run -d --name dsh-loongcollector'))
 
-    const unavailable = runCollectorPrepareHarness('failure', 'missing')
-    expect(unavailable.status).toBe(1)
-    expect(unavailable.stdout).toContain('image inspect')
-    expect(unavailable.stdout).not.toContain('rm -f dsh-loongcollector')
-    expect(unavailable.stdout).not.toContain('run -d --name dsh-loongcollector')
+      const unavailable = runCollectorPrepareHarness('failure', 'missing')
+      expect(unavailable.status).toBe(1)
+      expect(unavailable.stdout).toContain('image inspect')
+      expect(unavailable.stdout).not.toContain('rm -f dsh-loongcollector')
+      expect(unavailable.stdout).not.toContain('run -d --name dsh-loongcollector')
+    })
   })
 
   it.each(['unreachable', 'redirect', 'wrong-storage', 'one-backend'] as const)(
@@ -1200,65 +1202,68 @@ describe('Platform release workflows', () => {
     expect(targetMismatch.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
   })
 
-  it('executes generated bootstrap recovery commands through the real host script', () => {
-    const rollback = runRealBootstrapRecoveryHarness('rollbackable', 'matching')
-    expect(rollback.status, rollback.stderr).toBe(0)
-    expect(rollback.stdout).toContain('stop --time 60 dsh-platform')
-    expect(rollback.stdout).toContain('rm -f dsh-platform')
+  describe.skipIf(process.platform === 'win32')('POSIX bootstrap host script lifecycle', () => {
+    it('executes generated bootstrap recovery commands through the real host script', () => {
+      const rollback = runRealBootstrapRecoveryHarness('rollbackable', 'matching')
+      expect(rollback.status, rollback.stderr).toBe(0)
+      expect(rollback.stdout).toContain('stop --time 60 dsh-platform')
+      expect(rollback.stdout).toContain('rm -f dsh-platform')
 
-    const committed = runRealBootstrapRecoveryHarness('committed', 'matching')
-    expect(committed.status).toBe(0)
-    expect(committed.stdout).toContain('inspect dsh-platform --format')
+      const committed = runRealBootstrapRecoveryHarness('committed', 'matching')
+      expect(committed.status).toBe(0)
+      expect(committed.stdout).toContain('inspect dsh-platform --format')
 
-    for (const owner of ['foreign', 'missing'] as const) {
-      const failedRollback = runRealBootstrapRecoveryHarness('rollbackable', owner)
-      expect(failedRollback.status, owner).toBe(1)
-      expect(failedRollback.stderr).toContain('bootstrap candidate ownership does not match durable recovery state')
-      expect(failedRollback.stdout).not.toContain('stop --time 60 dsh-platform')
-      expect(failedRollback.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
-      expect(failedRollback.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
-      expect(failedRollback.candidateEnvExists).toBe(true)
+      for (const owner of ['foreign', 'missing'] as const) {
+        const failedRollback = runRealBootstrapRecoveryHarness('rollbackable', owner)
+        expect(failedRollback.status, owner).toBe(1)
+        expect(failedRollback.stderr).toContain('bootstrap candidate ownership does not match durable recovery state')
+        expect(failedRollback.stdout).not.toContain('stop --time 60 dsh-platform')
+        expect(failedRollback.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
+        expect(failedRollback.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+        expect(failedRollback.candidateEnvExists).toBe(true)
 
-      const failedCommit = runRealBootstrapRecoveryHarness('committed', owner)
-      expect(failedCommit.status, owner).toBe(1)
-      expect(failedCommit.stderr).toContain('bootstrap candidate ownership does not match durable recovery state')
-      expect(failedCommit.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
-      expect(failedCommit.candidateEnvExists).toBe(true)
-    }
-  })
+        const failedCommit = runRealBootstrapRecoveryHarness('committed', owner)
+        expect(failedCommit.status, owner).toBe(1)
+        expect(failedCommit.stderr).toContain('bootstrap candidate ownership does not match durable recovery state')
+        expect(failedCommit.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+        expect(failedCommit.candidateEnvExists).toBe(true)
+      }
+    })
 
-  it('executes real bootstrap rollback only for the exact candidate owner', () => {
-    const matching = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'matching')
-    expect(matching.status).toBe(0)
-    expect(matching.stdout).toContain('stop --time 60 dsh-platform')
-    expect(matching.stdout).toContain('rm -f dsh-platform')
+    it('executes real bootstrap rollback only for the exact candidate owner', () => {
+      const matching = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'matching')
+      expect(matching.status).toBe(0)
+      expect(matching.stdout).toContain('stop --time 60 dsh-platform')
+      expect(matching.stdout).toContain('rm -f dsh-platform')
 
-    const foreign = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'foreign')
-    expect(foreign.status).toBe(1)
-    expect(foreign.stdout).not.toContain('stop --time 60 dsh-platform')
-    expect(foreign.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
+      const foreign = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'foreign')
+      expect(foreign.status).toBe(1)
+      expect(foreign.stdout).not.toContain('stop --time 60 dsh-platform')
+      expect(foreign.stdout).not.toMatch(/^rm -f dsh-platform$/mu)
 
-    const missing = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'missing')
-    expect(missing.status).toBe(0)
-    expect(missing.stdout).not.toContain('stop --time 60 dsh-platform')
-  })
+      const missing = runBootstrapHostRecoveryHarness('bootstrap-rollback', 'missing')
+      expect(missing.status).toBe(0)
+      expect(missing.stdout).not.toContain('stop --time 60 dsh-platform')
+    })
 
-  it('executes real committed bootstrap recovery only for the exact candidate owner', () => {
-    expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'matching').status).toBe(0)
-    expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'foreign').status).toBe(1)
-    expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'missing').status).toBe(1)
-  })
+    it('executes real committed bootstrap recovery only for the exact candidate owner', () => {
+      expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'matching').status).toBe(0)
+      expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'foreign').status).toBe(1)
+      expect(runBootstrapHostRecoveryHarness('complete-bootstrap', 'missing').status).toBe(1)
+    })
 
-  it('rejects committed recovery while a rollback container remains', () => {
-    expect(runCommittedCleanupHarness('absent').status).toBe(0)
-    expect(runCommittedCleanupHarness('rollback-remains').status).toBe(1)
-    expect(runCommittedCleanupHarness('ps-fails').status).toBe(1)
-  })
+    it('rejects committed recovery while a rollback container remains', () => {
+      expect(runCommittedCleanupHarness('absent').status).toBe(0)
+      expect(runCommittedCleanupHarness('rollback-remains').status).toBe(1)
+      expect(runCommittedCleanupHarness('ps-fails').status).toBe(1)
+    })
 
-  it('keeps rollback state when Docker container enumeration fails', { timeout: 15_000 }, () => {
-    expect(runRollbackProbeHarness('none').status).toBe(0)
-    expect(runRollbackProbeHarness('first').status).toBe(1)
-    expect(runRollbackProbeHarness('second').status).toBe(1)
+    it('keeps rollback state when Docker container enumeration fails', { timeout: 15_000 }, () => {
+      expect(runRollbackProbeHarness('none').status).toBe(0)
+      expect(runRollbackProbeHarness('first').status).toBe(1)
+      expect(runRollbackProbeHarness('second').status).toBe(1)
+    })
+
   })
 
   it('builds the image on master path changes without publishing to GHCR', () => {

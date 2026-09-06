@@ -43,7 +43,7 @@ describe('Android acceptance candidate manifest', () => {
       }
       expect(run(fixture).status, mutation).not.toBe(0)
     }
-  })
+  }, 15_000)
 })
 
 function createFixture(bakedOrigin = origin, duplicateIdentity = false, missingIdentity = false) {

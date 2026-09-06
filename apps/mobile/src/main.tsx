@@ -78,7 +78,10 @@ export function disposeCompanionVisibility(): Promise<void> {
 export const mobileProductStarted = launchMobileProduct(mountMobileProduct)
 
 async function mountMobileProduct(): Promise<void> {
-  const environment = loadMobilePlatformEnvironment(await loadPackagedMobileRuntimeIdentity())
+  const environment = loadMobilePlatformEnvironment({
+    ...await loadPackagedMobileRuntimeIdentity(),
+    VITE_PLATFORM_ENV: import.meta.env.VITE_PLATFORM_ENV,
+  })
   const protectedStorage = new CapacitorMobileProtectedStorage()
   const parsedInstallationId = parseInstallationId(await loadProtectedInstallationId(
     protectedStorage,

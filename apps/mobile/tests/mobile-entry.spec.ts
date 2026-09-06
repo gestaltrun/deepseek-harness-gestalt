@@ -187,6 +187,7 @@ describe('Mobile Platform Account entry', () => {
   it('fails loud when the browsing context cannot create an Installation id', async () => {
     configureEnvironment()
     document.body.innerHTML = '<div id="root"></div>'
+    vi.stubGlobal('fetch', vi.fn(async () => runtimeIdentityResponse()))
     vi.stubGlobal('crypto', {})
     const { mobileProductStarted } = await import('../src/main.tsx')
     await expect(mobileProductStarted).rejects.toThrow(/system cryptography/)
@@ -202,6 +203,7 @@ describe('Mobile Platform Account entry', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       calls.push({ url, init })
+      if (url.endsWith('/dsh-mobile-runtime-identity.json')) return runtimeIdentityResponse()
       if (url.endsWith('/login-attempts')) {
         return json({
           id: 'attempt-mobile-entry',
@@ -231,28 +233,32 @@ describe('Mobile Platform Account entry', () => {
     expect(opened.searchParams.has('access_token')).toBe(false)
     expect(windowOpen).not.toHaveBeenCalled()
     await waitFor(() => { expect(calls.some(call => call.url.endsWith('/login-poll'))).toBe(true) })
-    expect(calls.every(call => call.url.startsWith('https://platform.example.com/'))).toBe(true)
+    expect(calls.filter(call => !call.url.endsWith('/dsh-mobile-runtime-identity.json'))
+      .every(call => call.url.startsWith('https://platform.example.com/'))).toBe(true)
   })
 
-  it('fails before rendering or traffic when the operated origin is missing', async () => {
+  it('fails before product traffic when the packaged runtime identity is missing', async () => {
     configureEnvironment()
-    vi.stubEnv('VITE_PLATFORM_ORIGIN', '')
     document.body.innerHTML = '<div id="root"></div>'
-    const fetch = vi.fn()
+    const fetch = vi.fn(async () => new Response('', { status: 404 }))
     vi.stubGlobal('fetch', fetch)
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     const { mobileProductStarted } = await import('../src/main.tsx')
-    await expect(mobileProductStarted).rejects.toThrow('production origin is required')
-    expect(screen.getByRole('alert').textContent).toContain('production origin is required')
-    expect(fetch).not.toHaveBeenCalled()
+    await expect(mobileProductStarted).rejects.toThrow('runtime identity request failed with HTTP 404')
+    expect(screen.getByRole('alert').textContent).toContain('runtime identity request failed with HTTP 404')
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
   it('validates the production Relay bundle before rendering or network acquisition', async () => {
     configureEnvironment()
     vi.stubEnv('VITE_REMOTE_RELAY_INBOUND_MAX_BYTES', '1')
     document.body.innerHTML = '<div id="root"></div>'
-    const fetch = vi.fn()
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.endsWith('/dsh-mobile-runtime-identity.json')) return runtimeIdentityResponse()
+      throw new Error(`unexpected product request ${url}`)
+    })
     vi.stubGlobal('fetch', fetch)
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
@@ -260,14 +266,18 @@ describe('Mobile Platform Account entry', () => {
     await expect(mobileProductStarted).rejects.toThrow('must admit one maximum Relay message')
 
     expect(screen.getByRole('alert').textContent).toContain('must admit one maximum Relay message')
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
   it('rejects legacy environment selection before rendering or traffic', async () => {
     configureEnvironment()
     vi.stubEnv('VITE_PLATFORM_ENV', 'development')
     document.body.innerHTML = '<div id="root"></div>'
-    const fetch = vi.fn()
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url.endsWith('/dsh-mobile-runtime-identity.json')) return runtimeIdentityResponse()
+      throw new Error(`unexpected product request ${url}`)
+    })
     vi.stubGlobal('fetch', fetch)
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
@@ -275,13 +285,16 @@ describe('Mobile Platform Account entry', () => {
     await expect(mobileProductStarted).rejects.toThrow('legacy environment selection is not accepted')
 
     expect(screen.getByRole('alert').textContent).toContain('legacy environment selection is not accepted')
-    expect(fetch).not.toHaveBeenCalled()
+    expect(fetch).toHaveBeenCalledOnce()
   })
 
   it('backgrounding stops the real Relay lifecycle and refuses settlement before sync', async () => {
     configureEnvironment()
     document.body.innerHTML = '<div id="root"></div>'
-    vi.stubGlobal('fetch', vi.fn(async () => json({ status: 'pending' })))
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      return url.endsWith('/dsh-mobile-runtime-identity.json') ? runtimeIdentityResponse() : json({ status: 'pending' })
+    }))
     const { mobileProductStarted } = await import('../src/main.tsx')
     await mobileProductStarted
     const { companionMayMutate, companionRuntime } = await import('../src/companion-lifecycle.ts')
@@ -432,6 +445,18 @@ describe('Mobile Platform Account entry', () => {
   })
 })
 
+function runtimeIdentityResponse(): Response {
+  return json({
+    version: 1,
+    origin: 'https://platform.example.com',
+    callbackUrl: 'https://platform.example.com/v1/account/oauth/github/callback',
+    githubClientId: 'mobile-production',
+    credentialReference: 'credentials://production',
+    databaseIdentity: 'database-production',
+    identityNamespace: 'namespace-production',
+  })
+}
+
 function configureEnvironment(overrides: Record<string, string> = {}): void {
   const fields: Record<string, string> = {
     VITE_PLATFORM_ORIGIN: 'https://platform.example.com',
@@ -500,6 +525,17 @@ async function mountSelectedDesktopProduct(suffix: string): Promise<{
   })
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.endsWith('/dsh-mobile-runtime-identity.json')) {
+      return json({
+        version: 1,
+        origin: 'https://platform.example.com',
+        callbackUrl: 'https://platform.example.com/v1/account/oauth/github/callback',
+        githubClientId: 'mobile-production',
+        credentialReference: 'credentials://production',
+        databaseIdentity,
+        identityNamespace,
+      })
+    }
     if (url.endsWith('/v1/account/session')) return json(account)
     return json({ status: 'pending' })
   }))

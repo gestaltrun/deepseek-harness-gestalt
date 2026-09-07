@@ -62,6 +62,7 @@ if [[ "${profile_expiration_epoch}" -le "$(date '+%s')" ]]; then
 fi
 
 cd "${repo_root}"
+pnpm run build:lib:host
 pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
 pnpm --dir apps/mobile exec cap sync ios

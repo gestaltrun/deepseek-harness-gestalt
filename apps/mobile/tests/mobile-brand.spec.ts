@@ -31,12 +31,11 @@ describe('Mobile brand validation', () => {
     const workflow = source('../../../.github/workflows/mobile-release.yml')
 
     for (const release of [android, ios]) {
-      expect(release).toContain('pnpm --filter @deepseek-ai/dsh-mobile run verify:brand')
+      const buildPrerequisite = release.indexOf('pnpm run build:lib:host')
+      const brandValidation = release.indexOf('pnpm --filter @deepseek-ai/dsh-mobile run verify:brand')
+      expect(buildPrerequisite).toBeGreaterThanOrEqual(0)
+      expect(brandValidation).toBeGreaterThan(buildPrerequisite)
     }
-    const androidBuildPrerequisite = android.indexOf('pnpm run build:lib:host')
-    const androidBrandValidation = android.indexOf('pnpm --filter @deepseek-ai/dsh-mobile run verify:brand')
-    expect(androidBuildPrerequisite).toBeGreaterThanOrEqual(0)
-    expect(androidBrandValidation).toBeGreaterThan(androidBuildPrerequisite)
     expect(workflow.match(/run: bash apps\/mobile\/scripts\/build-android-release\.sh/gu)).toHaveLength(2)
     expect(android).toContain('Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk')
     expect(android).toContain('-PdshMobileVersionCode="${MOBILE_BUILD_NUMBER}"')

@@ -28,6 +28,7 @@ printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore}" 2>/de
 chmod 600 "${keystore}"
 
 cd "${repo_root}"
+pnpm run build:lib:host
 pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
 pnpm --dir apps/mobile exec cap sync android

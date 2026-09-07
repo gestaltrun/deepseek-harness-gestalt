@@ -33,6 +33,11 @@ describe('Mobile brand validation', () => {
     for (const release of [android, ios]) {
       expect(release).toContain('pnpm --filter @deepseek-ai/dsh-mobile run verify:brand')
     }
+    const androidBuildPrerequisite = android.indexOf('pnpm run build:lib:host')
+    const androidBrandValidation = android.indexOf('pnpm --filter @deepseek-ai/dsh-mobile run verify:brand')
+    expect(androidBuildPrerequisite).toBeGreaterThanOrEqual(0)
+    expect(androidBrandValidation).toBeGreaterThan(androidBuildPrerequisite)
+    expect(workflow.match(/run: bash apps\/mobile\/scripts\/build-android-release\.sh/gu)).toHaveLength(2)
     expect(android).toContain('Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk')
     expect(android).toContain('-PdshMobileVersionCode="${MOBILE_BUILD_NUMBER}"')
     expect(android).toContain('-PdshMobileVersionName="${MOBILE_VERSION}"')
